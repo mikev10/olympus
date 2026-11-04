@@ -120,6 +120,10 @@ function cloneTriggers(triggers: TriggerPolicy): TriggerPolicy {
     schedules: frozenCopy((triggers.schedules ?? []).map((s) => frozen({ ...s }))),
     ...(triggers.maxDeliveryAgeMs === undefined ? {} : { maxDeliveryAgeMs: triggers.maxDeliveryAgeMs }),
     ...(triggers.candidateExpiryMs === undefined ? {} : { candidateExpiryMs: triggers.candidateExpiryMs }),
+    // The nightly sweep's selection is carried whole, or the job it governs would be refused for a block the document held (A-R13a-06).
+    ...(triggers.nightly === undefined
+      ? {}
+      : { nightly: frozen({ scanners: frozenCopy(triggers.nightly.scanners.map((s) => frozen({ ...s }))), advisoryHost: triggers.nightly.advisoryHost }) }),
   });
 }
 

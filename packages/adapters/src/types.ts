@@ -81,3 +81,43 @@ export interface AdapterSet {
   staticAnalysis: SecurityScanner | null;
   unavailableControls(): string[];
 }
+
+/** The stacks a dependency audit covers: the two R1 installs from (R13a, D-R13a-06). */
+export type AuditStack = 'npm' | 'pnpm';
+
+/** One advisory the audit reported against one package, located in the lockfile where the package is named. */
+export interface AuditFinding {
+  /** The advisory's GHSA id. */
+  readonly rule: string;
+  readonly packageName: string;
+  /** The lockfile line naming the package, or null where none does; a null line is never invented (D-R13a-06). */
+  readonly line: number | null;
+  /** The runtime's: the stack, the advisory, and the package, so a finding is the same finding on another night. */
+  readonly fingerprint: string;
+}
+
+/**
+ * A dependency audit's declaration (R13a): the stack it audits, the root
+ * files it reads, the image it is pinned to, and how its output becomes
+ * findings. The arguments are the declaration's; nothing in a policy or a
+ * repository chooses them. Its image is pinned by digest here, and a policy
+ * cannot name another (D-A-NR-04).
+ */
+export interface DependencyAuditor {
+  readonly stack: AuditStack;
+  /** The lockfile, by its name at the tree's root. */
+  readonly lockfile: string;
+  /** The root files copied into the audit's sandbox, the lockfile among them; nothing else of the tree is. */
+  readonly files: readonly string[];
+  /** `name@sha256:<digest>`. */
+  readonly image: string;
+  readonly invocation: readonly [string, ...string[]];
+  /**
+   * The findings a whole report names, located in `lockfileText`, or a
+   * reason the output is not one. A report is whole only from an exit the
+   * auditor declares, and only where that exit agrees with what it found:
+   * a clean report from an abnormal exit, or findings from a clean exit, is
+   * not one. Never an empty list for a report it could not read (I5).
+   */
+  parse(stdout: string, exitCode: number, lockfileText: string): { readonly ok: true; readonly findings: AuditFinding[] } | { readonly ok: false; readonly unreachable: boolean };
+}

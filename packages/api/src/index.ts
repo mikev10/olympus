@@ -56,3 +56,4 @@ export {
 } from './security.js';
 export { Intake, utcHour, type DeliveryOutcome, type IntakeOptions, type SecretSource } from './intake.js';
 export { firingTime, lastCovered, missedDates, startSchedules, utcDate, type Scheduler } from './schedule.js';
+export { NightlyJobs, SETTLED, flattenFigures, type NightlyOptions, type NightlyTarget } from './nightly.js';

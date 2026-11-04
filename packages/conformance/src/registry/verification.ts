@@ -80,6 +80,9 @@ function recording(inner: Vault, violations: IntegrityViolation[]): Vault {
     markCandidateExpired: (id, at) => inner.markCandidateExpired(id, at),
     countRefusedDelivery: (bucket, hour, cause) => inner.countRefusedDelivery(bucket, hour, cause),
     readRefusedDeliveryCounts: () => inner.readRefusedDeliveryCounts(),
+    recordNightly: (r) => inner.recordNightly(r),
+    readNightly: () => inner.readNightly(),
+    listObjects: () => inner.listObjects(),
     readRunState: (runId) => inner.readRunState(runId),
     commitRunState: (s, ifVersion) => inner.commitRunState(s, ifVersion),
   };

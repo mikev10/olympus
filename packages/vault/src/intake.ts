@@ -21,6 +21,8 @@ export function intakeProblem(d: TriggerDecision, candidate: CandidateRecord | n
     if (candidate === null) return 'a candidate outcome is written with its candidate';
     if (d.outcome.candidate !== id || candidate.id !== id) return 'a candidate is named by its source and key';
     if ((candidate.collectedBy as string) !== 'runtime') return 'a candidate is collected by the runtime';
+    // A kind's candidate is checked against its kind's schema; only a schedule's job writes one under a job's output schema (A-R13a-07).
+    if ((candidate.schema as string) !== candidate.kind && !(candidate.kind === 'scheduled' && candidate.schema === 'nightly-finding')) return "a candidate's schema is its kind's, or a job's on a scheduled candidate";
     if (candidate.body !== null) {
       const bytes = Buffer.from(candidate.body.base64, 'base64');
       if (createHash('sha256').update(bytes).digest('hex') !== candidate.body.sha256) return "a candidate's body hash is the hash of its body";

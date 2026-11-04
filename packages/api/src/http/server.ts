@@ -19,6 +19,7 @@ import { MAX_DELIVERY_BYTES } from '@olympus-ai/triggers';
 import { UNSUBSCRIBED_BUCKET, isNoRunState, type CandidateRecord, type IntakeEntry } from '@olympus-ai/vault';
 import { Intake, type DeliveryOutcome, type SecretSource } from '../intake.js';
 import { startSchedules, type Scheduler } from '../schedule.js';
+import { NightlyJobs, type NightlyTarget } from '../nightly.js';
 
 import { loadPolicyFile } from '../policy-file.js';
 import { admitRun, approveStation, cancelRun, rejectDraft, resumeRun, runStanding, type DriveHooks, type RunOutcome } from '../run.js';
@@ -45,6 +46,12 @@ export interface ApiServerOptions {
    * a name with the webhook prefix is asked for; absent, no delivery verifies.
    */
   readonly secrets?: SecretSource;
+  /**
+   * The checkout and branch the `nightly-security` job scans: the target's
+   * default branch (R13a, D-R13a-04). Absent or null, that job is refused
+   * `no-target`, never run over something else.
+   */
+  readonly nightlyTarget?: NightlyTarget | null;
 }
 
 export interface ApiServer {
@@ -289,7 +296,13 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
   const { components, principal } = options;
   const runs = new Map<RunId, Tracked>();
   const open = new Set<ServerResponse>();
-  const intake = new Intake({ vault: components.vault, secrets: options.secrets ?? (() => undefined) });
+  // The nightly jobs seat no model: they are given the sandbox, the scanners, and the Vault, and no driver or integrator (I2).
+  const jobs = new NightlyJobs({
+    vault: components.vault, sandbox: components.sandbox, workspaces: components.workspaces,
+    limits: components.profile === null ? null : components.profile.limits, scanners: components.scanners,
+    target: options.nightlyTarget ?? null,
+  });
+  const intake = new Intake({ vault: components.vault, secrets: options.secrets ?? (() => undefined), jobs });
   let scheduler: Scheduler | null = null;
 
   const tracked = (runId: RunId): Tracked => {
@@ -538,6 +551,11 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
     if (parts[0] === 'intake' && parts.length <= 2) {
       if (method !== 'GET') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
       send(res, 200, parts.length === 1 ? await listIntake() : await readIntake(decodeURIComponent(parts[1] ?? '')));
+      return;
+    }
+    if (parts[0] === 'nightly' && parts.length === 1) {
+      if (method !== 'GET') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
+      send(res, 200, await components.vault.readNightly());
       return;
     }
     if (parts[0] === 'outcomes' && parts.length === 1) {

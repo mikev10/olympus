@@ -23,6 +23,7 @@
     "@olympus-ai/driver-codex": "workspace:*",
     "@olympus-ai/driver-openai-compatible": "workspace:*",
     "@olympus-ai/integrity": "workspace:*",
+    "@olympus-ai/readiness": "workspace:*",
     "@olympus-ai/sandbox": "workspace:*",
     "@olympus-ai/triggers": "workspace:*",
     "@olympus-ai/vault": "workspace:*",

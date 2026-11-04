@@ -10,10 +10,10 @@
 import type {
   AgentClaim, ApprovalKey, AutonomyLevel, BaseRefusalPart, CompiledRole, DraftCondition, DraftRef, DraftStation, IndependenceGrade, ModelIdentity, ModelTier, Policy, PolicyRefusal,
   RejectionReason, RoleId, Run, RunId, RunState, StationId, StationRefusal, TaskId, TaskResult, VaultRef,
-  AuthorTrust, CandidateId, FieldDefect, SchemaKind, TemplateId, TriggerAdmissionCause, TriggerLineage,
+  AuthorTrust, CandidateId, CandidateSchema, FieldDefect, JobTemplateId, SchemaKind, TemplateId, TriggerAdmissionCause, TriggerLineage,
 } from '@olympus-ai/core';
 import type { CheckResult, IntegrityViolation, TamperReport } from '@olympus-ai/integrity';
-import type { EgressConnection, MeterReading } from '@olympus-ai/sandbox';
+import type { EgressConnection, EgressLog, MeterReading } from '@olympus-ai/sandbox';
 
 /**
  * I3: an agent may not be judged by an artifact it can write. Specs and
@@ -224,6 +224,21 @@ export type ResumeRefusal =
  * the proxy is a container with no route to the Vault (D-P14-09).
  */
 export type DecisionCause =
+  /**
+   * The nightly re-hash found a record of this run whose bytes no longer
+   * hash to its name or to the hash the last night saw, one a ref names that
+   * is missing, or a lock that no longer verifies (A-R13a-04). `record` is
+   * the store-relative path; nothing is repaired here, which is the
+   * operator's.
+   */
+  | {
+      readonly cause: 'record-drift';
+      readonly decidedBy: 'nightly';
+      readonly record: string;
+      readonly problem: RecordDriftProblem;
+      readonly expected: string;
+      readonly observed: string;
+    }
   | { readonly cause: 'admission-refused'; readonly decidedBy: 'admission'; readonly refusal: AdmissionRefusal }
   | { readonly cause: 'resume-refused'; readonly decidedBy: 'admission'; readonly refusal: ResumeRefusal }
   /** `station-machine` for a refusal `nextStep` or a capability check returned, `line` for one the line made itself. */
@@ -594,6 +609,13 @@ export interface CandidateRecord {
   readonly id: CandidateId;
   readonly kind: SchemaKind;
   readonly template: TemplateId;
+  /**
+   * The schema `extracted` was checked against: the kind's own, or a job's
+   * output schema for a finding a nightly job recorded (A-R13a-07). A
+   * candidate stored before R13a has none, and the store reads it as its
+   * kind's.
+   */
+  readonly schema: CandidateSchema;
   readonly extracted: Readonly<Record<string, string>>;
   readonly authorTrust: AuthorTrust;
   readonly lineage: TriggerLineage;
@@ -627,7 +649,9 @@ export interface TriggerDecision {
     | { readonly kind: 'refused'; readonly cause: 'stale'; readonly signedAt: string }
     | { readonly kind: 'refused'; readonly cause: 'budget' | 'not-enabled' }
     /** Firings a stopped service missed, recorded and never run late (D-A-TF-08). */
-    | { readonly kind: 'missed'; readonly first: string; readonly last: string };
+    | { readonly kind: 'missed'; readonly first: string; readonly last: string }
+    /** A schedule's job ran in place of a candidate, and wrote the nightly record whose SHA-256 this is (A-R13a-07). */
+    | { readonly kind: 'job'; readonly nightly: string };
   readonly collectedBy: 'runtime';
 }
 
@@ -658,6 +682,152 @@ export interface RefusedDeliveryCount {
 export interface NoRunState extends Error {
   readonly code: 'no-run-state';
   readonly runId: RunId;
+}
+
+/** How a record drifted (A-R13a-04). */
+export type RecordDriftProblem =
+  /** A content-addressed object whose bytes no longer hash to its name. */
+  | 'hash-mismatch'
+  /** A record a ref names, or one the last night saw, that the store no longer holds. */
+  | 'missing'
+  /** A record named by run, number, or id whose bytes differ from what the last night hashed. */
+  | 'changed-since-snapshot'
+  /** A locked artifact of a run still in flight that no longer hashes to its lock. */
+  | 'lock-unverified';
+
+/** The scanners a nightly finding can come from: R17's two, and the dependency audit (R13a). */
+export type NightlyScannerKind = 'secret-scan' | 'static-analysis' | 'dependency-audit';
+
+/**
+ * Why a finding has no candidate. It keeps its place in the nightly record
+ * either way, so a finding is never lost to a budget or a schema (D-R13a-07).
+ */
+export type UncandidatedCause = 'budget' | 'schema' | 'unlocated' | 'recorded-before';
+
+/**
+ * One thing a nightly job found. Every field is the runtime's: a path, a
+ * rule id, two hashes, two figures. Nothing a scanner said about a finding
+ * beyond its rule and location is kept (I7).
+ */
+export type NightlyFinding =
+  | {
+      readonly kind: 'record-drift';
+      readonly runId: RunId | null;
+      readonly record: string;
+      readonly problem: RecordDriftProblem;
+      readonly expected: string;
+      readonly observed: string;
+    }
+  /** `rate` is the figure's path in R2's outcomes; each value is its JSON, or `absent`. */
+  | { readonly kind: 'rate-drift'; readonly rate: string; readonly snapshot: string; readonly observed: string }
+  | {
+      readonly kind: 'security';
+      readonly scanner: NightlyScannerKind;
+      readonly rule: string;
+      readonly path: string;
+      /** Null where the location could not be found, which is then `unlocated` and has no candidate. */
+      readonly line: number | null;
+      readonly fingerprint: string;
+      readonly candidate: { readonly id: CandidateId } | { readonly none: UncandidatedCause };
+    }
+  /**
+   * A finding whose rule, path, line, or fingerprint did not pass the
+   * `nightly-finding` schema. It keeps its place, naming each field and the
+   * rule it broke, and none of its values: a value no schema admitted never
+   * enters a record (I7; codex-3, gemini-1).
+   */
+  | { readonly kind: 'security-unrecordable'; readonly scanner: NightlyScannerKind; readonly defects: readonly FieldDefect[] };
+
+/** A part of a job that could not finish, and why (I5). */
+export interface NightlyRefusal {
+  /** `job` is a failure no part caught: the record is still written, refused, with what was found before it (codex-5). */
+  readonly part: 'policy' | 'store' | 'rates' | 'locks' | 'target' | 'secret-scan' | 'static-analysis' | 'dependency-audit' | 'job';
+  readonly cause:
+    | 'no-policy' | 'not-enabled' | 'store-unreadable' | 'rates-unreadable' | 'locks-unreadable'
+    | 'no-target' | 'target-unreadable' | 'scan-failed' | 'no-lockfile' | 'unsupported-stack'
+    | 'advisory-unreachable' | 'audit-failed' | 'baseline-unrecorded' | 'job-failed';
+  readonly detail: string;
+}
+
+/**
+ * R2's figures over a fixed set of runs, flattened to one JSON value per
+ * figure, so two snapshots compare figure by figure (D-A-NR-03, D-R13a-03).
+ * `runs` are the runs settled when it was taken.
+ */
+export interface RateSnapshot {
+  readonly runs: readonly RunId[];
+  readonly figures: Readonly<Record<string, string>>;
+}
+
+/** What `nightly-integrity` covered. */
+export interface IntegrityCoverage {
+  /** How many objects the store yielded, each re-hashed. */
+  readonly objects: number;
+  /**
+   * The SHA-256 of every object's bytes, by store-relative path: what
+   * tomorrow compares against, so a record named by run, number, or id that
+   * changed, and any object that went missing, is found (D-A-NR-07).
+   */
+  readonly hashes: Readonly<Record<string, string>>;
+  /** The snapshot compared against, by its nightly record's SHA-256, or `none` on the first night: never a match (D-A-NR-03). */
+  readonly comparedWith: { readonly record: string } | 'none';
+  /** Tonight's snapshot; null where the rates could not be derived, which is a refusal. */
+  readonly rates: RateSnapshot | null;
+}
+
+/** What `nightly-security` covered. */
+export interface SecurityCoverage {
+  /** The default branch and the commit scanned, or null where there was no target. */
+  readonly target: { readonly branch: string; readonly commit: string } | null;
+  /** The parts that ran to their end. A part not here did not, and is a refusal. */
+  readonly ran: readonly NightlyScannerKind[];
+  /** The lockfile audited and its stack, or null where none was. */
+  readonly audited: { readonly lockfile: string; readonly stack: 'npm' | 'pnpm' } | null;
+  /**
+   * What each sandbox's proxy decided, read at its teardown whatever the part
+   * did. A nightly job has no run whose P14 record could hold them, so they
+   * are kept here (D-P14-04, D-R13a-08).
+   */
+  readonly egress: ReadonlyArray<{ readonly part: NightlyScannerKind; readonly log: EgressLog }>;
+}
+
+/**
+ * One nightly job's firing, written once, content-addressed, beside the runs
+ * and under none of them (A-R13a-02, D-A-NR-02). `completed` only where every
+ * part ran to its end; a part that could not is a refusal, and its findings so
+ * far are kept beside it, never recorded as nothing found (I5).
+ */
+export interface NightlyRecord {
+  readonly schedule: string;
+  readonly template: JobTemplateId;
+  /** The UTC date the firing covers, `YYYY-MM-DD`. */
+  readonly date: string;
+  readonly startedAt: string;
+  readonly endedAt: string;
+  readonly outcome: { readonly kind: 'completed' } | { readonly kind: 'refused'; readonly refusals: readonly [NightlyRefusal, ...NightlyRefusal[]] };
+  readonly findings: readonly NightlyFinding[];
+  readonly integrity: IntegrityCoverage | null;
+  readonly security: SecurityCoverage | null;
+  readonly collectedBy: 'runtime';
+}
+
+/** A nightly record as stored, beside the SHA-256 of its bytes, which is its name. */
+export interface NightlyEntry {
+  readonly record: NightlyRecord;
+  readonly sha256: string;
+}
+
+/**
+ * One object the store holds, as `listObjects` yields it (A-R13a-05).
+ * `path` is relative to the store, with forward slashes. `named` says
+ * whether the file's name is the SHA-256 of its bytes (`content`) or a run,
+ * a number, or an id (`name`), which only a previous night's hash can check.
+ */
+export interface StoredObject {
+  readonly path: string;
+  readonly runId: RunId | null;
+  readonly named: 'content' | 'name';
+  readonly bytes: Uint8Array;
 }
 
 /**
@@ -744,6 +914,21 @@ export interface Vault {
   countRefusedDelivery(bucket: string, hour: string, cause: CountedRefusalCause): Promise<void>;
   /** Every bucket's counts, sorted by hour then bucket. */
   readRefusedDeliveryCounts(): Promise<readonly RefusedDeliveryCount[]>;
+  /**
+   * One nightly job's record, write-once and content-addressed beside the
+   * runs; its SHA-256 is returned (A-R13a-02). Refused unless `collectedBy`
+   * is `'runtime'`.
+   */
+  recordNightly(r: NightlyRecord): Promise<string>;
+  /** Every nightly record, sorted by date, then schedule, then hash. */
+  readNightly(): Promise<readonly NightlyEntry[]>;
+  /**
+   * Every object the store holds, each with its bytes as stored (A-R13a-05).
+   * The store names the set, never a caller, so a re-hash over it covers
+   * what the store holds rather than what a caller thought to ask for.
+   * Read-only.
+   */
+  listObjects(): AsyncIterable<StoredObject>;
   /** Rejects with a `NoRunState` where the store holds no state for the run, and with anything else only on a fault. */
   readRunState(runId: RunId): Promise<RunState>;
   commitRunState(s: RunState, ifVersion: string): Promise<RunState>;
