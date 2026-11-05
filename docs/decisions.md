@@ -7428,3 +7428,120 @@ the unit touches before writing this.
 - **Rejected (gemini-3):** a day with no record is recorded with no seat and
   an empty subject (D-R13b-09), which is not the record of a seat that found
   nothing.
+
+## Amendment: post-merge observation (R8), split into R8a and R8b
+
+R8 was started on `v2` at e752669 and stopped before any code. Its entry gave
+no gate paths, no out-of-scope list, and no acceptance criteria, and building
+it changes `vault/src/types.ts` and `core/src/policy/types.ts`, which are gate
+paths the entry did not declare. The maintainer confirmed the recommended
+answers on 2026-11-05: an amendment first, a split, and the `ci-failure`
+payload as where check failures come from. The spec is
+`docs/plan/R8-observe.md`.
+
+### D-A-OB-01: R8 is two units, split by what each reads
+
+- **Found:** the entry holds attribution from git history and two webhook
+  kinds that exist (`core/src/trigger/schemas.ts:122-132`), plus an
+  observation plan written at `test-design` and locked before `build`.
+- **Chosen:** R8a builds the attribution, the rates, and the baseline. R8b
+  builds the plan on top of R8a and R19. R11 now depends on R8a.
+- **Rejected:** *One unit.* It would put git attribution and the I3 lock of a
+  new artifact in one review, and R8b also needs a contract choice that R8a
+  does not (D-A-OB-07).
+- **Reverse by:** merging the two entries in the table and the spec.
+
+### D-A-OB-02: the signal arrives as a job template on `post-merge` and `ci-failure`
+
+- **Found:** R22 left "R8's signal recorded against a run" to a job template
+  (`R22-triggers.md`, "What a trigger does"). Validation allows job templates
+  on `scheduled` only (`core/src/policy/validation.ts:649-652`).
+- **Chosen:** `observe-signal`, valid only on `post-merge` and `ci-failure`,
+  reads extracted fields alone and records a signal. It seats no model and
+  starts nothing. `observe-history`, valid only on `scheduled`, walks the
+  history. The scheduled walk is what keeps the record complete, because a
+  missed webhook cannot drop a revert from it.
+- **Rejected:** *A provider adapter that queries check runs.* It puts a
+  provider API in the core's path to a safety rate. *Webhooks alone.* A lost
+  delivery would silently drop a revert from the record.
+- **Reverse by:** removing `observe-signal`. The history walk finds reverts on
+  its own, though it would then see no failed checks.
+
+### D-A-OB-03: the run enters `observe` and leaves it when the window closes
+
+- **Found:** the line returns after the merge and never commits `observe`
+  (`api/src/line.ts:296-302`). `observe`'s contract is runtime-only with an
+  `auto` exit (`core/src/station/contracts.ts:206`).
+- **Chosen:** the run commits `observe` after the merge, and the runtime
+  moves it out once `observe.window` has passed since `mergedAt`. That exit is
+  recorded in P14's record. A run still observing is in no denominator.
+- **Rejected:** *Finish the run at `integrate` and attach observations to it
+  later.* The run's state would never say whether it is still being watched,
+  and an escaped rate over changes merged an hour ago reads as safe because
+  nothing had time to fail.
+- **Reverse by:** returning at `integrate` as today, and taking each rate's
+  denominator from records whose window has closed.
+
+### D-A-OB-04: a rollback is an exact inverse by patch id; a partial one is reported apart
+
+- **Found:** the entry says reverts are found "by content, not by a commit
+  message anyone can write". Integrate merges the run's commit with
+  `merge_method: 'merge'` (`api/src/integrate.ts:242`), so the change's diff
+  is `baseCommit..commit`.
+- **Chosen:** a rollback is a later first-parent commit whose
+  `git patch-id --stable` equals that of the change's inverted diff. A commit
+  that inverts some of the change's hunks is a `partial-reversal`. It is
+  reported on its own line, never counted as a rollback, and never dropped.
+- **Rejected:** *Counting partial reversals as rollbacks.* An ordinary edit
+  of the same lines would inflate the change-failure rate. *Dropping them.*
+  A fix made by hand would vanish from the record.
+- **Reverse by:** changing the match rule in one function. The records keep
+  both kinds.
+
+### D-A-OB-05: a failed check is known by its `checkRun` id; R8a looks up no name
+
+- **Found:** D-R22-11 said R8 would resolve the id against the provider. A
+  check's name is text the repository's CI configuration chose.
+- **Chosen:** R8a attributes by commit and records the id alone. A person
+  who wants the name reads it from the provider. This supersedes D-R22-11's
+  "R8 resolves the id".
+- **Rejected:** *Resolving the name in R8a.* That needs a provider API in the
+  core, and the name is free text, which the record would then carry.
+- **Reverse by:** a provider adapter that resolves names, kept outside the
+  core.
+
+### D-A-OB-06: every time says where it came from, and R2 never combines the two kinds
+
+- **Found:** commit dates are written by whoever commits. A push's
+  `pushed_at` comes from inside the signed body (`triggers/src/github.ts:86`),
+  and `mergedAt` comes from GitHub's API (`vault/src/types.ts:386`).
+- **Chosen:** each time is `provider-reported` or `committer-claimed`. The
+  baseline's lead time is `committer-claimed`, and R2 shows it as such, never
+  in one figure with a provider-reported time.
+- **Rejected:** *Treating commit dates as fact.* Anyone who commits can move
+  the baseline wherever they like.
+- **Reverse by:** none intended.
+
+### D-A-OB-07: R8b's "works" signal needs a contract choice that R8b's own amendment makes
+
+- **Found:** the extractor ignores every completed check that did not fail
+  (`triggers/src/github.ts:145-147`), so nothing delivers a success. D-R22-11
+  keeps check names out of payload schemas.
+- **Chosen:** R8b starts with its own amendment, which chooses between a
+  `TriggerKind` for completed checks and a provider adapter, and decides how a
+  plan names a check.
+- **Rejected:** *Deciding it here.* No unit would build it before R8a ships,
+  and R8a's records may change what the plan needs.
+- **Reverse by:** folding that choice into this amendment.
+
+### D-A-OB-08: R8a takes D-R2-11 and publishes the assumption, not a claim
+
+- **Found:** D-R2-11 left it to R8 to decide whether a bound supports a
+  general safety claim. Runs on one repository share a codebase.
+- **Chosen:** every rate R8a adds carries its sample size and its bound, and
+  the report says the bound assumes independent runs and that these runs are
+  not independent. No rate here admits or caps a level. Using one for L3 is
+  M3's, under D-A-LC-04.
+- **Rejected:** *A correlated-trials bound now.* It needs a model of how runs
+  are grouped, which nothing measures yet.
+- **Reverse by:** none intended.
