@@ -298,7 +298,7 @@ const CLAIM_NEVER_PROMPTED = runtime({
 
 const UNLOCATED_REFUSED = runtime({
   id: 'I5.nightly-unlocated-finding-is-refused',
-  title: 'a whole-tree finding naming a file the tree does not hold, a line its file does not have, or a category outside the closed list, and a findings-review finding naming no record of the day, is refused and recorded as refused, never a candidate; an unreadable result refuses the job',
+  title: 'a whole-tree finding naming a file the tree does not hold, a line its file does not have, or a category outside the closed list, and a findings-review finding naming no record of the day, is refused and recorded as refused, never a candidate; an unreadable result, and a day naming a violation the store cannot read, refuse the job',
   run: async () => {
     await withReview('r13b-unlocated-', 'gpt', async ({ vault, intake, driver, head }) => {
       await seedRun(vault, head);
@@ -329,6 +329,20 @@ const UNLOCATED_REFUSED = runtime({
       await intake.fire(await reviewPolicy(1), TREE, FIRED);
       const record = await recordOn(vault, TREE.id, FIRED);
       if (record.outcome.kind !== 'refused' || !record.outcome.refusals.some((r) => r.cause === 'result-unreadable')) throw new Error('I5: an unreadable result was recorded as no findings');
+    });
+    await withReview('r13b-lost-violation-', 'gpt', async ({ vault, intake, driver, head }) => {
+      await seedRun(vault, head);
+      await vault.recordDecision({
+        runId: RUN, taskId: 'build-1' as TaskId, station: 'build', decidedAt: `${DAY}T11:00:00.000Z`, occurrence: 'r13b-lost-violation',
+        decision: { cause: 'violation-recorded', decidedBy: 'line', violation: { runId: RUN, kind: 'violation', hash: '0'.repeat(64) } }, collectedBy: 'runtime',
+      });
+      driver.narrative = '{"findings":[]}';
+      await intake.fire(await reviewPolicy(1), FINDINGS, FIRED);
+      const record = await recordOn(vault, FINDINGS.id, FIRED);
+      if (record.outcome.kind !== 'refused' || !record.outcome.refusals.some((r) => r.cause === 'store-unreadable')) {
+        throw new Error(`I5: a day naming a violation the store could not read was reviewed: ${JSON.stringify(record.outcome)}`);
+      }
+      if (driver.requests.length !== 0) throw new Error('I5: a reviewer was seated over a day the store could not read whole');
     });
   },
 });

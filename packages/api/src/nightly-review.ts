@@ -127,7 +127,7 @@ function decisionFields(d: EnforcementDecision, violation: IntegrityViolation | 
     case 'draft-sent-back': return { ...base, sentBackBy: decision.sentBack.by };
     case 'draft-floor-applied': return { ...base, level: decision.level, failedConditions: [...decision.failed].sort().join(',') };
     case 'egress-connection': return { ...base, verdict: decision.connection.verdict };
-    case 'violation-recorded': return { ...base, violation: violation?.kind ?? 'unreadable', role: violation?.role ?? null };
+    case 'violation-recorded': return { ...base, violation: violation?.kind ?? null, role: violation?.role ?? null };
     case 'relay-refused': return { ...base, refused: decision.refused, exhausted: decision.exhausted };
     case 'tier-escalated': return { ...base, from: decision.from, to: decision.to, failedGates: decision.failedGates };
     case 'task-conflict': return { ...base, with: decision.with.length, paths: decision.paths.length };
@@ -145,14 +145,8 @@ export async function dayItems(vault: Vault, day: string): Promise<DayItem[]> {
     for (const ref of await vault.readDecisions(runId)) {
       const d = JSON.parse(decode(await vault.read(ref))) as EnforcementDecision;
       if (d.decidedAt.slice(0, 10) !== day) continue;
-      let violation: IntegrityViolation | null = null;
-      if (d.decision.cause === 'violation-recorded') {
-        try {
-          violation = JSON.parse(decode(await vault.read(d.decision.violation))) as IntegrityViolation;
-        } catch {
-          violation = null;
-        }
-      }
+      // A violation the store cannot read throws, and the job refuses as store-unreadable: never a day reviewed without it (I5).
+      const violation = d.decision.cause === 'violation-recorded' ? JSON.parse(decode(await vault.read(d.decision.violation))) as IntegrityViolation : null;
       items.push({ id: `decision:${ref.hash}`, kind: 'decision', runId: d.runId, fields: decisionFields(d, violation) });
     }
   }
