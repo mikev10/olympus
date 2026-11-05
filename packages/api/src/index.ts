@@ -57,3 +57,6 @@ export {
 export { Intake, utcHour, type DeliveryOutcome, type IntakeOptions, type SecretSource } from './intake.js';
 export { firingTime, lastCovered, missedDates, startSchedules, utcDate, type Scheduler } from './schedule.js';
 export { NightlyJobs, SETTLED, flattenFigures, type NightlyOptions, type NightlyTarget } from './nightly.js';
+export {
+  FINDINGS_REVIEWER_ROLE, JUDGING_ROLES, authorsOf as nightlyAuthorsOf, dayItems, readReviewResult, reviewedDay, seatLevel, type NightlySeatOptions,
+} from './nightly-review.js';

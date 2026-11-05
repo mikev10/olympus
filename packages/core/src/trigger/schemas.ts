@@ -22,16 +22,29 @@ import type { AuthorTrust, TriggerKind } from '../run/types.js';
  * schedule's id as its only input, seats no model, and never enters the
  * build: `nightly-integrity` re-hashes the Vault and checks R2's rates,
  * `nightly-security` scans the default branch and audits its lockfile
- * (R13a, A-R13a-01). A job template is valid only on `scheduled`. No
- * template starts a build (D-A-TF-01).
+ * (R13a, A-R13a-01). Two jobs seat a read-only reviewer and never enter the
+ * build either: `nightly-findings-review` reviews a day of the runtime's
+ * records as typed fields, and `nightly-tree-review` reviews the default
+ * branch's tree (R13b, A-R13b-01). A job template is valid only on
+ * `scheduled`. No template starts a build (D-A-TF-01).
  */
 export type TemplateId = 'intake-candidate' | JobTemplateId;
 
 /** The templates that run a job in place of recording a candidate (A-R13a-01). */
-export type JobTemplateId = 'nightly-integrity' | 'nightly-security';
+export type JobTemplateId = 'nightly-integrity' | 'nightly-security' | ReviewJobTemplateId;
 
-const TEMPLATE_SET: Readonly<Record<TemplateId, true>> = { 'intake-candidate': true, 'nightly-integrity': true, 'nightly-security': true };
-const JOB_TEMPLATE_SET: Readonly<Record<JobTemplateId, true>> = { 'nightly-integrity': true, 'nightly-security': true };
+/** The job templates that seat a reviewer (A-R13b-01). */
+export type ReviewJobTemplateId = 'nightly-findings-review' | 'nightly-tree-review';
+
+const JOB_TEMPLATE_SET: Readonly<Record<JobTemplateId, true>> = {
+  'nightly-integrity': true, 'nightly-security': true, 'nightly-findings-review': true, 'nightly-tree-review': true,
+};
+const TEMPLATE_SET: Readonly<Record<TemplateId, true>> = { 'intake-candidate': true, ...JOB_TEMPLATE_SET };
+const REVIEW_TEMPLATE_SET: Readonly<Record<ReviewJobTemplateId, true>> = { 'nightly-findings-review': true, 'nightly-tree-review': true };
+
+export function isReviewJobTemplate(value: unknown): value is ReviewJobTemplateId {
+  return typeof value === 'string' && Object.hasOwn(REVIEW_TEMPLATE_SET, value);
+}
 
 export function isJobTemplate(value: unknown): value is JobTemplateId {
   return typeof value === 'string' && Object.hasOwn(JOB_TEMPLATE_SET, value);
@@ -43,6 +56,19 @@ export function isTemplateId(value: unknown): value is TemplateId {
   return typeof value === 'string' && Object.hasOwn(TEMPLATE_SET, value);
 }
 
+/** A whole-tree finding's category: what it makes vulnerable, or what it makes reachable that need not be (R9's role). */
+export const TREE_CATEGORIES = Object.freeze([
+  'unchecked-input', 'exposed-secret', 'unenforced-authorization', 'weakened-check',
+  'reachable-before-authentication', 'unnamed-surface', 'unsafe-default', 'weakening-combination',
+] as const);
+export type TreeCategory = (typeof TREE_CATEGORIES)[number];
+
+/** A findings-review finding's category: what the day's records show. */
+export const RECORD_CATEGORIES = Object.freeze([
+  'repeated-refusal', 'repeated-park', 'violation', 'failed-check', 'record-drift', 'refused-deliveries', 'security-finding', 'control-gap',
+] as const);
+export type RecordCategory = (typeof RECORD_CATEGORIES)[number];
+
 /**
  * The character classes a field may be in. Each is anchored and admits no
  * whitespace, so no field can hold a sentence. A failed check is named by
@@ -52,7 +78,7 @@ export function isTemplateId(value: unknown): value is TemplateId {
 export type CharClass =
   | 'identifier' | 'repository' | 'branch-ref' | 'commit-sha'
   | 'failure-conclusion' | 'decimal' | 'label-list' | 'author-trust'
-  | 'nightly-scanner' | 'finding-rule' | 'tree-path';
+  | 'nightly-scanner' | 'finding-rule' | 'tree-path' | 'tree-category' | 'record-category' | 'day-record';
 
 export const CHAR_CLASSES: Readonly<Record<CharClass, RegExp>> = Object.freeze({
   identifier: /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/u,
@@ -70,6 +96,11 @@ export const CHAR_CLASSES: Readonly<Record<CharClass, RegExp>> = Object.freeze({
   'finding-rule': /^[A-Za-z0-9](?:[A-Za-z0-9._:-]*[A-Za-z0-9])?$/u,
   // Relative to the tree, forward slashes, no `..` component, no leading slash or dot-slash, no whitespace.
   'tree-path': /^(?!\/)(?!\.\/)(?!(?:.*\/)?\.\.(?:\/|$))[A-Za-z0-9._@+=,~/-]+$/u,
+  // The questions R9's security reviewer asks, one category each (D-R13b-08).
+  'tree-category': new RegExp(`^(?:${TREE_CATEGORIES.join('|')})$`, 'u'),
+  'record-category': new RegExp(`^(?:${RECORD_CATEGORIES.join('|')})$`, 'u'),
+  // An id the runtime gave one record of the day it reviewed, never a name a model chose (D-R13b-04).
+  'day-record': /^(?:(?:decision|trigger):[0-9a-f]{64}|nightly:[0-9a-f]{64}:[0-9]{1,6}|deliveries:[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[A-Za-z0-9._:-]{1,128})$/u,
 });
 
 /** A single label as the policy's allowlist names one: the elements of `label-list`. */
@@ -124,9 +155,24 @@ export const JOB_FIELD_SCHEMAS = Object.freeze({
     path: { maxBytes: 1024, charClass: 'tree-path' },
     line: { maxBytes: 10, charClass: 'decimal' },
   }),
+  /** Where the whole-tree reviewer found something, and which question it answers (A-R13b-01, D-R13b-08). */
+  'nightly-tree-finding': Object.freeze({
+    category: { maxBytes: 40, charClass: 'tree-category' },
+    path: { maxBytes: 1024, charClass: 'tree-path' },
+    line: { maxBytes: 10, charClass: 'decimal' },
+  }),
+  /** Which of the day's records the findings reviewer names, and what it shows (A-R13b-01, D-R13b-08). */
+  'nightly-record-finding': Object.freeze({
+    category: { maxBytes: 40, charClass: 'record-category' },
+    record: { maxBytes: 200, charClass: 'day-record' },
+  }),
 } as const satisfies Readonly<Record<string, Readonly<Record<string, FieldSpec>>>>);
 
 export type JobSchema = keyof typeof JOB_FIELD_SCHEMAS;
+
+export function isJobSchema(value: unknown): value is JobSchema {
+  return typeof value === 'string' && Object.hasOwn(JOB_FIELD_SCHEMAS, value);
+}
 /** Every schema a candidate's fields can have been checked against: a kind's, or a job's output schema. */
 export type CandidateSchema = SchemaKind | JobSchema;
 

@@ -1,5 +1,6 @@
 /**
- * The nightly jobs that call no model (R13a). A schedule that names a job
+ * The nightly jobs (R13a, R13b). The two that call no model are here; the two
+ * that seat a reviewer are in `nightly-review.ts`. A schedule that names a job
  * template runs one of them in place of recording a candidate; each writes
  * one `NightlyRecord` beside the runs, and each reads the schedule's id from
  * the event and nothing else (A-R13a-01).
@@ -21,15 +22,16 @@ import { createHash, randomUUID } from 'node:crypto';
 import { copyFile, mkdir, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { AUDITORS, UNSUPPORTED_LOCKFILES, type AuditFinding, type DependencyAuditor } from '@olympus-ai/adapters';
-import { checkFields, type JobTemplateId, type NightlyScanner, type Policy, type RunId, type RunState, type TriggerSchedule, type VaultRef } from '@olympus-ai/core';
+import { checkFields, isReviewJobTemplate, type JobTemplateId, type NightlyScanner, type Policy, type RunId, type RunState, type TriggerSchedule, type VaultRef } from '@olympus-ai/core';
 import type { Finding, SecurityCheckSpec } from '@olympus-ai/integrity';
 import { materialize, resolveCommit } from '@olympus-ai/readiness';
 import type { EgressLog, SandboxHandle, SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
 import {
   isNoRunState, type IntegrityCoverage, type NightlyEntry, type NightlyFinding, type NightlyRecord, type NightlyRefusal,
-  type RateSnapshot, type RecordDriftProblem, type SecurityCoverage, type Vault,
+  type NightlyReview, type RateSnapshot, type RecordDriftProblem, type SecurityCoverage, type Vault,
 } from '@olympus-ai/vault';
 import type { Intake } from './intake.js';
+import { reviewJob, type NightlySeatOptions } from './nightly-review.js';
 import { deriveOutcomes, readRunRecords, type RunEnding, type RunRecords } from './outcomes.js';
 import { scanTree } from './scan.js';
 import { scannerFor, type SecurityScanners } from './security.js';
@@ -51,6 +53,8 @@ export interface NightlyOptions {
   /** Null on a host with no target, where `nightly-security` is refused `no-target`. */
   readonly target: NightlyTarget | null;
   readonly auditors?: readonly DependencyAuditor[];
+  /** What seats the two reviewer jobs (R13b). Absent or null, each is refused `no-reviewer` (I5). */
+  readonly seat?: NightlySeatOptions | null;
   readonly now?: () => number;
 }
 
@@ -134,9 +138,16 @@ export class NightlyJobs {
     const startedAt = new Date(this.#now()).toISOString();
     let part: Part;
     try {
-      part = schedule.template === 'nightly-integrity'
-        ? await this.#integrity(schedule, date)
-        : await this.#security(policy, schedule, date, intake);
+      const { template } = schedule;
+      if (template === 'nightly-integrity') part = await this.#integrity(schedule, date);
+      else if (template === 'nightly-security') part = await this.#security(policy, schedule, date, intake);
+      else if (isReviewJobTemplate(template)) {
+        const { vault, sandbox, workspaces, limits, target } = this.#options;
+        const reviewed = await reviewJob(template, {
+          vault, sandbox, root: workspaces.root, user: workspaces.user, limits, target, seat: this.#options.seat ?? null, now: this.#now,
+        }, policy, schedule, date, intake);
+        part = { findings: [], refusals: reviewed.refusals, integrity: null, security: null, review: reviewed.review };
+      } else throw new Error(`no job is named ${String(template)}`);
     } catch (error) {
       // A failure no part caught still writes the record, refused, so the firing is never left without one (codex-5).
       part = { findings: [], refusals: [{ part: 'job', cause: 'job-failed', detail: describe(error) }], integrity: null, security: null };
@@ -144,7 +155,7 @@ export class NightlyJobs {
     const record: NightlyRecord = {
       schedule: schedule.id, template: schedule.template, date, startedAt, endedAt: new Date(this.#now()).toISOString(),
       outcome: refusedWith(part.refusals), findings: part.findings,
-      integrity: part.integrity, security: part.security, collectedBy: 'runtime',
+      integrity: part.integrity, security: part.security, review: part.review ?? null, collectedBy: 'runtime',
     };
     return { record, sha256: await this.#options.vault.recordNightly(record) };
   }
@@ -446,4 +457,5 @@ interface Part {
   readonly refusals: NightlyRefusal[];
   readonly integrity: IntegrityCoverage | null;
   readonly security: SecurityCoverage | null;
+  readonly review?: NightlyReview;
 }

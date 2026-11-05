@@ -7,6 +7,7 @@ import { R19_ASSERTIONS } from './drafting.js';
 import { CODEX_FAMILY_IS_DECLARED } from './codex.js';
 import { OPENAI_COMPATIBLE_FAMILY_IS_DECLARED } from './openai-compatible.js';
 import { AUTHOR_IDENTITY_NEVER_REVIEWS, SECURITY_SEAT_FAMILY_CHECKED } from './separation.js';
+import { R13B_I6 } from './nightly-review.js';
 
 /** I6: Reviewers never share the author's model family. */
 export const I6: InvariantEntry = {
@@ -36,6 +37,8 @@ export const I6: InvariantEntry = {
     // R9: identity, not family alone, at every review seat, and a security seat graded as the reviewer is.
     AUTHOR_IDENTITY_NEVER_REVIEWS,
     SECURITY_SEAT_FAMILY_CHECKED,
+    // R13b: each nightly reviewer graded against every author.
+    ...R13B_I6,
   ],
   pending: [],
 };

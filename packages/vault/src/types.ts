@@ -9,7 +9,7 @@
  */
 import type {
   AgentClaim, ApprovalKey, AutonomyLevel, BaseRefusalPart, CompiledRole, DraftCondition, DraftRef, DraftStation, IndependenceGrade, ModelIdentity, ModelTier, Policy, PolicyRefusal,
-  RejectionReason, RoleId, Run, RunId, RunState, StationId, StationRefusal, TaskId, TaskResult, VaultRef,
+  RecordCategory, RejectionReason, RoleId, Run, RunId, RunState, SeatIdentity, StationId, StationRefusal, TaskId, TaskResult, TreeCategory, VaultRef,
   AuthorTrust, CandidateId, CandidateSchema, FieldDefect, JobTemplateId, SchemaKind, TemplateId, TriggerAdmissionCause, TriggerLineage,
 } from '@olympus-ai/core';
 import type { CheckResult, IntegrityViolation, TamperReport } from '@olympus-ai/integrity';
@@ -741,11 +741,21 @@ export type NightlyFinding =
 /** A part of a job that could not finish, and why (I5). */
 export interface NightlyRefusal {
   /** `job` is a failure no part caught: the record is still written, refused, with what was found before it (codex-5). */
-  readonly part: 'policy' | 'store' | 'rates' | 'locks' | 'target' | 'secret-scan' | 'static-analysis' | 'dependency-audit' | 'job';
+  /** `subject` is what a reviewer is given, and `seat` the reviewer itself (R13b). */
+  readonly part: 'policy' | 'store' | 'rates' | 'locks' | 'target' | 'secret-scan' | 'static-analysis' | 'dependency-audit' | 'job' | 'subject' | 'seat';
+  /**
+   * R13b's: `no-reviewer` a service with no reviewer driver or roles
+   * directory; `role-unavailable` a role that did not compile or that policy
+   * does not scope; `seat-refused` a seat `seatReviewer` refused, at L3 for a
+   * shared family, or a driver lacking a capability; `seat-failed` a call
+   * that did not return; `result-unreadable` a final message that was not
+   * the result asked for, which is never read as no findings (I5).
+   */
   readonly cause:
     | 'no-policy' | 'not-enabled' | 'store-unreadable' | 'rates-unreadable' | 'locks-unreadable'
     | 'no-target' | 'target-unreadable' | 'scan-failed' | 'no-lockfile' | 'unsupported-stack'
-    | 'advisory-unreachable' | 'audit-failed' | 'baseline-unrecorded' | 'job-failed';
+    | 'advisory-unreachable' | 'audit-failed' | 'baseline-unrecorded' | 'job-failed'
+    | 'no-reviewer' | 'role-unavailable' | 'seat-refused' | 'seat-failed' | 'result-unreadable';
   readonly detail: string;
 }
 
@@ -808,7 +818,87 @@ export interface NightlyRecord {
   readonly findings: readonly NightlyFinding[];
   readonly integrity: IntegrityCoverage | null;
   readonly security: SecurityCoverage | null;
+  /** A reviewer job's seat and findings; null for a job that seats none. A record stored before R13b has none and is read as null. */
+  readonly review: NightlyReview | null;
   readonly collectedBy: 'runtime';
+}
+
+/**
+ * One of the reviewed day's records, as the findings reviewer is given it
+ * (D-R13b-04, I7): an id the runtime derived, the run it belongs to, and
+ * enumerated, id, or count fields alone. No message, detail, host, or other
+ * text a record carries is projected.
+ */
+export interface DayItem {
+  /** `decision:<sha256>`, `trigger:<sha256>`, `deliveries:<hour>:<bucket>`, or `nightly:<sha256>:<index>`. */
+  readonly id: string;
+  readonly kind: 'decision' | 'trigger-decision' | 'refused-deliveries' | 'nightly-finding';
+  readonly runId: RunId | null;
+  readonly fields: Readonly<Record<string, string | number | null>>;
+}
+
+/** What a reviewer was put in front of. */
+export type ReviewSubject =
+  | {
+      readonly kind: 'day';
+      /** The UTC date reviewed, the one before the firing's (D-R13b-04). */
+      readonly day: string;
+      readonly items: readonly DayItem[];
+      /** R8 records no post-merge outcome yet, so none was reviewed, and the record says so. */
+      readonly postMerge: 'not-recorded';
+    }
+  | {
+      readonly kind: 'tree';
+      readonly branch: string;
+      readonly commit: string;
+      readonly files: number;
+      /** The runs merged since the job's last completed run, whose calls are the authors (D-R13b-05). */
+      readonly merged: readonly RunId[];
+      /** The last completed run's start, or the literal `none` on the first. */
+      readonly since: string;
+      /** Whether the head is a commit no recorded merge produced: work merged outside Olympus, named and not reviewed for its authors. */
+      readonly unattributed: boolean;
+    };
+
+/**
+ * The seat a nightly reviewer filled (I6). `independence` is the weakest
+ * grade between the reviewer's model and any author's, from `seatReviewer`;
+ * `no-author` where the subject holds no author's work, so nothing could be
+ * shared. `level` is the one the seat was checked at.
+ */
+export interface NightlySeat {
+  readonly reviewer: SeatIdentity;
+  readonly authors: readonly SeatIdentity[];
+  readonly independence: IndependenceGrade | 'no-author';
+  readonly level: AutonomyLevel;
+}
+
+/** Why a reviewer's finding has no candidate, or was refused: never the values, which are the reviewer's (I7). */
+export type ReviewFinding =
+  | { readonly kind: 'tree'; readonly category: TreeCategory; readonly path: string; readonly line: number; readonly candidate: { readonly id: CandidateId } | { readonly none: UncandidatedCause } }
+  | { readonly kind: 'record'; readonly category: RecordCategory; readonly record: string; readonly candidate: { readonly id: CandidateId } | { readonly none: UncandidatedCause } }
+  /**
+   * A finding the runtime refused: `unlocated` names no file the tree holds
+   * or no line that file has, `unknown-record` no record of the day reviewed,
+   * `unrecordable` fields outside their schema (I5, R13b).
+   */
+  | { readonly kind: 'refused'; readonly cause: 'unlocated' | 'unknown-record' | 'unrecordable'; readonly defects: readonly FieldDefect[] };
+
+/**
+ * A nightly reviewer's seat and what came of it (R13b). `claim` is the
+ * reviewer's final message, kept as its claim: no record reads it as a
+ * finding, and no prompt is ever given it (I2, I7). `usage` and `egress` are
+ * read from the sandbox at teardown, since the job has no run whose records
+ * could hold them (D-R13b-02). Each is null where no call was made.
+ */
+export interface NightlyReview {
+  readonly subject: ReviewSubject | null;
+  readonly role: RoleVersion | null;
+  readonly seat: NightlySeat | null;
+  readonly usage: MeterReading | null;
+  readonly egress: EgressLog | null;
+  readonly claim: AgentClaim | null;
+  readonly findings: readonly ReviewFinding[];
 }
 
 /** A nightly record as stored, beside the SHA-256 of its bytes, which is its name. */

@@ -103,6 +103,9 @@ function draftLockFile(station: string): string {
 
 const DRAFT_STATIONS = new Set(['spec', 'test-design']);
 
+/** The job output schemas a scheduled candidate may name, repeated from core's `JOB_FIELD_SCHEMAS` (A-R13a-07, A-R13b-01). */
+const NIGHTLY_JOB_SCHEMAS: ReadonlySet<string> = new Set(['nightly-finding', 'nightly-tree-finding', 'nightly-record-finding']);
+
 /** Where nightly records are kept: beside the runs, under none (A-R13a-02). */
 const NIGHTLY_DIR = 'nightly';
 
@@ -672,7 +675,7 @@ function intakeRecordProblem(d: TriggerDecision, candidate: CandidateRecord | nu
     if (d.outcome.candidate !== id || candidate.id !== id) return 'a candidate is named by its source and key';
     if ((candidate.collectedBy as string) !== 'runtime') return 'a candidate is collected by the runtime';
     // A kind's candidate is checked against its kind's schema; only a schedule's job writes one under a job's output schema (A-R13a-07).
-    if ((candidate.schema as string) !== candidate.kind && !(candidate.kind === 'scheduled' && candidate.schema === 'nightly-finding')) return "a candidate's schema is its kind's, or a job's on a scheduled candidate";
+    if ((candidate.schema as string) !== candidate.kind && !(candidate.kind === 'scheduled' && NIGHTLY_JOB_SCHEMAS.has(candidate.schema))) return "a candidate's schema is its kind's, or a job's on a scheduled candidate";
     if (candidate.body !== null && sha256(Buffer.from(candidate.body.base64, 'base64')) !== candidate.body.sha256) return "a candidate's body hash is the hash of its body";
     return undefined;
   }
@@ -1109,7 +1112,8 @@ export class LocalVault implements Vault {
       const record = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
       if (!isRecord(record) || record.collectedBy !== 'runtime') throw new Error(`LocalVault: ${join(dir, name)} is not a nightly record`);
       // The hash is the name's, not recomputed: a drifted record is the re-hash's to find, not this reader's to hide.
-      out.push({ record: record as unknown as NightlyRecord, sha256: hash });
+      // A record stored before R13b has no review; it is read as one that seated none.
+      out.push({ record: { review: null, ...record } as unknown as NightlyRecord, sha256: hash });
     }
     return out.sort((a, b) => a.record.date.localeCompare(b.record.date) || a.record.schedule.localeCompare(b.record.schedule) || a.sha256.localeCompare(b.sha256));
   }

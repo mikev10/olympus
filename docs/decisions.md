@@ -7380,3 +7380,18 @@ the unit touches before writing this.
   and `docs/plan/R13-nightly.md` states A-R13b-01 that way.
 - **Reverse by:** folding the two schemas into `nightly-finding` with
   optional fields.
+
+### D-R13b-09: found while building
+
+- **Authors are read from the store's usage records, not from run state.**
+  `readUsage` (`packages/api/src/cost.ts:126`) takes a run state, and a run
+  can hold calls without one. `authorsOf` reads `vault.readUsage(runId)`,
+  the set the store names, and refuses a record the runtime did not write
+  for the run rather than skipping it (I5). **Reverse by:** reading through
+  run state.
+- **A day with no record seats no reviewer.** The record names the empty day
+  as its subject and no seat, which is not the record of a seat that found
+  nothing. **Reverse by:** seating over an empty list.
+- **A reviewer finding may carry a `note`.** The note stays in the claim. The
+  runtime reads only the schema's fields, so a reviewer can say what is wrong
+  without that text reaching a record field or a candidate (I7).

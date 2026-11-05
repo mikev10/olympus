@@ -18,6 +18,7 @@ import { TELEMETRY_IS_DRAWN_FROM_RUNTIME_RECORDS } from './telemetry.js';
 import { BASE_RESULTS_ARE_THE_RUNTIMES, RESUME_READS_THE_BASE_RECORD } from './base-run.js';
 import { R20_I2 } from './roles.js';
 import { R13A_I2 } from './nightly.js';
+import { R13B_I2 } from './nightly-review.js';
 
 /** I2: The runtime derives status; the model never reports it. */
 export const I2: InvariantEntry = {
@@ -27,6 +28,8 @@ export const I2: InvariantEntry = {
     ...R20_I2,
     // R13a: the nightly checks that call no model.
     ...R13A_I2,
+    // R13b: the nightly reviewers.
+    ...R13B_I2,
     // R17: security at the gate.
     ...R17_I2,
     // R4: parallel task execution.
