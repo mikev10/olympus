@@ -7359,7 +7359,7 @@ the unit touches before writing this.
   policy that grants none refuses the job.
 - **Reverse by:** removing the role.
 
-### D-R13b-08: the shape of a reviewer finding's fields — waiting on the maintainer
+### D-R13b-08: the shape of a reviewer finding's fields (A-R13b-01, as confirmed)
 
 - **Found:** A-R13b-01 says `nightly-finding` gains `category` and
   `record`. Every field of a schema is required (`schemas.ts:83`), so adding
@@ -7376,5 +7376,7 @@ the unit touches before writing this.
   alone.
 - **Alternative:** a field may be marked optional, and `nightly-finding`
   gains `category` and `record` as optional fields.
-- **Why it waits:** it changes the shape of a declared contract amendment,
-  and amendments wait for confirmation (CLAUDE.md, working rule 6).
+- **Confirmed:** the maintainer chose the recommended shape on 2026-11-05,
+  and `docs/plan/R13-nightly.md` states A-R13b-01 that way.
+- **Reverse by:** folding the two schemas into `nightly-finding` with
+  optional fields.
