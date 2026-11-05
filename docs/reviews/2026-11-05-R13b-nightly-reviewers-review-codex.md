@@ -1,3 +1,19 @@
+# External review of R13b, codex, 2026-11-05
+
+The adversarial review of R13b's two nightly reviewer jobs, by the Codex family, from the committed bundle. The triage of this review and its Gemini companion is `2026-11-05-R13b-nightly-reviewers-triage.md`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex. A headless `codex exec` run under a read-only sandbox, with recorded approval policy `never`, in an empty scratch working directory and a scratch config home holding only `auth.json`, with an environment of `CODEX_HOME` alone. The pre-run listing of both is the manifest's `cleanRoom`.
+- **Cross-family agreement:** codex-1 (the tree review's author window) was raised by Gemini too, as gemini-2. codex-2, codex-3, and codex-4 were raised by Codex alone.
+- **Date:** 2026-11-05
+- **Bundle:** `2026-11-05-R13b-nightly-reviewers-review-bundle.txt`, SHA-256 `cc142a44911b154a4db4e62101bd6bd28d9697026988c68f45cd8c1ca7fbbaeb` (the manifest's `bundleSha256`), base `adf5c9e` (`reviewed/R13a`), head `e3fcd98` (the unit branch's last code commit before the review). It held every changed package file under `packages/` and the changeset, new files whole and modified files as unified diffs; `docs/decisions.md` and `docs/plan/R13-nightly.md` were excluded, so the reviewer saw no design record. Prompt: `2026-11-05-R13b-nightly-reviewers-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated it had no prior project context and made no external lookups, and that local shell access was blocked so it ran nothing. This is a self-report and is not independently verifiable.
+- **Coverage, and any gap:** all seven prompt items were answered: 1 and 3 by findings 1–3, 2 by an explicit statement that no tautology was found (finding 4 is an incomplete assertion), 4 and 5 by explicit assessments, 6 by a list of sound mechanisms, and 7 by a qualification of the framing.
+- **Citations:** Line numbers are positions in the bundle's new-side hunks, not the repository; each was treated as a hint and the cited construct was located by name in the triage.
+
+---
+
 BASE: adf5c9e  
 HEAD: e3fcd98  
 packages/vault/src/types.ts  

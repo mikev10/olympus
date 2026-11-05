@@ -7395,3 +7395,35 @@ the unit touches before writing this.
 - **A reviewer finding may carry a `note`.** The note stays in the claim. The
   runtime reads only the schema's fields, so a reviewer can say what is wrong
   without that text reaching a record field or a candidate (I7).
+
+### D-R13b-10: what the external review changed, and what it left
+
+- **Fixed (review fixes, one commit each):** codex-4, the changes-no-run
+  assertion compares each run object's content as well as its name
+  (`e9f6e41`). codex-2, a violation the store cannot read now refuses the
+  findings review as `store-unreadable` instead of projecting `unreadable`
+  (`1408479`). gemini-1, a task id is no longer projected to the findings
+  reviewer. It is the requester's text, admitted with no character class
+  (`packages/api/src/validate.ts`, `parseGraph`), so D-R13b-04's projected
+  fields lose "task" (`38913f1`). **Rejected for gemini-1:** *projecting the
+  task id only when it is in the run id's class.* A class admits an
+  instruction-shaped token such as the conformance marker. **Reverse by:**
+  restoring `taskId` to `decisionFields`' base.
+- **Known limit, the author window (codex-1, gemini-2):** the tree review's
+  grade covers the authors of runs merged since its last completed run, as
+  the spec says (R13b, whole-tree reviewer), and not every author of the
+  tree it reads. The record holds the window (`subject.merged`,
+  `subject.since`) beside the grade, so the grade claims no more than that.
+  Grading against every merged run's authors changes the deliverable, and it
+  waits on the maintainer.
+- **Known limit, an empty answer (codex-3):** a completed review with no
+  findings records that the reviewer returned a readable, empty result. It
+  does not record that the reviewer examined the subject, and nothing
+  available to the runtime could. The half about repository instruction
+  files does not hold: both drivers disable them (codex
+  `project_doc_max_bytes=0`, claude-code `--setting-sources ''`), and
+  `I3.codex-workspace-instructions-not-loaded` and
+  `I3.workspace-instructions-not-loaded` assert it.
+- **Rejected (gemini-3):** a day with no record is recorded with no seat and
+  an empty subject (D-R13b-09), which is not the record of a seat that found
+  nothing.
