@@ -104,11 +104,12 @@ const empty = (subject: ReviewSubject | null): NightlyReview => ({ subject, role
 /**
  * One decision's typed fields. Every cause is listed, so a cause added later
  * fails to compile here rather than reaching the seat unprojected. No
- * message, detail, host, path, or check id is taken: a check id may be one a
- * drafter wrote (R19), and a host is the agent's choice (I7).
+ * message, detail, host, path, check id, or task id is taken: a check id may
+ * be one a drafter wrote (R19), a host is the agent's choice, and a task id is
+ * the requester's text, admitted with no character class (I7).
  */
 function decisionFields(d: EnforcementDecision, violation: IntegrityViolation | null): Record<string, string | number | null> {
-  const base = { cause: d.decision.cause, decidedBy: d.decision.decidedBy, taskId: d.taskId, station: d.station };
+  const base = { cause: d.decision.cause, decidedBy: d.decision.decidedBy, station: d.station };
   const decision = d.decision;
   switch (decision.cause) {
     case 'record-drift': return { ...base, problem: decision.problem };

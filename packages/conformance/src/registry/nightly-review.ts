@@ -250,7 +250,7 @@ const REDUCED_RECORDED = runtime({
 
 const TYPED_FIELDS_ONLY = runtime({
   id: 'I7.nightly-reviewer-gets-typed-fields-only',
-  title: "the findings reviewer is given the day's records as runtime ids and typed fields: a host the agent chose, a violation's detail, and every other text a record carries never reach its prompt",
+  title: "the findings reviewer is given the day's records as runtime ids and typed fields: a host the agent chose, a violation's detail, a task id, and every other text a record carries never reach its prompt",
   run: async () => {
     await withReview('r13b-typed-', 'gpt', async ({ vault, intake, driver, head }) => {
       await seedRun(vault, head);
@@ -259,7 +259,8 @@ const TYPED_FIELDS_ONLY = runtime({
         detectedAt: `${DAY}T11:00:00.000Z`, detail: { note: MARKER },
       });
       await vault.recordDecision({
-        runId: RUN, taskId: 'build-1' as TaskId, station: 'build', decidedAt: `${DAY}T11:00:00.000Z`, occurrence: 'r13b-violation',
+        // A task id is the requester's text, admitted with no character class: it never reaches the prompt either.
+        runId: RUN, taskId: MARKER as TaskId, station: 'build', decidedAt: `${DAY}T11:00:00.000Z`, occurrence: 'r13b-violation',
         decision: { cause: 'violation-recorded', decidedBy: 'line', violation }, collectedBy: 'runtime',
       });
       await intake.fire(await reviewPolicy(1), FINDINGS, FIRED);
