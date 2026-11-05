@@ -7,6 +7,7 @@
  * what is asserted (D-R13b-01).
  */
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdir, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Intake, NightlyJobs } from '@olympus-ai/api';
@@ -356,13 +357,14 @@ const TREE_READ_ONLY_DENY_ALL = runtime({
 
 const REVIEW_CHANGES_NO_RUN = runtime({
   id: 'I2.nightly-review-changes-no-run',
-  title: "neither nightly reviewer writes under any run: every run's records are the same objects after both jobs ran and recorded findings as before",
+  title: "neither nightly reviewer writes under any run: every run's records are the same objects, by name and by content, after both jobs ran and recorded findings as before",
   run: async () => {
     await withReview('r13b-no-run-', 'gpt', async ({ vault, intake, driver, head }) => {
       await seedRun(vault, head);
       const runs = async () => {
         const out: string[] = [];
-        for await (const object of vault.listObjects()) if (object.path.startsWith('runs/')) out.push(object.path);
+        // Name and content: an object rewritten in place under its old name is a write too.
+        for await (const object of vault.listObjects()) if (object.path.startsWith('runs/')) out.push(`${object.path} ${createHash('sha256').update(object.bytes).digest('hex')}`);
         return out.sort().join('\n');
       };
       const before = await runs();
