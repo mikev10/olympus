@@ -5,6 +5,7 @@ import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { walkFiles, workspacePackages, workspaceRelative } from '../kit/workspace.js';
 import { R20_I7 } from './roles.js';
 import { R13A_I7 } from './nightly.js';
+import { R13B_I7 } from './nightly-review.js';
 import { R22_I7 } from './triggers.js';
 import { R19_ASSERTIONS } from './drafting.js';
 import { TELEMETRY_EXPORTS_NO_TEXT } from './telemetry.js';
@@ -40,6 +41,8 @@ export const I7: InvariantEntry = {
     ...R22_I7,
     // R13a: the nightly checks that call no model.
     ...R13A_I7,
+    // R13b: the nightly reviewers.
+    ...R13B_I7,
     // R20: the role compiler.
     // R19: drafting at spec and test-design.
     ...R19_ASSERTIONS.I7,

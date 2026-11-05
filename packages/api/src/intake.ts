@@ -24,7 +24,7 @@
  * it, and no driver request carries any byte of a body.
  */
 import {
-  WEBHOOK_SECRET_PREFIX, checkFields, isJobTemplate, type AuthorTrust, type CandidateId, type ExtractedFields, type JobTemplateId, type Policy, type RunId,
+  WEBHOOK_SECRET_PREFIX, checkFields, isJobTemplate, type AuthorTrust, type CandidateId, type JobSchema, type JobTemplateId, type Policy, type RunId,
   type TemplateId, type TriggerLineage, type TriggerSchedule, type TriggerSubscription,
 } from '@olympus-ai/core';
 import { bodyDigest, extractGithub, signatureVerifies, untrustedBody } from '@olympus-ai/triggers';
@@ -185,21 +185,22 @@ export class Intake {
   }
 
   /**
-   * A nightly finding as a candidate (A-R13a-03, A-R13a-07). Its kind is
-   * `scheduled`, so it is admitted under the schedule's route; its fields are
-   * checked whole against `nightly-finding`; and it is held to the same budget
+   * A nightly finding as a candidate (A-R13a-03, A-R13a-07, A-R13b-01). Its
+   * kind is `scheduled`, so it is admitted under the schedule's route; its
+   * fields are checked whole against its job schema, a scanner's
+   * `nightly-finding` or a reviewer's; and it is held to the same budget
    * as every candidate. It is written under `nightly:<schedule id>`, apart
    * from the firing's own source, whose keys are dates.
    */
   async recordFinding(
-    policy: Policy, schedule: TriggerSchedule, key: string, fields: Readonly<Record<string, string>>,
+    policy: Policy, schedule: TriggerSchedule, key: string, fields: Readonly<Record<string, string>>, schema: JobSchema = 'nightly-finding',
   ): Promise<{ readonly id: CandidateId } | { readonly none: 'budget' | 'schema' | 'recorded-before' }> {
     return this.#serial(async () => {
       const source = `nightly:${schedule.id}`;
       const now = this.#now();
       const decision = (outcome: TriggerDecision['outcome']): TriggerDecision => ({ source, key, decidedAt: new Date(now).toISOString(), outcome, collectedBy: 'runtime' });
       if (await this.#vault.hasTriggerDecision(source, key)) return { none: 'recorded-before' };
-      const checked = checkFields('nightly-finding', fields);
+      const checked = checkFields(schema, fields);
       if (!checked.ok) {
         await this.#vault.recordTriggerDecision(decision({ kind: 'refused', cause: 'schema', defects: checked.defects }), null);
         return { none: 'schema' };
@@ -209,9 +210,9 @@ export class Intake {
         return { none: 'budget' };
       }
       const id = intakeId(source, key);
-      const extracted: ExtractedFields<'nightly-finding'> = checked.fields;
+      const extracted: Readonly<Record<string, string>> = checked.fields;
       const candidate: CandidateRecord = {
-        id, kind: 'scheduled', template: schedule.template, schema: 'nightly-finding', extracted, authorTrust: 'owner',
+        id, kind: 'scheduled', template: schedule.template, schema, extracted, authorTrust: 'owner',
         lineage: { depth: 0, chain: [], windowStart: new Date(now).toISOString() }, signedAt: null, body: null,
         recordedAt: new Date(now).toISOString(), collectedBy: 'runtime',
       };

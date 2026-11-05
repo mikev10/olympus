@@ -23,7 +23,7 @@ import { NightlyJobs, type NightlyTarget } from '../nightly.js';
 
 import { loadPolicyFile } from '../policy-file.js';
 import { admitRun, approveStation, cancelRun, rejectDraft, resumeRun, runStanding, type DriveHooks, type RunOutcome } from '../run.js';
-import type { BuiltGraph } from '../graph.js';
+import { imageFor, type BuiltGraph } from '../graph.js';
 import { runReport, type RunReport } from '../report.js';
 import { outcomes, type OutcomeWindow } from '../outcomes.js';
 import { telemetryOf, type TelemetryExport } from '../telemetry.js';
@@ -296,11 +296,16 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
   const { components, principal } = options;
   const runs = new Map<RunId, Tracked>();
   const open = new Set<ServerResponse>();
-  // The nightly jobs seat no model: they are given the sandbox, the scanners, and the Vault, and no driver or integrator (I2).
+  // The nightly jobs are given the sandbox, the scanners, and the Vault, and no builder or integrator (I2). The two
+  // reviewer jobs seat the reviewer driver, under the roles runs are admitted with (R13b, D-R13b-03, D-R13b-07).
   const jobs = new NightlyJobs({
     vault: components.vault, sandbox: components.sandbox, workspaces: components.workspaces,
     limits: components.profile === null ? null : components.profile.limits, scanners: components.scanners,
     target: options.nightlyTarget ?? null,
+    seat: {
+      driver: components.reviewer, roles: options.rolesDirectory,
+      image: components.profile === null ? 'none' : imageFor(components.profile, components.reviewer),
+    },
   });
   const intake = new Intake({ vault: components.vault, secrets: options.secrets ?? (() => undefined), jobs });
   let scheduler: Scheduler | null = null;

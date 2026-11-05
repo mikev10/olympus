@@ -297,7 +297,7 @@ export class StubVault implements Vault {
   }
 
   readNightly(): Promise<readonly NightlyEntry[]> {
-    const out = [...this.nightly.entries()].map(([hash, bytes]) => ({ record: JSON.parse(new TextDecoder().decode(bytes)) as NightlyRecord, sha256: hash }));
+    const out = [...this.nightly.entries()].map(([hash, bytes]) => ({ record: { review: null, ...(JSON.parse(new TextDecoder().decode(bytes)) as object) } as NightlyRecord, sha256: hash }));
     return Promise.resolve(out.sort((a, b) => a.record.date.localeCompare(b.record.date) || a.record.schedule.localeCompare(b.record.schedule) || a.sha256.localeCompare(b.sha256)));
   }
 

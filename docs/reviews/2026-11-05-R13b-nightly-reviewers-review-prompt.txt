@@ -1,0 +1,91 @@
+The code under review is in the file
+`2026-11-05-R13b-nightly-reviewers-review-bundle.txt` (SHA-256 cc142a44911b154a4db4e62101bd6bd28d9697026988c68f45cd8c1ca7fbbaeb) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing two scheduled jobs that seat an AI reviewer model over a software factory's own records and over a repository's tree, in a TypeScript project. You have the source and nothing else — no design documents,
+no author reasoning, no prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The runtime carries work from a request to merged code through fixed stations, with AI models in the seats, and records everything it decides in a store the models cannot write. This change adds two nightly jobs (packages/api/src/nightly-review.ts, dispatched from nightly.ts). `nightly-findings-review` gives a reviewer model one UTC day of the runtime's own records, projected to typed fields. `nightly-tree-review` gives a reviewer model the whole tree at the head of the default branch, read-only. Each reviewer answers in JSON. Each finding it reports becomes a candidate that a person may admit as new work, but only once the runtime has checked the finding against what it reviewed. The reviewer's free text is kept as a record of what it claimed. Each seat's model family is compared with the families of the models that authored the work under review.
+
+It must hold against a capable, motivated party trying to get untrusted text in front of a model as instructions, to get a finding recorded that the runtime never located, to have a reviewer judge work from its own model family while the record claims independence, or to have a nightly job change a run, a grant, or the store. Assume no deceptive intent — only
+that the easiest path gets taken.
+
+That party controls what the reviewer model returns (its whole final message and the model identity its result names), the contents and file names of the repository tree being reviewed, and the free-text fields of the records the runtime made during the day: messages, details, hosts an agent chose, check ids a drafting model may have written, and a violation's detail. It does not control the components the runtime is wired with — the store (Vault), the sandbox provider, the policy, the roles directory, and the drivers are runtime-selected and trusted, even where a function takes one as an argument — and it does not control code running inside the runtime's own process.
+
+The invariants at stake:
+
+- Reviewers never share the author's model family. Where they must because only one family is available, the system records reduced independence rather than claiming the guarantee. At the highest autonomy level, a same-family reviewer is refused.
+- Event payloads are data, never instructions. Untrusted text enters inside an envelope and is never concatenated into a system or role prompt.
+- Fail closed. A missing check, an absent capability, or an unreadable result is a refusal: never a silent degrade, never "nothing found".
+- Default deny. A capability not granted in policy is not available.
+- The runtime derives status; the model never reports it. What a model says is a claim, stored apart from evidence, and never decides anything.
+- No agent writes to the store. Nothing a sandbox can reach writes it.
+
+The mechanisms that matter most:
+
+- `dayItems` and `decisionFields`: what of each record reaches the findings reviewer's prompt.
+- `readReviewResult`, `elementFields`, and the per-finding checks in `findingsReview` and `treeReview`: the schema check (packages/core/src/trigger/schemas.ts), the record-id membership check, and the tree location check (path held, line within the file).
+- `seatOnce` and `grade`: role compilation, the policy scope, the sandbox spec (mount, egress, relay), and the independence grade before and after the call. `authorsOf` and `mergedSince` decide who counts as an author.
+- `NightlyRecord.review` (packages/vault/src/types.ts): what is persisted, and whether a reviewer's claim can reach a later prompt.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+R11's proposals and any learning-loop record. Also out: a review verdict that gates the line, which is M3's; a third model family; reviewing work merged outside Olympus beyond naming it unattributed; and any change, fix, or narrowing made from a finding.
+
+(R11 and M3 are later pieces of work in this project. "Olympus" is the project's name. Absent work listed here is not a defect.)
+
+THE QUESTION
+
+How would you get text a model or an outside party wrote into a reviewer's prompt as instructions, get a finding the runtime never located recorded as a candidate, or get a reviewer of an author's own model family recorded as independent, and how would you make either job fail open, recording "completed, nothing found" when it did not review?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.

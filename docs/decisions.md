@@ -7202,3 +7202,229 @@ read the code the unit touches before writing this.
   covers static-analysis rules, which are not checked for effective content
   (R17's scanner semantics). Neither issue has an owning unit yet.
 - **Reverse by:** reverting 2dfd2c4 and cfd5534.
+
+## R13b: Nightly reviewers
+
+Started against `v2` at adf5c9e, on branch `unit/r13b`. The spec is
+`docs/plan/R13-nightly.md`, R13b, with A-R13b-01. The session read the code
+the unit touches before writing this.
+
+### D-R13b-01: the boundary R13b was started on
+
+- **Deliverables:**
+  - the job templates `nightly-findings-review` and `nightly-tree-review`,
+    valid only on `scheduled` (A-R13b-01);
+  - the findings reviewer: one UTC day of the runtime's records, projected to
+    typed fields, reviewed by a read-only seat whose family is checked
+    against every author family the day holds through `seatReviewer`;
+  - the whole-tree reviewer: R9's `security-reviewer` role over the head of
+    the default branch, read-only, `deny-all`, the tree its only mount, its
+    family checked against every author of work merged since the job's last
+    completed run;
+  - the runtime's refusal of an unlocated finding: a tree finding must name a
+    file the tree holds and a line that file has, and a findings-review
+    finding must name a record of the day it reviewed. A refused finding is
+    recorded as refused;
+  - each located finding recorded as an `intake` candidate of typed fields,
+    with the reviewer's text kept as its claim in the nightly record and
+    never in a later prompt;
+  - each seat's identity, grade, usage, egress, and findings in the nightly
+    record;
+  - a registry assertion for each conformance row, and a changeset for each
+    package changed.
+- **Out of scope, verbatim from the spec:** R11's proposals and any
+  learning-loop record. Also out: a review verdict that gates the line, which
+  is M3's; a third model family; reviewing work merged outside Olympus beyond
+  naming it unattributed; and any change, fix, or narrowing made from a
+  finding.
+- **Acceptance, as commands:** `pnpm typecheck`, `pnpm lint`, and
+  `pnpm conformance` pass, and the report names
+  `I6.nightly-reviewer-family-differs-from-every-author`,
+  `I6.nightly-reduced-independence-is-recorded`,
+  `I7.nightly-reviewer-gets-typed-fields-only`,
+  `I7.nightly-claim-never-enters-a-prompt`,
+  `I5.nightly-unlocated-finding-is-refused`,
+  `I4.nightly-tree-reviewer-is-read-only-deny-all`, and
+  `I2.nightly-review-changes-no-run`, each of which fails when its check is
+  deleted. `pnpm test` passes for every package changed, and
+  `git ls-files -- .plan/` prints nothing.
+- **Invariants touched:**
+  - Reviewers never share the author's family (I6): each seat is graded
+    against every author through `seatReviewer`, and reduced independence is
+    recorded where the families cannot differ.
+  - Payloads are data (I7): the day reaches the seat as typed fields only,
+    and a reviewer's text never reaches a later prompt.
+  - Fail closed (I5): a seat that cannot run, a result the runtime cannot
+    read, and an unlocated finding are each a refusal, never "no findings".
+  - Default deny (I4): the tree seat is read-only under `deny-all`, with the
+    model relay alone; a seat's scope comes from policy, and a role policy
+    does not grant is refused.
+  - The runtime derives status (I2): neither job writes under any run.
+  - No agent writes to the Vault (I1): no sandbox mounts it.
+  - No Greek names in code (I10).
+- **Pending registry entries owed:** none for R13.
+- **Dependencies, verified:** R13a (adf5c9e, #95) and R9 (eb15d11, #90) are
+  merged into `v2` and tagged `reviewed/R13a` and `reviewed/R9`.
+- **Gate paths:** the spec's: `packages/core/src/trigger/schemas.ts`,
+  `packages/vault/src/types.ts`, and `packages/conformance/`. The pull
+  request takes `gate-change`, and the squash merge carries
+  `Gate-Change: acknowledged`.
+
+### D-R13b-02: what the code holds, verified, and where it differs from the spec
+
+- A seat runs only through `runTask` (`packages/api/src/line.ts:796`), which
+  needs a run: it records usage, egress, and decisions under that run. A
+  nightly job has none, so the nightly seat provisions, calls, and tears
+  down the same way, and keeps the usage reading and the egress log in the
+  nightly record, as R13a keeps its egress (D-R13a-08).
+- A relay is independent of egress: under `deny-all` a sandbox reaches the
+  relay and nothing else (`packages/sandbox/src/types.ts:46`, `:222`).
+- `seatReviewer` throws on a seat with no author
+  (`packages/core/src/station/machine.ts:258`).
+- Parks, violations, and failed gates are each a P14 decision
+  (`line.ts:349`, `:363`, `:1446`), so the day's refusals, parks,
+  violations, and failed checks are all among its decisions.
+- R8 is not built (`DECOMPOSITION.md`, R8, untagged), so no post-merge
+  outcome exists; the record says so rather than reviewing none silently.
+- A merged run's `IntegrationMerged` carries `mergeCommit` and `mergedAt`
+  (`packages/vault/src/types.ts:378`). Nothing lists the commits between two
+  commits: `packages/readiness/src/tree.ts` exports `resolveCommit` and
+  `materialize` alone.
+- Roles are compiled per run from a directory the request names
+  (`packages/api/src/run.ts:180`, `:625`). The service holds no roles
+  directory, and no role exists for a findings reviewer.
+- `nightly-finding` requires every field (`schemas.ts:83`, `:120`), and its
+  four fields describe a scanner's finding. A reviewer's finding has a
+  location or a record, and a category, and no scanner or rule (D-R13b-08).
+- `security-reviewer.md` describes one change and asks for prose
+  (`packages/compiler/roles/security-reviewer.md:39`).
+
+### D-R13b-03: the seat is the service's reviewer driver, graded at the schedule's level
+
+- **Chosen:** both jobs seat `components.reviewer`, the driver the operator
+  chose to review. `seatReviewer` is called at
+  `policy.triggers.maxAutonomy.scheduled`, with absence read as L0, so a
+  policy that lets scheduled work reach L3 refuses a same-family seat, and
+  below L3 the grade is recorded.
+- **Rejected:** *Pick whichever configured driver differs from the authors.*
+  The builder driver would then review, which no operator configured. *A
+  fixed L2.* It would never refuse, whatever level the policy lets
+  scheduled work reach.
+- **Reverse by:** passing another driver or another level to the seat.
+
+### D-R13b-04: the findings review covers the UTC day before the firing
+
+- **Chosen:** a firing on date D reviews every record whose runtime time
+  falls on D-1, a day that is over: the P14 decisions of every run, the
+  trigger decisions, the refused-delivery counts for the day's hours, and the
+  findings of R13a's nightly records for D-1. Each is given an id the runtime
+  derives (`decision:<sha256>`, `trigger:<sha256>`,
+  `deliveries:<bucket>:<hour>`, `nightly:<sha256>:<index>`) and only
+  enumerated, id, or count fields: cause, decided-by, run, task, station, a
+  refusal's reason, a check id and its cause, a violation's kind, counts. No
+  message, detail, host, path, or other text field is projected.
+- **Rejected:** *The day the firing falls on.* It is not over.
+- **Reverse by:** changing `reviewedDay` in `packages/api/src/nightly.ts`.
+
+### D-R13b-05: who an author is
+
+- **Chosen:** an author is the identity of every recorded call whose role is
+  not a judging role (`reviewer`, `security-reviewer`, either critic). For
+  the findings review, over the runs the day's records name. For the tree
+  review, over the runs whose `IntegrationMerged.mergedAt` is after the
+  job's last completed run started, and every merged run on the first. With
+  no author, `seatReviewer` is not called and the record says so. Whether
+  the head is a commit Olympus merged is recorded; a head no recorded merge
+  produced is named unattributed and reviewed no further for its authors.
+- **Rejected:** *Every call.* The line's reviewer is of another family than
+  its builder, so with two families every nightly seat would be reduced.
+- **Reverse by:** changing `authorsOf` in `packages/api/src/nightly.ts`.
+
+### D-R13b-06: a reviewer's result is strict JSON, asked for by the runtime
+
+- **Chosen:** the runtime's context ends with the output format, and the
+  final message is read the way `readCriticResult` reads a critic's
+  (`packages/api/src/drafting.ts:630`): one JSON object with closed keys,
+  anything else a refusal, never "no findings". R9's role file is not
+  edited, since the line's security seat runs under it.
+- **Rejected:** *Editing `security-reviewer.md`.* It would change what the
+  line's seat is asked for.
+- **Reverse by:** giving the nightly seat a role of its own.
+
+### D-R13b-07: the findings reviewer runs under a new role, `findings-reviewer`
+
+- **Chosen:** `packages/compiler/roles/findings-reviewer.md`, compiled with
+  the others from the service's roles directory at each firing, its hash in
+  the record. Its scope is `policy.roles['findings-reviewer']` at `review`. A
+  policy that grants none refuses the job.
+- **Reverse by:** removing the role.
+
+### D-R13b-08: the shape of a reviewer finding's fields (A-R13b-01, as confirmed)
+
+- **Found:** A-R13b-01 says `nightly-finding` gains `category` and
+  `record`. Every field of a schema is required (`schemas.ts:83`), so adding
+  two would make R13a's scanner findings carry fields they have no value for,
+  and a tree finding has no record, and a findings-review finding has no
+  path or line. Meeting the amendment as worded means optional fields or
+  placeholder values; either weakens the closed, all-required field set.
+- **Recommended:** keep `nightly-finding` as R13a shipped it, and add two job
+  schemas, each fully required: `nightly-tree-finding` with `category`,
+  `path`, and `line`, and `nightly-record-finding` with `category` and
+  `record`. `category` is a closed list in code: the eight questions R9's
+  role asks for a tree finding, and a fixed set for a findings-review
+  finding. `record` is in a new class that admits the runtime's record ids
+  alone.
+- **Alternative:** a field may be marked optional, and `nightly-finding`
+  gains `category` and `record` as optional fields.
+- **Confirmed:** the maintainer chose the recommended shape on 2026-11-05,
+  and `docs/plan/R13-nightly.md` states A-R13b-01 that way.
+- **Reverse by:** folding the two schemas into `nightly-finding` with
+  optional fields.
+
+### D-R13b-09: found while building
+
+- **Authors are read from the store's usage records, not from run state.**
+  `readUsage` (`packages/api/src/cost.ts:126`) takes a run state, and a run
+  can hold calls without one. `authorsOf` reads `vault.readUsage(runId)`,
+  the set the store names, and refuses a record the runtime did not write
+  for the run rather than skipping it (I5). **Reverse by:** reading through
+  run state.
+- **A day with no record seats no reviewer.** The record names the empty day
+  as its subject and no seat, which is not the record of a seat that found
+  nothing. **Reverse by:** seating over an empty list.
+- **A reviewer finding may carry a `note`.** The note stays in the claim. The
+  runtime reads only the schema's fields, so a reviewer can say what is wrong
+  without that text reaching a record field or a candidate (I7).
+
+### D-R13b-10: what the external review changed, and what it left
+
+- **Fixed (review fixes, one commit each):** codex-4, the changes-no-run
+  assertion compares each run object's content as well as its name
+  (`e9f6e41`). codex-2, a violation the store cannot read now refuses the
+  findings review as `store-unreadable` instead of projecting `unreadable`
+  (`1408479`). gemini-1, a task id is no longer projected to the findings
+  reviewer. It is the requester's text, admitted with no character class
+  (`packages/api/src/validate.ts`, `parseGraph`), so D-R13b-04's projected
+  fields lose "task" (`38913f1`). **Rejected for gemini-1:** *projecting the
+  task id only when it is in the run id's class.* A class admits an
+  instruction-shaped token such as the conformance marker. **Reverse by:**
+  restoring `taskId` to `decisionFields`' base.
+- **Known limit, the author window (codex-1, gemini-2):** the tree review's
+  grade covers the authors of runs merged since its last completed run, as
+  the spec says (R13b, whole-tree reviewer), and not every author of the
+  tree it reads. The record holds the window (`subject.merged`,
+  `subject.since`) beside the grade, so the grade claims no more than that.
+  Grading against every merged run's authors changes the deliverable; the
+  maintainer kept the spec's window on 2026-11-05. **Reverse by:** an
+  amendment grading the tree review against every merged run's authors.
+- **Known limit, an empty answer (codex-3):** a completed review with no
+  findings records that the reviewer returned a readable, empty result. It
+  does not record that the reviewer examined the subject, and nothing
+  available to the runtime could. The half about repository instruction
+  files does not hold: both drivers disable them (codex
+  `project_doc_max_bytes=0`, claude-code `--setting-sources ''`), and
+  `I3.codex-workspace-instructions-not-loaded` and
+  `I3.workspace-instructions-not-loaded` assert it.
+- **Rejected (gemini-3):** a day with no record is recorded with no seat and
+  an empty subject (D-R13b-09), which is not the record of a seat that found
+  nothing.

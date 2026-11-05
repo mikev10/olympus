@@ -16,6 +16,7 @@ import { TASK_CAPABILITIES_DO_NOT_OUTLIVE_THE_TASK, WRITABLE_GLOBS_ENFORCED_ON_T
 import { READINESS_NEVER_RAISES_A_CAP, ABSENT_SCAN_IS_NOT_A_PASS } from './readiness.js';
 import { R20_I4 } from './roles.js';
 import { R13A_I4 } from './nightly.js';
+import { R13B_I4 } from './nightly-review.js';
 import { R22_I4 } from './triggers.js';
 import { R19_ASSERTIONS } from './drafting.js';
 import { LOCAL_TOKEN_REACHES_NO_SANDBOX, SECURITY_SEAT_READS_ONLY_ITS_GRANTS } from './separation.js';
@@ -32,6 +33,8 @@ export const I4: InvariantEntry = {
     ...R22_I4,
     // R13a: the nightly checks that call no model.
     ...R13A_I4,
+    // R13b: the nightly reviewers.
+    ...R13B_I4,
     // R4: parallel task execution.
     ...R4_I4,
     READINESS_NEVER_RAISES_A_CAP,

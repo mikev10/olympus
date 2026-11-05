@@ -191,4 +191,7 @@ is deleted:
   checked against; a finding's candidate is kind `scheduled` with schema
   `nightly-finding` (D-A-NR-09). `TriggerDecision` gains the outcome `job`.
 - **A-R13b-01:** `TemplateId` gains `nightly-findings-review` and
-  `nightly-tree-review`. `nightly-finding` gains category and record fields.
+  `nightly-tree-review`. Two job schemas join `nightly-finding`, which is
+  unchanged: `nightly-tree-finding` takes category, path, and line, and
+  `nightly-record-finding` takes category and record. Every field is
+  required, and each category is from a closed list in code (D-R13b-08).
