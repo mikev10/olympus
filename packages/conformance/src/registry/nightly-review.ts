@@ -179,7 +179,7 @@ async function seedRun(vault: Vault, head: string, family = 'claude'): Promise<v
   await call('build-1', 'build', 'builder', family);
   await call('review-1', 'review', 'reviewer', 'judge');
   await vault.recordIntegration({
-    runId: RUN, kind: 'merged', repository: 'owner/target', baseBranch: 'main', baseCommit: head, branch: 'olympus/run', commit: head,
+    runId: RUN, kind: 'merged', repository: 'owner/target', baseBranch: 'main', baseCommit: head, branch: 'factory/run', commit: head,
     pullRequest: 1, url: 'https://example.invalid/pull/1', mergeCommit: head, mergedAt: `${DAY}T09:30:00.000Z`, collectedBy: 'runtime',
   });
   // A decision of the reviewed day whose host is the agent's text (I7).
