@@ -7414,8 +7414,9 @@ the unit touches before writing this.
   the spec says (R13b, whole-tree reviewer), and not every author of the
   tree it reads. The record holds the window (`subject.merged`,
   `subject.since`) beside the grade, so the grade claims no more than that.
-  Grading against every merged run's authors changes the deliverable, and it
-  waits on the maintainer.
+  Grading against every merged run's authors changes the deliverable; the
+  maintainer kept the spec's window on 2026-11-05. **Reverse by:** an
+  amendment grading the tree review against every merged run's authors.
 - **Known limit, an empty answer (codex-3):** a completed review with no
   findings records that the reviewer returned a readable, empty result. It
   does not record that the reviewer examined the subject, and nothing
