@@ -7546,6 +7546,107 @@ payload as where check failures come from. The spec is
   are grouped, which nothing measures yet.
 - **Reverse by:** none intended.
 
+## Amendment: R8b's observation plan (D-A-OB-07 resolved)
+
+Drafted on 2026-11-06 against `v2` at bd03b6f, after R8a merged (#100). It
+waits for the maintainer's confirmation before R8b builds anything.
+
+### D-A-OB-09: "works" is read from the provider at window close, not delivered by a trigger
+
+- **Found:** the extractor drops every completed check that did not fail
+  (`triggers/src/github.ts:145-147`). The window already waits out the
+  delivery age before it closes (`api/src/observe.ts:124`, `:218`). The check
+  runs on a default-branch commit can be listed. `GET
+  /repos/mikev10/olympus/commits/bd03b6f/check-runs` answered 200 with
+  `name`, `app.id`, `app.slug`, `conclusion`, `completed_at`, and `head_sha`
+  for each run.
+- **Chosen:** a provider adapter, a port beside `Integrator` with a GitHub
+  client, lists the check runs of each first-parent commit in the window when
+  `observe-history` closes it. The plan's signals are judged against that
+  list.
+- **Rejected:** *A `check-completed` `TriggerKind`.* A delivery that never
+  arrives cannot be told from a check that never ran, so a lost success would
+  read as `missing` and a lost failure as `working`. The second of those is a
+  silent degrade. The kind would also send every check on every commit
+  through intake, and it would still need a way to name the check, which no
+  payload may carry (D-R22-11).
+- **Reverse by:** adding the kind, then reading its records in place of the
+  adapter. The plan and its signals stay as they are.
+
+### D-A-OB-10: a plan names a check by app slug and exact name
+
+- **Found:** any GitHub App with checks write access can post a check run
+  under any name on a commit, and a check's name is text the CI configuration
+  chose.
+- **Chosen:** a `CheckRef` is `{ app, name }`. `app` is the producing app's
+  slug, in the `identifier` class. `name` is compared with the check run's
+  `name` byte for byte. The provider's name is used only for that comparison:
+  a record carries the plan's locked name, the check run's id, and its
+  conclusion, and never the provider's text. The plan is an artifact the run
+  supplies or drafts, never an event payload (I7).
+- **Rejected:** *The name alone.* Another app could post a passing check
+  under it. *The numeric app id.* No one writing a plan knows it, and slugs
+  are unique. *Matching case-insensitively or after trimming.* Two checks
+  could then match one name.
+- **Reverse by:** widening the match in one function. The stored names stay
+  as they are.
+
+### D-A-OB-11: the plan's shape, and how each signal is judged
+
+- **Chosen:** for a `works` check, the latest completed run on the merge
+  commit is `working` if it succeeded and `regressed` if it ended in a
+  `failure-conclusion`. A `regressed` check is `regressed` if any first-parent
+  commit from the merge commit to the closing head has a failing latest run,
+  and `working` if none does and at least one succeeded. In every other case,
+  including `neutral`, `skipped`, `cancelled`, or no run at all, the check is
+  `missing`. The rollback condition is met when every check it names is
+  failing on `consecutive` consecutive first-parent commits.
+- **Rejected:** *A rollback condition written as free text.* The runtime
+  could not evaluate it, and a model would end up deciding the outcome (I2).
+- **Reverse by:** changing one judging function. Its inputs are recorded.
+
+### D-A-OB-12: a plan is required exactly when observe is on
+
+- **Chosen:** a policy with `triggers.observe.windowMs` requires
+  `artifacts.observationPlan` on every run, and a run whose policy has no
+  window is refused if it names a plan. A plan is `'draft'` exactly when the
+  tests are, because R19 drafts both at `test-design` under one approval.
+- **Rejected:** *An optional plan.* A run without one would close `clean`
+  without being observed, which is the silent degrade D-A-BR-02 names.
+  *Folding the plan into the acceptance manifest.* That manifest is checks
+  the verify step runs (`api/src/run.ts:133-137`), and a plan is never run.
+- **Reverse by:** making the field optional. The lock and the reading stay as
+  they are.
+
+### D-A-OB-13: a plan-signal sits beside R8a's records, not in its rates
+
+- **Chosen:** `ObservationSignal` gains `plan-signal` (`check`, `role`
+  `works` or `regressed`, `status`, `commit`, `checkRun`, `conclusion`, `at`)
+  and `rollback-condition-met` (the checks and commits that met it). Both are
+  recorded before `window-closed`. R8a's rates do not count them. R2 reports
+  per run how many signals were working, regressed, or missing.
+- **Rejected:** *Counting a regressed plan signal as a change failure.* That
+  would change R8a's definition and its baseline, which has no plan to judge.
+- **Reverse by:** an R2 change that counts them. The records carry what it
+  needs.
+
+### D-A-OB-14: an unreadable provider keeps the window open
+
+- **Chosen:** a failed read of any commit in the range records a
+  `provider-unreadable` refusal in the walk's record and leaves that run's
+  window open, so the run stays `observing` and the next walk retries. The
+  adapter takes its own read-only token, never the integrator's merge token.
+- **Rejected:** *Closing the window with the checks marked `missing`.* An
+  outage would then read as an uninstrumented change. *Reusing the merge
+  token.* A read would then carry write access it does not need (I4).
+- **Open, and not verifiable from here:** whether a fine-grained personal
+  access token can read check runs on a private repository. GitHub's
+  fine-grained permission table lists no Checks permission. The probe above
+  used a classic token with `repo` scope. The adapter treats a 403 as
+  `provider-unreadable` either way, so a token that cannot read fails closed.
+  It is never read as `missing`.
+- **Reverse by:** none intended.
+
 ## R8a: Post-merge attribution and the baseline
 
 ### D-R8a-01: the boundary R8a was started on
