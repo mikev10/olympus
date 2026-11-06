@@ -142,7 +142,7 @@ export interface Outcomes {
     /**
      * Milliseconds from a change's merge to its rollback, for changes whose
      * window closed, each from two times of one source and never one figure
-     * of two (D-A-OB-06, D-R8a-09). The baseline beside Olympus's own.
+     * of two (D-A-OB-06, D-R8a-09). The baseline beside the line's own.
      */
     readonly timeToRestore: Beside<BySource>;
     /** The baseline's lead time from first commit to merge, committer-claimed; a change with one parent is counted as not measurable. */
@@ -154,9 +154,9 @@ export interface Outcomes {
   readonly notMeasured: readonly string[];
 }
 
-/** One figure for Olympus's own changes and one for the baseline, beside each other, never one figure (D-A-BR-04). */
+/** One figure for the line's own changes and one for the baseline, beside each other, never one figure (D-A-BR-04). */
 export interface Beside<T> {
-  readonly olympus: T;
+  readonly line: T;
   readonly baseline: T;
 }
 
@@ -175,7 +175,7 @@ export interface ObservedSafety {
   readonly observing: number;
   /** A rollback or a failed check on the merge commit, over changes whose window closed. */
   readonly changeFailure: Beside<Proportion>;
-  /** Olympus's change-failure rate keyed by each role whose calls built the change. */
+  /** The line's change-failure rate keyed by each role whose calls built the change. */
   readonly changeFailureByRole: Keyed<Proportion>;
   /** Keyed by each build seat's identity: role, driver, and model (A-R9-01). */
   readonly changeFailureBySeat: Keyed<Proportion>;
@@ -464,7 +464,7 @@ function builders(run: RunRecords): { roles: string[]; seats: string[] } {
   };
 }
 
-/** Observation's figures, Olympus's from its runs and the baseline's from the records beside them. */
+/** Observation's figures, the line's from its runs and the baseline's from the records beside them. */
 function observedFigures(runs: readonly RunRecords[], baseline: BaselineRecords | null): {
   safety: ObservedSafety; escaped: Proportion; timeToRestore: Beside<BySource>; leadTime: Outcomes['throughput']['baselineLeadTime'];
 } {
@@ -512,16 +512,16 @@ function observedFigures(runs: readonly RunRecords[], baseline: BaselineRecords 
     escaped: failure,
     safety: {
       observing: outcomesOf.length - closed.length,
-      changeFailure: { olympus: failure, baseline: failureRate(baseChanges.filter((c) => c.failed).length, baseChanges.length) },
+      changeFailure: { line: failure, baseline: failureRate(baseChanges.filter((c) => c.failed).length, baseChanges.length) },
       changeFailureByRole: byRole.rates(failureRate),
       changeFailureBySeat: bySeat.rates(failureRate),
-      rollbacks: { olympus: sum(own, (c) => c.rollbacks), baseline: sum(baseChanges, (c) => c.rollbacks) },
-      partialReversals: { olympus: sum(own, (c) => c.partials), baseline: sum(baseChanges, (c) => c.partials) },
-      checkFailures: { olympus: sum(own, (c) => c.checkFailures), baseline: sum(baseChanges, (c) => c.checkFailures) },
+      rollbacks: { line: sum(own, (c) => c.rollbacks), baseline: sum(baseChanges, (c) => c.rollbacks) },
+      partialReversals: { line: sum(own, (c) => c.partials), baseline: sum(baseChanges, (c) => c.partials) },
+      checkFailures: { line: sum(own, (c) => c.checkFailures), baseline: sum(baseChanges, (c) => c.checkFailures) },
       unattributed,
       perRun,
     },
-    timeToRestore: { olympus: bySource(own), baseline: bySource(baseChanges) },
+    timeToRestore: { line: bySource(own), baseline: bySource(baseChanges) },
     leadTime: { committerClaimed: distribution(lead), notMeasurable },
   };
 }

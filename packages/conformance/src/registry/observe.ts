@@ -105,7 +105,7 @@ async function repo(dir: string): Promise<Repo> {
 /** The record `integrate` writes once GitHub has merged a run's pull request (A-I1b-01). */
 async function seedMerge(vault: Vault, runId: RunId, mergeCommit: string, mergedAt: string): Promise<void> {
   await vault.recordIntegration({
-    runId, kind: 'merged', repository: 'octo/hello', baseBranch: 'main', baseCommit: mergeCommit, branch: `olympus/${runId}`, commit: mergeCommit,
+    runId, kind: 'merged', repository: 'octo/hello', baseBranch: 'main', baseCommit: mergeCommit, branch: `factory/${runId}`, commit: mergeCommit,
     pullRequest: 1, url: 'https://github.com/octo/hello/pull/1', collectedBy: 'runtime', mergeCommit, mergedAt,
   });
 }
@@ -231,7 +231,7 @@ const PARTIAL_REPORTED_APART = runtime({
       }
       if (kinds(own, 'rollback').length > 0) throw new Error('I5: a partial reversal was recorded as a rollback');
       const o = deriveOutcomes([await mergedRun(rig.vault, RUN_A, mergedAt)]);
-      if (o.safety.observed.partialReversals.olympus !== 1 || o.safety.observed.rollbacks.olympus !== 0) throw new Error(`I5: the counts are ${JSON.stringify(o.safety.observed)}`);
+      if (o.safety.observed.partialReversals.line !== 1 || o.safety.observed.rollbacks.line !== 0) throw new Error(`I5: the counts are ${JSON.stringify(o.safety.observed)}`);
       if (o.safety.escapedFalseDone.kind !== 'rate' || o.safety.escapedFalseDone.count !== 0) throw new Error('I5: a partial reversal was counted as an escaped false-done');
     });
   },
@@ -247,7 +247,7 @@ const SIGNAL_BY_COMMIT_ALONE = runtime({
       await seedMerge(rig.vault, RUN_A, a, ago(10_000));
       await seedMerge(rig.vault, RUN_B, b, ago(10_000));
       // Every field but the commit names B.
-      const answered = await signed(rig, CHECKS, checkFailure(a, { external_id: RUN_B, check_suite: { head_branch: `olympus/${RUN_B}`, head_sha: b }, pull_requests: [{ number: 2, head: { sha: b } }] }));
+      const answered = await signed(rig, CHECKS, checkFailure(a, { external_id: RUN_B, check_suite: { head_branch: `factory/${RUN_B}`, head_sha: b }, pull_requests: [{ number: 2, head: { sha: b } }] }));
       if (answered !== 'observed') throw new Error(`I7: the signal was answered ${answered}`);
       const onA = kinds(await rig.vault.readObservations(RUN_A), 'check-failure');
       if (onA.length !== 1 || onA[0]?.signal.kind !== 'check-failure' || onA[0].signal.checkRun !== '4242') throw new Error(`I7: the failure was not recorded against A by its commit: ${JSON.stringify(onA)}`);
@@ -405,12 +405,12 @@ const RATES_BOUND_AND_BASELINE = runtime({
       }
       const base = o.safety.observed.changeFailure.baseline;
       if (base.kind !== 'rate' || base.count !== 1 || base.sample !== 5) throw new Error(`I2: the baseline is not beside the rate: ${JSON.stringify(o.safety.observed.changeFailure)}`);
-      const own = o.throughput.timeToRestore.olympus;
+      const own = o.throughput.timeToRestore.line;
       const provider = own.providerReported;
       const committer = own.committerClaimed;
       if (provider.kind !== 'distribution' || provider.sample !== 1 || provider.median !== pushedAt * 1000 - Date.parse(mergedAt)
         || committer.kind !== 'distribution' || committer.sample !== 1 || committer.median !== 4.5 * 3_600_000) {
-        throw new Error(`I2: Olympus's time to restore combines sources: ${JSON.stringify(own)}`);
+        throw new Error(`I2: the line's time to restore combines sources: ${JSON.stringify(own)}`);
       }
       const theirs = o.throughput.timeToRestore.baseline;
       if (theirs.committerClaimed.kind !== 'distribution' || theirs.committerClaimed.median !== 3 * 3_600_000 || theirs.providerReported.kind !== 'no-sample') {
