@@ -892,6 +892,8 @@ export type ObservationSignal =
       readonly kind: 'window-closed';
       readonly at: SourcedTime;
       readonly windowMs: number;
+      /** The policy's delivery age the close also waited out, so a failure the window covered had time to arrive (codex-4). */
+      readonly graceMs: number;
       /** When the window opened: a run's `mergedAt`, or when the walk first saw a baseline change. */
       readonly opened: SourcedTime;
       /** The change's merge commit's committer date: one end of a committer-claimed time to restore. */

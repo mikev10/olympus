@@ -119,7 +119,9 @@ export async function walkHistory(vault: Vault, target: ObserveTarget | null, po
     return done();
   }
   const { checkout, branch } = target;
-  const graceMs = 0;
+  // A window waits out the policy's delivery age too: a signed event older than that is refused as stale, so once it
+  // has passed, every failure GitHub could still deliver about the window has arrived or never will (codex-4).
+  const graceMs = policy.triggers.maxDeliveryAgeMs ?? 0;
   const stamp = (): string => new Date(now()).toISOString();
 
   // What the store already holds: every merge, every observation, and every earlier walk.
@@ -217,7 +219,7 @@ export async function walkHistory(vault: Vault, target: ObserveTarget | null, po
       const committedAt = (await commitOf(checkout, change.change)).committedAt;
       const record: ObservationRecord = {
         runId: change.runId, change: change.change, recordedAt: stamp(), collectedBy: 'runtime',
-        signal: { kind: 'window-closed', at: { at: stamp(), source: 'runtime' }, windowMs, opened: change.opened, committedAt, leadTime: change.runId === null ? (firstSeen.get(change.change)?.leadTime ?? null) : null },
+        signal: { kind: 'window-closed', at: { at: stamp(), source: 'runtime' }, windowMs, graceMs, opened: change.opened, committedAt, leadTime: change.runId === null ? (firstSeen.get(change.change)?.leadTime ?? null) : null },
       };
       const sha = await vault.recordObservation(record);
       coverage.closed.push(change.change);
