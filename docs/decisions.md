@@ -7801,3 +7801,52 @@ payload as where check failures come from. The spec is
 - **Rejected:** *In `readiness`.* It would widen that package's exports for
   a reader readiness does not use.
 - **Reverse by:** moving the file.
+
+### D-R8a-14: found while building
+
+- **Each assertion fails with its check deleted.** Shown by deleting each
+  check in turn and running its assertion: the patch-id comparison
+  (`I2.observe-rollback-is-found-by-diff-alone`); partial reversals read as
+  rollbacks (`I5.observe-partial-reversal-is-reported-apart`); a signal
+  attributed to another run than its commit's
+  (`I7.observe-signal-is-attributed-by-commit-alone`); the signal-kind check
+  and the schedule check in validation, each alone
+  (`I7.observe-templates-are-valid-only-on-their-kinds`); an unreadable
+  checkout returned as an empty walk, and the ancestry check, each alone
+  (`I5.observe-unreadable-history-is-refused`); open windows counted in the
+  denominator (`I5.observe-open-window-is-in-no-denominator`); the window
+  requirement (`I5.observe-window-is-required`); and a time to restore taken
+  from two sources, and the baseline left unread, each alone
+  (`I2.observe-rates-carry-bound-and-baseline`). Eleven deletions, eleven
+  failures.
+- **The rates fixture first missed one.** With one run, whose rollback had a
+  provider-reported push, a time to restore mixing sources gave the same
+  number as the correct one, and the assertion passed. A second run whose
+  rollback has no reported push now makes a mixed figure differ, and the
+  deletion fails it.
+- **The run's entry into `observe` is asserted** in
+  `I5.integrate-merges-the-verified-tree-after-the-gate`: after the merge,
+  the state is `working` at `observe` and `observe` is the last station
+  entered. Deleting the commit that moves it fails the assertion.
+- **Two registry tables follow the new contract.** I1's list of named Vault
+  operations gains `recordObservation` and `readObservations`, so an
+  operation added without a name still fails I1. P14's decision table gains
+  an `observation-closed` row, run by the open-window scenario, which checks
+  the decision is recorded and decided by `observe`.
+- **R13b's findings reviewer sees `observation-closed`** with its window
+  alone; the observation's hash is not projected (`nightly-review.ts`).
+- **One validation rule the spec does not state:** at most one schedule may
+  name `observe-history`. Two walks of one branch would record the same
+  reversal twice and race to close one window.
+- **A walk that fails part way** keeps no head, so the next walk covers the
+  range again. A reversal it records twice is one signal: R2 counts a
+  change's signals by change, kind, commit, and check run, never by record.
+- **Known limits, owned:**
+  - a `history-rewritten` refusal repeats every night until the branch again
+    descends from the recorded head; repairing the record is the operator's,
+    as R13a's drift is (D-A-NR-02);
+  - a signal recorded after a change's window closed is kept and never
+    counted, so a late revert is visible in the record and absent from the
+    rates by design (D-R8a-07);
+  - the window a walk applies is the policy's when it runs, recorded in each
+    `window-closed` record (D-R8a-05).
