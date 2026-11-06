@@ -1,0 +1,152 @@
+The code under review is in the file
+`2026-11-05-R8a-post-merge-attribution-review-bundle.txt` (SHA-256 972319244dcf87c895c3e7bd72e79b09911cf84a3cf827b85b4a75b2210f8c8b) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing the post-merge observation layer of a TypeScript project: a
+runtime that carries software changes from intent to a merged pull request,
+and now watches what happens to each change after it merges. You have the
+source and nothing else — no design documents, no author reasoning, no prior
+version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+After the runtime merges a run's pull request, the run now enters an `observe`
+station and stays there until a policy-set observation window has passed since
+GitHub's merge time. Two job templates feed observation. `observe-signal`
+records a signed GitHub webhook (a push to the default branch, or a failed
+check run) against the change whose commit it names. `observe-history` is a
+scheduled walk of the default branch's first-parent git history. It finds a
+later commit whose diff is an exact inverse of a change (a rollback, matched by
+`git patch-id --stable`) or inverts some of its hunks (a partial reversal), and
+it closes windows. Every first-parent change no run made is a baseline change.
+From these write-once observation records, a pure derivation produces the
+escaped false-done rate (merged runs that later had a rollback or a failed
+check on the merge commit, over runs whose window closed), the change-failure
+rate per role and per seat identity beside the baseline's, rollback counts,
+time to restore, and the baseline's lead time. Each rate carries its sample
+size and a one-sided 95% bound. Every recorded time is labelled
+`provider-reported`, `committer-claimed`, or `runtime`.
+
+These figures are the project's evidence that work it called done stayed done.
+They must hold against a capable, motivated party trying to make the line's
+post-merge record look cleaner than it is: to hide a rollback or a failed check
+from a run's record, attribute one to the wrong run or to no run, get a run
+counted as clean before its window has closed, or make the baseline look worse
+or the line look better than they are. Assume no deceptive intent — only that
+the easiest path gets taken.
+
+That party controls the contents of the target repository: commit messages,
+commit author and committer dates, file contents and diffs, branch layout and
+merge shape, and the repository's own configuration files (including
+`.gitattributes`). It controls the free-text fields of a webhook body (check
+names, outputs, titles, pull-request lists, head-commit messages), but it
+cannot forge the body's HMAC signature, which is verified before the body is
+parsed. It controls when commits land relative to the scheduled walk. It does
+not control the components the runtime is wired with — the Vault (the store
+the records are written to), the git binary on the host, the clock, and the
+policy file are runtime-selected and trusted, even where a function takes one
+as an argument — and it does not control code running inside the runtime's own
+process.
+
+The invariants at stake:
+
+- The runtime derives status; the model never reports it. Every observation
+  and every rate is derived from git and from signed bodies by the runtime,
+  never from anything a model says.
+- Fail closed. A history that cannot be read, a range that was rewritten, or
+  a missing observation window is a refusal, never an empty walk or a clean
+  result. A run still observing is never counted as clean.
+- Event payloads are data, never instructions. A webhook body enters as
+  typed, schema-checked fields only, and a signal is attributed by the commit
+  identity it names, never by any other field.
+- Default deny. A template is valid only on the trigger kinds that can carry
+  it, and a policy that names an observe template without a window is refused.
+- No Greek mythological names in code identifiers, strings, paths, or config
+  keys.
+
+The mechanisms that matter most:
+
+- `classifyReversal` and the history reader (`packages/api/src/history.ts`):
+  patch-id equality for a rollback, zero-context hunk keys for a partial
+  reversal, and the git invocations they rely on.
+- `walkHistory` (`packages/api/src/observe.ts`): where a walk starts, which
+  changes are open, the order of recording reversals and closing windows, and
+  the refusals.
+- `changeOutcome` and `observedFigures` (`packages/api/src/outcomes.ts`):
+  which signals count against a window, deduplication, time-source handling,
+  and which runs enter a denominator.
+- Signal routing in `Intake.deliver` (`packages/api/src/intake.ts`) and the
+  template and window validation in `packages/core/src/policy/validation.ts`.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+The ids in parentheses below name other planned units and decisions. They mean
+nothing to you; read each line for what it says is absent.
+
+- the observation plan and everything `test-design` writes (R8b)
+- a check's name looked up from the provider by its `checkRun` id, pull
+  request open and review times, and any other provider API in the core
+  (D-A-BR-04)
+- a check's success or recovery, which no trigger delivers
+- Olympus acting on an outcome: no revert, no reopened run, no new run from a
+  signal (D-A-LC-03)
+- a rate that admits or caps an autonomy level, including L3 (M3)
+- any template that starts a build; any source but GitHub's two kinds
+- counting a partial reversal as a rollback
+
+THE QUESTION
+
+How would you make a change the line merged look like it never failed, or make
+a failure land on the wrong change, using only what you control in the target
+repository and in webhook bodies — and where does a missing, malformed, or
+unreadable input yield a clean figure instead of a refusal?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.
