@@ -62,6 +62,8 @@ export interface RunRecords {
   readonly startedAt: string | null;
   /** GitHub's merge time (A-R2-01); null unless merged. */
   readonly mergedAt: string | null;
+  /** The merge commit GitHub made (A-I1b-01); null unless merged. A signal recorded before the merge was is joined to the run on it (codex-3). */
+  readonly mergeCommit: string | null;
   readonly approvalsSpent: number;
   readonly tasks: readonly TaskRecord[];
   readonly decisions: readonly EnforcementDecision[];
@@ -258,6 +260,7 @@ export async function readRunRecords(vault: Vault, runId: RunId): Promise<RunRec
       stack: null,
       startedAt: refusal?.decidedAt ?? null,
       mergedAt: null,
+      mergeCommit: null,
       approvalsSpent: 0,
       tasks: [],
       decisions,
@@ -319,6 +322,7 @@ export async function readRunRecords(vault: Vault, runId: RunId): Promise<RunRec
     stack: recordedStack(admission),
     startedAt: admission.run.createdAt,
     mergedAt: merged?.kind === 'merged' ? merged.mergedAt : null,
+    mergeCommit: merged?.kind === 'merged' ? merged.mergeCommit : null,
     // The drive merges before it spends the integrate grant (D-I1b-01), so on a merged run that grant
     // was consumed by the merge, spent in state or not yet.
     approvalsSpent: state.approvals.filter((g) => g.usedAt !== null || (merged !== undefined && g.key === approvalKey('integrate', admission.run.requestedLevel))).length,
@@ -469,7 +473,14 @@ function observedFigures(runs: readonly RunRecords[], baseline: BaselineRecords 
   safety: ObservedSafety; escaped: Proportion; timeToRestore: Beside<BySource>; leadTime: Outcomes['throughput']['baselineLeadTime'];
 } {
   const merged = runs.filter((r) => r.ending === 'merged');
-  const outcomesOf = merged.map((r) => ({ run: r, outcome: changeOutcome(r.observations, r.mergedAt) }));
+  // A signal on a run's merge commit delivered before the run's merge was recorded is kept beside the runs; it is the
+  // run's by commit identity all the same, so it joins the run's own records here and leaves the baseline (codex-3).
+  const besideRecords = baseline?.observations ?? [];
+  const runCommits = new Set(merged.flatMap((r) => (r.mergeCommit === null ? [] : [r.mergeCommit])));
+  const outcomesOf = merged.map((r) => ({
+    run: r,
+    outcome: changeOutcome([...r.observations, ...besideRecords.filter((o) => o.change === r.mergeCommit)], r.mergedAt),
+  }));
   const closed = outcomesOf.filter((o) => o.outcome.closed);
   const byRole = new Tally();
   const bySeat = new Tally();
@@ -482,7 +493,7 @@ function observedFigures(runs: readonly RunRecords[], baseline: BaselineRecords 
   for (const { run, outcome } of outcomesOf) perRun[run.runId] = !outcome.closed ? 'observing' : outcome.failed ? 'failed' : 'clean';
 
   // The baseline: every change a walk closed beside the runs, joined with the signals beside the runs on its commit.
-  const records = baseline?.observations ?? [];
+  const records = besideRecords.filter((o) => !runCommits.has(o.change));
   const byChange = new Map<string, ObservationRecord[]>();
   for (const o of records) byChange.set(o.change, [...(byChange.get(o.change) ?? []), o]);
   const pushedAt = new Map<string, string>();

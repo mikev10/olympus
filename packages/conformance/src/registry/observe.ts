@@ -32,7 +32,7 @@ const CLOSED_AGO = WINDOW_MS + DELIVERY_AGE_MS + 60_000;
 export const RUN_A = 'run-a' as RunId;
 export const RUN_B = 'run-b' as RunId;
 
-const CHECKS: TriggerSubscription = { id: 'gh-checks', kind: 'ci-failure', source: 'github', transport: 'signed-webhook', secret: SECRET_NAME, trustCeiling: 'owner', labels: [] };
+export const CHECKS: TriggerSubscription = { id: 'gh-checks', kind: 'ci-failure', source: 'github', transport: 'signed-webhook', secret: SECRET_NAME, trustCeiling: 'owner', labels: [] };
 const PUSHES: TriggerSubscription = { id: 'gh-pushes', kind: 'post-merge', source: 'github', transport: 'signed-webhook', secret: SECRET_NAME, trustCeiling: 'owner', labels: [] };
 const WALK: TriggerSchedule = { id: 'observe', template: 'observe-history', at: '04:00' };
 
