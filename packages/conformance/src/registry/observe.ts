@@ -381,11 +381,15 @@ const RATES_BOUND_AND_BASELINE = runtime({
       const mergedAt = ago(2 * WINDOW_MS);
       const m = await rig.repo.merge('feature-a', { 'c.txt': 'c\n' }, 'Add c', '2026-10-01T00:00:00Z');
       await seedMerge(rig.vault, RUN_A, m, mergedAt);
+      const mb = await rig.repo.merge('feature-b', { 'g.txt': 'g\n' }, 'Add g', '2026-10-01T00:30:00Z');
+      await seedMerge(rig.vault, RUN_B, mb, mergedAt);
       const direct = await rig.repo.commit({ 'e.txt': 'e\n' }, 'Add e', '2026-10-01T01:00:00Z');
       await rig.repo.merge('feature-f', { 'f.txt': 'f\n' }, 'Add f', '2026-10-01T02:00:00Z');
       rig.repo.git(['revert', '-m', '1', '--no-edit', m], '2026-10-01T03:00:00Z');
       const rollback = rig.repo.git(['rev-parse', 'HEAD']);
       rig.repo.git(['revert', '--no-edit', direct], '2026-10-01T04:00:00Z');
+      // B's rollback has no reported push, so both ends of its time to restore are commit dates.
+      rig.repo.git(['revert', '-m', '1', '--no-edit', mb], '2026-10-01T05:00:00Z');
       // The run's rollback landed by a push GitHub reported; the baseline's did not.
       const pushedAt = Math.floor(Date.now() / 1000);
       await signed(rig, PUSHES, push(rollback, pushedAt));
@@ -393,16 +397,19 @@ const RATES_BOUND_AND_BASELINE = runtime({
       rig.clock.now += WINDOW_MS + 1;
       await walkOn(rig, '2026-11-06');
 
-      const run = await mergedRun(rig.vault, RUN_A, mergedAt);
-      const o = deriveOutcomes([run], {}, { observations: (await rig.vault.readObservations(null)).map((e) => e.record) });
+      const runs = [await mergedRun(rig.vault, RUN_A, mergedAt), await mergedRun(rig.vault, RUN_B, mergedAt)];
+      const o = deriveOutcomes(runs, {}, { observations: (await rig.vault.readObservations(null)).map((e) => e.record) });
       const escaped = o.safety.escapedFalseDone;
-      if (escaped.kind !== 'rate' || escaped.count !== 1 || escaped.sample !== 1 || escaped.bound.side !== 'upper' || !(escaped.bound.value > 0)) {
+      if (escaped.kind !== 'rate' || escaped.count !== 2 || escaped.sample !== 2 || escaped.bound.side !== 'upper' || !(escaped.bound.value > 0)) {
         throw new Error(`I2: the escaped rate carries no sample and bound: ${JSON.stringify(escaped)}`);
       }
       const base = o.safety.observed.changeFailure.baseline;
-      if (base.kind !== 'rate' || base.count !== 1 || base.sample !== 4) throw new Error(`I2: the baseline is not beside the rate: ${JSON.stringify(o.safety.observed.changeFailure)}`);
+      if (base.kind !== 'rate' || base.count !== 1 || base.sample !== 5) throw new Error(`I2: the baseline is not beside the rate: ${JSON.stringify(o.safety.observed.changeFailure)}`);
       const own = o.throughput.timeToRestore.olympus;
-      if (own.providerReported.kind !== 'distribution' || own.providerReported.median !== pushedAt * 1000 - Date.parse(mergedAt) || own.committerClaimed.kind !== 'no-sample') {
+      const provider = own.providerReported;
+      const committer = own.committerClaimed;
+      if (provider.kind !== 'distribution' || provider.sample !== 1 || provider.median !== pushedAt * 1000 - Date.parse(mergedAt)
+        || committer.kind !== 'distribution' || committer.sample !== 1 || committer.median !== 4.5 * 3_600_000) {
         throw new Error(`I2: Olympus's time to restore combines sources: ${JSON.stringify(own)}`);
       }
       const theirs = o.throughput.timeToRestore.baseline;
@@ -410,7 +417,7 @@ const RATES_BOUND_AND_BASELINE = runtime({
         throw new Error(`I2: the baseline's time to restore combines sources: ${JSON.stringify(theirs)}`);
       }
       const lead = o.throughput.baselineLeadTime;
-      if (lead.committerClaimed.kind !== 'distribution' || lead.committerClaimed.sample !== 1 || lead.notMeasurable !== 3) throw new Error(`I2: lead time is ${JSON.stringify(lead)}`);
+      if (lead.committerClaimed.kind !== 'distribution' || lead.committerClaimed.sample !== 1 || lead.notMeasurable !== 4) throw new Error(`I2: lead time is ${JSON.stringify(lead)}`);
       if (!o.boundAssumption.includes('not independent')) throw new Error('I2: the report does not say its bounds assume independent runs');
       // The store-wide report reads the baseline beside the runs too.
       const whole = await outcomes(rig.vault);
