@@ -11,7 +11,10 @@
  */
 import { approvalKey, gatedIterations } from '@olympus-ai/core';
 import type { AutonomyLevel, ModelIdentity, RunId, RunState, StationId, TaskId, TaskStatus } from '@olympus-ai/core';
-import { isNoRunState, type AdmissionRecord, type CriticRecord, type EnforcementDecision, type EvidenceBundle, type IntegrationRecord, type UsageRecord, type Vault } from '@olympus-ai/vault';
+import {
+  isNoRunState, type AdmissionRecord, type CriticRecord, type EnforcementDecision, type EvidenceBundle, type IntegrationRecord, type ObservationRecord,
+  type UsageRecord, type Vault,
+} from '@olympus-ai/vault';
 import { distribution, failureRate, successRate, type Distribution, type Proportion } from './bounds.js';
 import { costTotals, readUsage, type UsageTotal } from './cost.js';
 import { readIntegration } from './line.js';
@@ -73,6 +76,8 @@ export interface RunRecords {
   readonly reviewGrade: string;
   /** One entry per critic result the run recorded: its grade, and whether it found anything (R19). */
   readonly critiques: ReadonlyArray<{ readonly grade: string; readonly found: boolean }>;
+  /** Every observation stored under the run (R8a); empty for a run never merged or never observed. */
+  readonly observations: readonly ObservationRecord[];
 }
 
 /** A window over admission time, inclusive at `from` and exclusive at `to`. */
@@ -97,8 +102,13 @@ export interface Outcomes {
     readonly caughtFalseDoneByStack: Keyed<Proportion>;
     /** Keyed by the run's weakest review-seat grade, so what a cheaper, less independent seat costs is seen (D-A-DS-06). */
     readonly caughtFalseDoneByGrade: Keyed<Proportion>;
-    /** A change that passed every gate and failed later needs `observe` (R8). Never implied to be zero. */
-    readonly escapedFalseDone: 'not-established';
+    /**
+     * Merged runs, each of which passed every gate, that then had a rollback
+     * or a failed check on the merge commit, over merged runs whose window
+     * closed (R8a). A run still observing is in no denominator.
+     */
+    readonly escapedFalseDone: Proportion;
+    readonly observed: ObservedSafety;
   };
   readonly throughput: {
     /** Merged runs that spent no approval, over admitted runs that finished. Per run: approvals are granted per station exit. */
@@ -129,9 +139,58 @@ export interface Outcomes {
     /** Milliseconds from admission to GitHub's merge time, merged runs only. */
     readonly cycleTime: Distribution;
     readonly costPerMergedChange: CostPerMerge;
+    /**
+     * Milliseconds from a change's merge to its rollback, for changes whose
+     * window closed, each from two times of one source and never one figure
+     * of two (D-A-OB-06, D-R8a-09). The baseline beside Olympus's own.
+     */
+    readonly timeToRestore: Beside<BySource>;
+    /** The baseline's lead time from first commit to merge, committer-claimed; a change with one parent is counted as not measurable. */
+    readonly baselineLeadTime: { readonly committerClaimed: Distribution; readonly notMeasurable: number };
   };
+  /** What every bound here assumes, said with the figures (D-A-OB-08). */
+  readonly boundAssumption: string;
   /** What is not measured, said once so a reader never takes an absence for a zero. */
   readonly notMeasured: readonly string[];
+}
+
+/** One figure for Olympus's own changes and one for the baseline, beside each other, never one figure (D-A-BR-04). */
+export interface Beside<T> {
+  readonly olympus: T;
+  readonly baseline: T;
+}
+
+/** Durations by where their times came from; no distribution holds two sources. */
+export interface BySource {
+  readonly providerReported: Distribution;
+  readonly committerClaimed: Distribution;
+}
+
+/** How one merged run's observation stands: still watched, or closed with or without a failure. */
+export type RunObservation = 'observing' | 'clean' | 'failed';
+
+/** What post-merge observation shows (R8a). Each rate is over changes whose window closed. */
+export interface ObservedSafety {
+  /** Merged runs whose window has not closed: counted here, in no denominator (D-A-OB-03). */
+  readonly observing: number;
+  /** A rollback or a failed check on the merge commit, over changes whose window closed. */
+  readonly changeFailure: Beside<Proportion>;
+  /** Olympus's change-failure rate keyed by each role whose calls built the change. */
+  readonly changeFailureByRole: Keyed<Proportion>;
+  /** Keyed by each build seat's identity: role, driver, and model (A-R9-01). */
+  readonly changeFailureBySeat: Keyed<Proportion>;
+  readonly rollbacks: Beside<number>;
+  /** Reported on their own line and never counted as a rollback (D-A-OB-04). */
+  readonly partialReversals: Beside<number>;
+  readonly checkFailures: Beside<number>;
+  /** Failed checks beside the runs on a commit no closed change carries: still observing, or no change a walk opened. */
+  readonly unattributed: number;
+  readonly perRun: Keyed<RunObservation>;
+}
+
+/** Observations kept beside the runs: the baseline's changes, and signals no run's commit carried. */
+export interface BaselineRecords {
+  readonly observations: readonly ObservationRecord[];
 }
 
 export type CostPerMerge =
@@ -146,10 +205,14 @@ export type CostPerMerge =
     };
 
 export const NOT_MEASURED: readonly string[] = [
-  'escaped false-done: needs post-merge observation (R8)',
-  "the team's own baseline: attributed by R8",
   'role per call: read from the station, review being the reviewer',
+  "a failed check's name: known by its check run id alone, read from the provider by a person (D-A-OB-05)",
+  'pull request open and review times: need a provider adapter, never the core (D-A-BR-04)',
+  'a check that recovered: no trigger delivers a success (D-A-OB-07)',
 ];
+
+/** Said with every bound (D-A-OB-08, D-R2-11). */
+export const BOUND_ASSUMPTION = 'Each bound is a one-sided 95% Clopper-Pearson bound, which assumes independent trials. Runs on one repository share a codebase and are not independent, so a bound here is narrower than the truth. No rate here admits or caps an autonomy level.';
 
 const decode = (bytes: Uint8Array): unknown => JSON.parse(new TextDecoder().decode(bytes));
 
@@ -202,6 +265,7 @@ export async function readRunRecords(vault: Vault, runId: RunId): Promise<RunRec
       cost: null,
       reviewGrade: 'no-review',
       critiques: [],
+      observations: [],
     };
   }
 
@@ -264,6 +328,7 @@ export async function readRunRecords(vault: Vault, runId: RunId): Promise<RunRec
     cost: costTotals(usage).run,
     reviewGrade: reviewGradeOf(state),
     critiques: await critiquesOf(vault, state),
+    observations: (await vault.readObservations(runId)).map((e) => e.record),
   };
 }
 
@@ -325,11 +390,148 @@ export async function outcomes(vault: Vault, window: OutcomeWindow = {}): Promis
     const run = await readRunRecords(vault, runId);
     if (inWindow(run.startedAt, window)) runs.push(run);
   }
-  return deriveOutcomes(runs, window);
+  const beside = (await vault.readObservations(null)).map((e) => e.record);
+  return deriveOutcomes(runs, window, { observations: beside.filter((o) => inWindow(openedAt(o), window) || o.signal.kind !== 'window-closed') });
 }
 
-/** The derivation itself, over records already read: pure, so a figure is a function of its records. */
-export function deriveOutcomes(runs: readonly RunRecords[], window: OutcomeWindow = {}): Outcomes {
+/** When a closed change's window opened, from its `window-closed` record; null for any other record. */
+function openedAt(o: ObservationRecord): string | null {
+  return o.signal.kind === 'window-closed' ? o.signal.opened.at : null;
+}
+
+/** A signal's identity, so the same signal recorded twice — a walk run again, a delivery sent twice — counts once. */
+function signalKey(o: ObservationRecord): string {
+  const s = o.signal;
+  return JSON.stringify([o.change, s.kind, 'commit' in s ? s.commit : null, s.kind === 'check-failure' ? s.checkRun : null]);
+}
+
+interface ChangeOutcome {
+  readonly closed: boolean;
+  readonly failed: boolean;
+  readonly rollbacks: number;
+  readonly partials: number;
+  readonly checkFailures: number;
+  /** Merge to first counted rollback, from two times of one source; null without a counted rollback. */
+  readonly restore: { readonly source: 'provider-reported' | 'committer-claimed'; readonly ms: number } | null;
+}
+
+/**
+ * One change's outcome from its records (D-R8a-07): a signal counts only when
+ * recorded before the change's window closed. `merged` is the change's
+ * provider-reported landing time where one is known.
+ */
+function changeOutcome(records: readonly ObservationRecord[], merged: string | null): ChangeOutcome {
+  const seen = new Set<string>();
+  const unique = records.filter((o) => {
+    const key = signalKey(o);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const closedAt = unique.find((o) => o.signal.kind === 'window-closed');
+  const counted = closedAt === undefined ? [] : unique.filter((o) => o.signal.kind !== 'window-closed' && o.recordedAt <= closedAt.recordedAt);
+  const rollbacks = counted.filter((o) => o.signal.kind === 'rollback');
+  const checkFailures = counted.filter((o) => o.signal.kind === 'check-failure').length;
+  let restore: ChangeOutcome['restore'] = null;
+  const first = [...rollbacks].sort((a, b) => a.recordedAt.localeCompare(b.recordedAt))[0];
+  if (first?.signal.kind === 'rollback' && closedAt?.signal.kind === 'window-closed') {
+    restore = first.signal.at.source === 'provider-reported' && merged !== null
+      ? { source: 'provider-reported', ms: Date.parse(first.signal.at.at) - Date.parse(merged) }
+      : { source: 'committer-claimed', ms: Date.parse(first.signal.committedAt) - Date.parse(closedAt.signal.committedAt) };
+  }
+  return {
+    closed: closedAt !== undefined,
+    failed: rollbacks.length > 0 || checkFailures > 0,
+    rollbacks: rollbacks.length,
+    partials: counted.filter((o) => o.signal.kind === 'partial-reversal').length,
+    checkFailures,
+    restore,
+  };
+}
+
+function bySource(changes: readonly ChangeOutcome[]): BySource {
+  const of = (source: 'provider-reported' | 'committer-claimed'): Distribution =>
+    distribution(changes.flatMap((c) => (c.restore?.source === source ? [c.restore.ms] : [])));
+  return { providerReported: of('provider-reported'), committerClaimed: of('committer-claimed') };
+}
+
+/** The roles and seat identities whose calls built a run's change, read from its usage records (A-R9-01). */
+function builders(run: RunRecords): { roles: string[]; seats: string[] } {
+  const built = run.usage.filter((u) => u.station === 'build');
+  return {
+    roles: [...new Set(built.map((u) => u.role.id))].sort(),
+    seats: [...new Set(built.map((u) => `${u.role.id} ${u.driver ?? 'unrecorded'} ${modelKey(u.model)}`))].sort(),
+  };
+}
+
+/** Observation's figures, Olympus's from its runs and the baseline's from the records beside them. */
+function observedFigures(runs: readonly RunRecords[], baseline: BaselineRecords | null): {
+  safety: ObservedSafety; escaped: Proportion; timeToRestore: Beside<BySource>; leadTime: Outcomes['throughput']['baselineLeadTime'];
+} {
+  const merged = runs.filter((r) => r.ending === 'merged');
+  const outcomesOf = merged.map((r) => ({ run: r, outcome: changeOutcome(r.observations, r.mergedAt) }));
+  const closed = outcomesOf.filter((o) => o.outcome.closed);
+  const byRole = new Tally();
+  const bySeat = new Tally();
+  for (const { run, outcome } of closed) {
+    const { roles, seats } = builders(run);
+    for (const role of roles) byRole.add(role, outcome.failed);
+    for (const seat of seats) bySeat.add(seat, outcome.failed);
+  }
+  const perRun: Record<string, RunObservation> = {};
+  for (const { run, outcome } of outcomesOf) perRun[run.runId] = !outcome.closed ? 'observing' : outcome.failed ? 'failed' : 'clean';
+
+  // The baseline: every change a walk closed beside the runs, joined with the signals beside the runs on its commit.
+  const records = baseline?.observations ?? [];
+  const byChange = new Map<string, ObservationRecord[]>();
+  for (const o of records) byChange.set(o.change, [...(byChange.get(o.change) ?? []), o]);
+  const pushedAt = new Map<string, string>();
+  for (const o of records) if (o.signal.kind === 'pushed') pushedAt.set(o.signal.commit, o.signal.at.at);
+  const baseChanges: ChangeOutcome[] = [];
+  const lead: number[] = [];
+  let notMeasurable = 0;
+  let unattributed = 0;
+  for (const [change, own] of byChange) {
+    const closedAt = own.find((o) => o.signal.kind === 'window-closed');
+    if (closedAt === undefined) {
+      // A failed check on a commit no closed change carries: one still observing, or one no walk opened as a change.
+      unattributed += own.filter((o) => o.signal.kind === 'check-failure').length;
+      continue;
+    }
+    baseChanges.push(changeOutcome(own, pushedAt.get(change) ?? null));
+    if (closedAt.signal.kind === 'window-closed') {
+      const lt = closedAt.signal.leadTime;
+      if (lt?.kind === 'measured') lead.push(lt.ms);
+      else if (lt?.kind === 'not-measurable') notMeasurable += 1;
+    }
+  }
+  const sum = (xs: readonly ChangeOutcome[], f: (c: ChangeOutcome) => number): number => xs.reduce((n, c) => n + f(c), 0);
+  const own = closed.map((o) => o.outcome);
+  const failure = failureRate(own.filter((c) => c.failed).length, own.length);
+  return {
+    escaped: failure,
+    safety: {
+      observing: outcomesOf.length - closed.length,
+      changeFailure: { olympus: failure, baseline: failureRate(baseChanges.filter((c) => c.failed).length, baseChanges.length) },
+      changeFailureByRole: byRole.rates(failureRate),
+      changeFailureBySeat: bySeat.rates(failureRate),
+      rollbacks: { olympus: sum(own, (c) => c.rollbacks), baseline: sum(baseChanges, (c) => c.rollbacks) },
+      partialReversals: { olympus: sum(own, (c) => c.partials), baseline: sum(baseChanges, (c) => c.partials) },
+      checkFailures: { olympus: sum(own, (c) => c.checkFailures), baseline: sum(baseChanges, (c) => c.checkFailures) },
+      unattributed,
+      perRun,
+    },
+    timeToRestore: { olympus: bySource(own), baseline: bySource(baseChanges) },
+    leadTime: { committerClaimed: distribution(lead), notMeasurable },
+  };
+}
+
+/**
+ * The derivation itself, over records already read: pure, so a figure is a
+ * function of its records. `baseline` is the observations beside the runs;
+ * null where they were not read, so every baseline figure is `no-sample`.
+ */
+export function deriveOutcomes(runs: readonly RunRecords[], window: OutcomeWindow = {}, baseline: BaselineRecords | null = null): Outcomes {
   const population: Record<RunEnding, number> = { refused: 0, merged: 0, passed: 0, cancelled: 0, halted: 0, parked: 0, unfinished: 0 };
   for (const run of runs) population[run.ending] += 1;
 
@@ -433,6 +635,7 @@ export function deriveOutcomes(runs: readonly RunRecords[], window: OutcomeWindo
   const cycle = merges.flatMap((r) => (r.startedAt === null || r.mergedAt === null ? [] : [Date.parse(r.mergedAt) - Date.parse(r.startedAt)]));
   const spent = runs.reduce((sum, r) => sum + (r.cost?.metered.costUsd ?? 0), 0);
   const unknown = runs.some((r) => r.cost !== null && r.cost.bound === 'lower');
+  const observed = observedFigures(runs, baseline);
 
   return {
     window,
@@ -444,7 +647,8 @@ export function deriveOutcomes(runs: readonly RunRecords[], window: OutcomeWindo
       caughtFalseDoneByLevel: fdLevel.rates(failureRate),
       caughtFalseDoneByStack: fdStack.rates(failureRate),
       caughtFalseDoneByGrade: fdGrade.rates(failureRate),
-      escapedFalseDone: 'not-established',
+      escapedFalseDone: observed.escaped,
+      observed: observed.safety,
     },
     throughput: {
       autonomyRatio: successRate(finished.filter(autonomous).length, finished.length),
@@ -468,7 +672,10 @@ export function deriveOutcomes(runs: readonly RunRecords[], window: OutcomeWindo
       costPerMergedChange: merges.length === 0
         ? { kind: 'no-sample', spentUsd: spent }
         : { kind: 'cost', usd: spent / merges.length, spentUsd: spent, merges: merges.length, bound: unknown ? 'lower' : 'exact' },
+      timeToRestore: observed.timeToRestore,
+      baselineLeadTime: observed.leadTime,
     },
+    boundAssumption: BOUND_ASSUMPTION,
     notMeasured: NOT_MEASURED,
   };
 }

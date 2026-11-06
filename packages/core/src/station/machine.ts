@@ -346,7 +346,13 @@ export type Step =
   /** A task station with nothing left to do at it: the station is exiting. */
   | { readonly kind: 'finish'; readonly station: StationId }
   /** The station's work is done: evaluate the exit into `to`. */
-  | { readonly kind: 'exit'; readonly from: StationId; readonly to: StationId };
+  | { readonly kind: 'exit'; readonly from: StationId; readonly to: StationId }
+  /**
+   * A merged run being watched, or one whose window has closed (R8a,
+   * D-R8a-04). The line has nothing to do here: the history walk closes the
+   * window, and `learn` is M3's.
+   */
+  | { readonly kind: 'observe' };
 
 const BUILDABLE: ReadonlySet<TaskStatus> = new Set(['pending', 'failed', 'running']);
 
@@ -475,6 +481,9 @@ export function nextStep(state: RunState, graph: TaskGraph, limits: StepLimits, 
   const builds = graph.tasks.filter((task) => task.station === 'build');
   const reviews = graph.tasks.filter((task) => task.station === 'review');
 
+  // A run at `observe` was merged; its window is the history walk's to close, in either phase (D-R8a-04).
+  if (state.station === 'observe') return { kind: 'observe' };
+
   if (state.phase === 'exiting') {
     if (state.station === 'verify') {
       if (builds.every((task) => statusOf(state, task) === 'passed')) return { kind: 'exit', from: 'verify', to: 'review' };
@@ -510,9 +519,8 @@ export function nextStep(state: RunState, graph: TaskGraph, limits: StepLimits, 
     case 'plan':
     case 'integrate':
       return { kind: 'work', station: state.station };
-    case 'observe':
     case 'learn':
-      throw new Error(`station machine: M1 never enters ${state.station}`);
+      throw new Error('station machine: M3 enters learn, and the line never does');
   }
 }
 

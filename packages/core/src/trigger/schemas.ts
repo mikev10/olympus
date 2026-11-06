@@ -25,21 +25,42 @@ import type { AuthorTrust, TriggerKind } from '../run/types.js';
  * (R13a, A-R13a-01). Two jobs seat a read-only reviewer and never enter the
  * build either: `nightly-findings-review` reviews a day of the runtime's
  * records as typed fields, and `nightly-tree-review` reviews the default
- * branch's tree (R13b, A-R13b-01). A job template is valid only on
- * `scheduled`. No template starts a build (D-A-TF-01).
+ * branch's tree (R13b, A-R13b-01). `observe-history` walks the default
+ * branch for reverts and closes observation windows (R8a). A job template is
+ * valid only on `scheduled`. `observe-signal` records a push or a failed
+ * check against the change whose commit it names, and is valid only on
+ * `post-merge` and `ci-failure` (D-A-OB-02). No template starts a build
+ * (D-A-TF-01).
  */
-export type TemplateId = 'intake-candidate' | JobTemplateId;
+export type TemplateId = 'intake-candidate' | SignalTemplateId | JobTemplateId;
+
+/** The template that records a delivery as an observation in place of a candidate (R8a, D-A-OB-02). */
+export type SignalTemplateId = 'observe-signal';
+
+/** The kinds a signal template is valid on: the two GitHub events that name a commit. */
+export const SIGNAL_KINDS: readonly TriggerKind[] = Object.freeze(['post-merge', 'ci-failure']);
 
 /** The templates that run a job in place of recording a candidate (A-R13a-01). */
-export type JobTemplateId = 'nightly-integrity' | 'nightly-security' | ReviewJobTemplateId;
+export type JobTemplateId = 'nightly-integrity' | 'nightly-security' | 'observe-history' | ReviewJobTemplateId;
 
 /** The job templates that seat a reviewer (A-R13b-01). */
 export type ReviewJobTemplateId = 'nightly-findings-review' | 'nightly-tree-review';
 
+/** The templates that need the policy's observation window (D-R8a-05). */
+export type ObserveTemplateId = SignalTemplateId | 'observe-history';
+
 const JOB_TEMPLATE_SET: Readonly<Record<JobTemplateId, true>> = {
-  'nightly-integrity': true, 'nightly-security': true, 'nightly-findings-review': true, 'nightly-tree-review': true,
+  'nightly-integrity': true, 'nightly-security': true, 'observe-history': true, 'nightly-findings-review': true, 'nightly-tree-review': true,
 };
-const TEMPLATE_SET: Readonly<Record<TemplateId, true>> = { 'intake-candidate': true, ...JOB_TEMPLATE_SET };
+const TEMPLATE_SET: Readonly<Record<TemplateId, true>> = { 'intake-candidate': true, 'observe-signal': true, ...JOB_TEMPLATE_SET };
+
+export function isSignalTemplate(value: unknown): value is SignalTemplateId {
+  return value === 'observe-signal';
+}
+
+export function isObserveTemplate(value: unknown): value is ObserveTemplateId {
+  return value === 'observe-signal' || value === 'observe-history';
+}
 const REVIEW_TEMPLATE_SET: Readonly<Record<ReviewJobTemplateId, true>> = { 'nightly-findings-review': true, 'nightly-tree-review': true };
 
 export function isReviewJobTemplate(value: unknown): value is ReviewJobTemplateId {

@@ -113,6 +113,7 @@ function decisionFields(d: EnforcementDecision, violation: IntegrityViolation | 
   const decision = d.decision;
   switch (decision.cause) {
     case 'record-drift': return { ...base, problem: decision.problem };
+    case 'observation-closed': return { ...base, windowMs: decision.windowMs };
     case 'admission-refused': return { ...base, reason: decision.refusal.reason };
     case 'resume-refused': return { ...base, reason: decision.refusal.reason };
     case 'station-refused': {

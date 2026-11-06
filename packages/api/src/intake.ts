@@ -24,7 +24,7 @@
  * it, and no driver request carries any byte of a body.
  */
 import {
-  WEBHOOK_SECRET_PREFIX, checkFields, isJobTemplate, type AuthorTrust, type CandidateId, type JobSchema, type JobTemplateId, type Policy, type RunId,
+  WEBHOOK_SECRET_PREFIX, checkFields, isJobTemplate, isSignalTemplate, type AuthorTrust, type CandidateId, type JobSchema, type JobTemplateId, type Policy, type RunId,
   type TemplateId, type TriggerLineage, type TriggerSchedule, type TriggerSubscription,
 } from '@olympus-ai/core';
 import { bodyDigest, extractGithub, signatureVerifies, untrustedBody } from '@olympus-ai/triggers';
@@ -51,6 +51,8 @@ export interface IntakeOptions {
 export type DeliveryOutcome =
   | { readonly outcome: 'candidate'; readonly candidate: CandidateId }
   | { readonly outcome: 'ignored' }
+  /** Recorded as an observation and no candidate (R8a). */
+  | { readonly outcome: 'observed' }
   | { readonly outcome: 'refused'; readonly cause: CountedRefusalCause | 'stale' | 'schema' | 'budget' | 'not-enabled' };
 
 /** The UTC hour a count is kept under. */
@@ -116,6 +118,16 @@ export class Intake {
           return write(decide({ kind: 'refused', cause: 'stale', signedAt: new Date(extracted.signedAt).toISOString() }), null, { outcome: 'refused', cause: 'stale' });
         }
         return write(decide({ kind: 'refused', cause: 'schema', defects: extracted.defects }), null, { outcome: 'refused', cause: 'schema' });
+      }
+      // A signal records no candidate, so it is routed before the budget, which counts candidates a person must read (D-R8a-11).
+      const routed = policy.triggers.taskTemplate[extracted.kind];
+      if (isSignalTemplate(routed)) {
+        if (this.#jobs === null || (extracted.kind !== 'post-merge' && extracted.kind !== 'ci-failure')) {
+          return write(decide({ kind: 'refused', cause: 'not-enabled' }), null, { outcome: 'refused', cause: 'not-enabled' });
+        }
+        // The extracted fields alone, checked whole against the kind's schema; nothing else in the body is read (I7).
+        const observation = await this.#jobs.signal(extracted.kind, extracted.extracted, extracted.signedAt);
+        return write(decide({ kind: 'observed', observation }), null, { outcome: 'observed' });
       }
       if (await this.#overBudget(policy, now)) return write(decide({ kind: 'refused', cause: 'budget' }), null, { outcome: 'refused', cause: 'budget' });
       const template = policy.triggers.taskTemplate[extracted.kind];

@@ -225,6 +225,18 @@ export type ResumeRefusal =
  */
 export type DecisionCause =
   /**
+   * The runtime closed a merged run's observation window: `windowMs` had
+   * passed since `mergedAt`, by the runtime's clock (R8a, D-A-OB-03). The
+   * run's `window-closed` observation is `observation`; no model and no
+   * approval decided it.
+   */
+  | {
+      readonly cause: 'observation-closed';
+      readonly decidedBy: 'observe';
+      readonly observation: string;
+      readonly windowMs: number;
+    }
+  /**
    * The nightly re-hash found a record of this run whose bytes no longer
    * hash to its name or to the hash the last night saw, one a ref names that
    * is missing, or a lock that no longer verifies (A-R13a-04). `record` is
@@ -651,7 +663,9 @@ export interface TriggerDecision {
     /** Firings a stopped service missed, recorded and never run late (D-A-TF-08). */
     | { readonly kind: 'missed'; readonly first: string; readonly last: string }
     /** A schedule's job ran in place of a candidate, and wrote the nightly record whose SHA-256 this is (A-R13a-07). */
-    | { readonly kind: 'job'; readonly nightly: string };
+    | { readonly kind: 'job'; readonly nightly: string }
+    /** A delivery whose template is `observe-signal` wrote the observation whose SHA-256 this is, and no candidate (R8a, D-R8a-11). */
+    | { readonly kind: 'observed'; readonly observation: string };
   readonly collectedBy: 'runtime';
 }
 
@@ -742,7 +756,7 @@ export type NightlyFinding =
 export interface NightlyRefusal {
   /** `job` is a failure no part caught: the record is still written, refused, with what was found before it (codex-5). */
   /** `subject` is what a reviewer is given, and `seat` the reviewer itself (R13b). */
-  readonly part: 'policy' | 'store' | 'rates' | 'locks' | 'target' | 'secret-scan' | 'static-analysis' | 'dependency-audit' | 'job' | 'subject' | 'seat';
+  readonly part: 'policy' | 'store' | 'rates' | 'locks' | 'target' | 'secret-scan' | 'static-analysis' | 'dependency-audit' | 'job' | 'subject' | 'seat' | 'history';
   /**
    * R13b's: `no-reviewer` a service with no reviewer driver or roles
    * directory; `role-unavailable` a role that did not compile or that policy
@@ -755,7 +769,14 @@ export interface NightlyRefusal {
     | 'no-policy' | 'not-enabled' | 'store-unreadable' | 'rates-unreadable' | 'locks-unreadable'
     | 'no-target' | 'target-unreadable' | 'scan-failed' | 'no-lockfile' | 'unsupported-stack'
     | 'advisory-unreachable' | 'audit-failed' | 'baseline-unrecorded' | 'job-failed'
-    | 'no-reviewer' | 'role-unavailable' | 'seat-refused' | 'seat-failed' | 'result-unreadable';
+    | 'no-reviewer' | 'role-unavailable' | 'seat-refused' | 'seat-failed' | 'result-unreadable'
+    /**
+     * R8a's: `no-window` a policy naming no observation window;
+     * `history-unreadable` a checkout, head, or range git could not read;
+     * `history-rewritten` a head the last walk recorded that is no longer
+     * an ancestor of the branch. None is ever read as no reverts (I5).
+     */
+    | 'no-window' | 'history-unreadable' | 'history-rewritten';
   readonly detail: string;
 }
 
@@ -820,7 +841,104 @@ export interface NightlyRecord {
   readonly security: SecurityCoverage | null;
   /** A reviewer job's seat and findings; null for a job that seats none. A record stored before R13b has none and is read as null. */
   readonly review: NightlyReview | null;
+  /** The history walk's range and what it opened and closed (R8a); null for any other job. A record stored before R8a is read as null. */
+  readonly observation: ObservationCoverage | null;
   readonly collectedBy: 'runtime';
+}
+
+/**
+ * Where a time came from (D-A-OB-06, D-R8a-09). `provider-reported` is
+ * GitHub's, in a signed body or its merge API; `committer-claimed` is commit
+ * metadata, which whoever made the commit wrote; `runtime` is the runtime's
+ * own clock. No figure combines two of them.
+ */
+export type TimeSource = 'provider-reported' | 'committer-claimed' | 'runtime';
+
+export interface SourcedTime {
+  readonly at: string;
+  readonly source: TimeSource;
+}
+
+/**
+ * A baseline change's lead time, from its first commit's author date to the
+ * merge commit's committer date: `committer-claimed` at both ends. A commit
+ * with one parent, a squash or a direct push, keeps no first commit, so its
+ * lead time is not measurable, never zero (D-A-BR-04).
+ */
+export type LeadTime =
+  | { readonly kind: 'measured'; readonly ms: number; readonly source: 'committer-claimed' }
+  | { readonly kind: 'not-measurable'; readonly why: 'one-parent' };
+
+/**
+ * What one signal showed about one change (R8a). `rollback`: a later
+ * first-parent commit whose patch id is the change's inverse.
+ * `partial-reversal`: one that inverts some of the change's hunks and not
+ * all, never counted as a rollback (D-A-OB-04). `check-failure`: a failed
+ * check on the change's merge commit, known by its run id alone (D-A-OB-05).
+ * `pushed`: the commit landed on the default branch at a provider-reported
+ * time (D-R8a-08). `window-closed`: the runtime closed the change's window.
+ */
+export type ObservationSignal =
+  | { readonly kind: 'rollback'; readonly commit: string; readonly at: SourcedTime; readonly committedAt: string }
+  | { readonly kind: 'partial-reversal'; readonly commit: string; readonly at: SourcedTime; readonly hunks: number; readonly of: number }
+  | { readonly kind: 'check-failure'; readonly commit: string; readonly at: SourcedTime; readonly checkRun: string; readonly conclusion: string }
+  | { readonly kind: 'pushed'; readonly commit: string; readonly at: SourcedTime }
+  | {
+      readonly kind: 'window-closed';
+      readonly at: SourcedTime;
+      readonly windowMs: number;
+      /** When the window opened: a run's `mergedAt`, or when the walk first saw a baseline change. */
+      readonly opened: SourcedTime;
+      /** The change's merge commit's committer date: one end of a committer-claimed time to restore. */
+      readonly committedAt: string;
+      /** A baseline change's lead time; null for a run's, whose cycle time R2 already has. */
+      readonly leadTime: LeadTime | null;
+    };
+
+/**
+ * One signal about one change, written once and content-addressed (R8a).
+ * `runId` is the run whose merge commit `change` is, or null: a baseline
+ * change no run made, or a signal on a commit no run merged, which is kept
+ * beside the runs as unattributed. `change` is the change's first-parent
+ * commit on the default branch. I2: every field is the runtime's, from git or
+ * from a signed body's typed fields (I7).
+ */
+export interface ObservationRecord {
+  readonly runId: RunId | null;
+  readonly change: string;
+  readonly signal: ObservationSignal;
+  /** The runtime's clock when it was recorded: a signal counts against a window only when recorded before it closed (D-R8a-07). */
+  readonly recordedAt: string;
+  readonly collectedBy: 'runtime';
+}
+
+/** An observation as stored, beside the SHA-256 of its bytes, which is its name. */
+export interface ObservationEntry {
+  readonly record: ObservationRecord;
+  readonly sha256: string;
+}
+
+/** A baseline change the walk saw for the first time, with what its window-closed record will carry. */
+export interface OpenedChange {
+  readonly change: string;
+  readonly firstSeen: string;
+  readonly committedAt: string;
+  readonly leadTime: LeadTime;
+}
+
+/**
+ * One history walk (R8a): the default branch's range it walked, oldest
+ * first, the baseline changes it saw for the first time, and the changes
+ * whose windows it closed. `to` is null for a walk that read no head.
+ */
+export interface ObservationCoverage {
+  readonly branch: string | null;
+  readonly from: string | null;
+  readonly to: string | null;
+  readonly walked: number;
+  readonly opened: readonly OpenedChange[];
+  readonly closed: readonly string[];
+  readonly signals: number;
 }
 
 /**
@@ -1012,6 +1130,14 @@ export interface Vault {
   recordNightly(r: NightlyRecord): Promise<string>;
   /** Every nightly record, sorted by date, then schedule, then hash. */
   readNightly(): Promise<readonly NightlyEntry[]>;
+  /**
+   * One observation, write-once and content-addressed: under its run, or
+   * beside the runs where `runId` is null (R8a, D-R8a-03). Its SHA-256 is
+   * returned. Refused unless `collectedBy` is `'runtime'`.
+   */
+  recordObservation(r: ObservationRecord): Promise<string>;
+  /** A run's observations, or with null those kept beside the runs; sorted by `recordedAt`, then hash. */
+  readObservations(runId: RunId | null): Promise<readonly ObservationEntry[]>;
   /**
    * Every object the store holds, each with its bytes as stored (A-R13a-05).
    * The store names the set, never a caller, so a re-hash over it covers

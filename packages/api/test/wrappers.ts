@@ -23,7 +23,7 @@ import type {
 import type { IntegrityViolation } from '@olympus-ai/integrity';
 import type { ExecOptions, ExecResult, SandboxCapabilities, SandboxHandle, SandboxProvider, SandboxSpec, Teardown } from '@olympus-ai/sandbox';
 import type {
-  AdmissionRecord, BaseRunRecord, CandidateRecord, CountedRefusalCause, CriticRecord, DraftLockRecord, DraftRecord, EnforcementDecision, EvidenceBundle, IntakeEntry, IntegrationRecord, IntentRecord, LockManifest, LockVerdict, NightlyEntry, NightlyRecord, RefusedDeliveryCount, StoredObject, RubricRecord, TriggerDecision, UsageRecord, Vault,
+  AdmissionRecord, BaseRunRecord, CandidateRecord, CountedRefusalCause, CriticRecord, DraftLockRecord, DraftRecord, EnforcementDecision, EvidenceBundle, IntakeEntry, IntegrationRecord, IntentRecord, LockManifest, LockVerdict, NightlyEntry, NightlyRecord, ObservationEntry, ObservationRecord, RefusedDeliveryCount, StoredObject, RubricRecord, TriggerDecision, UsageRecord, Vault,
 } from '@olympus-ai/vault';
 
 export class DelegatingVault implements Vault {
@@ -152,6 +152,14 @@ export class DelegatingVault implements Vault {
 
   readNightly(): Promise<readonly NightlyEntry[]> {
     return this.inner.readNightly();
+  }
+
+  recordObservation(r: ObservationRecord): Promise<string> {
+    return this.inner.recordObservation(r);
+  }
+
+  readObservations(runId: RunId | null): Promise<readonly ObservationEntry[]> {
+    return this.inner.readObservations(runId);
   }
 
   listObjects(): AsyncIterable<StoredObject> {
