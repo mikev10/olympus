@@ -6,6 +6,7 @@ import { walkFiles, workspacePackages, workspaceRelative } from '../kit/workspac
 import { R20_I7 } from './roles.js';
 import { R13A_I7 } from './nightly.js';
 import { R8A_I7 } from './observe.js';
+import { R8A_REVIEW_I7 } from './observe-review.js';
 import { R13B_I7 } from './nightly-review.js';
 import { R22_I7 } from './triggers.js';
 import { R19_ASSERTIONS } from './drafting.js';
@@ -43,6 +44,7 @@ export const I7: InvariantEntry = {
     // R13a: the nightly checks that call no model.
     ...R13A_I7,
     ...R8A_I7,
+    ...R8A_REVIEW_I7,
     // R13b: the nightly reviewers.
     ...R13B_I7,
     // R20: the role compiler.

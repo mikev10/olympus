@@ -24,15 +24,19 @@ const triggers = async () => import('@olympus-ai/triggers');
 const SECRET_NAME = 'FACTORY_WEBHOOK_OBSERVE';
 const SECRET = 'conformance-observe-secret-of-some-length';
 const MARKER = 'R8A-MARKER-ignore-previous-instructions';
-const WINDOW_MS = 1_000_000;
-const RUN_A = 'run-a' as RunId;
-const RUN_B = 'run-b' as RunId;
+export const WINDOW_MS = 1_000_000;
+/** The policy's delivery age: a window closes once it, too, has passed (codex-4). */
+export const DELIVERY_AGE_MS = 3_600_000;
+/** How long ago a merge was for its window to have closed. */
+const CLOSED_AGO = WINDOW_MS + DELIVERY_AGE_MS + 60_000;
+export const RUN_A = 'run-a' as RunId;
+export const RUN_B = 'run-b' as RunId;
 
 const CHECKS: TriggerSubscription = { id: 'gh-checks', kind: 'ci-failure', source: 'github', transport: 'signed-webhook', secret: SECRET_NAME, trustCeiling: 'owner', labels: [] };
 const PUSHES: TriggerSubscription = { id: 'gh-pushes', kind: 'post-merge', source: 'github', transport: 'signed-webhook', secret: SECRET_NAME, trustCeiling: 'owner', labels: [] };
 const WALK: TriggerSchedule = { id: 'observe', template: 'observe-history', at: '04:00' };
 
-const ROUTE = {
+export const ROUTE = {
   enabled: ['human', 'scheduled', 'ci-failure', 'post-merge'] as TriggerKind[],
   entryStation: { human: 'intake' as const, scheduled: 'intake' as const, 'ci-failure': 'intake' as const, 'post-merge': 'intake' as const },
   taskTemplate: { scheduled: 'intake-candidate' as const, 'ci-failure': 'observe-signal' as const, 'post-merge': 'observe-signal' as const },
@@ -40,7 +44,7 @@ const ROUTE = {
   minAuthorTrust: { human: 'owner' as const, scheduled: 'owner' as const, 'ci-failure': 'anonymous' as const, 'post-merge': 'anonymous' as const },
 };
 
-async function observePolicy(): Promise<Policy> {
+export async function observePolicy(): Promise<Policy> {
   return linePolicy({}, {
     triggers: {
       ...ROUTE,
@@ -48,7 +52,7 @@ async function observePolicy(): Promise<Policy> {
       budgetPerWindow: { runs: 20, windowMs: 3_600_000 },
       subscriptions: [CHECKS, PUSHES],
       schedules: [WALK],
-      maxDeliveryAgeMs: 3_600_000,
+      maxDeliveryAgeMs: DELIVERY_AGE_MS,
       candidateExpiryMs: 86_400_000,
       observe: { windowMs: WINDOW_MS },
     },
@@ -56,16 +60,16 @@ async function observePolicy(): Promise<Policy> {
 }
 
 /** A git checkout, run with a fixed identity and, where given, fixed dates. */
-function gitIn(dir: string) {
+export function gitIn(dir: string) {
   return (args: readonly string[], date?: string): string => execFileSync('git', ['-C', dir, '-c', 'user.email=r8a@example.invalid', '-c', 'user.name=r8a', '-c', 'core.autocrlf=false', ...args], {
     stdio: 'pipe', encoding: 'utf8',
     env: { ...process.env, ...(date === undefined ? {} : { GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date }) },
   }).trim();
 }
 
-const LINES = (n: number, change: Readonly<Record<number, string>> = {}): string => Array.from({ length: n }, (_, i) => change[i + 1] ?? `line ${String(i + 1)}`).join('\n') + '\n';
+export const LINES = (n: number, change: Readonly<Record<number, string>> = {}): string => Array.from({ length: n }, (_, i) => change[i + 1] ?? `line ${String(i + 1)}`).join('\n') + '\n';
 
-interface Repo {
+export interface Repo {
   readonly dir: string;
   readonly git: ReturnType<typeof gitIn>;
   /** Commits `files` on a branch off main and merges it with --no-ff, as GitHub's merge method does; returns the merge commit. */
@@ -74,7 +78,7 @@ interface Repo {
   commit(files: Readonly<Record<string, string>>, message: string, date?: string): Promise<string>;
 }
 
-async function repo(dir: string): Promise<Repo> {
+export async function repo(dir: string): Promise<Repo> {
   await mkdir(dir, { recursive: true });
   const git = gitIn(dir);
   git(['init', '-q', '-b', 'main']);
@@ -103,65 +107,66 @@ async function repo(dir: string): Promise<Repo> {
 }
 
 /** The record `integrate` writes once GitHub has merged a run's pull request (A-I1b-01). */
-async function seedMerge(vault: Vault, runId: RunId, mergeCommit: string, mergedAt: string): Promise<void> {
+export async function seedMerge(vault: Vault, runId: RunId, mergeCommit: string, mergedAt: string): Promise<void> {
   await vault.recordIntegration({
     runId, kind: 'merged', repository: 'octo/hello', baseBranch: 'main', baseCommit: mergeCommit, branch: `factory/${runId}`, commit: mergeCommit,
     pullRequest: 1, url: 'https://github.com/octo/hello/pull/1', collectedBy: 'runtime', mergeCommit, mergedAt,
   });
 }
 
-interface Rig {
+export interface Rig {
   readonly vault: Vault;
   readonly repo: Repo;
   readonly jobs: NightlyJobs;
   readonly intake: Intake;
   readonly policy: Policy;
-  /** The walk's clock, in ms; set before a firing to move it. */
-  readonly clock: { now: number };
+  /** The walk's clock, in ms; set before a firing to move it. `tick` moves it on every read. */
+  readonly clock: { now: number; tick: number };
+  readonly store: string;
 }
 
-async function withObserve<T>(prefix: string, body: (rig: Rig) => Promise<T>, target: 'checkout' | 'missing' = 'checkout'): Promise<T> {
+export async function withObserve<T>(prefix: string, body: (rig: Rig) => Promise<T>, target: 'checkout' | 'missing' = 'checkout'): Promise<T> {
   const { Intake: IntakeClass, NightlyJobs: Jobs, SCANNERS } = await api();
   const { LocalVault } = await import('@olympus-ai/vault');
   return withVaultDirs(prefix, async (dirs, base) => {
     const vault = new LocalVault(dirs);
     const r = await repo(join(base, 'target'));
-    const clock = { now: Date.now() };
+    const clock = { now: Date.now(), tick: 0 };
     const jobs = new Jobs({
       vault, sandbox: unusedSandbox(), workspaces: { root: join(base, 'trees'), user: { uid: 1000, gid: 1000 } }, limits: null, scanners: SCANNERS,
-      target: { checkout: target === 'checkout' ? r.dir : join(base, 'no-such-checkout'), branch: 'main' }, now: () => clock.now,
+      target: { checkout: target === 'checkout' ? r.dir : join(base, 'no-such-checkout'), branch: 'main' }, now: () => (clock.now += clock.tick),
     });
     const intake = new IntakeClass({ vault, secrets: (name) => (name === SECRET_NAME ? SECRET : undefined), jobs });
-    return body({ vault, repo: r, jobs, intake, policy: await observePolicy(), clock });
+    return body({ vault, repo: r, jobs, intake, policy: await observePolicy(), clock, store: dirs.store });
   });
 }
 
 /** The walk provisions no sandbox; one that is asked for fails the assertion. */
-function unusedSandbox() {
+export function unusedSandbox() {
   const fail = (): never => {
     throw new Error('R8a: the history walk asked for a sandbox');
   };
   return { id: 'unused', provision: fail, exec: fail, destroy: fail, capabilities: () => ({ computerUse: false, gpu: false, os: 'linux' as const, persistent: false, remote: false }) };
 }
 
-async function walkOn(rig: Rig, date: string): Promise<NightlyRecord> {
+export async function walkOn(rig: Rig, date: string): Promise<NightlyRecord> {
   await rig.intake.fire(rig.policy, WALK, date);
   const entry = (await rig.vault.readNightly()).find((e) => e.record.schedule === WALK.id && e.record.date === date);
   if (entry === undefined) throw new Error(`R8a: no walk record for ${date}`);
   return entry.record;
 }
 
-const kinds = (records: ReadonlyArray<{ record: ObservationRecord }>, kind: ObservationRecord['signal']['kind']): ObservationRecord[] =>
+export const kinds = (records: ReadonlyArray<{ record: ObservationRecord }>, kind: ObservationRecord['signal']['kind']): ObservationRecord[] =>
   records.map((e) => e.record).filter((r) => r.signal.kind === kind);
 
-async function signed(rig: Rig, subscription: TriggerSubscription, payload: unknown): Promise<string> {
+export async function signed(rig: Rig, subscription: TriggerSubscription, payload: unknown): Promise<string> {
   const { signBody } = await triggers();
   const body = Buffer.from(JSON.stringify(payload));
   const outcome = await rig.intake.deliver(rig.policy, subscription, signBody(body, SECRET), body);
   return outcome.outcome;
 }
 
-function checkFailure(sha: string, extra: Readonly<Record<string, unknown>> = {}): unknown {
+export function checkFailure(sha: string, extra: Readonly<Record<string, unknown>> = {}): unknown {
   return {
     action: 'completed',
     check_run: { id: 4242, head_sha: sha, conclusion: 'failure', completed_at: new Date().toISOString().replace(/\.\d+Z$/u, 'Z'), name: `${MARKER} lint`, output: { title: MARKER, summary: MARKER }, ...extra },
@@ -169,20 +174,20 @@ function checkFailure(sha: string, extra: Readonly<Record<string, unknown>> = {}
   };
 }
 
-function push(after: string, pushedAt: number): unknown {
+export function push(after: string, pushedAt: number): unknown {
   return { ref: 'refs/heads/main', after, head_commit: { message: MARKER }, repository: { full_name: 'octo/hello', default_branch: 'main', pushed_at: pushedAt } };
 }
 
 /** A merged run's records as R2 reads them, with the observations the store holds for it. */
-async function mergedRun(vault: Vault, runId: RunId, mergedAt: string): Promise<RunRecords> {
+export async function mergedRun(vault: Vault, runId: RunId, mergedAt: string, mergeCommit: string | null = null): Promise<RunRecords> {
   return {
-    runId, ending: 'merged', requestedLevel: 2, stack: 'vitest@4', startedAt: mergedAt, mergedAt, approvalsSpent: 1,
+    runId, mergeCommit, ending: 'merged', requestedLevel: 2, stack: 'vitest@4', startedAt: mergedAt, mergedAt, approvalsSpent: 1,
     tasks: [], decisions: [], usage: [], cost: null, reviewGrade: 'different-family', critiques: [],
     observations: (await vault.readObservations(runId)).map((e) => e.record),
   };
 }
 
-const ago = (ms: number): string => new Date(Date.now() - ms).toISOString();
+export const ago = (ms: number): string => new Date(Date.now() - ms).toISOString();
 
 // ---------------------------------------------------------------------------
 
@@ -219,7 +224,7 @@ const PARTIAL_REPORTED_APART = runtime({
   run: async () => {
     const { deriveOutcomes } = await api();
     await withObserve('r8a-partial-', async (rig) => {
-      const mergedAt = ago(2 * WINDOW_MS);
+      const mergedAt = ago(CLOSED_AGO);
       const a = await rig.repo.merge('feature-a', { 'a.txt': LINES(12, { 2: 'two, changed', 10: 'ten, changed' }) }, 'Edit a twice');
       await seedMerge(rig.vault, RUN_A, a, mergedAt);
       const partial = await rig.repo.commit({ 'a.txt': LINES(12, { 10: 'ten, changed' }) }, 'tidy line two');
@@ -334,7 +339,7 @@ export const OPEN_WINDOW_IN_NO_DENOMINATOR = runtime({
   run: async () => {
     const { deriveOutcomes } = await api();
     await withObserve('r8a-open-', async (rig) => {
-      const oldMerge = ago(2 * WINDOW_MS);
+      const oldMerge = ago(CLOSED_AGO);
       const freshMerge = ago(10_000);
       const a = await rig.repo.merge('feature-a', { 'c.txt': 'c\n' }, 'Add c');
       const b = await rig.repo.merge('feature-b', { 'd.txt': 'd\n' }, 'Add d');
@@ -378,7 +383,7 @@ const RATES_BOUND_AND_BASELINE = runtime({
   run: async () => {
     const { deriveOutcomes, outcomes } = await api();
     await withObserve('r8a-rates-', async (rig) => {
-      const mergedAt = ago(2 * WINDOW_MS);
+      const mergedAt = ago(CLOSED_AGO);
       const m = await rig.repo.merge('feature-a', { 'c.txt': 'c\n' }, 'Add c', '2026-10-01T00:00:00Z');
       await seedMerge(rig.vault, RUN_A, m, mergedAt);
       const mb = await rig.repo.merge('feature-b', { 'g.txt': 'g\n' }, 'Add g', '2026-10-01T00:30:00Z');
@@ -394,7 +399,7 @@ const RATES_BOUND_AND_BASELINE = runtime({
       const pushedAt = Math.floor(Date.now() / 1000);
       await signed(rig, PUSHES, push(rollback, pushedAt));
       await walkOn(rig, '2026-11-05');
-      rig.clock.now += WINDOW_MS + 1;
+      rig.clock.now += WINDOW_MS + DELIVERY_AGE_MS + 1;
       await walkOn(rig, '2026-11-06');
 
       const runs = [await mergedRun(rig.vault, RUN_A, mergedAt), await mergedRun(rig.vault, RUN_B, mergedAt)];
