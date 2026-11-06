@@ -15,7 +15,7 @@ import { intakeId, intakeProblem } from '../intake.js';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
 import type {
   AdmissionRecord, BaseRunRecord, CandidateRecord, CountedRefusalCause, CriticRecord, DraftLockRecord, DraftRecord, EnforcementDecision, EvidenceBundle, IntakeEntry, IntegrationRecord, IntentRecord, NightlyEntry, NightlyRecord, RefusedDeliveryCount, StoredObject, TriggerDecision,
-  LockEntry, LockManifest, LockVerdict, NoRunState, RubricRecord, UsageRecord, Vault,
+  LockEntry, LockManifest, LockVerdict, NoRunState, ObservationEntry, ObservationRecord, RubricRecord, UsageRecord, Vault,
 } from '../types.js';
 
 /** Reported as `actual` for a locked path that no longer exists: a deleted artifact is a mismatch, not an empty file. */
@@ -63,6 +63,7 @@ export class StubVault implements Vault {
   private readonly intake = new Map<CandidateId, IntakeEntry>();
   private readonly refusedCounts = new Map<string, Partial<Record<CountedRefusalCause, number>>>();
   private readonly nightly = new Map<string, Uint8Array>();
+  private readonly observations = new Map<string, Uint8Array>();
 
   /** `root` is what locked paths resolve against (S1 finding 4d; P1 decides where the base belongs). */
   constructor(root: string) {
@@ -296,8 +297,23 @@ export class StubVault implements Vault {
     return Promise.resolve(hash);
   }
 
+  recordObservation(r: ObservationRecord): Promise<string> {
+    if ((r.collectedBy as string) !== 'runtime') return Promise.reject(new Error('StubVault: an observation is collected by the runtime'));
+    const bytes = new TextEncoder().encode(JSON.stringify(r));
+    const hash = sha256(bytes);
+    if (!this.observations.has(hash)) this.observations.set(hash, bytes);
+    return Promise.resolve(hash);
+  }
+
+  readObservations(runId: RunId | null): Promise<readonly ObservationEntry[]> {
+    const out = [...this.observations.entries()]
+      .map(([hash, bytes]) => ({ record: JSON.parse(new TextDecoder().decode(bytes)) as ObservationRecord, sha256: hash }))
+      .filter((e) => e.record.runId === runId);
+    return Promise.resolve(out.sort((a, b) => a.record.recordedAt.localeCompare(b.record.recordedAt) || a.sha256.localeCompare(b.sha256)));
+  }
+
   readNightly(): Promise<readonly NightlyEntry[]> {
-    const out = [...this.nightly.entries()].map(([hash, bytes]) => ({ record: { review: null, ...(JSON.parse(new TextDecoder().decode(bytes)) as object) } as NightlyRecord, sha256: hash }));
+    const out = [...this.nightly.entries()].map(([hash, bytes]) => ({ record: { review: null, observation: null, ...(JSON.parse(new TextDecoder().decode(bytes)) as object) } as NightlyRecord, sha256: hash }));
     return Promise.resolve(out.sort((a, b) => a.record.date.localeCompare(b.record.date) || a.record.schedule.localeCompare(b.record.schedule) || a.sha256.localeCompare(b.sha256)));
   }
 
@@ -310,6 +326,10 @@ export class StubVault implements Vault {
     }
     for (const [hash, bytes] of [...this.nightly.entries()].sort(([a], [b]) => a.localeCompare(b))) {
       yield { path: `nightly/${hash}.json`, runId: null, named: 'content', bytes };
+    }
+    for (const [hash, bytes] of [...this.observations.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+      const runId = (JSON.parse(new TextDecoder().decode(bytes)) as ObservationRecord).runId;
+      yield { path: runId === null ? `observations/${hash}.json` : `runs/${runId}/observations/${hash}.json`, runId, named: 'content', bytes };
     }
   }
 

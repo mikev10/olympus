@@ -56,7 +56,9 @@ export {
 } from './security.js';
 export { Intake, utcHour, type DeliveryOutcome, type IntakeOptions, type SecretSource } from './intake.js';
 export { firingTime, lastCovered, missedDates, startSchedules, utcDate, type Scheduler } from './schedule.js';
-export { NightlyJobs, SETTLED, flattenFigures, type NightlyOptions, type NightlyTarget } from './nightly.js';
+export { NightlyJobs, SETTLED, flattenFigures, settledForRates, type NightlyOptions, type NightlyTarget } from './nightly.js';
+export { recordSignal, walkHistory, type ObserveTarget, type Walked } from './observe.js';
+export { classifyReversal, type ChangeInverse, type CommitDiff, type Reversal } from './history.js';
 export {
   FINDINGS_REVIEWER_ROLE, JUDGING_ROLES, authorsOf as nightlyAuthorsOf, dayItems, readReviewResult, reviewedDay, seatLevel, type NightlySeatOptions,
 } from './nightly-review.js';

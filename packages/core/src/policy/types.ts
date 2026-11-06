@@ -81,6 +81,17 @@ export interface TriggerPolicy {
    * image is named here, so no edit to this block can run an unpinned one.
    */
   nightly?: NightlyPolicy;
+  /**
+   * How long a merged change is watched (R8a, D-A-OB-03, D-R8a-05).
+   * Required while a subscription's template or a schedule names
+   * `observe-signal` or `observe-history`; no window is implied (I5).
+   */
+  observe?: ObservePolicy;
+}
+
+/** The observation window: milliseconds from a change's merge to the close of its window, at most 90 days. */
+export interface ObservePolicy {
+  windowMs: number;
 }
 
 /**

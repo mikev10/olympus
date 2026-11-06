@@ -47,6 +47,8 @@ function run(id: string, over: Partial<RunRecords>): RunRecords {
     approvalsSpent: 0,
     reviewGrade: 'different-family',
     critiques: [],
+    observations: [],
+    mergeCommit: null,
     tasks: [],
     decisions: [],
     usage: [],
@@ -97,7 +99,9 @@ describe('deriveOutcomes', () => {
   it('counts a failed attempt and a passing attempt whose claim differed as caught false-dones, and not a passing, matching one', () => {
     const o = deriveOutcomes([run('r1', { tasks: [task('a', ['failed', 'passed']), task('b', ['passed'], { mismatch: 0 }), task('c', ['passed'])] })]);
     expect(o.safety.caughtFalseDone).toMatchObject({ kind: 'rate', count: 2, sample: 4 });
-    expect(o.safety.escapedFalseDone).toBe('not-established');
+    // A merged run with no closed window is observing: in no denominator, never clean (R8a, D-A-OB-03).
+    expect(o.safety.escapedFalseDone).toEqual({ kind: 'no-sample' });
+    expect(o.safety.observed.observing).toBe(1);
   });
 
   it("keys a task's attempts under one model, or escalated when its calls ran on more than one", () => {

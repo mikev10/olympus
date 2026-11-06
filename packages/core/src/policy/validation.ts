@@ -30,10 +30,11 @@ import {
 } from './constants.js';
 import type {
   ApprovalKey, ApprovalOutcome, CapabilityScope, EscalationGrant, PolicyDocument, TriggerPolicy,
-  NightlyPolicy, NightlyScanner, TriggerSchedule, TriggerSubscription,
+  NightlyPolicy, NightlyScanner, ObservePolicy, TriggerSchedule, TriggerSubscription,
 } from './types.js';
 import {
-  CHAR_CLASSES, LABEL_CLASS, TEMPLATE_IDS, hasFieldSchema, isJobTemplate, isTemplateId, type TemplateId,
+  CHAR_CLASSES, LABEL_CLASS, SIGNAL_KINDS, TEMPLATE_IDS, hasFieldSchema, isJobTemplate, isObserveTemplate, isSignalTemplate, isTemplateId,
+  type TemplateId,
 } from '../trigger/schemas.js';
 
 /** One thing wrong, at the path it is wrong at. */
@@ -82,8 +83,10 @@ const BUDGET_KEYS: Readonly<Record<keyof Budget, true>> = {
 const TRIGGER_KEYS: Readonly<Record<keyof TriggerPolicy, true>> = {
   enabled: true, entryStation: true, taskTemplate: true, maxAutonomy: true,
   minAuthorTrust: true, maxTriggerDepth: true, budgetPerWindow: true,
-  subscriptions: true, schedules: true, maxDeliveryAgeMs: true, candidateExpiryMs: true, nightly: true,
+  subscriptions: true, schedules: true, maxDeliveryAgeMs: true, candidateExpiryMs: true, nightly: true, observe: true,
 };
+
+const OBSERVE_KEYS: Readonly<Record<keyof ObservePolicy, true>> = { windowMs: true };
 
 const NIGHTLY_KEYS: Readonly<Record<keyof NightlyPolicy, true>> = { scanners: true, advisoryHost: true };
 const NIGHTLY_SCANNER_KEYS: Readonly<Record<'kind' | 'config', true>> = { kind: true, config: true };
@@ -105,6 +108,9 @@ const SCHEDULE_KEYS: Readonly<Record<keyof TriggerSchedule, true>> = { id: true,
 /** The bounds D-R22-02 and D-R22-04 set: a delivery at most seven days old, a candidate waiting at most thirty. */
 export const MAX_DELIVERY_AGE_CAP_MS = 7 * 24 * 3_600_000;
 export const CANDIDATE_EXPIRY_CAP_MS = 30 * 24 * 3_600_000;
+
+/** The longest a change may be watched after its merge (D-R8a-05). */
+export const OBSERVE_WINDOW_CAP_MS = 90 * 24 * 3_600_000;
 
 /** A subscription's secret is a host variable with this prefix, so no other host secret can be named as one (D-A-TF-05). */
 export const WEBHOOK_SECRET_PREFIX = 'FACTORY_WEBHOOK_';
@@ -467,11 +473,12 @@ function validateTriggers(value: unknown, path: string, defects: PolicyDefect[])
   const maxDeliveryAgeMs = optionalBounded(record, 'maxDeliveryAgeMs', path, MAX_DELIVERY_AGE_CAP_MS, '7 days', defects);
   const candidateExpiryMs = optionalBounded(record, 'candidateExpiryMs', path, CANDIDATE_EXPIRY_CAP_MS, '30 days', defects);
   const nightly = Object.hasOwn(record, 'nightly') ? validateNightly(record.nightly, child(path, 'nightly'), defects) ?? null : undefined;
+  const observe = Object.hasOwn(record, 'observe') ? validateObserve(record.observe, child(path, 'observe'), defects) ?? null : undefined;
   if (
     enabled === undefined || entryStation === undefined || taskTemplate === undefined
     || maxAutonomy === undefined || minAuthorTrust === undefined || maxTriggerDepth === undefined
     || runs === undefined || windowMs === undefined || subscriptions === undefined || schedules === undefined
-    || maxDeliveryAgeMs === null || candidateExpiryMs === null || nightly === null
+    || maxDeliveryAgeMs === null || candidateExpiryMs === null || nightly === null || observe === null
   ) return undefined;
   const triggers: TriggerPolicy = {
     enabled, entryStation, taskTemplate, maxAutonomy, minAuthorTrust,
@@ -479,6 +486,7 @@ function validateTriggers(value: unknown, path: string, defects: PolicyDefect[])
     ...(maxDeliveryAgeMs === undefined ? {} : { maxDeliveryAgeMs }),
     ...(candidateExpiryMs === undefined ? {} : { candidateExpiryMs }),
     ...(nightly === undefined ? {} : { nightly }),
+    ...(observe === undefined ? {} : { observe }),
   };
   const before = defects.length;
   routeDefects(triggers, path, defects);
@@ -542,6 +550,18 @@ function validateNightly(value: unknown, path: string, defects: PolicyDefect[]):
     return undefined;
   }
   return { scanners, advisoryHost };
+}
+
+/** The observation window (D-R8a-05): a positive integer of milliseconds, at most 90 days. */
+function validateObserve(value: unknown, path: string, defects: PolicyDefect[]): ObservePolicy | undefined {
+  const record = shape(value, path, keysOf(OBSERVE_KEYS), defects);
+  if (record === undefined) return undefined;
+  if (!Object.hasOwn(record, 'windowMs')) {
+    defects.push({ path: child(path, 'windowMs'), problem: 'required key is missing; no window is implied' });
+    return undefined;
+  }
+  const windowMs = optionalBounded(record, 'windowMs', path, OBSERVE_WINDOW_CAP_MS, '90 days', defects);
+  return typeof windowMs === 'number' ? { windowMs } : undefined;
 }
 
 function validateNightlyScanner(value: unknown, path: string, defects: PolicyDefect[]): NightlyScanner | undefined {
@@ -651,8 +671,32 @@ function routeDefects(triggers: TriggerPolicy, path: string, defects: PolicyDefe
     if (kind !== 'scheduled' && isJobTemplate(template)) {
       defects.push({ path: child(child(path, 'taskTemplate'), kind), problem: `'${template}' is a job template, valid only on 'scheduled'` });
     }
+    // A signal is attributed by the commit its event names, so only the two kinds that name one can carry it (D-A-OB-02).
+    if (isSignalTemplate(template) && !SIGNAL_KINDS.some((k) => k === kind)) {
+      defects.push({ path: child(child(path, 'taskTemplate'), kind), problem: `'${template}' is valid only on ${SIGNAL_KINDS.map((k) => `'${k}'`).join(' and ')}` });
+    }
+  }
+  // An observe template with no window would never close one, or close it at once; neither is implied (I5, D-R8a-05).
+  const observing = Object.values(triggers.taskTemplate).some(isObserveTemplate) || schedules.some((s) => isObserveTemplate(s.template));
+  if (observing && triggers.observe === undefined) {
+    defects.push({ path: child(path, 'observe'), problem: 'required while a template is observe-signal or observe-history; no window is implied' });
+  }
+  // Two walks of one branch would each record the same reversal and race to close the same window.
+  // A walk closes windows; with no route for failed checks, a closed window would read as free of failures that were
+  // never collected. So observing needs ci-failure enabled, sent to observe-signal, through a subscription (codex-8, I5).
+  if (schedules.some((s) => s.template === 'observe-history')) {
+    const routed = triggers.enabled.includes('ci-failure') && triggers.taskTemplate['ci-failure'] === 'observe-signal' && subscriptions.some((s) => s.kind === 'ci-failure');
+    if (!routed) {
+      defects.push({ path: child(path, 'schedules'), problem: "'observe-history' needs 'ci-failure' enabled, routed to 'observe-signal', through a subscription; without it no failed check is collected" });
+    }
+  }
+  if (schedules.filter((s) => s.template === 'observe-history').length > 1) {
+    defects.push({ path: child(path, 'schedules'), problem: `'observe-history' is named by more than one schedule; one walk keeps the record` });
   }
   schedules.forEach((s, i) => {
+    if (isSignalTemplate(s.template)) {
+      defects.push({ path: `${child(path, 'schedules')}[${String(i)}].template`, problem: `'${s.template}' records a delivery that names a commit; a schedule's firing names none` });
+    }
     if (s.template === 'nightly-security' && triggers.nightly === undefined) {
       defects.push({ path: `${child(path, 'schedules')}[${String(i)}].template`, problem: `'nightly-security' needs a nightly block naming its scanners and advisory host` });
     }

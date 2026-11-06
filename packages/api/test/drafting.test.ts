@@ -104,7 +104,7 @@ describe('rates keyed by independence grade (D-A-DS-06)', () => {
   const run = (id: string, reviewGrade: string, critiques: RunRecords['critiques'] = []): RunRecords => ({
     runId: id as RunId, ending: 'merged', requestedLevel: 2, stack: 's', startedAt: null, mergedAt: null, approvalsSpent: 0,
     tasks: [{ taskId: 't' as TaskId, station: 'build', status: 'passed', iterations: 1, attempts: [{ outcome: 'passed', claimMismatch: false }], firstModel: 'm', models: ['m'] }],
-    decisions: [], usage: [], cost: null, reviewGrade, critiques,
+    decisions: [], usage: [], cost: null, reviewGrade, critiques, observations: [], mergeCommit: null,
   });
 
   it('keeps the false-done rate and the autonomy ratio per review grade, and critic findings per critic grade', () => {

@@ -10,6 +10,7 @@
  * and the station. Deleting the write for any one cause fails its row (I8).
  */
 import { REHASH_FINDS_DRIFT } from './nightly.js';
+import { OPEN_WINDOW_IN_NO_DENOMINATOR } from './observe.js';
 import { createHash } from 'node:crypto';
 import { cp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -60,7 +61,8 @@ export type CauseKey =
   | 'approval-rejected'
   | 'draft-sent-back'
   | 'draft-floor-applied'
-  | 'record-drift';
+  | 'record-drift'
+  | 'observation-closed';
 
 export function keyOf(d: DecisionCause): CauseKey {
   switch (d.cause) {
@@ -92,6 +94,8 @@ export function keyOf(d: DecisionCause): CauseKey {
       return 'draft-floor-applied';
     case 'record-drift':
       return 'record-drift';
+    case 'observation-closed':
+      return 'observation-closed';
   }
 }
 
@@ -608,6 +612,8 @@ export const DECISION_TABLE: Readonly<Record<CauseKey, Row>> = {
   'draft-floor-applied': { kind: 'scenario', run: () => draftingDecision('draft-floor-applied') },
   // R13a: the nightly re-hash records drift that names a run in that run's record, decided by `nightly`.
   'record-drift': { kind: 'scenario', run: async () => { await REHASH_FINDS_DRIFT.run(); } },
+  // R8a: the history walk closes a merged run's window past its time and records it, decided by observe (D-A-OB-03).
+  'observation-closed': { kind: 'scenario', run: async () => { await OPEN_WINDOW_IN_NO_DENOMINATOR.run(); } },
   'approval-refused:draft-mismatch': { kind: 'scenario', run: () => draftingDecision('draft-mismatch') },
   'approval-refused:draft-invalid': { kind: 'scenario', run: () => draftingDecision('draft-invalid') },
   'station:parked:iterations-exhausted': { kind: 'scenario', run: () => parkScenario('iterations-exhausted') },

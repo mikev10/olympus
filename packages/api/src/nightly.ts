@@ -28,9 +28,10 @@ import { materialize, resolveCommit } from '@olympus-ai/readiness';
 import type { EgressLog, SandboxHandle, SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
 import {
   isNoRunState, type IntegrityCoverage, type NightlyEntry, type NightlyFinding, type NightlyRecord, type NightlyRefusal,
-  type NightlyReview, type RateSnapshot, type RecordDriftProblem, type SecurityCoverage, type Vault,
+  type NightlyReview, type ObservationCoverage, type RateSnapshot, type RecordDriftProblem, type SecurityCoverage, type Vault,
 } from '@olympus-ai/vault';
 import type { Intake } from './intake.js';
+import { recordSignal, walkHistory } from './observe.js';
 import { reviewJob, type NightlySeatOptions } from './nightly-review.js';
 import { deriveOutcomes, readRunRecords, type RunEnding, type RunRecords } from './outcomes.js';
 import { scanTree } from './scan.js';
@@ -60,6 +61,15 @@ export interface NightlyOptions {
 
 /** Endings no later step changes: a snapshot covers these runs alone (D-R13a-03). */
 export const SETTLED: ReadonlySet<RunEnding> = new Set<RunEnding>(['refused', 'merged', 'cancelled']);
+
+/**
+ * Whether a run's figures can no longer change, so a snapshot may hold it: a
+ * settled ending, and for a merged run a closed observation window too, since
+ * its escaped status is open until then (D-R8a-12).
+ */
+export function settledForRates(run: RunRecords): boolean {
+  return SETTLED.has(run.ending) && (run.ending !== 'merged' || run.observations.some((o) => o.signal.kind === 'window-closed'));
+}
 
 /** A finding's fingerprint is the runtime's SHA-256, hex; nothing else is a key (codex-3). */
 const FINGERPRINT = /^[0-9a-f]{64}$/u;
@@ -141,6 +151,10 @@ export class NightlyJobs {
       const { template } = schedule;
       if (template === 'nightly-integrity') part = await this.#integrity(schedule, date);
       else if (template === 'nightly-security') part = await this.#security(policy, schedule, date, intake);
+      else if (template === 'observe-history') {
+        const walked = await walkHistory(this.#options.vault, this.#options.target, policy, this.#now);
+        part = { findings: [], refusals: walked.refusals, integrity: null, security: null, observation: walked.observation };
+      }
       else if (isReviewJobTemplate(template)) {
         const { vault, sandbox, workspaces, limits, target } = this.#options;
         const reviewed = await reviewJob(template, {
@@ -155,9 +169,14 @@ export class NightlyJobs {
     const record: NightlyRecord = {
       schedule: schedule.id, template: schedule.template, date, startedAt, endedAt: new Date(this.#now()).toISOString(),
       outcome: refusedWith(part.refusals), findings: part.findings,
-      integrity: part.integrity, security: part.security, review: part.review ?? null, collectedBy: 'runtime',
+      integrity: part.integrity, security: part.security, review: part.review ?? null, observation: part.observation ?? null, collectedBy: 'runtime',
     };
     return { record, sha256: await this.#options.vault.recordNightly(record) };
+  }
+
+  /** A delivery's signal, recorded in place of a candidate (R8a, D-R8a-11); the observation's hash is returned. */
+  signal(kind: 'post-merge' | 'ci-failure', fields: Readonly<Record<string, string>>, signedAt: number): Promise<string> {
+    return recordSignal(this.#options.vault, this.#now, kind, fields, signedAt);
   }
 
   async #integrity(schedule: TriggerSchedule, date: string): Promise<Part> {
@@ -273,7 +292,7 @@ export class NightlyJobs {
           const run = records.get(runId);
           if (run === undefined) findings.push({ kind: 'rate-drift', rate: `runs.${runId}`, snapshot: '"settled"', observed: 'absent' });
           else {
-            if (!SETTLED.has(run.ending)) findings.push({ kind: 'rate-drift', rate: `runs.${runId}`, snapshot: '"settled"', observed: JSON.stringify(run.ending) });
+            if (!settledForRates(run)) findings.push({ kind: 'rate-drift', rate: `runs.${runId}`, snapshot: '"settled"', observed: JSON.stringify(run.ending) });
             again.push(run);
           }
         }
@@ -284,7 +303,7 @@ export class NightlyJobs {
           if (before !== now) findings.push({ kind: 'rate-drift', rate, snapshot: before, observed: now });
         }
       }
-      const settled = [...records.values()].filter((r) => SETTLED.has(r.ending));
+      const settled = [...records.values()].filter(settledForRates);
       rates = { runs: settled.map((r) => r.runId).sort(), figures: flattenFigures(deriveOutcomes(settled)) };
     }
 
@@ -458,4 +477,5 @@ interface Part {
   readonly integrity: IntegrityCoverage | null;
   readonly security: SecurityCoverage | null;
   readonly review?: NightlyReview;
+  readonly observation?: ObservationCoverage;
 }

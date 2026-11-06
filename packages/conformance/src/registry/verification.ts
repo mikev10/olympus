@@ -82,6 +82,8 @@ function recording(inner: Vault, violations: IntegrityViolation[]): Vault {
     readRefusedDeliveryCounts: () => inner.readRefusedDeliveryCounts(),
     recordNightly: (r) => inner.recordNightly(r),
     readNightly: () => inner.readNightly(),
+    recordObservation: (r) => inner.recordObservation(r),
+    readObservations: (runId) => inner.readObservations(runId),
     listObjects: () => inner.listObjects(),
     readRunState: (runId) => inner.readRunState(runId),
     commitRunState: (s, ifVersion) => inner.commitRunState(s, ifVersion),

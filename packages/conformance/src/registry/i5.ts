@@ -36,6 +36,8 @@ import { ADAPTER_REFUSAL_ENFORCED_AT_ADMISSION, CHECK_COMMAND_HAS_A_GRAMMAR, MIS
 import { INDETERMINATE_PROBE_LOWERS, UNSUPPORTED_STACK_REFUSES, REFUSAL_NAMES_THE_BOUNDING_TERM } from './readiness.js';
 import { R20_I5 } from './roles.js';
 import { R13A_I5 } from './nightly.js';
+import { R8A_I5 } from './observe.js';
+import { R8A_REVIEW_I5 } from './observe-review.js';
 import { R13B_I5 } from './nightly-review.js';
 import { R22_I5 } from './triggers.js';
 import { R19_ASSERTIONS } from './drafting.js';
@@ -58,6 +60,8 @@ export const I5: InvariantEntry = {
     ...R22_I5,
     // R13a: the nightly checks that call no model.
     ...R13A_I5,
+    ...R8A_I5,
+    ...R8A_REVIEW_I5,
     // R13b: the nightly reviewers.
     ...R13B_I5,
     // R17: security at the gate.

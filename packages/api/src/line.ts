@@ -254,6 +254,9 @@ export async function runLine(ctx: LineContext, changed: readonly TamperedPath[]
       case 'finish':
         await commit(ctx, { phase: 'exiting' });
         break;
+      case 'observe':
+        // Merged and watched, or watched and closed: nothing is left for the line (D-R8a-04).
+        return { ok: true, state: ctx.state };
       case 'exit': {
         // A drafted artifact's exit carries its draft and the conditions the runtime found failed (R19).
         const floor = isDraftStation(step.from) && isDrafted(ctx, step.from) ? draftFloorOf(ctx.state, step.from) : undefined;
@@ -293,12 +296,16 @@ export async function runLine(ctx: LineContext, changed: readonly TamperedPath[]
         // commit as the move, so a stop between the two leaves it unspent and
         // the gate is evaluated again (A-P4-04).
         const approvals = spend(ctx.state.approvals, next.spends, draft);
-        // The run has passed its last M1 exit gate; `observe` is never entered at M1.
+        // The run has passed its last exit gate on the line.
         if (!M1_STATIONS.includes(next.next)) {
           // Merged before the grant is spent: a stop between the two leaves the grant unspent, and the
           // resume finds the pull request merged at the same commit and records the same act (D-I1b-01).
           if (step.from === 'integrate') await mergeAccepted(ctx);
-          if (next.spends !== null) await commit(ctx, { approvals });
+          // A merged run is watched: it enters `observe` in the commit that spends its grant, and the history
+          // walk closes its window (R8a, D-A-OB-03, D-R8a-04). A run with no integrator merged nothing.
+          const merged = step.from === 'integrate' && (await readIntegration(ctx.components.vault, ctx.run.id)).some((r) => r.kind === 'merged');
+          if (merged) await commit(ctx, { station: 'observe', phase: 'working', approvals });
+          else if (next.spends !== null) await commit(ctx, { approvals });
           return { ok: true, state: ctx.state };
         }
         await commit(ctx, { station: next.next, phase: 'working', approvals });

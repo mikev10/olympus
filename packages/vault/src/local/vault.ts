@@ -35,7 +35,7 @@ import type { CandidateId, RunId, RunState, StationId, TaskResult, VaultRef, Vau
 import type { IntegrityViolation } from '@olympus-ai/integrity';
 import type {
   AdmissionRecord, BaseRunRecord, CandidateRecord, CountedRefusalCause, CriticRecord, DecisionCause, DraftLockRecord, DraftRecord, EnforcementDecision, EvidenceBundle, IntakeEntry, IntegrationRecord, IntentRecord, NightlyEntry, NightlyRecord, RefusedDeliveryCount, StoredObject, TriggerDecision,
-  LockEntry, LockManifest, LockVerdict, NoRunState, RubricRecord, UsageRecord, Vault,
+  LockEntry, LockManifest, LockVerdict, NoRunState, ObservationEntry, ObservationRecord, RubricRecord, UsageRecord, Vault,
 } from '../types.js';
 
 /** Reported as `actual` for a locked path that no longer exists: a deleted artifact is a mismatch, not an empty file (D-S1-02). */
@@ -109,13 +109,65 @@ const NIGHTLY_JOB_SCHEMAS: ReadonlySet<string> = new Set(['nightly-finding', 'ni
 /** Where nightly records are kept: beside the runs, under none (A-R13a-02). */
 const NIGHTLY_DIR = 'nightly';
 
+/** Where observations are kept: `runs/<id>/observations/` for a run's, and this directory beside the runs for the rest (D-R8a-03). */
+const OBSERVATIONS_DIR = 'observations';
+
+const OBSERVATION_SIGNALS: ReadonlySet<string> = new Set(['rollback', 'partial-reversal', 'check-failure', 'pushed', 'window-closed']);
+const TIME_SOURCES: ReadonlySet<string> = new Set(['provider-reported', 'committer-claimed', 'runtime']);
+
+function isSourcedTime(value: unknown): boolean {
+  return isRecord(value) && isTime(value.at) && typeof value.source === 'string' && TIME_SOURCES.has(value.source);
+}
+
+const COMMIT = /^[0-9a-f]{40,64}$/;
+
+function isCount(value: unknown, min: number): boolean {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= min;
+}
+
+/** Each kind's own fields, whole: a record missing one is refused, never read as the kind it names (codex-7). */
+function signalProblem(signal: Record<string, unknown>): string | undefined {
+  if (!isSourcedTime(signal.at)) return 'its time does not say where it came from, or is not a time';
+  if (signal.kind !== 'window-closed' && (typeof signal.commit !== 'string' || !COMMIT.test(signal.commit))) return 'it names no commit';
+  switch (signal.kind) {
+    case 'rollback':
+      return isTime(signal.committedAt) && (signal.match === 'patch-id' || signal.match === 'all-hunks') ? undefined : 'a rollback carries its commit date and how it matched';
+    case 'partial-reversal':
+      return isCount(signal.of, 2) && isCount(signal.hunks, 1) && (signal.hunks as number) < (signal.of as number) ? undefined : 'a partial reversal names some, not all, of its hunks';
+    case 'check-failure':
+      return hasString(signal, 'checkRun') && hasString(signal, 'conclusion') ? undefined : 'a check failure names its check run and conclusion';
+    case 'pushed':
+      return undefined;
+    case 'window-closed': {
+      if (!isCount(signal.windowMs, 1) || !isCount(signal.graceMs, 0)) return 'a closed window carries its window and grace';
+      if (!isSourcedTime(signal.opened) || !isTime(signal.committedAt)) return 'a closed window carries when it opened and its change\'s commit date';
+      const lead = signal.leadTime;
+      const leadOk = lead === null || (isRecord(lead) && ((lead.kind === 'measured' && typeof lead.ms === 'number' && Number.isFinite(lead.ms)) || lead.kind === 'not-measurable'));
+      return leadOk ? undefined : 'a closed window carries a lead time, or null';
+    }
+    default:
+      return 'its signal is not a known kind';
+  }
+}
+
+/** Why an observation is refused, or undefined: the runtime's, naming its change, a known signal, and its own fields whole. */
+function observationProblem(r: unknown): string | undefined {
+  if (!isRecord(r) || r.collectedBy !== 'runtime') return "collectedBy is not 'runtime'";
+  if (r.runId !== null && typeof r.runId !== 'string') return 'its run is neither a run id nor null';
+  if (typeof r.change !== 'string' || !COMMIT.test(r.change) || !isTime(r.recordedAt)) return 'it names no change commit or carries no time';
+  const signal = r.signal;
+  if (!isRecord(signal) || typeof signal.kind !== 'string' || !OBSERVATION_SIGNALS.has(signal.kind)) return 'its signal is not a known kind';
+  return signalProblem(signal);
+}
+
 const CONTENT_NAME = /^([0-9a-f]{64})\.json$/;
 
 /** `runs/<id>/objects/<kind>/<sha256>.json` and `nightly/<sha256>.json` are named by their hash. */
 function contentNamed(parts: readonly string[]): boolean {
   const name = parts.at(-1) ?? '';
   if (!CONTENT_NAME.test(name)) return false;
-  if (parts.length === 2 && parts[0] === NIGHTLY_DIR) return true;
+  if (parts.length === 2 && (parts[0] === NIGHTLY_DIR || parts[0] === OBSERVATIONS_DIR)) return true;
+  if (parts.length === 4 && parts[0] === 'runs' && parts[2] === OBSERVATIONS_DIR) return true;
   return parts.length === 5 && parts[0] === 'runs' && parts[2] === 'objects' && KINDS.includes(parts[3] as VaultRefKind);
 }
 
@@ -403,6 +455,7 @@ const DECIDERS: Readonly<Record<DecisionCause['cause'], readonly string[]>> = {
   'draft-sent-back': ['line'],
   'draft-floor-applied': ['line'],
   'record-drift': ['nightly'],
+  'observation-closed': ['observe'],
 };
 
 function isNullableString(r: Record<string, unknown>, key: string): boolean {
@@ -1112,10 +1165,44 @@ export class LocalVault implements Vault {
       const record = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
       if (!isRecord(record) || record.collectedBy !== 'runtime') throw new Error(`LocalVault: ${join(dir, name)} is not a nightly record`);
       // The hash is the name's, not recomputed: a drifted record is the re-hash's to find, not this reader's to hide.
-      // A record stored before R13b has no review; it is read as one that seated none.
-      out.push({ record: { review: null, ...record } as unknown as NightlyRecord, sha256: hash });
+      // A record stored before R13b has no review, and one before R8a no observation; each is read as none.
+      out.push({ record: { review: null, observation: null, ...record } as unknown as NightlyRecord, sha256: hash });
     }
     return out.sort((a, b) => a.record.date.localeCompare(b.record.date) || a.record.schedule.localeCompare(b.record.schedule) || a.sha256.localeCompare(b.sha256));
+  }
+
+  /** Under `runs/<id>/observations/<sha256>.json`, or `observations/<sha256>.json` beside the runs (D-R8a-03). */
+  async recordObservation(r: ObservationRecord): Promise<string> {
+    const problem = observationProblem(r);
+    if (problem !== undefined) throw new Error(`LocalVault: refusing an observation: ${problem}`);
+    const dir = r.runId === null ? join(this.#store, OBSERVATIONS_DIR) : join(runDir(this.#store, r.runId), OBSERVATIONS_DIR);
+    const bytes = encode(r);
+    const hash = sha256(bytes);
+    await createExclusive(join(dir, `${hash}.json`), bytes);
+    return hash;
+  }
+
+  async readObservations(runId: RunId | null): Promise<readonly ObservationEntry[]> {
+    const dir = runId === null ? join(this.#store, OBSERVATIONS_DIR) : join(runDir(this.#store, runId), OBSERVATIONS_DIR);
+    let names: string[];
+    try {
+      names = await readdir(dir);
+    } catch (error) {
+      if (isAbsent(error)) return [];
+      throw error;
+    }
+    const out: ObservationEntry[] = [];
+    for (const name of names) {
+      const hash = CONTENT_NAME.exec(name)?.[1];
+      if (hash === undefined) continue;
+      const record = await readJson(join(dir, name));
+      // A record that is not an observation is a fault, never a record to skip (I5); a drifted hash is the re-hash's to find.
+      const problem = observationProblem(record);
+      if (problem !== undefined) throw new Error(`LocalVault: ${join(dir, name)} is not an observation: ${problem}`);
+      if ((record as ObservationRecord).runId !== runId) throw new Error(`LocalVault: ${join(dir, name)} names another run`);
+      out.push({ record: record as ObservationRecord, sha256: hash });
+    }
+    return out.sort((a, b) => a.record.recordedAt.localeCompare(b.record.recordedAt) || a.sha256.localeCompare(b.sha256));
   }
 
   /**

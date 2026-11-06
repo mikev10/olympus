@@ -97,7 +97,7 @@ async function toApproval(it: Integrating): Promise<void> {
 export const INTEGRATE_MERGES_THE_VERIFIED_TREE = runtime({
   id: 'I5.integrate-merges-the-verified-tree-after-the-gate',
   title:
-    "integrate pushes the run's accepted change and opens its pull request before the exit, merges only after a human approved the exit, and what merges is the base commit with exactly the verified diff; the merge is recorded in the Vault with the time GitHub reports it merged, and a resume after it neither opens nor merges again",
+    "integrate pushes the run's accepted change and opens its pull request before the exit, merges only after a human approved the exit, and what merges is the base commit with exactly the verified diff; the merge is recorded in the Vault with the time GitHub reports it merged, the merged run enters observe, and a resume after it neither opens nor merges again",
   run: async () => {
     await withIntegration('i1b-merge-', async (it) => {
       const { runStanding } = await api();
@@ -133,6 +133,9 @@ export const INTEGRATE_MERGES_THE_VERIFIED_TREE = runtime({
       if (record.mergedAt !== merged.mergedAt) throw new Error(`I5: the merge record carries ${record.mergedAt}, not the time GitHub merged at (${String(merged.mergedAt)})`);
       const { LocalVault } = await import('@olympus-ai/vault');
       if ((await runStanding(new LocalVault(it.rig.dirs), it.rig.runId)).standing.standing !== 'passed') throw new Error('I5: a merged run does not stand passed');
+      // A merged run is watched: it enters observe in the commit that spent its grant (R8a, D-A-OB-03), and the drive returns.
+      const watched = await new LocalVault(it.rig.dirs).readRunState(it.rig.runId);
+      if (watched.station !== 'observe' || watched.phase !== 'working' || watched.stations.at(-1)?.station !== 'observe') throw new Error(`I5: a merged run is ${watched.phase} at ${watched.station}, not being watched at observe`);
 
       // A resume of the finished run touches the remote no further.
       const writes = it.github.requests.filter((r) => r.method !== 'GET').length;

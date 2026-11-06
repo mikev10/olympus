@@ -124,6 +124,8 @@ function cloneTriggers(triggers: TriggerPolicy): TriggerPolicy {
     ...(triggers.nightly === undefined
       ? {}
       : { nightly: frozen({ scanners: frozenCopy(triggers.nightly.scanners.map((s) => frozen({ ...s }))), advisoryHost: triggers.nightly.advisoryHost }) }),
+    // The observation window is carried whole, or every observe template would be refused for a window the document held (D-R8a-05).
+    ...(triggers.observe === undefined ? {} : { observe: frozen({ windowMs: triggers.observe.windowMs }) }),
   });
 }
 
