@@ -682,6 +682,14 @@ function routeDefects(triggers: TriggerPolicy, path: string, defects: PolicyDefe
     defects.push({ path: child(path, 'observe'), problem: 'required while a template is observe-signal or observe-history; no window is implied' });
   }
   // Two walks of one branch would each record the same reversal and race to close the same window.
+  // A walk closes windows; with no route for failed checks, a closed window would read as free of failures that were
+  // never collected. So observing needs ci-failure enabled, sent to observe-signal, through a subscription (codex-8, I5).
+  if (schedules.some((s) => s.template === 'observe-history')) {
+    const routed = triggers.enabled.includes('ci-failure') && triggers.taskTemplate['ci-failure'] === 'observe-signal' && subscriptions.some((s) => s.kind === 'ci-failure');
+    if (!routed) {
+      defects.push({ path: child(path, 'schedules'), problem: "'observe-history' needs 'ci-failure' enabled, routed to 'observe-signal', through a subscription; without it no failed check is collected" });
+    }
+  }
   if (schedules.filter((s) => s.template === 'observe-history').length > 1) {
     defects.push({ path: child(path, 'schedules'), problem: `'observe-history' is named by more than one schedule; one walk keeps the record` });
   }

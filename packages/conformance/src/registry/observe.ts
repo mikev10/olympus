@@ -275,7 +275,7 @@ const TEMPLATES_ON_THEIR_KINDS = runtime({
     const { DEFAULT_POLICY_DOCUMENT, validatePolicyDocument } = await core();
     const doc = (t: Partial<TriggerPolicy>): PolicyDocument => ({
       ...DEFAULT_POLICY_DOCUMENT,
-      triggers: { ...DEFAULT_POLICY_DOCUMENT.triggers, ...ROUTE, maxDeliveryAgeMs: 3_600_000, candidateExpiryMs: 86_400_000, observe: { windowMs: WINDOW_MS }, ...t },
+      triggers: { ...DEFAULT_POLICY_DOCUMENT.triggers, ...ROUTE, subscriptions: [CHECKS, PUSHES], maxDeliveryAgeMs: DELIVERY_AGE_MS, candidateExpiryMs: 86_400_000, observe: { windowMs: WINDOW_MS }, ...t },
     });
     const valid = validatePolicyDocument(doc({ schedules: [WALK] }));
     if (!valid.ok) throw new Error(`I7: the whole observe route was refused: ${JSON.stringify(valid.defects)}`);
