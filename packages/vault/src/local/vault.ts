@@ -115,16 +115,49 @@ const OBSERVATIONS_DIR = 'observations';
 const OBSERVATION_SIGNALS: ReadonlySet<string> = new Set(['rollback', 'partial-reversal', 'check-failure', 'pushed', 'window-closed']);
 const TIME_SOURCES: ReadonlySet<string> = new Set(['provider-reported', 'committer-claimed', 'runtime']);
 
-/** Why an observation is refused, or undefined: the runtime's, naming its change, a known signal, and a sourced time. */
+function isSourcedTime(value: unknown): boolean {
+  return isRecord(value) && isTime(value.at) && typeof value.source === 'string' && TIME_SOURCES.has(value.source);
+}
+
+const COMMIT = /^[0-9a-f]{40,64}$/;
+
+function isCount(value: unknown, min: number): boolean {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= min;
+}
+
+/** Each kind's own fields, whole: a record missing one is refused, never read as the kind it names (codex-7). */
+function signalProblem(signal: Record<string, unknown>): string | undefined {
+  if (!isSourcedTime(signal.at)) return 'its time does not say where it came from, or is not a time';
+  if (signal.kind !== 'window-closed' && (typeof signal.commit !== 'string' || !COMMIT.test(signal.commit))) return 'it names no commit';
+  switch (signal.kind) {
+    case 'rollback':
+      return isTime(signal.committedAt) && (signal.match === 'patch-id' || signal.match === 'all-hunks') ? undefined : 'a rollback carries its commit date and how it matched';
+    case 'partial-reversal':
+      return isCount(signal.of, 2) && isCount(signal.hunks, 1) && (signal.hunks as number) < (signal.of as number) ? undefined : 'a partial reversal names some, not all, of its hunks';
+    case 'check-failure':
+      return hasString(signal, 'checkRun') && hasString(signal, 'conclusion') ? undefined : 'a check failure names its check run and conclusion';
+    case 'pushed':
+      return undefined;
+    case 'window-closed': {
+      if (!isCount(signal.windowMs, 1) || !isCount(signal.graceMs, 0)) return 'a closed window carries its window and grace';
+      if (!isSourcedTime(signal.opened) || !isTime(signal.committedAt)) return 'a closed window carries when it opened and its change\'s commit date';
+      const lead = signal.leadTime;
+      const leadOk = lead === null || (isRecord(lead) && ((lead.kind === 'measured' && typeof lead.ms === 'number' && Number.isFinite(lead.ms)) || lead.kind === 'not-measurable'));
+      return leadOk ? undefined : 'a closed window carries a lead time, or null';
+    }
+    default:
+      return 'its signal is not a known kind';
+  }
+}
+
+/** Why an observation is refused, or undefined: the runtime's, naming its change, a known signal, and its own fields whole. */
 function observationProblem(r: unknown): string | undefined {
   if (!isRecord(r) || r.collectedBy !== 'runtime') return "collectedBy is not 'runtime'";
   if (r.runId !== null && typeof r.runId !== 'string') return 'its run is neither a run id nor null';
-  if (!hasString(r, 'change') || !hasString(r, 'recordedAt')) return 'it names no change or carries no time';
+  if (typeof r.change !== 'string' || !COMMIT.test(r.change) || !isTime(r.recordedAt)) return 'it names no change commit or carries no time';
   const signal = r.signal;
   if (!isRecord(signal) || typeof signal.kind !== 'string' || !OBSERVATION_SIGNALS.has(signal.kind)) return 'its signal is not a known kind';
-  const at = signal.at;
-  if (!isRecord(at) || !hasString(at, 'at') || typeof at.source !== 'string' || !TIME_SOURCES.has(at.source)) return "its time does not say where it came from";
-  return undefined;
+  return signalProblem(signal);
 }
 
 const CONTENT_NAME = /^([0-9a-f]{64})\.json$/;
