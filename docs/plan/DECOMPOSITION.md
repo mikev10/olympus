@@ -601,10 +601,11 @@ order between them is settled before any of them is picked up.
 | R5 | Goal decomposition | M3 | R4, R20 | — |
 | R6 | Driver: any OpenAI-compatible endpoint | M2 | P5, P10, P12 | `docs/plan/R6-openai-compatible.md` |
 | R7 | False-done benchmark | M2 | P6, P7, I1, R17, R19 | `docs/plan/R7-benchmark.md` |
-| R8 | Observe: post-merge outcomes | M2 | I1, R2, R22 | — |
+| R8a | Post-merge attribution and the baseline | M2 | I1, R2, R22 | `docs/plan/R8-observe.md` |
+| R8b | The observation plan | M2 | R8a, R19 | `docs/plan/R8-observe.md` |
 | R9 | Separation of duties across every seat | M2 | P6, P9, R17, R26 | — |
 | R10 | Trust ratchet | M2 | P12, P14, R22 | — |
-| R11 | Learning loop | M3 | R2, R7, R8, P14, R13b, R20 | — |
+| R11 | Learning loop | M3 | R2, R7, R8a, P14, R13b, R20 | — |
 | R12 | Telemetry export (OpenTelemetry) | M2 | P9, P13, P14, R2 | `docs/plan/R12-telemetry.md` |
 | R13a | Nightly checks without a model | M2 | P14, R2, R17, R22 | `docs/plan/R13-nightly.md` |
 | R13b | Nightly reviewers | M2 | R13a, R9 | `docs/plan/R13-nightly.md` |
@@ -859,6 +860,14 @@ unit also records when the pull request `integrate` opened was merged, the one
 wait after a run that the line does not see. Pull request and review times
 need a provider's API, and come from a provider adapter, never the core
 (D-A-BR-04).
+
+**Split, by amendment (D-A-OB-01):** this entry is built as two units.
+**R8a**, post-merge attribution and the baseline, covers reverts, failed
+checks, the rates, and the baseline, and depends on I1, R2, and R22. **R8b**,
+the observation plan, depends on R8a and R19 and starts with an amendment of
+its own (D-A-OB-07). What each delivers, what each leaves out, its gate paths,
+and its conformance are in `docs/plan/R8-observe.md`. The merge time this
+entry asks for is already recorded (`IntegrationMerged.mergedAt`, A-R2-01).
 
 ### R9 — Separation of duties across every seat
 
