@@ -211,6 +211,7 @@ export const NOT_MEASURED: readonly string[] = [
   "a failed check's name: known by its check run id alone, read from the provider by a person (D-A-OB-05)",
   'pull request open and review times: need a provider adapter, never the core (D-A-BR-04)',
   'a check that recovered: no trigger delivers a success (D-A-OB-07)',
+  "equal exposure between the line and its baseline: a run's window opens at GitHub's merge time and a baseline change's when a walk first sees it, so a baseline change is watched up to one walk longer (codex-6)",
 ];
 
 /** Said with every bound (D-A-OB-08, D-R2-11). */
