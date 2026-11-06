@@ -179,7 +179,7 @@ export async function walkHistory(vault: Vault, target: ObserveTarget | null, po
           if (found.kind === 'none') continue;
           const at = pushed.get(commit.commit) ?? { at: commit.committedAt, source: 'committer-claimed' as const };
           const signal: ObservationSignal = found.kind === 'rollback'
-            ? { kind: 'rollback', commit: commit.commit, at, committedAt: commit.committedAt }
+            ? { kind: 'rollback', commit: commit.commit, at, committedAt: commit.committedAt, match: found.match }
             : { kind: 'partial-reversal', commit: commit.commit, at, hunks: found.hunks, of: found.of };
           await vault.recordObservation({ runId: change.runId, change: change.change, signal, recordedAt: stamp(), collectedBy: 'runtime' });
           coverage.signals += 1;

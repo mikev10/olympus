@@ -194,21 +194,25 @@ export async function commitDiff(checkout: string, commit: BranchCommit): Promis
 }
 
 export type Reversal =
-  | { readonly kind: 'rollback' }
+  | { readonly kind: 'rollback'; readonly match: 'patch-id' | 'all-hunks' }
   | { readonly kind: 'partial-reversal'; readonly hunks: number; readonly of: number }
   | { readonly kind: 'none' };
 
 /**
  * Whether `later` undoes `change`, by diff alone (D-A-OB-04). A rollback is
- * an exact inverse by patch id. A partial reversal inverts at least one and
- * not every one of the change's hunks; it is never a rollback.
+ * an exact inverse by patch id, or a commit that inverts every one of the
+ * change's hunks and edits something else besides: the change is undone
+ * either way, and an edit beside it must not hide that (codex-5, gemini-1).
+ * A partial reversal inverts at least one and not every one of the change's
+ * hunks; it is never a rollback.
  */
 export function classifyReversal(change: ChangeInverse, later: CommitDiff): Reversal {
   if (change.inversePatchId === null || later.commit === change.change) return { kind: 'none' };
-  if (later.patchId !== null && later.patchId === change.inversePatchId) return { kind: 'rollback' };
+  if (later.patchId !== null && later.patchId === change.inversePatchId) return { kind: 'rollback', match: 'patch-id' };
   const theirs = new Set(later.hunks);
   const hunks = change.inverseHunks.filter((h) => theirs.has(h)).length;
-  return hunks > 0 && hunks < change.inverseHunks.length ? { kind: 'partial-reversal', hunks, of: change.inverseHunks.length } : { kind: 'none' };
+  if (hunks === 0) return { kind: 'none' };
+  return hunks === change.inverseHunks.length ? { kind: 'rollback', match: 'all-hunks' } : { kind: 'partial-reversal', hunks, of: change.inverseHunks.length };
 }
 
 /**

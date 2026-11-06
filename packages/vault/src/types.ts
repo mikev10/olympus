@@ -879,7 +879,12 @@ export type LeadTime =
  * time (D-R8a-08). `window-closed`: the runtime closed the change's window.
  */
 export type ObservationSignal =
-  | { readonly kind: 'rollback'; readonly commit: string; readonly at: SourcedTime; readonly committedAt: string }
+  /**
+   * `match` is how it was found: `patch-id`, an exact inverse; or
+   * `all-hunks`, a commit that inverts every hunk of the change and edits
+   * something else too, which is still the change undone (codex-5, gemini-1).
+   */
+  | { readonly kind: 'rollback'; readonly commit: string; readonly at: SourcedTime; readonly committedAt: string; readonly match: 'patch-id' | 'all-hunks' }
   | { readonly kind: 'partial-reversal'; readonly commit: string; readonly at: SourcedTime; readonly hunks: number; readonly of: number }
   | { readonly kind: 'check-failure'; readonly commit: string; readonly at: SourcedTime; readonly checkRun: string; readonly conclusion: string }
   | { readonly kind: 'pushed'; readonly commit: string; readonly at: SourcedTime }
