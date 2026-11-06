@@ -119,6 +119,7 @@ export async function walkHistory(vault: Vault, target: ObserveTarget | null, po
     return done();
   }
   const { checkout, branch } = target;
+  const graceMs = 0;
   const stamp = (): string => new Date(now()).toISOString();
 
   // What the store already holds: every merge, every observation, and every earlier walk.
@@ -138,8 +139,11 @@ export async function walkHistory(vault: Vault, target: ObserveTarget | null, po
   const openRuns = [...merged.values()].filter((r) => !closes(runObservations.get(r.runId) ?? []));
   let head: string;
   let commits: BranchCommit[];
+  // When the head was read: a window closes only if it had closed by then, so no close covers history the walk did not read (codex-2).
+  let headAt: number;
   try {
     head = await resolveCommit(checkout, `refs/heads/${branch}`);
+    headAt = now();
     let from = lastTo;
     if (from === null) {
       // The first walk starts before the oldest merge still observed, so a revert of it already on the branch is found (D-R8a-10).
@@ -209,7 +213,7 @@ export async function walkHistory(vault: Vault, target: ObserveTarget | null, po
     // Windows close after every reversal is recorded (D-R8a-07).
     const firstSeen = new Map<string, OpenedChange>([...openedBefore, ...coverage.opened.map((o) => [o.change, o] as const)]);
     for (const change of open) {
-      if (now() < Date.parse(change.opened.at) + windowMs) continue;
+      if (headAt < Date.parse(change.opened.at) + windowMs + graceMs) continue;
       const committedAt = (await commitOf(checkout, change.change)).committedAt;
       const record: ObservationRecord = {
         runId: change.runId, change: change.change, recordedAt: stamp(), collectedBy: 'runtime',
