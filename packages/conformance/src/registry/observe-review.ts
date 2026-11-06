@@ -63,7 +63,9 @@ const CLOSES_ONLY_WHAT_THE_HEAD_COVERED = runtime({
       const a = await rig.repo.merge('feature-a', { 'c.txt': 'c\n' }, 'Add c');
       await seedMerge(rig.vault, RUN_A, a, new Date(mergedAt).toISOString());
       // A clock that moves a minute on every read: the window closes during the walk, after the head was read.
-      rig.clock.now = mergedAt + PAST_CLOSE - 120_000 - 60_000;
+      // The job reads the clock once before the walk reads the head, so the head is read a millisecond before the window
+      // closes, and every later read is after it.
+      rig.clock.now = mergedAt + PAST_CLOSE - 60_000 - 2 * 60_000 - 1;
       rig.clock.tick = 60_000;
       await walkOn(rig, '2026-11-05');
       if (kinds(await rig.vault.readObservations(RUN_A), 'window-closed').length > 0) throw new Error('I5: a window closed over time after the head the walk read');
