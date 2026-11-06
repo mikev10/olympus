@@ -1,3 +1,19 @@
+# External review of R8a, codex, 2026-11-05
+
+This is the codex family's review of R8a, post-merge attribution and the baseline. The reply follows the header unchanged. The triage covering both reviews is `2026-11-05-R8a-post-merge-attribution-triage.md`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex. A headless `codex exec` run under a read-only sandbox, with recorded approval policy `never`, in an empty scratch working directory and a scratch config home holding only `auth.json`, with an environment of `CODEX_HOME` alone. The pre-run listing of both is the manifest's `cleanRoom`.
+- **Cross-family agreement:** Raised codex-1 with gemini-2 (a dropped merge closes clean) and codex-5 with gemini-1 (a full revert plus an edit vanishes). Raised alone: codex-2, -3, -4, -6, -7, -8, -9, and the coverage note.
+- **Date:** 2026-11-05
+- **Bundle:** `2026-11-05-R8a-post-merge-attribution-review-bundle.txt`, SHA-256 `972319244dcf87c895c3e7bd72e79b09911cf84a3cf827b85b4a75b2210f8c8b`, base `reviewed/R13b`, head `9ecba3a` (the unit branch as shipped in PR #100). The bundle holds every new file in full and every modified file as a function-context diff. It excludes `docs/decisions.md`, `docs/reviews/`, `docs/plan/`, and `pnpm-lock.yaml`. Prompt: `2026-11-05-R8a-post-merge-attribution-review-prompt.txt`.
+- **Prior context and lookups:** It stated that it had no prior project context and performed no external lookups. It also stated that local filesystem access was blocked. This is a self-report and cannot be verified independently.
+- **Coverage, and any gap:** Items 1, 3, 5, 6, and 7 were answered. On item 2 it named one coverage gap and no tautology. Item 4 had no entry.
+- **Citations:** Line numbers are positions in the bundle's new-side diff hunks, not in the repository. Each finding was located by its function before it was judged.
+
+---
+
 BASE: reviewed/R13b  
 HEAD: 9ecba3a  
 packages/vault/src/types.ts  

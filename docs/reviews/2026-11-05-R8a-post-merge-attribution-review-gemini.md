@@ -1,3 +1,19 @@
+# External review of R8a, gemini, 2026-11-05
+
+This is the gemini family's review of R8a, post-merge attribution and the baseline. The reply follows the header unchanged. The triage covering both reviews is `2026-11-05-R8a-post-merge-attribution-triage.md`.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini. A direct `generateContent` API call to `gemini-3.1-pro-preview`, offering no tools. `cleanRoom` is `null` because an API call loads no local configuration.
+- **Cross-family agreement:** Raised gemini-1 with codex-5 and gemini-2 with codex-1. Raised alone: gemini-3.
+- **Date:** 2026-11-05
+- **Bundle:** `2026-11-05-R8a-post-merge-attribution-review-bundle.txt`, SHA-256 `972319244dcf87c895c3e7bd72e79b09911cf84a3cf827b85b4a75b2210f8c8b`, base `reviewed/R13b`, head `9ecba3a` (the unit branch as shipped in PR #100). The bundle holds every new file in full and every modified file as a function-context diff. It excludes `docs/decisions.md`, `docs/reviews/`, `docs/plan/`, and `pnpm-lock.yaml`. Prompt: `2026-11-05-R8a-post-merge-attribution-review-prompt.txt`.
+- **Prior context and lookups:** It stated that it performed no lookups and held no prior context. This is a self-report and cannot be verified independently.
+- **Coverage, and any gap:** Items 1, 3, 6, and 7 were answered. Items 2, 4, and 5 had no entry.
+- **Citations:** Line numbers are positions in the bundle's new-side diff hunks, not in the repository. Each finding was located by its function before it was judged.
+
+---
+
 BASE: reviewed/R13b
 HEAD: 9ecba3a
 packages/vault/src/types.ts

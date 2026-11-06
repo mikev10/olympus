@@ -7850,3 +7850,44 @@ payload as where check failures come from. The spec is
     rates by design (D-R8a-07);
   - the window a walk applies is the policy's when it runs, recorded in each
     `window-closed` record (D-R8a-05).
+
+### D-R8a-15: what the external review changed, and what it left
+
+Triage: `docs/reviews/2026-11-05-R8a-post-merge-attribution-triage.md`. Both
+families counted on the first run. 13 findings: 11 fixed, 1 stated as a limit,
+1 rejected. Each fix landed after an assertion of the reviewer's construction
+was shown failing on the code as reviewed.
+
+- **The walk's start, and every watched change, must be on the head's
+  first-parent history**, or the walk is refused `history-rewritten`, naming
+  them (codex-1, gemini-2). This replaces the plain ancestry check that
+  D-R8a-10 relied on. Reverse by restoring `isAncestor` in `walkHistory`.
+- **A window closes only if it had closed when the head was read**, and only
+  once `windowMs` plus `maxDeliveryAgeMs` have passed (codex-2, codex-4). The
+  delivery age is the bound intake already enforces on a signed event, so a
+  failure the window covered has arrived by then or never will. Each
+  `window-closed` carries `graceMs`. This refines D-R8a-07: the rule that a
+  signal counts only if recorded before the close stands, and the close now
+  waits for every delivery that could still be valid. Reverse by setting the
+  grace to 0 and using the close-time clock.
+- **A commit that inverts every hunk of a change is a rollback**, recorded
+  `match: 'all-hunks'`, beside `match: 'patch-id'` (codex-5, gemini-1). This
+  extends D-A-OB-04's exact-inverse rule to a whole reversal that carries an
+  unrelated edit. A partial reversal is still some hunks and not all, and is
+  still never counted. Reverse in `classifyReversal`.
+- **Every diff is read with `--text`** (gemini-3). A `-diff` or `binary`
+  attribute emptied the hunks a partial reversal is matched on. An exact
+  rollback was already found, through the blob ids that `--full-index` writes.
+- **A signal kept beside the runs on a run's merge commit joins that run**
+  in the derivation (`RunRecords.mergeCommit`), and leaves the baseline and the
+  unattributed count (codex-3).
+- **The store checks each observation kind's fields whole** (codex-7).
+- **A schedule naming `observe-history` needs `ci-failure` enabled, routed
+  to `observe-signal`, and subscribed** (codex-8). Without that route, a
+  closed window would read as free of failures nothing collected.
+- **Known limit (codex-6):** the line's windows open at GitHub's merge time,
+  and the baseline's when a walk first sees the change. The report now says
+  so. Opening a baseline window at a recorded push time would narrow the gap,
+  and is left as an option.
+- **Rejected (codex-9):** the npm scope is exempt from the naming check by
+  construction.
