@@ -70,6 +70,16 @@ export async function isAncestor(checkout: string, ancestor: string, descendant:
   }
 }
 
+/**
+ * Every commit on `head`'s first-parent chain: the default branch's own
+ * history, which a commit reachable only through a merge's second parent is
+ * not on (codex-1).
+ */
+export async function firstParentChain(checkout: string, head: string): Promise<Set<string>> {
+  const out = await git(checkout, 'rev-list', '--first-parent', requireOid(head, 'head'));
+  return new Set(out.split('\n').filter((l) => l !== '').map((l) => requireOid(l, 'commit')));
+}
+
 /** A commit's parents and committer date. */
 export async function commitOf(checkout: string, commit: string): Promise<BranchCommit> {
   const out = (await git(checkout, 'rev-list', '--no-walk', '--parents', '--format=%cI', requireOid(commit, 'commit'))).trim().split('\n');

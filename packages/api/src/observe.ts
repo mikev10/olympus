@@ -24,7 +24,7 @@ import {
   type OpenedChange, type SourcedTime, type Vault,
 } from '@olympus-ai/vault';
 import {
-  changeInverse, classifyReversal, commitDiff, commitOf, firstParents, isAncestor, leadTimeOf,
+  changeInverse, classifyReversal, commitDiff, commitOf, firstParentChain, firstParents, leadTimeOf,
   type BranchCommit, type ChangeInverse, type CommitDiff,
 } from './history.js';
 import { readIntegration } from './line.js';
@@ -147,8 +147,17 @@ export async function walkHistory(vault: Vault, target: ObserveTarget | null, po
       from = oldest === undefined ? head : ((await commitOf(checkout, oldest.mergeCommit)).parents[0] ?? null);
     }
     coverage.from = from;
-    if (from !== null && !(await isAncestor(checkout, from, head))) {
-      refusals.push({ part: 'history', cause: 'history-rewritten', detail: `${from}, where the walk last stopped, is not an ancestor of ${branch}'s head ${head}` });
+    // The walk's start and every change still watched must be on the branch's own first-parent history. One an
+    // ancestor only through a merge's second parent, or dropped by a reset, is history rewritten under the record,
+    // never a change left to close clean (codex-1, gemini-2).
+    const chain = await firstParentChain(checkout, head);
+    if (from !== null && !chain.has(from)) {
+      refusals.push({ part: 'history', cause: 'history-rewritten', detail: `${from}, where the walk last stopped, is not on ${branch}'s first-parent history at ${head}` });
+      return done();
+    }
+    const dropped = [...openRuns.map((r) => r.mergeCommit), ...openedBefore.keys()].filter((c) => !chain.has(c));
+    if (dropped.length > 0) {
+      refusals.push({ part: 'history', cause: 'history-rewritten', detail: `changes still watched are no longer on ${branch}'s first-parent history at ${head}: ${dropped.join(', ')}` });
       return done();
     }
     commits = from === head ? [] : await firstParents(checkout, from, head);
