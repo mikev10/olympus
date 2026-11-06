@@ -129,7 +129,7 @@ const ATTRIBUTES_DO_NOT_BLIND_THE_DIFF = runtime({
   title: "a .gitattributes that marks the changed files -diff or binary hides neither a rollback of them nor a partial reversal (gemini-3)",
   run: async () => {
     await withObserve('r8a-attributes-', async (rig) => {
-      await rig.repo.commit({ '.gitattributes': '*.txt -diff\n*.dat binary\n' }, 'attributes');
+      await rig.repo.commit({ '.gitattributes': '*.txt -diff\n*.dat binary\n', 'e.txt': LINES(12) }, 'attributes');
       const a = await rig.repo.merge('feature-a', { 'a.txt': LINES(12, { 2: 'two, changed' }), 'd.dat': 'data\n' }, 'Change a');
       await seedMerge(rig.vault, RUN_A, a, ago(10_000));
       rig.repo.git(['revert', '-m', '1', '--no-edit', a]);

@@ -7,7 +7,7 @@
  * message: a revert is found by what it does, never by what it says.
  *
  * Only plumbing commands run, each with `core.fsmonitor=false`, and every
- * diff with `--no-ext-diff` and `--no-textconv`, so no command the
+ * diff with `--text`, `--no-ext-diff`, and `--no-textconv`, so no command the
  * repository's configuration names runs on a read.
  */
 import { execFile, spawn } from 'node:child_process';
@@ -98,11 +98,15 @@ async function emptyTree(checkout: string): Promise<string> {
   return requireOid((await gitWith(checkout, '', 'mktree')).trim(), 'empty tree');
 }
 
-/** The patch from `a` to `b`, with no external diff or text conversion; `a` null is the empty tree. */
+/**
+ * The patch from `a` to `b`, with no external diff or text conversion; `a` null is the empty tree.
+ * `--text` diffs every file as text, so a `.gitattributes` marking files `-diff` or `binary` cannot empty
+ * the hunks a partial reversal is matched on (gemini-3).
+ */
 async function patch(checkout: string, a: string | null, b: string, context: 'default' | 'none'): Promise<string> {
   const left = a ?? (await emptyTree(checkout));
   return git(
-    checkout, 'diff-tree', '-p', '-r', '--no-ext-diff', '--no-textconv', '--no-color', '--no-renames', '--full-index',
+    checkout, 'diff-tree', '-p', '-r', '--text', '--no-ext-diff', '--no-textconv', '--no-color', '--no-renames', '--full-index',
     ...(context === 'none' ? ['-U0'] : []), requireOid(left, 'tree'), requireOid(b, 'tree'),
   );
 }
