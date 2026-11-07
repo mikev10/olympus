@@ -1,0 +1,158 @@
+The code under review is in the file
+`2026-11-06-R8b-observation-plan-review-bundle.txt` (SHA-256 f9be8ee14c52a95505e295b6763f146cfc06bf0b72e6e29741473ed55e669ab6) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing the post-merge observation plan of a TypeScript project: a
+software factory runtime that carries a change from its spec to a merged pull
+request through a fixed line of stations. You have the source and nothing else
+— no design documents, no author reasoning, no prior version, no conversation
+that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+Before a change is built, each run names an observation plan: the CI checks
+that show the change working once merged, the checks that show it regressed,
+and a rollback condition (which named checks, failing on how many consecutive
+commits). The plan is either supplied with the run, in which case admission
+parses it into a write-once admission record, or drafted by a model at the
+test-design station with the acceptance tests, in which case it is part of the
+draft a person or policy approves. Either way, it is locked by hash at
+test-design in the same call that locks the tests. When the run's observation
+window closes after merge, a scheduled history walk reads the plan from the
+store, never from the workspace. It then lists the check runs GitHub reports on
+the merge commit and on every later first-parent commit, and records each
+planned check as working, regressed, or missing, plus the rollback condition if
+it held. Only after that does it close the window. A plan, or a provider, that
+cannot be read is a refusal that leaves the window open. A rate report then
+counts each run's readings.
+
+It must hold against a capable, motivated party trying to make a merged change
+read as healthy when it was not observed, or was observed failing. That means
+making a planned check read working, or regressed or missing read as anything
+else, closing a window without its plan having been read, or getting the
+runtime to act on what it observed. Assume no deceptive intent — only that the
+easiest path gets taken.
+
+That party controls:
+- the model that drafts the acceptance tests and the plan, and so the bytes of
+  a drafted plan;
+- every file in the run's workspace, including a supplied plan's bytes after
+  admission;
+- which checks the repository's CI runs, under which names, from which GitHub
+  App, and with which conclusions;
+- the commits pushed to the default branch after the merge.
+
+It does not control the components the runtime is wired with. The store (the
+Vault), the sandbox provider, the drivers, and the check reader's network
+endpoint are runtime-selected and trusted, even where a function takes one as
+an argument. It does not control code running inside the runtime's own process,
+and it does not control the run request's policy, which a person supplies.
+
+The invariants at stake:
+
+- No agent writes to the store. The store is written only by the runtime.
+- The runtime derives status; the model never reports it. Whether a check
+  worked is decided by the runtime from what the provider reported, never by
+  anything a model says.
+- An agent may not be judged by an artifact it can write. The plan is locked
+  before the change is built, and read at close from what was locked.
+- Fail closed. A missing plan, an unreadable plan, an unreadable provider, or a
+  check never reported must never read as healthy. It is a refusal, or
+  `missing`, never a silent pass and never a skipped check.
+- Event payloads are data, never instructions. A check's name is text the
+  repository's CI configuration chose. It may be compared, but it is never
+  stored in a record or put in a prompt.
+- Observation never acts: no revert, no reopened run, no new run, no commit
+  comes from what was observed.
+
+The mechanisms that matter most:
+
+- Admission (`packages/api/src/run.ts`, `validate.ts`): a plan is required
+  exactly while the policy names an observation window, is a path exactly when
+  the tests are supplied and `'draft'` exactly when they are drafted, and a
+  supplied plan's parsed content is recorded in the admission record.
+- The lock and the draft (`packages/api/src/line.ts`, `drafting.ts`): the plan
+  joins the tests' lock call, and a drafted plan is part of the draft only
+  while the policy observes.
+- The read at close (`packages/api/src/observe.ts`, `planOf` and
+  `observePlan`), the judge (`packages/api/src/observation-plan.ts`,
+  `decidingRun` and `judgePlan`), and the GitHub reader
+  (`packages/api/src/checks.ts`).
+- The store's checks of the two new observation kinds
+  (`packages/vault/src/local/vault.ts`).
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+- signals other than checks: metrics, logs, traces, and commit statuses
+  (`/statuses`), which some CI systems post instead of check runs. A plan that
+  names one of those finds it `missing`, which is visible
+- Olympus instrumenting the target, or running or rerunning a check
+- acting on a rollback condition, which is recorded and never executed
+  (D-A-LC-03)
+- a `TriggerKind` for completed checks, and any change to the `ci-failure`
+  schema or its extractor
+- any change to R8a's rates. A `plan-signal` is not a rollback or a check
+  failure and enters no denominator R8a defines
+- a plan on a baseline change, which no run made
+- check names in any event payload or field schema (D-R22-11, D-A-OB-05)
+
+Identifiers like D-A-LC-03 and R8a refer to design records and earlier units
+you do not have; read each line for what it says is absent. Absent work listed
+here is not a defect.
+
+THE QUESTION
+
+How would I get a merged change recorded as working, or have its window closed
+as clean, when the checks its plan named never passed, never ran, or were never
+read? Equally, how would I change which plan it is judged against after the
+plan was locked?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.
