@@ -163,15 +163,89 @@ following, and each fails when its check is deleted:
   never reported is recorded as missing, never skipped, so an uninstrumented
   change is visible as one.
 
-**R8b needs a contract amendment before it starts.** A "works" signal is a
-check that succeeded, and no trigger delivers a success
-(`triggers/src/github.ts:145-147`). The R8b amendment chooses between a
-`TriggerKind` for completed checks and a provider adapter that reads check
-runs, and it decides what language a plan names a check in, since D-R22-11
-keeps check names out of every payload schema (D-A-OB-07).
+**The amendment (D-A-OB-09 to D-A-OB-14), drafted against `v2` at bd03b6f.**
+A "works" signal is a check that succeeded, and no trigger delivers a success
+(`triggers/src/github.ts:145-147`). R8b reads checks from the provider rather
+than adding a trigger kind. At window close, a provider adapter lists the
+check runs on the change's first-parent commits, and the plan's signals are
+judged against that list (D-A-OB-09). A plan names a check by the producing
+app's slug and the check run's exact name. The comparison is byte-for-byte,
+and the provider's name never enters a payload, a record, or a prompt
+(D-A-OB-10).
 
-**Out of scope:** signals other than checks (metrics, logs, traces, which
-need a provider adapter); Olympus instrumenting the target; acting on a
-rollback condition, which is recorded and never executed (D-A-LC-03).
+**Deliver, as amended:**
 
-**Gate paths, conformance, and acceptance:** set by R8b's amendment.
+- **The plan file.** `artifacts.observationPlan` on the run request, a path
+  or `'draft'`. It is `'draft'` exactly when the acceptance tests are, and is
+  then drafted at `test-design` under the same drafter, critic, and approval
+  R19 gives the tests (`api/src/drafting.ts:730-743`). It is JSON:
+  `{ "works": [CheckRef, ...], "regressed": [CheckRef, ...], "rollback": { "regressed": [index, ...], "consecutive": n } }`,
+  where a `CheckRef` is `{ "app": slug, "name": text }`. Each list holds at
+  least one check, `rollback.regressed` indexes into `regressed`, and
+  `consecutive` is at least 1 (D-A-OB-11).
+- **Required while observe is on.** A policy that names an observation window
+  requires a plan on every run. A plan on a run whose policy names no window
+  is refused, because nothing would ever read it (I5, D-A-OB-12).
+- **Locked at `test-design`.** The plan's path joins the tests in the one
+  `lockAdmitted` call (`api/src/line.ts:432`) and is re-verified at every
+  transition. A drafted plan is locked with the drafted tests when the draft
+  is approved. The lock's shape does not change.
+- **Read at window close.** For a run with a plan, `observe-history` reads,
+  through the adapter, the check runs on the merge commit and on every
+  first-parent commit up to the head it closes at, before it records
+  `window-closed`. Each named check is recorded as one `plan-signal`
+  observation, `working`, `regressed`, or `missing`, with the commit, the
+  check run's id, its conclusion, and its `completed_at` as a
+  `provider-reported` time. A rollback condition that is met is recorded as
+  `rollback-condition-met`, and nothing acts on it (D-A-OB-13, D-A-LC-03).
+- **Fail closed on the provider.** If the adapter cannot read a commit's
+  check runs (no token, 401, 403, 404, timeout, or a partial page), the walk
+  records a `provider-unreadable` refusal and leaves that run's window open.
+  The run stays `observing`, and the next walk tries again. Such a check is
+  never recorded as `missing`, and the window never closes unread (I5,
+  D-A-OB-14).
+
+**Out of scope:**
+
+- signals other than checks: metrics, logs, traces, and commit statuses
+  (`/statuses`), which some CI systems post instead of check runs. A plan
+  that names one of those finds it `missing`, which is visible
+- Olympus instrumenting the target, or running or rerunning a check
+- acting on a rollback condition, which is recorded and never executed
+  (D-A-LC-03)
+- a `TriggerKind` for completed checks, and any change to the `ci-failure`
+  schema or its extractor
+- any change to R8a's rates. A `plan-signal` is not a rollback or a check
+  failure and enters no denominator R8a defines
+- a plan on a baseline change, which no run made
+- check names in any event payload or field schema (D-R22-11, D-A-OB-05)
+
+**Gate paths:** `packages/vault/src/types.ts` for the `plan-signal` and
+`rollback-condition-met` signals, and `packages/conformance/` for the
+registry entries. The plan's type and validator live beside the run request
+in `packages/api`, and the adapter's port and its GitHub client live beside
+`Integrator` (`api/src/integrate.ts:41`), so the core gains no provider API
+(D-A-BR-04). The pull request takes `gate-change`, and the squash merge
+carries `Gate-Change: acknowledged`.
+
+**Conformance and acceptance:** `pnpm typecheck`, `pnpm lint`, and
+`pnpm conformance` pass. The report names an assertion for each of the
+following, and each fails when its check is deleted:
+
+- a run whose policy names a window and whose request has no plan is refused
+  at admission, and a run whose plan is absent or changed at `test-design`
+  is refused there, never admitted unplanned
+- a plan on a run whose policy names no window is refused
+- the plan is in the `test-design` lock manifest, and a later edit to it is
+  caught as tamper at the next transition
+- a plan is drafted at `test-design` only when the tests are, and a drafted
+  plan is locked only through the draft's approval
+- each named check is recorded as `working`, `regressed`, or `missing` at
+  window close. A check the provider never reported is `missing`, never
+  skipped
+- a check run with the plan's name but another app is not the plan's check,
+  and neither is one whose name differs by case or whitespace
+- an unreadable provider is recorded as a refusal, the window stays open,
+  and the run is counted as observing
+- a rollback condition that is met is recorded, and it starts, reverts, and
+  reopens nothing
