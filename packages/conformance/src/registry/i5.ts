@@ -37,6 +37,7 @@ import { INDETERMINATE_PROBE_LOWERS, UNSUPPORTED_STACK_REFUSES, REFUSAL_NAMES_TH
 import { R20_I5 } from './roles.js';
 import { R13A_I5 } from './nightly.js';
 import { R8A_I5 } from './observe.js';
+import { R8B_I5 } from './observe-plan.js';
 import { R8A_REVIEW_I5 } from './observe-review.js';
 import { R13B_I5 } from './nightly-review.js';
 import { R22_I5 } from './triggers.js';
@@ -61,6 +62,7 @@ export const I5: InvariantEntry = {
     // R13a: the nightly checks that call no model.
     ...R13A_I5,
     ...R8A_I5,
+    ...R8B_I5,
     ...R8A_REVIEW_I5,
     // R13b: the nightly reviewers.
     ...R13B_I5,

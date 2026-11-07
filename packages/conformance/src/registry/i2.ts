@@ -19,6 +19,7 @@ import { BASE_RESULTS_ARE_THE_RUNTIMES, RESUME_READS_THE_BASE_RECORD } from './b
 import { R20_I2 } from './roles.js';
 import { R13A_I2 } from './nightly.js';
 import { R8A_I2 } from './observe.js';
+import { R8B_I2 } from './observe-plan.js';
 import { R8A_REVIEW_I2 } from './observe-review.js';
 import { R13B_I2 } from './nightly-review.js';
 
@@ -31,6 +32,7 @@ export const I2: InvariantEntry = {
     // R13a: the nightly checks that call no model.
     ...R13A_I2,
     ...R8A_I2,
+    ...R8B_I2,
     ...R8A_REVIEW_I2,
     // R13b: the nightly reviewers.
     ...R13B_I2,

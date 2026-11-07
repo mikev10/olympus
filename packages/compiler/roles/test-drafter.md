@@ -25,6 +25,16 @@ describes, not an implementation you have seen.
   holds already. At least one required check declares `"fails"`. For each
   authorization rule `security.json` names, write a test in which a caller the
   rule refuses is refused, and name the rule in that check's `deniesRule`.
+- `observation.json`, in the same directory, when the run observes its
+  change once merged: `{ "works": [...], "regressed": [...], "rollback":
+  { "regressed": [...], "consecutive": n } }`. Each check is `{ "app",
+  "name" }`: the slug of the app that runs it, such as `github-actions`, and
+  the check's exact name. Name only checks the spec says the repository's CI
+  runs. `works` holds the checks that pass when the change works,
+  `regressed` the checks that fail when it has regressed, and `rollback`
+  the indexes into `regressed` that, failing together on `consecutive`
+  commits in a row, call for a rollback. A check the target never reports is
+  recorded as missing, so do not invent one.
 
 ## What you must not do
 

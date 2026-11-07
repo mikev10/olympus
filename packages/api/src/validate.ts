@@ -111,7 +111,9 @@ export type RequestProblemCode =
   /** An intent that is not a person's text from the principal's channel (R19, I7). */
   | 'not-an-intent'
   /** The roles or rubrics the run needs, or the drivers that seat a drafter or a critic, are not given (R19). */
-  | 'unseated';
+  | 'unseated'
+  /** An observation plan that does not hold its shape: a check that is not an app slug and an exact name, an empty list, or a rollback condition that indexes nothing (R8b, D-A-OB-11). */
+  | 'invalid-plan';
 
 export interface RequestProblem {
   /** The field, as a path into the request or an artifact: `graph.tasks[1].dependsOn[0]`. */
@@ -215,6 +217,14 @@ function artifactProblems(artifacts: unknown, report: Report): void {
   if (a.acceptanceManifest !== undefined) {
     if (testsDrafted) report('artifacts.acceptanceManifest', 'not-applicable', 'drafted acceptance tests carry their own acceptance manifest; a supplied one is not named beside them');
     else one('artifacts.acceptanceManifest', a.acceptanceManifest);
+  }
+  // The plan is drafted exactly when the tests are, under one approval (R8b, D-A-OB-12).
+  const plan = a.observationPlan;
+  if (plan === 'draft') {
+    if (!testsDrafted) report('artifacts.observationPlan', 'not-applicable', 'a plan is drafted with drafted acceptance tests; supplied tests come with a supplied plan');
+  } else if (plan !== undefined) {
+    if (testsDrafted) report('artifacts.observationPlan', 'not-applicable', "drafted acceptance tests draft their plan; it is 'draft', never a supplied file");
+    else one('artifacts.observationPlan', plan);
   }
   const parts = a.specParts;
   const named = new Set<string>();

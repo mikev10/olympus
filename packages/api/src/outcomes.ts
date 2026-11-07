@@ -171,6 +171,19 @@ export interface BySource {
 /** How one merged run's observation stands: still watched, or closed with or without a failure. */
 export type RunObservation = 'observing' | 'clean' | 'failed';
 
+/**
+ * A merged run's observation plan as the runtime judged it at window close
+ * (R8b, D-A-OB-13): how many planned checks were seen working, seen
+ * regressed, or never reported, and whether the rollback condition held. It
+ * sits beside the rates and enters none of them.
+ */
+export interface PlanReading {
+  readonly working: number;
+  readonly regressed: number;
+  readonly missing: number;
+  readonly rollbackConditionMet: boolean;
+}
+
 /** What post-merge observation shows (R8a). Each rate is over changes whose window closed. */
 export interface ObservedSafety {
   /** Merged runs whose window has not closed: counted here, in no denominator (D-A-OB-03). */
@@ -188,6 +201,8 @@ export interface ObservedSafety {
   /** Failed checks beside the runs on a commit no closed change carries: still observing, or no change a walk opened. */
   readonly unattributed: number;
   readonly perRun: Keyed<RunObservation>;
+  /** Each merged run whose plan was read, by run id; a run with no plan, or one still observing, has no entry. */
+  readonly plans: Keyed<PlanReading>;
 }
 
 /** Observations kept beside the runs: the baseline's changes, and signals no run's commit carried. */
@@ -492,6 +507,16 @@ function observedFigures(runs: readonly RunRecords[], baseline: BaselineRecords 
   }
   const perRun: Record<string, RunObservation> = {};
   for (const { run, outcome } of outcomesOf) perRun[run.runId] = !outcome.closed ? 'observing' : outcome.failed ? 'failed' : 'clean';
+  const plans: Record<string, PlanReading> = {};
+  for (const run of merged) {
+    const read = run.observations.filter((o) => o.signal.kind === 'plan-signal');
+    if (read.length === 0) continue;
+    const count = (status: 'working' | 'regressed' | 'missing'): number => read.filter((o) => o.signal.kind === 'plan-signal' && o.signal.status === status).length;
+    plans[run.runId] = {
+      working: count('working'), regressed: count('regressed'), missing: count('missing'),
+      rollbackConditionMet: run.observations.some((o) => o.signal.kind === 'rollback-condition-met'),
+    };
+  }
 
   // The baseline: every change a walk closed beside the runs, joined with the signals beside the runs on its commit.
   const records = besideRecords.filter((o) => !runCommits.has(o.change));
@@ -532,6 +557,7 @@ function observedFigures(runs: readonly RunRecords[], baseline: BaselineRecords 
       checkFailures: { line: sum(own, (c) => c.checkFailures), baseline: sum(baseChanges, (c) => c.checkFailures) },
       unattributed,
       perRun,
+      plans,
     },
     timeToRestore: { line: bySource(own), baseline: bySource(baseChanges) },
     leadTime: { committerClaimed: distribution(lead), notMeasurable },

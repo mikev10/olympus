@@ -76,6 +76,7 @@ import {
   type LineContext,
 } from './line.js';
 import { denialRefusal, parseSecurityPart, type SecurityPart } from './security.js';
+import { parsePlan, planDraftPath } from './observation-plan.js';
 import { DRAFT_DIR, parseQuestions, parseRunRequirements, type RunRequirements } from './spec-parts.js';
 import { mergedCheckProblems, parseManifest } from './validate.js';
 import { suiteBindingProblems, taskResultProblems, writesOutsideGrant } from './verification.js';
@@ -500,9 +501,11 @@ async function readTestDraft(ctx: LineContext, start: string, work: string): Pro
   const requirements = ctx.requirements;
   if (requirements === null) throw new Error('line: drafted tests reached test-design with no run-requirements part locked; admission refuses that');
   const manifestPath = manifestDraftPath(ctx.run.id);
+  // The plan is part of the draft only while the policy observes; otherwise it is a stray path, discarded unread (R8b, D-R8b-01).
+  const planPath = ctx.policy.triggers.observe === undefined ? null : planDraftPath(ctx.run.id);
   const testDir = requirements.testDirectory;
   const specPaths = new Set(specArtifacts(ctx).map((a) => a.path));
-  const drafted = (path: string): boolean => path === manifestPath || (under(testDir, path) && !specPaths.has(path));
+  const drafted = (path: string): boolean => path === manifestPath || path === planPath || (under(testDir, path) && !specPaths.has(path) && path !== planPath);
   const changed = (await ownDiff(start, work)).filter((e) => e.sha256 !== null).map((e) => e.path);
   const files: DraftFile[] = [];
   for (const path of changed.filter(drafted).sort()) {
@@ -510,7 +513,18 @@ async function readTestDraft(ctx: LineContext, start: string, work: string): Pro
     if (file !== undefined) files.push(file);
   }
   const problems: Array<{ path: string; code: string }> = [];
-  const tests = files.filter((f) => f.path !== manifestPath).map((f) => f.path);
+  const tests = files.filter((f) => f.path !== manifestPath && f.path !== planPath).map((f) => f.path);
+  if (planPath !== null) {
+    // A drafted plan is held to the shape a supplied one is held to at admission (D-A-OB-11).
+    const plan = files.find((f) => f.path === planPath);
+    const json = plan === undefined ? undefined : jsonOf(plan);
+    if (plan === undefined) problems.push({ path: planPath, code: 'missing' });
+    else if (json === undefined) problems.push({ path: planPath, code: 'not-json' });
+    else {
+      const parsed = parsePlan(json, 'plan');
+      if (!parsed.ok) for (const p of parsed.problems) problems.push({ path: `${planPath}#${p.path}`, code: p.code });
+    }
+  }
   if (tests.length === 0) problems.push({ path: testDir, code: 'missing' });
   const base = basePath(ctx.components.workspaces, ctx.run.id);
   for (const test of tests) if (await existsIn(base, test)) problems.push({ path: test, code: 'exists' });
@@ -739,7 +753,8 @@ export function lockedArtifacts(artifacts: LineArtifacts, runId: string, station
     };
   }
   const manifest = manifestDraftPath(runId);
-  return { ...artifacts, acceptanceTests: files.filter((f) => f.path !== manifest), acceptanceManifest: at(manifest) };
+  const plan = planDraftPath(runId);
+  return { ...artifacts, acceptanceTests: files.filter((f) => f.path !== manifest && f.path !== plan), acceptanceManifest: at(manifest), observationPlan: at(plan) };
 }
 
 /**

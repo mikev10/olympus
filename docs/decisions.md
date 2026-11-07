@@ -8094,3 +8094,31 @@ was shown failing on the code as reviewed.
   which is visible, never silent. Telling the drafter which checks the
   target's CI runs is a contract question for a later amendment. It goes in
   the PR body as an issue.
+
+### D-R8b-02: what the build decided that D-R8b-01 did not
+
+- **The admission record holds the plan, parsed.** `AdmissionRecord.artifacts`
+  gains `observationPlan`, `AdmittedPlan`, in `vault/src/types.ts`, the gate
+  path the amendment declared. A supplied plan's content is recorded there, so
+  the walk never reads the workspace. Its bytes are still hashed, locked at
+  `test-design`, and re-verified like every other artifact.
+- **A plan problem is a request problem.** The parser reports
+  `RequestProblem`s, with one new code, `invalid-plan`. Admission returns
+  them, and a test draft records their paths and codes, as it does a
+  manifest's. Rejected: a separate problem type, which would need a second
+  path through admission and drafting.
+- **Two refusal causes.** `NightlyRefusal` gains the parts `plan` and
+  `provider` and the causes `plan-unreadable` and `provider-unreadable`
+  (D-A-OB-14). A refusal makes the walk's record `refused`, as R8a's history
+  refusals do, while every window that could be closed still closes.
+- **R2's reading.** `ObservedSafety.plans` holds each read run's counts of
+  working, regressed, and missing checks, and whether the rollback condition
+  was met. It enters no rate (D-A-OB-13).
+- **The reader picks the deciding run itself.** It lists `filter=all`, and a
+  page count that does not reach the total, a run on another commit, or an id
+  listed twice is thrown, never trimmed. An error carries the status and
+  never the body, so the token cannot leak through one.
+- **The check is verified, not trusted.** Each R8b assertion was run with its
+  check removed: the window rule, the plan's place in the lock call, the
+  app-and-name comparison, the refusal that keeps a window open, the missing
+  plan in a draft, and the consecutive count. Each failed and was restored.

@@ -31,6 +31,7 @@ import {
   type NightlyReview, type ObservationCoverage, type RateSnapshot, type RecordDriftProblem, type SecurityCoverage, type Vault,
 } from '@olympus-ai/vault';
 import type { Intake } from './intake.js';
+import type { CheckReader } from './observation-plan.js';
 import { recordSignal, walkHistory } from './observe.js';
 import { reviewJob, type NightlySeatOptions } from './nightly-review.js';
 import { deriveOutcomes, readRunRecords, type RunEnding, type RunRecords } from './outcomes.js';
@@ -42,6 +43,8 @@ import type { WorkspaceStore } from './workspace.js';
 export interface NightlyTarget {
   readonly checkout: string;
   readonly branch: string;
+  /** What `observe-history` reads a run's planned checks through (R8b). Absent or null, a planned run's window stays open, refused. */
+  readonly checks?: CheckReader | null;
 }
 
 export interface NightlyOptions {

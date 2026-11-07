@@ -34,10 +34,15 @@
  * - `FACTORY_WEBHOOK_*`: each subscription's secret, named by the policy and
  *   read here on the host, never by a sandbox (D-A-TF-05). A subscription
  *   whose variable is unset verifies no delivery (I5)
+ * - `FACTORY_CHECKS_TOKEN`, optional: a token that reads the check runs of
+ *   `FACTORY_GIT_REPOSITORY`, never the merge token (R8b, D-A-OB-14). Unset,
+ *   a run with an observation plan is refused at its window's close, and the
+ *   window stays open until a host that can read its checks closes it
  *
  * A missing variable stops the host before it listens (I5).
  */
 
+import { GitHubCheckReader } from '../checks.js';
 import { createApiServer } from '../http/server.js';
 import { readFile } from 'node:fs/promises';
 import { composeHost, containerUser, parseCodexSeats, parseEndpointFile, webhookSecrets } from './compose.js';
@@ -74,6 +79,7 @@ const components = await composeHost({
     token: required('FACTORY_GIT_TOKEN'),
   },
 });
+const checksToken = process.env.FACTORY_CHECKS_TOKEN ?? '';
 const server = createApiServer({
   components,
   token: required('FACTORY_API_TOKEN'),
@@ -83,7 +89,10 @@ const server = createApiServer({
   // Only a name with the webhook prefix is ever read here, so a policy cannot name another host secret as one.
   secrets: webhookSecrets(process.env),
   // The nightly sweep scans the branch runs merge into, as the working copy holds it (D-R13a-04).
-  nightlyTarget: { checkout: required('FACTORY_REPOSITORY'), branch: required('FACTORY_GIT_BASE_BRANCH') },
+  nightlyTarget: {
+    checkout: required('FACTORY_REPOSITORY'), branch: required('FACTORY_GIT_BASE_BRANCH'),
+    checks: checksToken === '' ? null : new GitHubCheckReader({ repository: required('FACTORY_GIT_REPOSITORY'), token: checksToken }),
+  },
   rubricsDirectory: process.env.FACTORY_RUBRICS_DIR === undefined || process.env.FACTORY_RUBRICS_DIR === '' ? null : process.env.FACTORY_RUBRICS_DIR,
 });
 await server.listen(port, process.env.FACTORY_LISTEN_HOST ?? '127.0.0.1');
