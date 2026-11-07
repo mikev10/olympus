@@ -1,0 +1,48 @@
+{
+  "unit": "R8b",
+  "family": "gemini",
+  "artifacts": {
+    "promptFile": "2026-11-06-R8b-observation-plan-review-prompt.txt",
+    "bundleFile": "2026-11-06-R8b-observation-plan-review-bundle.txt",
+    "matchingPairs": 1
+  },
+  "invocation": {
+    "kind": "api",
+    "method": "POST",
+    "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent",
+    "modelRequested": "gemini-3.1-pro-preview",
+    "headerNames": [
+      "x-goog-api-key",
+      "content-type"
+    ]
+  },
+  "cleanRoom": null,
+  "exitCode": 0,
+  "timedOut": false,
+  "startedAt": "2026-11-07T04:06:56.358Z",
+  "endedAt": "2026-11-07T04:11:20.055Z",
+  "durationMs": 263697,
+  "cliVersion": "api:generativelanguage/v1beta",
+  "modelReported": "gemini-3.1-pro-preview",
+  "tokenUsage": {
+    "promptTokenCount": 65277,
+    "candidatesTokenCount": 449,
+    "totalTokenCount": 106829,
+    "thoughtsTokenCount": 41103
+  },
+  "payloadSha256": "8e0e5fdde5453253a8151c477d65f7ac3664f1b9a34ffb17a2c096fa20897b19",
+  "payloadBytes": 227421,
+  "ingestion": {
+    "kind": "complete",
+    "inputTokens": 65277,
+    "floor": 45484
+  },
+  "postRunFileCount": null,
+  "recordedApprovalPolicy": null,
+  "bundleSha256": "f9be8ee14c52a95505e295b6763f146cfc06bf0b72e6e29741473ed55e669ab6",
+  "integrity": {
+    "kind": "verified"
+  },
+  "replySha256": "86b300ee430125d4e06030d083109bb3c713529a1eef9091086d286a4b3bda7e",
+  "outcome": "counted"
+}
