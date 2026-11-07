@@ -7992,3 +7992,105 @@ was shown failing on the code as reviewed.
   and is left as an option.
 - **Rejected (codex-9):** the npm scope is exempt from the naming check by
   construction.
+
+## R8b: The observation plan
+
+### D-R8b-01: the boundary R8b was started on
+
+- **Unit:** R8b, the observation plan (`docs/plan/R8-observe.md`, as amended
+  by #101, D-A-OB-09 to D-A-OB-14). Depends on R8a (#100, `reviewed/R8a`) and
+  R19 (#64, `reviewed/R19`), both merged into `v2`.
+- **Deliverables:**
+  - `artifacts.observationPlan` on the run request, a path or `'draft'`,
+    validated at admission, required exactly while the policy names
+    `triggers.observe.windowMs`, and refused otherwise (D-A-OB-12);
+  - a supplied plan is locked at `test-design` in the same `lockAdmitted`
+    call as the tests and re-verified with every locked artifact; a drafted
+    plan is written by the test drafter at `.drafts/<run>/observation.json`
+    and locked with the approved draft;
+  - a `CheckReader` port and a `GitHubCheckReader` beside `Integrator`, with
+    its own read-only token (`FACTORY_CHECKS_TOKEN`);
+  - at window close, `observe-history` judges each planned check `working`,
+    `regressed`, or `missing`, records a `plan-signal` per check and
+    `rollback-condition-met` when the condition holds, and only then closes
+    the window. An unreadable plan or provider is a refusal, and the window
+    stays open (D-A-OB-13, D-A-OB-14);
+  - R2's run view counts each run's plan signals by status.
+- **Out of scope (verbatim from the amended spec):** signals other than
+  checks (metrics, logs, traces, and commit statuses); Olympus instrumenting
+  the target or running a check; acting on a rollback condition; a
+  `TriggerKind` for completed checks or any change to `ci-failure`; any
+  change to R8a's rates; a plan on a baseline change; check names in any
+  event payload or field schema.
+- **Acceptance:** `pnpm typecheck`, `pnpm lint`, `pnpm conformance`, and
+  `pnpm test` pass, and the report names one assertion for each of the eight
+  bullets under R8b's "Conformance and acceptance", each of which fails when
+  its check is deleted.
+- **Invariants touched:** I3, because an agent may not be judged by an
+  artifact it can write: the plan is locked before `build` and read only from
+  the store. I5, fail closed: a missing plan, an unreadable plan, and an
+  unreadable provider are all refusals. I2, the runtime derives status: the
+  runtime, never a model, judges each signal. I7, payloads are data: a
+  provider's check name is compared and dropped, never stored or prompted.
+  D-A-LC-03: no signal starts, reverts, or reopens anything. **Pending
+  registry entries owed:** none (`grep -rn "'R8b'" packages/conformance/src`
+  finds no match).
+- **Assumptions, each verified:**
+  - Check runs on a default-branch commit can be listed with `name`,
+    `app.slug`, `conclusion`, `completed_at`, and `head_sha`: `gh api
+    repos/mikev10/olympus/commits/bd03b6f/check-runs` answered 200.
+  - The admission record is in the store, write-once, and reachable from run
+    state (`run.ts:1131-1133`, `local/vault.ts:871-888`), so observe can read
+    a supplied plan without the workspace.
+  - A drafted plan's bytes are in the store: `DraftRecord.files[].base64`
+    (`vault/src/types.ts:454-472`), reached through
+    `RunState.drafts['test-design'].locked` (`core/src/run/types.ts:230-233`)
+    and `DraftLockRecord.draft` (`vault/src/types.ts:514-522`).
+  - The test-design lock takes a list of paths and refuses a path locked
+    twice (`line.ts:432`, `local/vault.ts:805-815`), so the plan joins that
+    one call.
+  - A test draft's paths are chosen by one predicate, and every other path is
+    discarded unread (`drafting.ts:505`, `:544`).
+  - `ctx.policy` is on the line context (`line.ts:166`), so the drafter's
+    draft rules can see whether observe is on.
+  - The walk closes windows in one loop after every reversal is recorded
+    (`observe.ts:215-232`), so the plan's reading goes in that loop, before
+    the close.
+- **Where the code differs from the amended spec:**
+  - The spec puts the plan's type beside the run request in `packages/api`.
+    The admission record, in `packages/vault`, has to hold it, and vault
+    imports nothing from api, so the type lives in `vault/src/types.ts`,
+    which is a declared gate path. Its validator stays in api.
+  - R8a's conformance seeds a merge with no run state (`registry/observe.ts:110`).
+    A real merged run always has one. R8b reads the plan through the run's
+    state, so `seedMerge` now seeds an admission and a state too.
+- **Choice points:**
+  - *A merged run whose state or admission cannot be read.* Chosen: a
+    `plan-unreadable` refusal, with the window left open. Rejected: closing it
+    as if it had no plan, which would close a planned run unobserved. Reverse
+    by changing `planOf` in `observe.ts`.
+  - *An admission record with no `observationPlan` field.* Such a record was
+    admitted before R8b, when no plan existed, so it is read as `none` and
+    closes as R8a closed it. The store is not writable by any agent (I1), so
+    an absent field cannot be forged. Reverse: none intended.
+  - *A drafted plan when observe is off.* Its path is not part of the draft,
+    so it is discarded unread like any other stray path. Rejected: a draft
+    problem, which would send a draft back over a file nothing reads.
+  - *Which commits a `regressed` check is read on.* Chosen: each first-parent
+    commit from the merge commit to the head the walk read. A commit after
+    the window's end can be included, by at most one walk's interval, as R8a's
+    reversals are. Rejected: cutting the range by commit time, which is
+    `committer-claimed` (D-A-OB-06).
+  - *Which run of a check counts.* Chosen: the latest completed run per
+    commit, ordered by `completed_at`, then by id. The reader lists
+    `filter=all` and picks the run itself. Rejected: GitHub's
+    `filter=latest`, whose grouping the runtime cannot check.
+  - *Reading a plan twice.* A run that already has `plan-signal` records is
+    not judged again, so a close that failed after its signals were written
+    is finished without duplicating them.
+- **Found, not in scope:** the test drafter sees only the locked spec
+  (`roles/test-drafter.md`), so a drafted plan can name only checks the spec
+  states. A plan that names checks the target does not run reads `missing`,
+  which is visible, never silent. Telling the drafter which checks the
+  target's CI runs is a contract question for a later amendment. It goes in
+  the PR body as an issue.
