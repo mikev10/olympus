@@ -210,13 +210,12 @@ const RUN_LEAVES_OBSERVE = runtime({
       const a = await rig.repo.merge('feature-a', { 'c.txt': 'c\n' }, 'Add c');
       const b = await rig.repo.merge('feature-b', { 'd.txt': 'd\n' }, 'Add d');
       const RUN_C = 'run-c' as RunId;
+      // Each merge is seeded with its run's admission and a state at `observe`, phase working (R8b's seedMerge).
       await seedMerge(rig.vault, RUN_A, a, ago(PAST_CLOSE));
       await seedMerge(rig.vault, RUN_C, b, ago(10_000));
       for (const runId of [RUN_A, RUN_C]) {
-        await rig.vault.commitRunState({
-          runId, admission: { runId, kind: 'admission', hash: 'c'.repeat(64) }, station: 'observe', stations: [{ station: 'observe', enteredAt: new Date().toISOString() }], phase: 'working',
-          tasks: {}, attempts: {}, results: {}, evidenceRefs: [], violations: [], approvals: [], reviews: [], drafts: {}, usage: [], cancelled: null, halted: null, version: '0',
-        }, '0');
+        const seeded = await rig.vault.readRunState(runId);
+        if (seeded.station !== 'observe' || seeded.phase !== 'working') throw new Error(`I2 control: ${runId} was seeded ${seeded.phase} at ${seeded.station}`);
       }
       await walkOn(rig, '2026-11-05');
       const closed = await rig.vault.readRunState(RUN_A);

@@ -152,6 +152,8 @@ export interface LineArtifacts {
   readonly spec: readonly AdmittedArtifact[];
   readonly acceptanceTests: readonly AdmittedArtifact[];
   readonly acceptanceManifest: AdmittedArtifact | null;
+  /** The observation plan, locked at `test-design` with the tests: supplied, or drafted once its draft is locked; null where none (R8b). */
+  readonly observationPlan: AdmittedArtifact | null;
   readonly verificationManifest: AdmittedArtifact;
   readonly taskGraph: AdmittedArtifact;
   readonly specParts: {
@@ -428,7 +430,12 @@ async function work(ctx: LineContext, station: StationId): Promise<StationRefusa
       // held, and the base is judged by the record rather than run again (D-A-BF-01).
       let baseRun = await ctx.components.vault.readBaseRun(ctx.run.id, null);
       if (baseRun === null) {
-        const manifests = [ctx.artifacts.verificationManifest, ...(ctx.artifacts.acceptanceManifest === null ? [] : [ctx.artifacts.acceptanceManifest])];
+        // The plan is locked by the same call as the tests, before anything is built (R8b, I3).
+        const manifests = [
+          ctx.artifacts.verificationManifest,
+          ...(ctx.artifacts.acceptanceManifest === null ? [] : [ctx.artifacts.acceptanceManifest]),
+          ...(ctx.artifacts.observationPlan === null ? [] : [ctx.artifacts.observationPlan]),
+        ];
         const refusal = await lockAdmitted(ctx, 'test-design', [...ctx.artifacts.acceptanceTests, ...manifests]);
         if (refusal !== undefined) return refusal;
         const tree = baseRunPath(ctx.components.workspaces, ctx.run.id);
@@ -947,8 +954,11 @@ export function joinParts(parts: ReadonlyArray<{ grant: ContextGrant; text: stri
 
 /** Every artifact the run was admitted with. Each is locked by its station, and none may appear in a task's diff. */
 function admittedArtifacts(ctx: LineContext): AdmittedArtifact[] {
-  const { acceptanceTests, acceptanceManifest, verificationManifest, taskGraph } = ctx.artifacts;
-  return [...specArtifacts(ctx), ...acceptanceTests, ...(acceptanceManifest === null ? [] : [acceptanceManifest]), verificationManifest, taskGraph];
+  const { acceptanceTests, acceptanceManifest, observationPlan, verificationManifest, taskGraph } = ctx.artifacts;
+  return [
+    ...specArtifacts(ctx), ...acceptanceTests, ...(acceptanceManifest === null ? [] : [acceptanceManifest]),
+    ...(observationPlan === null ? [] : [observationPlan]), verificationManifest, taskGraph,
+  ];
 }
 
 /** The spec's files and each part it carries: what `spec` locks, and what a `locked-spec` grant reads (R17). */

@@ -72,13 +72,14 @@ import { adapterAdmission, buildAdapterSet, missingControls, type AdapterSet } f
 import { compileRoles, type RoleFileRefusal } from '@olympus-ai/compiler';
 import type { CheckSpec } from '@olympus-ai/integrity';
 import type { SandboxProvider } from '@olympus-ai/sandbox';
-import type { AdmissionRecord, AdmissionRefusal, AdmittedArtifact, AdmittedManifest, AdmittedSet, CriticRecord, DraftLockRecord, DraftRecord, EvidenceBundle, IntakeEntry, IntentRecord, ResumeRefusal, RubricRecord, RubricVersion, Vault } from '@olympus-ai/vault';
+import type { AdmissionRecord, AdmissionRefusal, AdmittedArtifact, AdmittedManifest, AdmittedPlan, AdmittedSet, CriticRecord, DraftLockRecord, DraftRecord, EvidenceBundle, IntakeEntry, IntentRecord, ResumeRefusal, RubricRecord, RubricVersion, Vault } from '@olympus-ai/vault';
 import { readUsage, unsettledCalls, worstCaseCost, type WorstCaseCost } from './cost.js';
 import { estimateCost, type CostEstimate, type EstimateCell } from './outcomes.js';
 import { problemCodes, recordDecision } from './decisions.js';
 import { integrateEscalations, readIntegration, runLine, type LineArtifacts, type LineContext } from './line.js';
 import { draftFloorOf, lockedArtifacts, NOT_DRAFTING, seatDriver, settleArtifactRoot, settleBase, type DraftingContext, type DraftingDrivers } from './drafting.js';
 import { readRubrics, rubricsProblems, type ReadRubric } from './rubrics.js';
+import { parsePlan } from './observation-plan.js';
 import { DRAFT_DIR, parseQuestions, parseRunRequirements, type RunRequirements } from './spec-parts.js';
 import type { BuiltGraph } from './graph.js';
 import { reachesRemote, type Integrator } from './integrate.js';
@@ -137,6 +138,12 @@ export interface RequestedArtifacts {
    * named with drafted tests, which draft their own.
    */
   readonly acceptanceManifest?: string;
+  /**
+   * JSON: the observation plan (R8b, D-A-OB-11). Required while the policy
+   * names `triggers.observe.windowMs`, and refused otherwise; the literal `'draft'`
+   * exactly when the acceptance tests are (D-A-OB-12).
+   */
+  readonly observationPlan?: string;
   /** JSON: `{ "checks": CheckSpec[] }`. */
   readonly verificationManifest: string;
   /** JSON: `{ "tasks": [{ id, station, role, dependsOn, dependencySet }] }`. */
@@ -444,6 +451,8 @@ async function admitArtifacts(req: RunRequest): Promise<{ ok: true; admitted: Ad
   const graphFile = await read('artifacts.taskGraph', req.artifacts.taskGraph);
   const acceptancePath = req.artifacts.acceptanceManifest;
   const acceptanceFile = acceptancePath === undefined ? undefined : await read('artifacts.acceptanceManifest', acceptancePath);
+  const planPath = req.artifacts.observationPlan;
+  const planFile = planPath === undefined || planPath === 'draft' ? undefined : await read('artifacts.observationPlan', planPath);
   const parts = req.artifacts.specParts ?? {};
   const securityFile = parts.security === undefined ? undefined : await read('artifacts.specParts.security', parts.security);
   const requirementsFile = parts.runRequirements === undefined ? undefined : await read('artifacts.specParts.runRequirements', parts.runRequirements);
@@ -472,6 +481,15 @@ async function admitArtifacts(req: RunRequest): Promise<{ ok: true; admitted: Ad
     else if (!parsed.ok) problems.push(...parsed.problems.map((p) => ({ ...p, path: p.path.replace(/^manifest/, 'acceptanceManifest') })));
     else acceptanceChecks = parsed.checks;
   }
+  // A supplied plan is held to its shape here and recorded parsed, so `observe` reads it from the store alone (D-R8b-01).
+  let observationPlan: AdmittedPlan = planPath === 'draft' ? { source: 'drafted' } : { source: 'none' };
+  if (planFile !== undefined) {
+    const json = parseJson(planFile.bytes);
+    const parsed = json === undefined ? undefined : parsePlan(json, 'observationPlan');
+    if (parsed === undefined) problems.push({ path: 'artifacts.observationPlan', code: 'not-json', message: 'the observation plan is not JSON' });
+    else if (!parsed.ok) problems.push(...parsed.problems);
+    else observationPlan = { source: 'supplied', file: planFile.admitted, plan: parsed.plan };
+  }
   if (problems.length > 0 || !manifest.ok || !graph.ok) return { ok: false, problems };
   if (acceptanceFile !== undefined) {
     const merged = mergedCheckProblems(manifest.checks, acceptanceChecks);
@@ -489,6 +507,7 @@ async function admitArtifacts(req: RunRequest): Promise<{ ok: true; admitted: Ad
         acceptanceManifest,
         verificationManifest: manifestFile.admitted,
         taskGraph: graphFile.admitted,
+        observationPlan,
         specParts: { security: securityFile?.admitted ?? null, runRequirements: requirementsFile?.admitted ?? null, questions: questionsFile?.admitted ?? null },
       },
       graph: graph.graph,
@@ -861,6 +880,23 @@ async function candidateFor(
   return { ok: true, entry: { ...entry, candidate: entry.candidate } };
 }
 
+/**
+ * A plan is required exactly while the policy names an observation window:
+ * without one a merged run would close clean unobserved, and a plan with no
+ * window would never be read (R8b, D-A-OB-12, I5).
+ */
+function planProblems(req: RunRequest, policy: Policy): RequestProblem[] {
+  const window = policy.triggers.observe?.windowMs;
+  const plan = req.artifacts.observationPlan;
+  if (window !== undefined && plan === undefined) {
+    return [{ path: 'artifacts.observationPlan', code: 'missing', message: "the policy names an observation window, so every run names its observation plan: a file, or 'draft' with drafted tests" }];
+  }
+  if (window === undefined && plan !== undefined) {
+    return [{ path: 'artifacts.observationPlan', code: 'not-applicable', message: 'the policy names no observation window, so nothing would ever read this plan' }];
+  }
+  return [];
+}
+
 /** Every check admission makes, in order; `admitRun` records whichever refuses. */
 async function admission(req: RunRequest): Promise<AdmissionOutcome> {
   const problems = [...requestProblems(req), ...storeProblems(req)];
@@ -874,6 +910,8 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
   if (!policy.ok) return { ok: false, reason: 'invalid-request', problems: [{ path: 'policy', code: 'invalid-policy', message: policy.message }] };
   const admitted = await admitArtifacts(req);
   if (!admitted.ok) return { ok: false, reason: 'invalid-request', problems: admitted.problems };
+  const unplanned = planProblems(req, policy.policy);
+  if (unplanned.length > 0) return { ok: false, reason: 'invalid-request', problems: unplanned };
   const drafted = draftedStations(admitted.admitted.drafted);
   const drafting = draftingProblems(req, admitted.admitted.drafted, policy.policy);
   if (drafting.length > 0) return { ok: false, reason: 'invalid-request', problems: drafting };
@@ -1094,10 +1132,20 @@ function recordArtifacts(artifacts: unknown): AdmissionRecord['artifacts'] | und
     if (isRecordLike(value) && value.source === 'supplied' && isAdmittedArtifact(value.file)) return { source: 'supplied', file: value.file };
     return undefined;
   })(artifacts.acceptanceManifest);
+  // Absent on a run admitted before R8b, which had no plan: `none` (D-R8b-01).
+  const observationPlan = ((value: unknown): AdmittedPlan | undefined => {
+    if (value === undefined) return { source: 'none' };
+    if (isRecordLike(value) && (value.source === 'none' || value.source === 'drafted')) return { source: value.source };
+    if (isRecordLike(value) && value.source === 'supplied' && isAdmittedArtifact(value.file)) {
+      const plan = parsePlan(value.plan, 'observationPlan');
+      return plan.ok ? { source: 'supplied', file: value.file, plan: plan.plan } : undefined;
+    }
+    return undefined;
+  })(artifacts.observationPlan);
   const spec = set(artifacts.spec);
   const tests = set(artifacts.acceptanceTests);
   const parts = artifacts.specParts;
-  if (spec === undefined || tests === undefined || manifest === undefined || !isRecordLike(parts)) return undefined;
+  if (spec === undefined || tests === undefined || manifest === undefined || observationPlan === undefined || !isRecordLike(parts)) return undefined;
   const security = nullableArtifact(parts.security);
   const runRequirements = nullableArtifact(parts.runRequirements);
   const questions = nullableArtifact(parts.questions);
@@ -1108,6 +1156,7 @@ function recordArtifacts(artifacts: unknown): AdmissionRecord['artifacts'] | und
     acceptanceManifest: manifest,
     verificationManifest: artifacts.verificationManifest,
     taskGraph: artifacts.taskGraph,
+    observationPlan,
     specParts: { security, runRequirements, questions },
   };
 }
@@ -1118,6 +1167,7 @@ export function lineArtifactsOf(artifacts: AdmissionRecord['artifacts']): LineAr
     spec: artifacts.spec.source === 'supplied' ? artifacts.spec.files : [],
     acceptanceTests: artifacts.acceptanceTests.source === 'supplied' ? artifacts.acceptanceTests.files : [],
     acceptanceManifest: artifacts.acceptanceManifest.source === 'supplied' ? artifacts.acceptanceManifest.file : null,
+    observationPlan: artifacts.observationPlan?.source === 'supplied' ? artifacts.observationPlan.file : null,
     verificationManifest: artifacts.verificationManifest,
     taskGraph: artifacts.taskGraph,
     specParts: artifacts.specParts,
@@ -1225,6 +1275,8 @@ async function loadLine(vault: Vault, record: AdmissionRecord, state: RunState):
   const manifestJson = await load(artifacts.verificationManifest);
   const graphJson = await load(artifacts.taskGraph);
   const acceptanceJson = await load(artifacts.acceptanceManifest);
+  // Held to its admitted or locked bytes like every other artifact; its content is read from the store (D-R8b-01).
+  await load(artifacts.observationPlan);
   const securityJson = await load(artifacts.specParts.security);
   const requirementsJson = await load(artifacts.specParts.runRequirements);
   const empty = { artifacts, graph: { tasks: [], edges: [] }, checks: [], securityPart: null, requirements: null, drafting, changed };

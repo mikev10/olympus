@@ -57,7 +57,12 @@ export {
 export { Intake, utcHour, type DeliveryOutcome, type IntakeOptions, type SecretSource } from './intake.js';
 export { firingTime, lastCovered, missedDates, startSchedules, utcDate, type Scheduler } from './schedule.js';
 export { NightlyJobs, SETTLED, flattenFigures, settledForRates, type NightlyOptions, type NightlyTarget } from './nightly.js';
-export { recordSignal, walkHistory, type ObserveTarget, type Walked } from './observe.js';
+export { planOf, recordSignal, walkHistory, type ObserveTarget, type RunPlan, type Walked } from './observe.js';
+export {
+  FAILING_CONCLUSIONS, decidingRun, judgePlan, parsePlan, planDraftPath,
+  type CheckReader, type CheckRun, type Judged, type JudgedCheck, type ParsedPlan, type PlanProblem, type Verdict,
+} from './observation-plan.js';
+export { GitHubCheckReader, type GitHubCheckReaderOptions } from './checks.js';
 export { classifyReversal, type ChangeInverse, type CommitDiff, type Reversal } from './history.js';
 export {
   FINDINGS_REVIEWER_ROLE, JUDGING_ROLES, authorsOf as nightlyAuthorsOf, dayItems, readReviewResult, reviewedDay, seatLevel, type NightlySeatOptions,

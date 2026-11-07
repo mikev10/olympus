@@ -426,6 +426,39 @@ export type AdmittedManifest =
   | { readonly source: 'drafted' }
   | { readonly source: 'none' };
 
+/**
+ * A check a plan names: the producing app's slug and the check run's exact
+ * name, compared byte for byte. The app is part of it because any app that can
+ * write checks can post one under any name (R8b, D-A-OB-10).
+ */
+export interface CheckRef {
+  readonly app: string;
+  readonly name: string;
+}
+
+/**
+ * The observation plan (R8b, D-A-OB-11): the checks that show a change
+ * working once merged, the checks that show it regressed, and the condition
+ * that calls for a rollback, which is recorded and never acted on
+ * (D-A-LC-03). `rollback.regressed` indexes `regressed`.
+ */
+export interface ObservationPlan {
+  readonly works: readonly CheckRef[];
+  readonly regressed: readonly CheckRef[];
+  readonly rollback: { readonly regressed: readonly number[]; readonly consecutive: number };
+}
+
+/**
+ * The plan as admitted: supplied, its bytes hashed and its content parsed
+ * here so `observe` reads it from the store alone; drafted with drafted tests
+ * (R19); or `none`, for a run whose policy names no observation window
+ * (D-A-OB-12).
+ */
+export type AdmittedPlan =
+  | { readonly source: 'supplied'; readonly file: AdmittedArtifact; readonly plan: ObservationPlan }
+  | { readonly source: 'drafted' }
+  | { readonly source: 'none' };
+
 /** A rubric a person wrote for one drafting station's critic, as admission read and recorded it (R19). */
 export interface RubricVersion {
   readonly station: DraftStation;
@@ -548,6 +581,8 @@ export interface AdmissionRecord {
     readonly acceptanceManifest: AdmittedManifest;
     readonly verificationManifest: AdmittedArtifact;
     readonly taskGraph: AdmittedArtifact;
+    /** Drafted exactly when the acceptance tests are; absent on a run admitted before R8b, which is read as `none`. */
+    readonly observationPlan?: AdmittedPlan;
     /**
      * Each part of a supplied spec, locked with it at `spec`, or `null` where
      * it was not admitted: `spec` then refuses a missing security part (R17).
@@ -756,7 +791,7 @@ export type NightlyFinding =
 export interface NightlyRefusal {
   /** `job` is a failure no part caught: the record is still written, refused, with what was found before it (codex-5). */
   /** `subject` is what a reviewer is given, and `seat` the reviewer itself (R13b). */
-  readonly part: 'policy' | 'store' | 'rates' | 'locks' | 'target' | 'secret-scan' | 'static-analysis' | 'dependency-audit' | 'job' | 'subject' | 'seat' | 'history';
+  readonly part: 'policy' | 'store' | 'rates' | 'locks' | 'target' | 'secret-scan' | 'static-analysis' | 'dependency-audit' | 'job' | 'subject' | 'seat' | 'history' | 'plan' | 'provider';
   /**
    * R13b's: `no-reviewer` a service with no reviewer driver or roles
    * directory; `role-unavailable` a role that did not compile or that policy
@@ -776,7 +811,15 @@ export interface NightlyRefusal {
      * `history-rewritten` a head the last walk recorded that is no longer
      * an ancestor of the branch. None is ever read as no reverts (I5).
      */
-    | 'no-window' | 'history-unreadable' | 'history-rewritten';
+    | 'no-window' | 'history-unreadable' | 'history-rewritten'
+    /**
+     * R8b's: `plan-unreadable` a merged run whose state, admission, or
+     * locked plan the store could not give back; `provider-unreadable` check
+     * runs the provider did not give whole, or a host with no check reader.
+     * Each leaves the run's window open, never read as a missing check (I5,
+     * D-A-OB-14).
+     */
+    | 'plan-unreadable' | 'provider-unreadable';
   readonly detail: string;
 }
 
@@ -888,6 +931,28 @@ export type ObservationSignal =
   | { readonly kind: 'partial-reversal'; readonly commit: string; readonly at: SourcedTime; readonly hunks: number; readonly of: number }
   | { readonly kind: 'check-failure'; readonly commit: string; readonly at: SourcedTime; readonly checkRun: string; readonly conclusion: string }
   | { readonly kind: 'pushed'; readonly commit: string; readonly at: SourcedTime }
+  /**
+   * One check the run's plan named, as the runtime judged it when the window
+   * closed (R8b, D-A-OB-11). `check` is the plan's locked name, never the
+   * provider's text. `commit` is where it was judged, the merge commit for a
+   * `missing` check. `checkRun`, `conclusion`, and a `provider-reported` `at`
+   * come from the run that decided it; for `missing` they are null and `at`
+   * is the runtime's.
+   */
+  | {
+      readonly kind: 'plan-signal';
+      readonly role: 'works' | 'regressed';
+      readonly check: CheckRef;
+      readonly status: 'working' | 'regressed' | 'missing';
+      readonly commit: string;
+      readonly checkRun: string | null;
+      readonly conclusion: string | null;
+      readonly at: SourcedTime;
+      /** How many first-parent commits the check was read on, and on how many a success or failure was reported (triage D). */
+      readonly coverage: { readonly commits: number; readonly decided: number };
+    }
+  /** The plan's rollback condition held: every check it names failed on each of `commits`, consecutive first parents. Never acted on (D-A-LC-03). */
+  | { readonly kind: 'rollback-condition-met'; readonly commit: string; readonly at: SourcedTime; readonly checks: readonly CheckRef[]; readonly commits: readonly string[] }
   | {
       readonly kind: 'window-closed';
       readonly at: SourcedTime;

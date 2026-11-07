@@ -9,9 +9,9 @@
 import { execFileSync } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { Intake, NightlyJobs, RunRecords } from '@olympus-ai/api';
+import type { CheckReader, Intake, NightlyJobs, RunRecords } from '@olympus-ai/api';
 import type { Policy, PolicyDocument, RunId, TriggerKind, TriggerPolicy, TriggerSchedule, TriggerSubscription } from '@olympus-ai/core';
-import type { NightlyRecord, ObservationRecord, Vault } from '@olympus-ai/vault';
+import type { AdmissionRecord, AdmittedPlan, NightlyRecord, ObservationRecord, Vault } from '@olympus-ai/vault';
 import { runtime } from '../kit/assert.js';
 import type { LocalAssertion } from '../kit/types.js';
 import { linePolicy } from './line.js';
@@ -106,8 +106,30 @@ export async function repo(dir: string): Promise<Repo> {
   };
 }
 
-/** The record `integrate` writes once GitHub has merged a run's pull request (A-I1b-01). */
-export async function seedMerge(vault: Vault, runId: RunId, mergeCommit: string, mergedAt: string): Promise<void> {
+/**
+ * What a merged run holds before its merge: an admission record naming its
+ * observation plan, and a state at `observe` that points at it. A real merged
+ * run always has both, and the walk reads its plan through them (R8b,
+ * D-R8b-01). `plan` absent seeds a run admitted before R8b, with no plan field.
+ */
+export async function seedAdmitted(vault: Vault, runId: RunId, plan?: AdmittedPlan): Promise<void> {
+  const admission = await vault.recordAdmission({
+    run: { id: runId }, roles: [], stack: 'unsupported', artifacts: plan === undefined ? {} : { observationPlan: plan },
+  } as unknown as AdmissionRecord);
+  await vault.commitRunState({
+    runId, admission, station: 'observe', stations: [], phase: 'working', tasks: {}, attempts: {}, results: {}, evidenceRefs: [],
+    violations: [], approvals: [], reviews: [], drafts: {}, usage: [], cancelled: null, halted: null, version: '0',
+  }, '0');
+}
+
+/** The record `integrate` writes once GitHub has merged a run's pull request (A-I1b-01), over a run admitted with no plan. */
+export async function seedMerge(vault: Vault, runId: RunId, mergeCommit: string, mergedAt: string, plan: AdmittedPlan | 'unadmitted' = { source: 'none' }): Promise<void> {
+  if (plan !== 'unadmitted') await seedAdmitted(vault, runId, plan);
+  await recordMerge(vault, runId, mergeCommit, mergedAt);
+}
+
+/** The integration record alone, for a run whose admission is already in the store. */
+export async function recordMerge(vault: Vault, runId: RunId, mergeCommit: string, mergedAt: string): Promise<void> {
   await vault.recordIntegration({
     runId, kind: 'merged', repository: 'octo/hello', baseBranch: 'main', baseCommit: mergeCommit, branch: `factory/${runId}`, commit: mergeCommit,
     pullRequest: 1, url: 'https://github.com/octo/hello/pull/1', collectedBy: 'runtime', mergeCommit, mergedAt,
@@ -125,7 +147,7 @@ export interface Rig {
   readonly store: string;
 }
 
-export async function withObserve<T>(prefix: string, body: (rig: Rig) => Promise<T>, target: 'checkout' | 'missing' = 'checkout'): Promise<T> {
+export async function withObserve<T>(prefix: string, body: (rig: Rig) => Promise<T>, target: 'checkout' | 'missing' = 'checkout', checks: CheckReader | null = null): Promise<T> {
   const { Intake: IntakeClass, NightlyJobs: Jobs, SCANNERS } = await api();
   const { LocalVault } = await import('@olympus-ai/vault');
   return withVaultDirs(prefix, async (dirs, base) => {
@@ -134,7 +156,7 @@ export async function withObserve<T>(prefix: string, body: (rig: Rig) => Promise
     const clock = { now: Date.now(), tick: 0 };
     const jobs = new Jobs({
       vault, sandbox: unusedSandbox(), workspaces: { root: join(base, 'trees'), user: { uid: 1000, gid: 1000 } }, limits: null, scanners: SCANNERS,
-      target: { checkout: target === 'checkout' ? r.dir : join(base, 'no-such-checkout'), branch: 'main' }, now: () => (clock.now += clock.tick),
+      target: { checkout: target === 'checkout' ? r.dir : join(base, 'no-such-checkout'), branch: 'main', checks }, now: () => (clock.now += clock.tick),
     });
     const intake = new IntakeClass({ vault, secrets: (name) => (name === SECRET_NAME ? SECRET : undefined), jobs });
     return body({ vault, repo: r, jobs, intake, policy: await observePolicy(), clock, store: dirs.store });

@@ -1107,6 +1107,67 @@ export async function draftsRejectedPark(): Promise<void> {
   await LAST_ATTEMPT_GOES_TO_A_PERSON.run();
 }
 
+/**
+ * R8b: a drafted plan is drafted with the tests, under their approval, and
+ * read at window close from the draft its lock approved (D-R8b-01).
+ */
+export const DRAFTED_PLAN_WITH_THE_TESTS: LocalAssertion = runtime({
+  id: 'I3.observe-plan-is-drafted-with-the-tests',
+  title:
+    "a plan is 'draft' exactly when the tests are; a test draft without its plan goes back as a runtime problem; the plan is locked at test-design only once the draft is approved, against the approved hash; and the walk reads it from that draft when the window closes",
+  run: async () => {
+    const { admitRun, walkHistory, planDraftPath } = await api();
+    const { PLAN, checkRun, readerOf } = await import('./observe-plan.js');
+    const { observePolicy, repo, recordMerge, ago, WINDOW_MS, DELIVERY_AGE_MS, kinds } = await import('./observe.js');
+    const observing = await observePolicy();
+    const policy = { ...(await draftingPolicy()), triggers: observing.triggers };
+    await withLine('r8b-drafted-', async (rig) => {
+      const planPath = planDraftPath(rig.runId);
+      const r = await drafting(rig, {
+        // The first draft forgets its plan; the second writes it.
+        tests: (attempt, id) => (attempt === 1 ? helloTests(id) : { ...helloTests(id), [planDraftPath(id)]: JSON.stringify(PLAN) }),
+      });
+      const refusedAt = async (artifacts: RunRequest['artifacts'], context: string): Promise<void> => {
+        const outcome = await admitRun(await r.request({ policy, artifacts }));
+        if (outcome.ok || outcome.reason !== 'invalid-request' || !outcome.problems.some((p) => p.path === 'artifacts.observationPlan' && p.code === 'not-applicable')) {
+          throw new Error(`R8b: ${context} was ${outcome.ok ? 'admitted' : JSON.stringify(outcome)}`);
+        }
+      };
+      await refusedAt({ ...artifactsFor(true, false), observationPlan: 'draft' }, "a 'draft' plan beside supplied tests");
+      await refusedAt({ ...artifactsFor(true, true), observationPlan: 'observation.json' }, 'a supplied plan beside drafted tests');
+
+      // Drafted tests are drafted from a drafted spec's run-requirements part, so the spec is drafted and approved first (R19).
+      awaiting(await admitAndDrive(r, { policy, artifacts: { ...artifactsFor(true, true), observationPlan: 'draft' } }), 'spec:1', 'a drafted spec');
+      const spec = lastAttempt(await rig.state(), 'spec');
+      awaiting(await approveAndResume(rig, r, 'spec:1', spec.sha256 ?? ''), 'test-design:1', 'a drafted plan');
+      const attempts = (await rig.state()).drafts['test-design']?.attempts ?? [];
+      const back = attempts[0]?.sentBack;
+      if (back?.by !== 'runtime' || !back.problems.some((p) => p.path === planPath && p.code === 'missing')) throw new Error(`R8b: a test draft without its plan was not sent back: ${JSON.stringify(back)}`);
+      const vault = (await r.components()).vault;
+      if ((await vault.readLocks(rig.runId))?.entries.some((e) => e.lockedBy === 'test-design') === true) throw new Error('R8b: something was locked at test-design before the draft was approved');
+      const attempt = lastAttempt(await rig.state(), 'test-design');
+      if (attempt.sha256 === null || attempt.draft === null) throw new Error('R8b: the second test draft was not recorded');
+      awaiting(await approveAndResume(rig, r, 'test-design:1', attempt.sha256), 'integrate:1', 'the run after its drafted plan was approved');
+      const record = await readRecord<DraftRecord>(vault, attempt.draft);
+      const drafted = record.files.find((f) => f.path === planPath);
+      const entry = (await vault.readLocks(rig.runId))?.entries.find((e) => e.path === planPath);
+      if (drafted === undefined || entry?.lockedBy !== 'test-design' || entry.sha256 !== drafted.sha256) throw new Error(`R8b: the drafted plan is not locked at test-design against the approved hash: ${JSON.stringify({ entry, drafted })}`);
+
+      // Merged, and read at close from the draft the lock approved, never from the workspace.
+      await writeFile(join(rig.dirs.artifacts, planPath), JSON.stringify({ ...PLAN, works: [{ app: 'github-actions', name: 'rewritten after the lock' }] }));
+      const checkout = await repo(join(rig.dirs.artifacts, '..', 'r8b-target'));
+      const merge = await checkout.merge('feature-a', { 'c.txt': 'c\n' }, 'Add c');
+      await recordMerge(vault, rig.runId, merge, ago(WINDOW_MS + DELIVERY_AGE_MS + 60_000));
+      const reader = readerOf((commit) => [checkRun(1, commit, 'test', 'success')]);
+      const walked = await walkHistory(vault, { checkout: checkout.dir, branch: 'main', checks: reader }, observing, Date.now);
+      if (walked.refusals.length > 0) throw new Error(`R8b: the walk over a drafted plan was refused: ${JSON.stringify(walked.refusals)}`);
+      const read = kinds(await vault.readObservations(rig.runId), 'plan-signal');
+      const names = read.map((o) => (o.signal.kind === 'plan-signal' ? o.signal.check.name : '')).sort();
+      if (names.join() !== ['e2e', 'smoke', 'test'].join()) throw new Error(`R8b: the walk read the plan as naming ${JSON.stringify(names)}, not the approved draft's checks`);
+    });
+  },
+});
+
 export const R19_ASSERTIONS = {
   I3: [DRAFTED_SPEC_LOCKS_NOTHING_UNTIL_APPROVED, DRAFTED_TESTS_LOCK_AND_RUN, SUPPLIED_ARTIFACTS_SEAT_NO_DRAFTER, APPROVAL_BINDS_THE_DRAFT, LOCKED_DRAFT_IS_THE_BYTES_READ, TEST_DRAFTER_IS_BLACK_BOX, BASE_REFUSAL_CARRIES_NOTHING_OF_THE_BASE],
   I4: [DRAFTED_EXIT_FLOOR, DRAFTED_FLOOR_CONDITIONS, DRAFT_OUTSIDE_THE_GRANT_GOES_BACK],

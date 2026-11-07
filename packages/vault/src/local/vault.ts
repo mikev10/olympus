@@ -112,7 +112,9 @@ const NIGHTLY_DIR = 'nightly';
 /** Where observations are kept: `runs/<id>/observations/` for a run's, and this directory beside the runs for the rest (D-R8a-03). */
 const OBSERVATIONS_DIR = 'observations';
 
-const OBSERVATION_SIGNALS: ReadonlySet<string> = new Set(['rollback', 'partial-reversal', 'check-failure', 'pushed', 'window-closed']);
+const OBSERVATION_SIGNALS: ReadonlySet<string> = new Set(['rollback', 'partial-reversal', 'check-failure', 'pushed', 'plan-signal', 'rollback-condition-met', 'window-closed']);
+/** A signal only a run's plan yields, so it is never kept beside the runs (R8b). */
+const PLAN_SIGNALS: ReadonlySet<string> = new Set(['plan-signal', 'rollback-condition-met']);
 const TIME_SOURCES: ReadonlySet<string> = new Set(['provider-reported', 'committer-claimed', 'runtime']);
 
 function isSourcedTime(value: unknown): boolean {
@@ -123,6 +125,10 @@ const COMMIT = /^[0-9a-f]{40,64}$/;
 
 function isCount(value: unknown, min: number): boolean {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= min;
+}
+
+function isCheckRef(value: unknown): boolean {
+  return isRecord(value) && typeof value.app === 'string' && value.app !== '' && typeof value.name === 'string' && value.name !== '';
 }
 
 /** Each kind's own fields, whole: a record missing one is refused, never read as the kind it names (codex-7). */
@@ -138,6 +144,26 @@ function signalProblem(signal: Record<string, unknown>): string | undefined {
       return hasString(signal, 'checkRun') && hasString(signal, 'conclusion') ? undefined : 'a check failure names its check run and conclusion';
     case 'pushed':
       return undefined;
+    case 'plan-signal': {
+      const status = signal.status;
+      if ((signal.role !== 'works' && signal.role !== 'regressed') || (status !== 'working' && status !== 'regressed' && status !== 'missing')) return 'a plan signal names its role and status';
+      if (!isCheckRef(signal.check)) return "a plan signal names the plan's check";
+      const coverage = signal.coverage;
+      if (!isRecord(coverage) || !isCount(coverage.commits, 1) || !isCount(coverage.decided, 0) || (coverage.decided as number) > (coverage.commits as number)) {
+        return 'a plan signal carries how many commits it was read and decided on';
+      }
+      // A check that was seen carries the run that decided it; a missing one carries none (D-A-OB-11).
+      const seen = typeof signal.checkRun === 'string' && signal.checkRun !== '' && typeof signal.conclusion === 'string' && signal.conclusion !== '';
+      const unseen = signal.checkRun === null && signal.conclusion === null;
+      return (status === 'missing' ? unseen : seen) ? undefined : 'a plan signal carries the run that decided it, or none when the check is missing';
+    }
+    case 'rollback-condition-met': {
+      const checks = signal.checks;
+      const commits = signal.commits;
+      if (!Array.isArray(checks) || checks.length === 0 || !checks.every(isCheckRef)) return 'a met rollback condition names its checks';
+      if (!Array.isArray(commits) || commits.length === 0 || !commits.every((c) => typeof c === 'string' && COMMIT.test(c))) return 'a met rollback condition names its commits';
+      return undefined;
+    }
     case 'window-closed': {
       if (!isCount(signal.windowMs, 1) || !isCount(signal.graceMs, 0)) return 'a closed window carries its window and grace';
       if (!isSourcedTime(signal.opened) || !isTime(signal.committedAt)) return 'a closed window carries when it opened and its change\'s commit date';
@@ -157,6 +183,7 @@ function observationProblem(r: unknown): string | undefined {
   if (typeof r.change !== 'string' || !COMMIT.test(r.change) || !isTime(r.recordedAt)) return 'it names no change commit or carries no time';
   const signal = r.signal;
   if (!isRecord(signal) || typeof signal.kind !== 'string' || !OBSERVATION_SIGNALS.has(signal.kind)) return 'its signal is not a known kind';
+  if (PLAN_SIGNALS.has(signal.kind) && r.runId === null) return "a plan's signal names the run whose plan it is";
   return signalProblem(signal);
 }
 
