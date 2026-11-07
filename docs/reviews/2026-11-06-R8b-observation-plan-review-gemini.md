@@ -1,3 +1,19 @@
+# External review of R8b, gemini, 2026-11-06
+
+Gemini's adversarial review of R8b, the observation plan, from the bundle alone. The triage is `2026-11-06-R8b-observation-plan-triage.md`.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini. A direct `generateContent` API call to `gemini-3.1-pro-preview`, offering no tools. `cleanRoom` is `null` because an API call loads no local configuration.
+- **Cross-family agreement:** gemini-1 (a partial write of plan signals read as complete) and gemini-2 (a drafter can name a trivial check) were raised by Codex too, as codex-1 and codex-2. Gemini raised nothing alone.
+- **Date:** 2026-11-06
+- **Bundle:** `2026-11-06-R8b-observation-plan-review-bundle.txt`, SHA-256 `f9be8ee14c52a95505e295b6763f146cfc06bf0b72e6e29741473ed55e669ab6`, base `bd03b6f` (`reviewed/R8a`), head `174bf3a` (R8b's implementation commit on `unit/r8b`). It holds every new file in full and every modified file as a function-context diff, 23 sections; `docs/decisions.md`, `docs/reviews/`, `docs/plan/`, and `pnpm-lock.yaml` were excluded. Prompt: `2026-11-06-R8b-observation-plan-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer said it held no prior context and performed no external lookups. A self-report, not independently verifiable.
+- **Coverage, and any gap:** two findings, under items 1 and 3 (gemini-1) and 2 (gemini-2). Items 4, 5, 6, and 7 came back empty: no assessment of which mechanisms are sound, and nothing on whether the framing was right. That silence is not an endorsement.
+- **Citations:** line numbers are positions in the bundle's new-side diffs, not in the repository; each was located by construct before it was checked.
+
+---
+
 I hold no prior context about this project, and I performed no external lookups.
 
 BASE: bd03b6f

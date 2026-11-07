@@ -8122,3 +8122,22 @@ was shown failing on the code as reviewed.
   check removed: the window rule, the plan's place in the lock call, the
   app-and-name comparison, the refusal that keeps a window open, the missing
   plan in a draft, and the consecutive count. Each failed and was restored.
+
+### D-R8b-03: what the external review changed, and what it left
+
+- **Fixed (codex-1, gemini-1):** a plan's reading is complete only when every
+  planned check has its signal. A met rollback condition is recorded before
+  any signal, and a part-done reading is finished, never taken as done.
+- **Fixed (codex-3):** only a success or a failing conclusion decides a check
+  on a commit. A later neutral, skipped, cancelled, or stale run never erases
+  a failure.
+- **Fixed (codex-4):** every plan signal carries `coverage`: the commits the
+  check was read on and the ones a decisive run was reported on.
+- **Known limit (codex-2, gemini-2):** a plan names a check, not what it runs.
+  A trivial check, or a CI job emptied under a planned name, reads `working`.
+  Binding a check to its executed definition means reading the target's
+  workflows, which the out-of-scope list leaves out. The test critic and the
+  draft's approval stand against a trivial check. Reverse by an amendment
+  that pins workflow definitions.
+- **Known limit:** two runs of one app and one name on one commit cannot be
+  told from a rerun, so the latest decisive one decides.

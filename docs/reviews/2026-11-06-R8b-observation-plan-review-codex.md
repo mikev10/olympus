@@ -1,3 +1,19 @@
+# External review of R8b, codex, 2026-11-06
+
+Codex's adversarial review of R8b, the observation plan, from the bundle alone. The triage is `2026-11-06-R8b-observation-plan-triage.md`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex. A headless `codex exec` run under a read-only sandbox, with recorded approval policy `never`, in an empty scratch working directory and a scratch config home holding only `auth.json`, with an environment of `CODEX_HOME` alone. The pre-run listing of both is the manifest's `cleanRoom`.
+- **Cross-family agreement:** codex-1 (a partial write of plan signals read as complete) and codex-2 (a check's identity does not bind what it runs) were raised by Gemini too, as gemini-1 and gemini-2. codex-3 and codex-4 were raised by codex alone.
+- **Date:** 2026-11-06
+- **Bundle:** `2026-11-06-R8b-observation-plan-review-bundle.txt`, SHA-256 `f9be8ee14c52a95505e295b6763f146cfc06bf0b72e6e29741473ed55e669ab6`, base `bd03b6f` (`reviewed/R8a`), head `174bf3a` (R8b's implementation commit on `unit/r8b`). It holds every new file in full and every modified file as a function-context diff, 23 sections; `docs/decisions.md`, `docs/reviews/`, `docs/plan/`, and `pnpm-lock.yaml` were excluded. Prompt: `2026-11-06-R8b-observation-plan-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer said it had no prior project context, performed no external lookups, and that a local directory command was blocked. A self-report, not independently verifiable.
+- **Coverage, and any gap:** items 1, 3, 5 (through codex-2), 6, and 7 were answered. Items 2 and 4 were answered as none found (no tautological assertion, no attacker-reachable escape hatch).
+- **Citations:** line numbers are positions in the bundle's new-side diffs, not in the repository; each was located by construct before it was checked.
+
+---
+
 BASE: bd03b6f  
 HEAD: 174bf3a  
 packages/vault/src/types.ts  
