@@ -258,6 +258,46 @@ const ROLLBACK_RECORDED_ONLY = runtime({
   },
 });
 
+const PARTIAL_READING_IS_FINISHED = runtime({
+  id: 'I5.observe-partial-plan-reading-is-finished-before-close',
+  title:
+    "a walk whose store fails after recording some of a plan's signals leaves the window open, and the next walk records every planned check and the met rollback condition before it closes the window, never closing on the part already written (triage A, codex-1, gemini-1)",
+  run: async () => {
+    const { walkHistory } = await api();
+    let commits: readonly string[] = [];
+    const reader = readerOf((commit) => (commits.includes(commit) ? [checkRun(1, commit, 'smoke', 'failure'), checkRun(2, commit, 'e2e', 'failure')] : []));
+    await withObserve('r8b-partial-', async (rig) => {
+      const { a, later } = await history(rig);
+      commits = [a, later];
+      await seedMerge(rig.vault, RUN_A, a, ago(CLOSED_AGO), SUPPLIED);
+      // The store fails on the second plan signal it is asked to record, as a full disk or an I/O error would.
+      let planWrites = 0;
+      const failing = new Proxy(rig.vault, {
+        get(target, key) {
+          if (key !== 'recordObservation') {
+            // Bound to the store itself, whose private fields a proxy receiver cannot reach.
+            const value = Reflect.get(target, key, target) as unknown;
+            return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+          }
+          return async (r: ObservationRecord) => {
+            if (r.signal.kind === 'plan-signal' && ++planWrites === 2) throw new Error('store: no space left on device');
+            return target.recordObservation(r);
+          };
+        },
+      });
+      const first = await walkHistory(failing, { checkout: rig.repo.dir, branch: 'main', checks: reader }, rig.policy, () => Date.now());
+      if (first.refusals.length === 0) throw new Error('I5 control: a store that failed mid-reading refused nothing');
+      if (kinds(await rig.vault.readObservations(RUN_A), 'window-closed').length !== 0) throw new Error('I5: a window closed on a reading the store did not finish');
+      await walkOn(rig, '2026-11-05');
+      const own = await rig.vault.readObservations(RUN_A);
+      const names = kinds(own, 'plan-signal').map((o) => (o.signal.kind === 'plan-signal' ? `${o.signal.role}:${o.signal.check.name}` : '')).sort();
+      if (names.join() !== ['regressed:e2e', 'regressed:smoke', 'works:test'].join()) throw new Error(`I5: the finished reading holds ${JSON.stringify(names)}`);
+      if (kinds(own, 'rollback-condition-met').length !== 1) throw new Error('I5: the met rollback condition was lost to the partial write');
+      if (kinds(own, 'window-closed').length !== 1) throw new Error('I5 control: the finished reading did not close the window');
+    }, 'checkout', reader);
+  },
+});
+
 export const R8B_I2: readonly LocalAssertion[] = [JUDGED_AT_CLOSE];
 export const R8B_I3: readonly LocalAssertion[] = [PLAN_LOCKED, DRAFTED_PLAN_WITH_THE_TESTS];
-export const R8B_I5: readonly LocalAssertion[] = [PLAN_REQUIRED, UNREADABLE_KEEPS_OPEN, ROLLBACK_RECORDED_ONLY];
+export const R8B_I5: readonly LocalAssertion[] = [PLAN_REQUIRED, UNREADABLE_KEEPS_OPEN, ROLLBACK_RECORDED_ONLY, PARTIAL_READING_IS_FINISHED];

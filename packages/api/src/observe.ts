@@ -156,18 +156,22 @@ export async function planOf(vault: Vault, runId: RunId): Promise<RunPlan> {
   return plan.ok ? { kind: 'plan', plan: plan.plan } : { kind: 'unreadable', detail: `run ${runId}'s drafted plan does not hold its shape` };
 }
 
+/** One planned check's identity in the records: its role, its app, and its exact name. */
+const planKey = (role: string, check: { readonly app: string; readonly name: string }): string => JSON.stringify([role, check.app, check.name]);
+
 /**
- * Reads and records a run's plan before its window closes (D-A-OB-13). A run
- * that already has its plan signals is not judged again, so a close that
- * failed after they were written is finished without repeating them. Returns
- * a refusal, and records nothing, where the plan or the provider could not be
- * read: the window then stays open (D-A-OB-14).
+ * Reads and records a run's plan before its window closes (D-A-OB-13). The
+ * reading is complete only when every planned check has its signal: a met
+ * rollback condition is recorded before any signal, so a run holding every
+ * signal holds its condition too. A reading a failed write left part-done is
+ * finished on the next walk, recording only what is absent, and never taken
+ * as complete because some of it is there (triage A, codex-1, gemini-1).
+ * Returns a refusal, and records nothing, where the plan or the provider
+ * could not be read: the window then stays open (D-A-OB-14).
  */
 async function observePlan(
   vault: Vault, checks: CheckReader | null, checkout: string, head: string, change: OpenChange & { readonly runId: RunId }, stamp: () => string,
 ): Promise<NightlyRefusal | 'recorded' | 'none'> {
-  const already = await vault.readObservations(change.runId);
-  if (already.some((e) => e.record.signal.kind === 'plan-signal')) return 'recorded';
   let plan: RunPlan;
   try {
     plan = await planOf(vault, change.runId);
@@ -176,6 +180,10 @@ async function observePlan(
   }
   if (plan.kind === 'none') return 'none';
   if (plan.kind === 'unreadable') return { part: 'plan', cause: 'plan-unreadable', detail: plan.detail };
+  const already = await vault.readObservations(change.runId);
+  const recorded = new Set(already.flatMap((e) => (e.record.signal.kind === 'plan-signal' ? [planKey(e.record.signal.role, e.record.signal.check)] : [])));
+  const planned = [...plan.plan.works.map((c) => planKey('works', c)), ...plan.plan.regressed.map((c) => planKey('regressed', c))];
+  if (planned.every((k) => recorded.has(k))) return 'recorded';
   if (checks === null) return { part: 'provider', cause: 'provider-unreadable', detail: `run ${change.runId} has a plan and this host names no check reader` };
   // The merge commit, then every first parent after it up to the head the walk read.
   const after = change.change === head ? [] : await firstParents(checkout, change.change, head);
@@ -186,21 +194,22 @@ async function observePlan(
     return { part: 'provider', cause: 'provider-unreadable', detail: `the check runs for run ${change.runId} could not be read whole: ${describe(error)}` };
   }
   const judged = judgePlan(plan.plan, commits);
-  for (const j of judged.checks) {
-    const at: SourcedTime = j.run?.completedAt != null ? { at: j.run.completedAt, source: 'provider-reported' } : { at: stamp(), source: 'runtime' };
-    const signal: ObservationSignal = {
-      kind: 'plan-signal', role: j.role, check: j.check, status: j.status, commit: j.commit,
-      checkRun: j.run === null ? null : j.run.id, conclusion: j.run === null ? null : j.run.conclusion, at,
-    };
-    await vault.recordObservation({ runId: change.runId, change: change.change, signal, recordedAt: stamp(), collectedBy: 'runtime' });
-  }
-  if (judged.rollback !== null) {
+  if (judged.rollback !== null && !already.some((e) => e.record.signal.kind === 'rollback-condition-met')) {
     const last = judged.rollback.commits[judged.rollback.commits.length - 1] ?? change.change;
-    // Recorded, and nothing acts on it: no revert, no reopened run, no new run (D-A-LC-03).
+    // Recorded first, and nothing acts on it: no revert, no reopened run, no new run (D-A-LC-03).
     await vault.recordObservation({
       runId: change.runId, change: change.change, recordedAt: stamp(), collectedBy: 'runtime',
       signal: { kind: 'rollback-condition-met', commit: last, at: { at: stamp(), source: 'runtime' }, checks: judged.rollback.checks, commits: judged.rollback.commits },
     });
+  }
+  for (const j of judged.checks) {
+    if (recorded.has(planKey(j.role, j.check))) continue;
+    const at: SourcedTime = j.run?.completedAt != null ? { at: j.run.completedAt, source: 'provider-reported' } : { at: stamp(), source: 'runtime' };
+    const signal: ObservationSignal = {
+      kind: 'plan-signal', role: j.role, check: j.check, status: j.status, commit: j.commit,
+      checkRun: j.run === null ? null : j.run.id, conclusion: j.run === null ? null : j.run.conclusion, at, coverage: j.coverage,
+    };
+    await vault.recordObservation({ runId: change.runId, change: change.change, signal, recordedAt: stamp(), collectedBy: 'runtime' });
   }
   return 'recorded';
 }

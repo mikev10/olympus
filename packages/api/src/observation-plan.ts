@@ -109,12 +109,23 @@ export interface CheckReader {
   checkRuns(commit: string): Promise<readonly CheckRun[]>;
 }
 
-/** The run of `check` that decides it on one commit: the latest completed, by `completed_at`, then id. */
+/** A conclusion that says something about the change: a success, or a failure. Neutral, skipped, cancelled, and stale say nothing. */
+function decisive(conclusion: string | null): boolean {
+  return conclusion === 'success' || (conclusion !== null && FAILING_CONCLUSIONS.has(conclusion));
+}
+
+/**
+ * The run of `check` that decides it on one commit: the latest decisive
+ * completed run, by `completed_at`, then id. A later neutral, skipped,
+ * cancelled, or stale completion decides nothing, so it never erases an
+ * earlier failure; a later success does, as a rerun that passed (triage C,
+ * codex-3).
+ */
 export function decidingRun(runs: readonly CheckRun[], check: CheckRef): CheckRun | null {
   let best: CheckRun | null = null;
   for (const run of runs) {
     // Byte-for-byte: a name differing by case or whitespace is another check, and so is another app's (D-A-OB-10).
-    if (run.app !== check.app || run.name !== check.name || run.status !== 'completed' || run.completedAt === null) continue;
+    if (run.app !== check.app || run.name !== check.name || run.status !== 'completed' || run.completedAt === null || !decisive(run.conclusion)) continue;
     if (best === null) best = run;
     else {
       const order = run.completedAt.localeCompare(best.completedAt ?? '');
@@ -133,6 +144,8 @@ export interface JudgedCheck {
   readonly status: Verdict;
   readonly commit: string;
   readonly run: CheckRun | null;
+  /** How many commits the check was read on, and on how many a decisive run was reported: a gap is visible, never folded into the verdict (triage D, codex-4). */
+  readonly coverage: { readonly commits: number; readonly decided: number };
 }
 
 export interface Judged {
@@ -161,24 +174,24 @@ export function judgePlan(plan: ObservationPlan, commits: ReadonlyArray<{ readon
   const checks: JudgedCheck[] = [];
   for (const check of plan.works) {
     const run = decidingRun(merge.runs, check);
-    checks.push({ role: 'works', check, status: verdictOf(run), commit: merge.commit, run: verdictOf(run) === 'missing' ? null : run });
+    const coverage = { commits: 1, decided: run === null ? 0 : 1 };
+    checks.push({ role: 'works', check, status: verdictOf(run), commit: merge.commit, run, coverage });
   }
   for (const check of plan.regressed) {
-    let first: { commit: string; run: CheckRun; status: Verdict } | null = null;
+    let first: { commit: string; run: CheckRun } | null = null;
     let failed: { commit: string; run: CheckRun } | null = null;
+    let decided = 0;
     for (const c of commits) {
       const run = decidingRun(c.runs, check);
-      const status = verdictOf(run);
-      if (run === null || status === 'missing') continue;
-      if (status === 'regressed') {
-        failed = { commit: c.commit, run };
-        break;
-      }
-      first ??= { commit: c.commit, run, status };
+      if (run === null) continue;
+      decided += 1;
+      if (verdictOf(run) === 'regressed') failed ??= { commit: c.commit, run };
+      else first ??= { commit: c.commit, run };
     }
-    if (failed !== null) checks.push({ role: 'regressed', check, status: 'regressed', commit: failed.commit, run: failed.run });
-    else if (first !== null) checks.push({ role: 'regressed', check, status: 'working', commit: first.commit, run: first.run });
-    else checks.push({ role: 'regressed', check, status: 'missing', commit: merge.commit, run: null });
+    const coverage = { commits: commits.length, decided };
+    if (failed !== null) checks.push({ role: 'regressed', check, status: 'regressed', commit: failed.commit, run: failed.run, coverage });
+    else if (first !== null) checks.push({ role: 'regressed', check, status: 'working', commit: first.commit, run: first.run, coverage });
+    else checks.push({ role: 'regressed', check, status: 'missing', commit: merge.commit, run: null, coverage });
   }
   const named = plan.rollback.regressed.map((i) => plan.regressed[i]).filter((c): c is CheckRef => c !== undefined);
   let streak: string[] = [];

@@ -148,6 +148,10 @@ function signalProblem(signal: Record<string, unknown>): string | undefined {
       const status = signal.status;
       if ((signal.role !== 'works' && signal.role !== 'regressed') || (status !== 'working' && status !== 'regressed' && status !== 'missing')) return 'a plan signal names its role and status';
       if (!isCheckRef(signal.check)) return "a plan signal names the plan's check";
+      const coverage = signal.coverage;
+      if (!isRecord(coverage) || !isCount(coverage.commits, 1) || !isCount(coverage.decided, 0) || (coverage.decided as number) > (coverage.commits as number)) {
+        return 'a plan signal carries how many commits it was read and decided on';
+      }
       // A check that was seen carries the run that decided it; a missing one carries none (D-A-OB-11).
       const seen = typeof signal.checkRun === 'string' && signal.checkRun !== '' && typeof signal.conclusion === 'string' && signal.conclusion !== '';
       const unseen = signal.checkRun === null && signal.conclusion === null;

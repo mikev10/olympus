@@ -948,6 +948,8 @@ export type ObservationSignal =
       readonly checkRun: string | null;
       readonly conclusion: string | null;
       readonly at: SourcedTime;
+      /** How many first-parent commits the check was read on, and on how many a success or failure was reported (triage D). */
+      readonly coverage: { readonly commits: number; readonly decided: number };
     }
   /** The plan's rollback condition held: every check it names failed on each of `commits`, consecutive first parents. Never acted on (D-A-LC-03). */
   | { readonly kind: 'rollback-condition-met'; readonly commit: string; readonly at: SourcedTime; readonly checks: readonly CheckRef[]; readonly commits: readonly string[] }

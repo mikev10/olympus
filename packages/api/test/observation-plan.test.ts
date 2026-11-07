@@ -83,6 +83,39 @@ describe('judgePlan', () => {
     ]);
   });
 
+  test('a later neutral, skipped, or cancelled completion never erases a failure (triage C, codex-3)', () => {
+    for (const later of ['neutral', 'skipped', 'cancelled']) {
+      const commit = { commit: SHA(1), runs: [
+        run({ id: '1', name: 'smoke', headSha: SHA(1), conclusion: 'failure', completedAt: '2026-11-01T00:00:00.000Z' }),
+        run({ id: '2', name: 'smoke', headSha: SHA(1), conclusion: later, completedAt: '2026-11-01T01:00:00.000Z' }),
+        run({ id: '3', name: 'e2e', headSha: SHA(1), conclusion: 'failure' }),
+      ] };
+      const judged = judgePlan(plan, [commit, { ...commit, commit: SHA(2), runs: commit.runs.map((r) => ({ ...r, headSha: SHA(2) })) }]);
+      expect(judged.checks.find((c) => c.check.name === 'smoke')?.status).toBe('regressed');
+      expect(judged.rollback?.commits).toEqual([SHA(1), SHA(2)]);
+    }
+  });
+
+  test('a later success on the same commit decides it: a rerun that passed', () => {
+    const runs = [
+      run({ id: '1', name: 'smoke', headSha: SHA(1), conclusion: 'failure', completedAt: '2026-11-01T00:00:00.000Z' }),
+      run({ id: '2', name: 'smoke', headSha: SHA(1), conclusion: 'success', completedAt: '2026-11-01T01:00:00.000Z' }),
+    ];
+    expect(judgePlan(plan, [{ commit: SHA(1), runs }]).checks.find((c) => c.check.name === 'smoke')?.status).toBe('working');
+  });
+
+  test('a regressed check counts the commits it was read on and the commits it was decided on (triage D, codex-4)', () => {
+    const judged = judgePlan(plan, [
+      { commit: SHA(1), runs: [run({ name: 'smoke', headSha: SHA(1) })] },
+      { commit: SHA(2), runs: [] },
+      { commit: SHA(3), runs: [run({ name: 'smoke', headSha: SHA(3), conclusion: 'skipped' })] },
+    ]);
+    const smoke = judged.checks.find((c) => c.check.name === 'smoke');
+    expect(smoke?.status).toBe('working');
+    expect(smoke?.coverage).toEqual({ commits: 3, decided: 1 });
+    expect(judged.checks.find((c) => c.check.name === 'test (node 22)')?.coverage).toEqual({ commits: 1, decided: 0 });
+  });
+
   test('the rollback condition needs every named check failing on consecutive commits', () => {
     const failing = (n: number) => ({ commit: SHA(n), runs: [run({ name: 'smoke', headSha: SHA(n), conclusion: 'failure' }), run({ name: 'e2e', headSha: SHA(n), conclusion: 'timed_out' })] });
     const halfFailing = { commit: SHA(3), runs: [run({ name: 'smoke', headSha: SHA(3), conclusion: 'failure' })] };
