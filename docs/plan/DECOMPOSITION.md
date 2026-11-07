@@ -619,7 +619,7 @@ order between them is settled before any of them is picked up.
 | R21 | Local model endpoint | M2 | R6 | `docs/plan/R21-local-endpoint.md` |
 | R22 | Trigger framework | M2 | P3, P9, P12, P14, R19 | `docs/plan/R22-triggers.md` |
 | R23 | Workspace skills and instruction discovery | M2 | P5, R6, R20 | — |
-| R24 | Repository instructions as granted context | M2 | P1, P4, R20, R23; R10 above L2 | — |
+| R24 | Repository instructions as granted context | M2 | P1, P4, R10, R20, R23 | — |
 | R25 | Property checks | M3 | P6, P8, R7, R15, R19 | — |
 | R26 | Driver: Codex | M2 | P5, P10, P12, P13, R23 | — |
 
@@ -947,6 +947,59 @@ record. The admission ceiling already never widens; this adds the narrowing.
 At M1 it would hold little, since only the human trigger exists and egress is
 the model API alone. It matters the moment the trigger framework admits outside
 payloads, or any allowlist grows past the model API.
+
+**Amendment:** A-R10-01 to A-R10-03, which this unit builds (D-A-TR-01 to
+D-A-TR-05). Policy classifies sensitive paths by class, grants a role the
+classes it may read (none by default), and declares per role a narrowed scope
+of tools, egress, and level ceiling, each validated as no wider than the
+role's own. The trigger policy names, per kind, a trust below which an
+admitted run is narrowed; absent, it is the floor, so a policy written before
+R10 behaves as it does today. Run state records the narrowing once and never
+clears it, and P14's record gains `capability-narrowed`.
+
+Binding:
+
+- a run is narrowed at admission when its author is below `narrowBelow`, or
+  when any role it seats is granted a sensitive class; a role in a narrowed run
+  with no narrowed scope is refused (I5)
+- narrowing takes effect at the task boundary: every later task's sandbox,
+  tools, and level come from the narrowed scope. The input that narrowed the
+  run is placed only in a request whose sandbox was built that way, after the
+  narrowing is committed to run state and the record; any failure in between
+  refuses the task (I5)
+- nothing restores a narrowed capability inside the run; work that needs it
+  back is a newly admitted run
+- a sensitive path is absent from every attempt's tree unless the role is
+  granted its class in a run narrowed at admission. Verification still sees the
+  full tree, an omitted path is never a deletion in a diff, and a task that
+  writes an omitted path is refused
+- the level ceiling binds every station exit after narrowing, so a narrowed run
+  reads its approvals at the lower level
+- a narrowing API in `line` that later input sources call (R16's fields, R24's
+  set) the same way, exercised here by a test source
+
+**Gate paths:** `packages/core/src/policy/types.ts`,
+`packages/core/src/run/types.ts`, and `packages/vault/src/types.ts` for the
+amendment, and `packages/conformance/` for the registry entries. The pull
+request takes `gate-change`, and the squash merge carries
+`Gate-Change: acknowledged`.
+
+**Not in this unit:** a `tighten()` method on sandbox providers; classifying
+content rather than paths; new trust levels; any template that starts a build
+(R16); R24's instruction set; secret scanning; and any way to widen a run once
+admitted.
+
+**Conformance:** `pnpm typecheck`, `pnpm lint`, and `pnpm conformance` pass,
+and the report names an assertion for each, failing when its check is
+deleted: a narrowed scope wider than its role's is refused at validation; a
+narrowed run seating a role with no narrowed scope is refused; an author
+below `narrowBelow` is admitted narrowed and the record says so; no task after
+narrowing gets a sandbox, tools, or level beyond the narrowed scope; the
+narrowing input is withheld until the narrowed sandbox is provisioned and the
+narrowing recorded; no call restores a narrowed capability; a sensitive path
+is absent from an ungranted task's tree, is not deleted by its diff, and a
+write to it is refused; and a policy with no R10 keys admits exactly as
+before.
 
 ### R11 — Learning loop
 
@@ -2031,11 +2084,10 @@ Binding:
   tasks under one role and one base still share a cacheable prefix.
 - **Who wrote it is policy's question.** These files reached the base through
   the target's own merge process, not the line's. Policy may grant
-  `'repo-instructions'` at L0 to L2. Above L2 the grant needs R10, under which
-  a file policy classifies as sensitive narrows the run before it reaches a
-  model. Until R10 lands, admission refuses a run whose level is above L2 and
-  whose policy grants it, and R10's pull request lifts that refusal as one of
-  its own amendments. The unit recommends that targets classify these paths as
+  `'repo-instructions'` at L0 to L2. Above L2 the grant narrows the run under
+  R10 before the set reaches a model, through R10's narrowing API, and a
+  target that classifies these paths as sensitive has them unmounted unless
+  granted (D-A-TR-05). There is no interim refusal: R10 lands first. The unit recommends that targets classify these paths as
   protected, so a change to them escalates at `integrate` like any protected
   path.
 - **Nothing that judges.** The set never includes the locked spec,
