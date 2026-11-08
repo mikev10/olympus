@@ -82,6 +82,8 @@ export type RequestProblemCode =
   | 'overlaps'
   /** A role's egress allowlist names a host the git remote is reached on (D-I1b-05). */
   | 'reaches-git-remote'
+  /** An admitted artifact is in a sensitive class: it is every seat's context, so it cannot be withheld (D-R10-09). */
+  | 'sensitive-artifact'
   /** A security check's image is not pinned by digest, or is not the image declared for its kind (R17). */
   | 'not-pinned'
   /** A security check's `config` is neither text nor null, or is null for a scanner with no rules of its own. */
