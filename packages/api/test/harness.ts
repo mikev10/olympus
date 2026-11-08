@@ -136,6 +136,8 @@ function scope(stations: CapabilityScope['stations'], tier: ModelTier): Capabili
     autonomyCeiling: 2,
     triggerKinds: ['human'],
     budget: { maxTokens: 1000, maxCostUsd: 1, maxWallClockMs: 60_000 },
+    sensitiveGrants: [],
+    narrowed: null,
   };
 }
 
@@ -158,12 +160,14 @@ export function policyDocument(overrides: Partial<PolicyDocument> = {}): PolicyD
     approvals: { ...AUTO_BELOW_L2 },
     roles: { [BUILDER]: roleScope('builder'), [REVIEWER]: roleScope('reviewer') },
     protectedPaths: ['.github/**'],
+    sensitivePaths: {},
     triggers: {
       enabled: ['human'],
       entryStation: { human: 'intake' },
       taskTemplate: {},
       maxAutonomy: { human: 2 },
       minAuthorTrust: { human: 'owner' },
+      narrowBelow: {},
       maxTriggerDepth: 2,
       budgetPerWindow: { runs: 20, windowMs: 3_600_000 },
     },

@@ -11,6 +11,7 @@ import type {
   AgentClaim, ApprovalKey, AutonomyLevel, BaseRefusalPart, CompiledRole, DraftCondition, DraftRef, DraftStation, IndependenceGrade, ModelIdentity, ModelTier, Policy, PolicyRefusal,
   RecordCategory, RejectionReason, RoleId, Run, RunId, RunState, SeatIdentity, StationId, StationRefusal, TaskId, TaskResult, TreeCategory, VaultRef,
   AuthorTrust, CandidateId, CandidateSchema, FieldDefect, JobTemplateId, SchemaKind, TemplateId, TriggerAdmissionCause, TriggerLineage,
+  NarrowedScope, NarrowingCause,
 } from '@olympus-ai/core';
 import type { CheckResult, IntegrityViolation, TamperReport } from '@olympus-ai/integrity';
 import type { EgressConnection, EgressLog, MeterReading } from '@olympus-ai/sandbox';
@@ -330,6 +331,20 @@ export type DecisionCause =
    * the trees the runtime built, before the conflict is committed, as a park
    * is; the task is rebuilt, or parks past the policy's bound (A-R4-03, I5).
    */
+  /**
+   * The run was narrowed (A-R10-03): at admission, by its author's trust or a
+   * seated role's sensitive grant, or by the line, when a declared source's
+   * input arrived. `scopes` is what each seated role narrowed to, and `level`
+   * the ceiling every later exit reads its approval at. Recorded before the
+   * narrowing is committed to run state (D-R10-03).
+   */
+  | {
+      readonly cause: 'capability-narrowed';
+      readonly decidedBy: 'admission' | 'line';
+      readonly narrowing: NarrowingCause;
+      readonly scopes: Readonly<Record<RoleId, NarrowedScope>>;
+      readonly level: AutonomyLevel;
+    }
   | {
       readonly cause: 'task-conflict';
       readonly decidedBy: 'line';

@@ -15,7 +15,7 @@ import { createHash } from 'node:crypto';
 import { cp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ComponentGraph } from '@olympus-ai/api';
-import type { ParkCause, RoleId, RunId, RunState, StationId, StationRefusal, TaskId } from '@olympus-ai/core';
+import type { NarrowingCause, ParkCause, RoleId, RunId, RunState, StationId, StationRefusal, TaskId } from '@olympus-ai/core';
 import type { EgressConnection, EgressLog, MeterReading, SandboxProvider, Teardown } from '@olympus-ai/sandbox';
 import type { AdmissionRefusal, DecisionCause, EnforcementDecision, ResumeRefusal, Vault } from '@olympus-ai/vault';
 import ts from 'typescript';
@@ -28,6 +28,7 @@ import { realComponents, realPolicy } from './real-line.js';
 import { failingRun } from './tier.js';
 import { expiredCandidateRun } from './triggers.js';
 import { conflictScenario } from './parallel.js';
+import { authorTrustNarrowing, grantNarrowing, inputNarrowing } from './ratchet.js';
 import { draftingDecision, draftsRejectedPark } from './drafting.js';
 import { inTask, runHello, writes } from './verification.js';
 import { ARTIFACTS, HELLO_TASK, lineScope, linePolicy, readRecord, refusalOf, stubDriver, withLine, writeManifest, type LineRig } from './line.js';
@@ -62,7 +63,8 @@ export type CauseKey =
   | 'draft-sent-back'
   | 'draft-floor-applied'
   | 'record-drift'
-  | 'observation-closed';
+  | 'observation-closed'
+  | `capability-narrowed:${NarrowingCause['kind']}`;
 
 export function keyOf(d: DecisionCause): CauseKey {
   switch (d.cause) {
@@ -96,6 +98,8 @@ export function keyOf(d: DecisionCause): CauseKey {
       return 'record-drift';
     case 'observation-closed':
       return 'observation-closed';
+    case 'capability-narrowed':
+      return `capability-narrowed:${d.narrowing.kind}`;
   }
 }
 
@@ -747,6 +751,10 @@ export const DECISION_TABLE: Readonly<Record<CauseKey, Row>> = {
       });
     },
   },
+  // R10: each narrowing is recorded by the component that decided it, before the state that carries it.
+  'capability-narrowed:author-trust': { kind: 'scenario', run: authorTrustNarrowing },
+  'capability-narrowed:sensitive-grant': { kind: 'scenario', run: grantNarrowing },
+  'capability-narrowed:input': { kind: 'scenario', run: inputNarrowing },
   'task-conflict': {
     kind: 'scenario',
     run: () => conflictScenario('task-conflict', (decisions) => {

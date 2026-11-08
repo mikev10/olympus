@@ -41,7 +41,7 @@ function scopeWith(scope: CapabilityScope, kinds: TriggerKind[]): CapabilityScop
 }
 
 /** The line's two roles, listing `kinds`, under a trigger policy that enables `issue` with its whole route. */
-async function issuePolicy(triggerOverrides: Partial<TriggerPolicy> = {}, kinds: TriggerKind[] = ['human', 'issue']): Promise<Policy> {
+export async function issuePolicy(triggerOverrides: Partial<TriggerPolicy> = {}, kinds: TriggerKind[] = ['human', 'issue']): Promise<Policy> {
   return linePolicy({}, {
     roles: {
       ['builder' as RoleId]: scopeWith(lineScope(['build', 'verify'], 'standard'), kinds),
@@ -53,6 +53,7 @@ async function issuePolicy(triggerOverrides: Partial<TriggerPolicy> = {}, kinds:
       taskTemplate: { issue: 'intake-candidate' },
       maxAutonomy: { human: 2, issue: 1 },
       minAuthorTrust: { human: 'owner', issue: 'collaborator' },
+      narrowBelow: {},
       maxTriggerDepth: 2,
       budgetPerWindow: { runs: 20, windowMs: 3_600_000 },
       subscriptions: [ISSUE_SUBSCRIPTION],
@@ -115,7 +116,7 @@ async function issueCandidate(rig: LineRig, policy: Policy, options: IssueOption
 }
 
 /** Writes a candidate directly, as the intake would, for a shape no delivery reaches in one step. */
-async function plantCandidate(vault: Vault, key: string, change: Partial<CandidateRecord>): Promise<CandidateId> {
+export async function plantCandidate(vault: Vault, key: string, change: Partial<CandidateRecord>): Promise<CandidateId> {
   const { intakeId } = await import('@olympus-ai/vault');
   const id = intakeId('planted', key);
   const now = new Date().toISOString();
@@ -588,6 +589,7 @@ const MISSED_FIRING_RECORDED = runtime({
           taskTemplate: { scheduled: 'intake-candidate' },
           maxAutonomy: { human: 2, scheduled: 0 },
           minAuthorTrust: { human: 'owner', scheduled: 'owner' },
+          narrowBelow: {},
           maxTriggerDepth: 2,
           budgetPerWindow: { runs: 20, windowMs: 3_600_000 },
           schedules: [{ id: 'nightly', template: 'intake-candidate', at: '02:00' }],

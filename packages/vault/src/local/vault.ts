@@ -385,7 +385,18 @@ function requireRunState(value: unknown, file: string): RunState {
   if (!isStationHistory(stations)) {
     throw new Error(`LocalVault: ${file} holds station entries that are not a station and a time each; refusing to return a partial record`);
   }
-  return { ...value, drafts, approvals, stations, reviews: (value.reviews as unknown[]).map(seatBeforeR9) } as unknown as RunState;
+  // A state committed before R10 was never narrowed (A-R10-02).
+  const narrowed = value.narrowed === undefined ? null : value.narrowed;
+  // Every later exit reads its level from here, so a level outside 0-3 or a cause not one of the three is refused (A-R10-02).
+  const narrowedOk = narrowed === null || (
+    isRecord(narrowed) && hasString(narrowed, 'at') && isRecord(narrowed.cause) &&
+    (narrowed.cause.kind === 'author-trust' || narrowed.cause.kind === 'sensitive-grant' || narrowed.cause.kind === 'input') &&
+    (narrowed.level === 0 || narrowed.level === 1 || narrowed.level === 2 || narrowed.level === 3)
+  );
+  if (!narrowedOk) {
+    throw new Error(`LocalVault: ${file} holds a narrowing that is not a cause, a time, and a level; refusing to return a partial record`);
+  }
+  return { ...value, drafts, approvals, stations, narrowed, reviews: (value.reviews as unknown[]).map(seatBeforeR9) } as unknown as RunState;
 }
 
 
@@ -478,6 +489,7 @@ const DECIDERS: Readonly<Record<DecisionCause['cause'], readonly string[]>> = {
   'relay-refused': ['model-relay'],
   'tier-escalated': ['line'],
   'task-conflict': ['line'],
+  'capability-narrowed': ['admission', 'line'],
   'approval-rejected': ['approval'],
   'draft-sent-back': ['line'],
   'draft-floor-applied': ['line'],

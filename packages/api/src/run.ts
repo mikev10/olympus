@@ -12,6 +12,7 @@
 import { createHash } from 'node:crypto';
 import { readFile, realpath } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
+import picomatch from 'picomatch';
 import {
   approvalKey,
   capabilityRefusal,
@@ -40,6 +41,8 @@ import {
   transition,
   validatePolicyDocument,
   admitTrigger,
+  levelOf,
+  narrowAtAdmission,
   type AdmittedTrigger,
   type CandidateId,
   type CapabilityScope,
@@ -223,6 +226,8 @@ export interface DriveHooks {
   readonly cancelRequested?: () => RunCancellation | null;
   /** Told of every committed state, in order. */
   readonly onCommit?: (state: RunState) => void;
+  /** Input a declared source brought for a build task, which narrows the run first (D-R10-06). The HTTP service never sets it. */
+  readonly inputFor?: NonNullable<LineContext['inputFor']>;
 }
 
 /** Deliberately no level, policy, or artifacts: a resume reads them from the run's admission record (A-P4-03). */
@@ -737,6 +742,32 @@ function policyRefusal(level: AutonomyLevel, graph: TaskGraph, policy: Policy, d
 }
 
 /**
+ * Every admitted artifact whose path a sensitive class matches (D-R10-09). A
+ * locked artifact is offered to seats as text in their context, which tree
+ * omission cannot reach, so classifying one sensitive would withhold nothing.
+ */
+function sensitiveArtifacts(artifacts: unknown, policy: Policy): RequestProblem[] {
+  const globs = Object.values(policy.sensitivePaths).flat();
+  if (globs.length === 0) return [];
+  const paths: string[] = [];
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) value.forEach(walk);
+    else if (typeof value === 'object' && value !== null) {
+      const record = value as Record<string, unknown>;
+      if (typeof record.path === 'string') paths.push(record.path);
+      Object.values(record).forEach(walk);
+    }
+  };
+  walk(artifacts);
+  const matches = picomatch(globs, { dot: true });
+  return [...new Set(paths)].filter((path) => matches(path)).sort().map((path) => ({
+    path: 'artifacts',
+    code: 'sensitive-artifact',
+    message: `${path} is an admitted artifact and a sensitive class matches it; an artifact is every seat's context, so it cannot be withheld`,
+  }));
+}
+
+/**
  * No sandbox the line provisions may reach the git remote: the merge is the
  * runtime's, from the host, and an agent that could reach the remote could
  * push its own change (D-A-I1-07, D-I1b-05). The remote's domains are the
@@ -912,6 +943,9 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
   if (!admitted.ok) return { ok: false, reason: 'invalid-request', problems: admitted.problems };
   const unplanned = planProblems(req, policy.policy);
   if (unplanned.length > 0) return { ok: false, reason: 'invalid-request', problems: unplanned };
+  // A locked artifact reaches every seat as text, whatever its tree omits, so none may be sensitive (codex-1, D-R10-09).
+  const sensitive = sensitiveArtifacts(admitted.admitted.artifacts, policy.policy);
+  if (sensitive.length > 0) return { ok: false, reason: 'invalid-request', problems: sensitive };
   const drafted = draftedStations(admitted.admitted.drafted);
   const drafting = draftingProblems(req, admitted.admitted.drafted, policy.policy);
   if (drafting.length > 0) return { ok: false, reason: 'invalid-request', problems: drafting };
@@ -943,6 +977,10 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
     if (triggerVerdict.reason === 'trigger-refused') return { ok: false, reason: 'trigger-refused', cause: triggerVerdict.cause, detail: triggerVerdict.detail };
     return { ok: false, reason: 'policy-refused', station: 'intake', role: triggerVerdict.role, refusal: triggerVerdict.refusal };
   }
+  // An admitted author below the kind's `narrowBelow`, or a seated role granted a sensitive class, narrows the
+  // run before anything runs; a role with no narrowed scope, or a level above a narrowed ceiling, is refused (A-R10-01, D-R10-02).
+  const narrowing = narrowAtAdmission(trigger, req.requestedLevel, seatedScopes(admitted.admitted.graph, policy.policy, drafted), policy.policy.triggers);
+  if (!narrowing.ok) return { ok: false, reason: 'policy-refused', station: 'intake', role: narrowing.role, refusal: narrowing.refusal };
   const rolesAt = await rolesProblems(req);
   if (rolesAt.length > 0) return { ok: false, reason: 'invalid-request', problems: rolesAt };
   const roles = await admitRoles(req.roles, admitted.admitted.graph, drafted);
@@ -1050,6 +1088,13 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
     await discardRun(workspaces, req.runId);
     return { ok: false, reason: 'invalid-request', problems: [{ path: 'candidate', code: 'already-admitted', message: `candidate ${candidate.candidate.id} admitted another run first` }] };
   }
+  // Recorded before the state that carries it, so no narrowed run exists that the record cannot count (D-R10-03).
+  if (narrowing.narrowing !== null) {
+    await recordDecision(
+      { vault, runId: req.runId, taskId: null, station: 'intake' },
+      { cause: 'capability-narrowed', decidedBy: 'admission', narrowing: narrowing.narrowing.cause, scopes: narrowing.narrowing.plan.scopes, level: narrowing.narrowing.plan.level },
+    );
+  }
   const record: AdmissionRecord = { ...unrecorded, ...(await draftingRecords()) };
   const admission = await vault.recordAdmission(record);
   const state = await vault.commitRunState(
@@ -1071,6 +1116,8 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
       cancelled: null,
       halted: null,
       drafts: {},
+      // Narrowed in the first state, so no task ever runs at the admitted scope (A-R10-02).
+      narrowed: narrowing.narrowing === null ? null : { cause: narrowing.narrowing.cause, at: now, level: narrowing.narrowing.plan.level },
       version: '0',
     },
     '0',
@@ -1424,7 +1471,7 @@ export async function approveStation(req: ApprovalRequest): Promise<ApprovalOutc
   if (named !== null && typeof named !== 'string') return refuse('invalid-request', 'draft must be the hash of the draft approved, or null', null);
   const state = await req.vault.readRunState(req.runId);
   const { record, policy } = await readAdmission(req.vault, state);
-  const level = record.run.requestedLevel;
+  const level = levelOf(record.run.requestedLevel, state.narrowed);
   const { graph, changed, drafting } = await loadLine(req.vault, record, state);
   if (changed.length > 0) return refuse('not-awaiting', `run ${req.runId} has an admitted artifact that changed; it is not awaiting approval`, state.station);
 
@@ -1484,7 +1531,7 @@ export async function rejectDraft(req: RejectionRequest): Promise<RejectionOutco
   const reason: unknown = req.reason ?? null;
   const state = await req.vault.readRunState(req.runId);
   const { record, policy } = await readAdmission(req.vault, state);
-  const level = record.run.requestedLevel;
+  const level = levelOf(record.run.requestedLevel, state.narrowed);
   const { graph, changed, drafting } = await loadLine(req.vault, record, state);
   const station = state.station;
   if (changed.length > 0 || !isDraftStation(station)) return { ok: false, reason: 'not-awaiting', message: `run ${req.runId} is not waiting at a drafted exit` };
@@ -1603,7 +1650,7 @@ export async function runStanding(vault: Vault, runId: RunId): Promise<{ state: 
   // The last exit is crossed only by a run that passed, and when it needs an approval the line
   // spends the grant in the commit that ends the run. A spent grant for it is that record; the
   // gate re-evaluated would ask for a second approval of an exit already crossed (D-P9-08).
-  const last = approvalKey(LAST_STATION, record.run.requestedLevel);
+  const last = approvalKey(LAST_STATION, levelOf(record.run.requestedLevel, state.narrowed));
   if (state.approvals.some((grant) => grant.key === last && grant.usedAt !== null)) return { state, standing: { standing: 'passed' }, source: 'records' };
   const { graph, changed, drafting } = await loadLine(vault, record, state);
   if (changed.length > 0) {
@@ -1624,7 +1671,7 @@ export async function runStanding(vault: Vault, runId: RunId): Promise<{ state: 
   const next = transition({
     from: step.from,
     to: step.to,
-    level: record.run.requestedLevel,
+    level: levelOf(record.run.requestedLevel, state.narrowed),
     policy,
     tampered: verdict.ok ? [] : verdict.tampered.map((t) => ({ ...t })),
     grants: state.approvals,

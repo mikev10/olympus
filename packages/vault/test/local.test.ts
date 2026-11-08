@@ -95,7 +95,7 @@ function state(version: string): RunState {
     reviews: [],
     usage: [],
     cancelled: null,
-    halted: null,
+    halted: null, narrowed: null,
     drafts: {},
     version,
   };
@@ -684,6 +684,31 @@ describe('records read back from the store', () => {
       await expect(vault.readRunState(runId)).rejects.toThrow(/does not hold a run state/);
     },
   );
+
+  // External review of R10: a stored narrowing is what every later exit reads its level from, so a level that is
+  // not one of the four, or a cause that is not one of the three, is refused rather than read.
+  test.each([
+    { cause: { kind: 'input', source: 'repo-instructions' }, at: 'x' },
+    { cause: { kind: 'input', source: 'repo-instructions' }, at: 'x', level: 7 },
+    { cause: { kind: 'input', source: 'repo-instructions' }, at: 'x', level: '1' },
+    { cause: { kind: 'invented' }, at: 'x', level: 1 },
+  ])('a run state whose narrowing is %j is refused (A-R10-02)', async (narrowed) => {
+    const dir = join(store, 'runs', runId, 'state');
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, '1.json'), JSON.stringify({ ...state('1'), narrowed }));
+    await expect(vault.readRunState(runId)).rejects.toThrow(/narrowing/);
+  });
+
+  test('a run state written before R10 reads as not narrowed, and a well-formed narrowing is read back (A-R10-02)', async () => {
+    const dir = join(store, 'runs', runId, 'state');
+    await mkdir(dir, { recursive: true });
+    const { narrowed: _absent, ...before } = state('1');
+    await writeFile(join(dir, '1.json'), JSON.stringify(before));
+    expect((await vault.readRunState(runId)).narrowed).toBeNull();
+    const narrowed = { cause: { kind: 'author-trust', trust: 'outside' }, at: 'x', level: 1 };
+    await writeFile(join(dir, '2.json'), JSON.stringify({ ...state('2'), narrowed }));
+    expect((await vault.readRunState(runId)).narrowed).toStrictEqual(narrowed);
+  });
 
   test('a run state whose phase is not one of the two is refused', async () => {
     const dir = join(store, 'runs', runId, 'state');

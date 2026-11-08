@@ -35,6 +35,7 @@ async function nightlyPolicy(): Promise<Policy> {
       taskTemplate: { scheduled: 'intake-candidate' },
       maxAutonomy: { human: 2, scheduled: 0 },
       minAuthorTrust: { human: 'owner', scheduled: 'owner' },
+      narrowBelow: {},
       maxTriggerDepth: 2,
       budgetPerWindow: { runs: 20, windowMs: 3_600_000 },
       schedules: [INTEGRITY, SECURITY],

@@ -1175,3 +1175,25 @@ export const R19_ASSERTIONS = {
   I6: [CRITIC_OF_DRAFTER_FAMILY_IS_ADVISORY, TEST_DRAFTER_OF_BUILDER_FAMILY],
   I7: [REJECTION_TEXT_ONLY_AT_SPEC, INTENT_IS_NOT_A_PAYLOAD, INTENT_REFUSED_FROM_ANOTHER_CHANNEL],
 } as const;
+
+/**
+ * R10: a drafted path a sensitive class matches is a runtime problem,
+ * `sensitive-path`, which sends the draft back: a draft becomes every later
+ * seat's context once locked, and the critic is handed its files whatever its
+ * own tree omits (D-R10-09, external review of R10, codex-3 and gemini-1).
+ */
+export async function sensitiveDraftGoesBack(): Promise<void> {
+  await withLine('r10-draft-sensitive-', async (rig) => {
+    const r = await drafting(rig);
+    const policy = await draftingPolicy({}, {});
+    const { StrictPolicyEngine } = await core();
+    const classified = new StrictPolicyEngine().resolvePolicy({ ...policy, sensitivePaths: { drafts: ['.drafts/**'] } });
+    await admitAndDrive(r, { policy: classified });
+    const [first] = (await rig.state()).drafts.spec?.attempts ?? [];
+    const back = first?.sentBack;
+    if (back?.by !== 'runtime') throw new Error(`R10: a draft writing a sensitive path was not sent back by the runtime: ${JSON.stringify(back)}`);
+    const sensitive = back.problems.filter((p) => p.code === 'sensitive-path').map((p) => p.path);
+    if (!sameStrings(sensitive, Object.keys(helloSpec(rig.runId)))) throw new Error(`R10: the draft's sensitive paths were ${JSON.stringify(sensitive)}, not its four files`);
+    if ((await (await r.components()).vault.readLocks(rig.runId)) !== null) throw new Error('R10: a draft writing a sensitive path locked something');
+  });
+}

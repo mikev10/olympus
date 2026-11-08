@@ -8266,3 +8266,204 @@ open questions on 2026-11-07, each the recommended answer.
   `capability-narrowed`, decided by `admission` or `line`, naming the cause
   (`author-trust`, `sensitive-grant`, or a declared input source) and the scope
   each role narrowed to.
+
+## R10: Trust ratchet
+
+### D-R10-01: the boundary R10 was started on
+
+- **Unit:** R10, the trust ratchet (`docs/plan/DECOMPOSITION.md`, as amended
+  by #104, D-A-TR-01 to D-A-TR-05, A-R10-01 to A-R10-03). Depends on P12,
+  P14, and R22, each merged into `v2` and tagged (`reviewed/P12`,
+  `reviewed/P14`, `reviewed/R22`).
+- **Deliverables:**
+  - A-R10-01: `sensitivePaths` on `Policy` and `PolicyDocument`;
+    `sensitiveGrants` and `narrowed` on `CapabilityScope`; `narrowBelow` on
+    `TriggerPolicy`. The validator reads each, defaults each when absent, and
+    refuses a narrowed scope wider than its role's own and a grant of a class
+    the policy does not declare;
+  - A-R10-02: `RunState.narrowed`, written once and never cleared; the Vault
+    reads a state committed before R10 as not narrowed;
+  - A-R10-03: the `capability-narrowed` decision, by `admission` or `line`;
+  - admission narrows a run whose author is below `narrowBelow` or that seats
+    a role granted a sensitive class, and refuses one that seats a role with
+    no narrowed scope;
+  - the line builds every task's sandbox, tools, and exit level from the
+    narrowed scope once the run is narrowed;
+  - `narrowRun`, the narrowing API in `line`, and a withheld-input type that
+    only it can release, exercised by a test source;
+  - sensitive paths left out of every model-facing tree, verification over
+    the full tree, and a write to a sensitive path refused.
+- **Out of scope (verbatim):** a `tighten()` method on sandbox providers;
+  classifying content rather than paths; new trust levels; any template that
+  starts a build (R16); R24's instruction set; secret scanning; and any way
+  to widen a run once admitted.
+- **Acceptance:** `pnpm typecheck`, `pnpm lint`, `pnpm conformance`, and
+  `pnpm test` pass, and the report names one assertion for each of the eight
+  clauses of R10's conformance, each failing when its check is deleted.
+- **Invariants touched:** I4, default deny: no role reads a sensitive class
+  unless policy grants it, and a narrowed scope can only take capability
+  away. I5, fail closed: a narrowed run seating a role that declares no
+  narrowed scope is refused, the narrowing input is withheld until the
+  narrowing is committed, and a write to a sensitive path is refused. I2:
+  the narrowing is derived by the runtime from the admitted trigger and
+  policy, never from a model. I7: input that narrows a run is data placed in
+  the variable suffix, never in a system or role prompt. **Pending registry
+  entries owed:** none (`grep -rn "R10" packages/conformance/src` finds none;
+  D-A-TR-01).
+- **Assumptions, each verified:**
+  - Admission refuses below `minAuthorTrust` and nothing else reads trust
+    (`core/src/trigger/admission.ts:66-76`); the admitted trigger carries the
+    candidate's trust (`api/src/run.ts:938-941`).
+  - Every model call in a run goes through `runTask`, which takes tools,
+    egress, and budget from `scopeFor(ctx, task)` and provisions a fresh
+    sandbox per call (`api/src/line.ts:790-860`). The review and security
+    seats take the review task's role scope (`line.ts:1586`), drafters and
+    critics theirs (`drafting.ts:393`, `:702`). Nightly review runs outside
+    any run (`nightly-review.ts:364`).
+  - Exit levels are read in exactly two places, both from
+    `run.requestedLevel`: the line's exit (`line.ts:272`) and the standing a
+    caller reads (`run.ts:1627`).
+  - Model-facing trees are made in four places: the build start/work pair
+    (`line.ts:1190-1193`), the review view (`line.ts:1492`), and the
+    drafter's and critic's copies (`drafting.ts:384-388`, `:694-697`).
+    Verification materialises from the base and the cumulative diff
+    (`workspace.ts:300-310`), so checks see the full tree.
+  - A task's change is `ownDiff(start, work)` (`workspace.ts:253-261`): a
+    path absent from both copies is never in it, and a path present only in
+    work is `added`.
+  - A write outside a role's grant is refused as a `capability-escape`
+    violation (`line.ts:1227-1246`), which P14 records.
+  - The stored policy is re-validated through `validatePolicyDocument` on
+    every resume (`run.ts:1199`), so every new key must default when absent
+    or no pre-R10 run could resume.
+  - The Vault's run-state readers default fields added since
+    (`local/vault.ts:368-388`, `stub/vault.ts:353-358`).
+- **Where the code differs from the entry:** nothing beyond D-A-TR-01; its
+  line numbers still hold at `5c1dd51`.
+
+### D-R10-02: a narrowed ceiling below the requested level is refused at admission
+
+- **Ambiguous:** the entry says the ceiling "binds every station exit after
+  narrowing, so a narrowed run reads its approvals at the lower level", and
+  the spine says an over-request "fails closed; it never silently
+  downgrades".
+- **Chosen:** at admission the narrowing is known before anything runs, so a
+  requested level above any seated role's narrowed ceiling is an
+  over-request, refused as `policy-refused`/`exceeds-cap` like every other.
+  A run narrowed later by an input source cannot be refused for the level it
+  was admitted at; from then on every exit reads its approval at
+  `min(requested, the lowest narrowed ceiling of a seated role)`. That is
+  lower, never higher, and the `capability-narrowed` decision records it.
+- **Rejected:** *admit at the narrowed level.* A silent downgrade at
+  admission, which the spine forbids. *Per-station ceilings.* The lowest
+  ceiling over the run is stricter, and a role seated at one station cannot
+  dodge it.
+- **Reverse by:** removing the over-request check from admission's narrowing.
+
+### D-R10-03: the decision is recorded before the state that carries it
+
+- **Chosen:** at admission, `capability-narrowed` is recorded after every
+  refusal check and before the admission record and first state; in the
+  line, `narrowRun` records it before it commits `RunState.narrowed`. A
+  failure between the two leaves a record that over-reports narrowing, never
+  a narrowed run P14's record cannot count. The input is released only after
+  both.
+- **Rejected:** *state first.* A failure after it leaves a narrowed run with
+  no record.
+- **Reverse by:** swapping the two calls.
+
+### D-R10-04: input sources are a closed list
+
+- **Chosen:** `InputSource` is `'trigger-fields' | 'repo-instructions'`, the
+  two sources the entry names (R16's fields, R24's set). The conformance test
+  source narrows as `'repo-instructions'`. A source a later unit adds is a
+  contract edit, visible in the diff.
+- **Rejected:** *any string.* A source nobody declared could narrow a run as
+  a cause nobody can audit.
+- **Reverse by:** widening the union.
+
+### D-R10-05: a write to any sensitive path is refused, and grants need an admission narrowing
+
+- **Chosen:** a role's `sensitiveGrants` mount its classes only when
+  `RunState.narrowed` was set at admission (`author-trust` or
+  `sensitive-grant`). In a run narrowed later, or not at all, every class is
+  left out of every model-facing tree. A path in a task's own diff that
+  matches a class its role is not given is refused as a `capability-escape`,
+  whether or not the base held it, so a model cannot create one unseen.
+- **Rejected:** *refuse only the paths the copy omitted.* A new file in a
+  sensitive class would pass.
+- **Reverse by:** matching against the omitted list instead of the globs.
+
+### D-R10-06: the input hook is the runtime's, not the caller's
+
+- **Chosen:** a later source reaches the line through `narrowRun`, which
+  returns a `WithheldInput` that only `runTask` places, and only into a
+  narrowed run's variable suffix. The test source reaches it through a drive
+  hook, which the HTTP service never sets.
+- **Rejected:** *a field on the run request.* A caller could put text into a
+  model's context through an API meant for the runtime's own code.
+- **Reverse by:** removing the hook; `narrowRun` stays.
+
+### D-R10-07: the narrowed level is committed with the narrowing
+
+- **Found while building:** the exit level is read in eleven places across
+  `line.ts`, `run.ts`, `drafting.ts`, and `outcomes.ts`: each exit, each
+  approval key, the standing, and each seat's grade. Recomputing the lowest
+  narrowed ceiling at each would need the seated roles, which half of them do
+  not hold.
+- **Chosen:** `RunNarrowing` carries `level`, computed once when the
+  narrowing is planned and recorded in the same decision, and every site
+  reads `levelOf(requested, state.narrowed)` from core, which never returns
+  more than the level the run was admitted at. This adds one field to the
+  type A-R10-02 declared, in a gate path this unit owns; the reviewers are
+  asked to challenge it.
+- **Rejected:** *recompute at every site.* Eleven copies of one rule, and a
+  site that forgets one reads its approvals at the admitted level.
+- **Reverse by:** removing the field and computing the level from the
+  seated roles at each site.
+
+### D-R10-08: a narrowing that cannot complete stops the drive
+
+- **Found while building:** `StationRefusal` has no reason for a narrowing
+  that failed, and adding one changes `core/src/station/types.ts`, a contract
+  file this unit does not declare.
+- **Chosen:** `narrowRun` throws when a seated role declares no narrowed
+  scope, or when the record or the commit fails. The drive stops with the
+  input unplaced, and the service records the halt (A-P9-02).
+- **Rejected:** *a new refusal reason.* A contract change outside the
+  unit's declared gate paths, which would stop the unit.
+- **Reverse by:** an amendment adding the reason; `narrowRun` then returns it.
+
+### D-R10-09: no locked artifact and no draft may be sensitive (external review of R10)
+
+- **Found by review:** codex-1, and codex-3 with gemini-1. A locked
+  artifact reaches every seat as context text, which tree omission cannot
+  withhold. A drafted file is handed to the critic whatever the critic's tree
+  omits, and once locked it becomes every later seat's context.
+- **Chosen:** admission refuses a run whose admitted artifact a sensitive
+  class matches (`sensitive-artifact`), and a drafted path a sensitive class
+  matches sends the draft back (`sensitive-path`), whatever the drafter is
+  granted.
+- **Rejected:** *filter each seat's context by its grants.* The spec and the
+  tests are context every seat needs, so filtering them would refuse every
+  seat. Refusing at admission is the same outcome, decided earlier and
+  recorded once.
+- **Reverse by:** removing `sensitiveArtifacts` from admission and the
+  `sensitive-path` check from drafting.
+
+### D-R10-10: a call is not made under a scope read before a sibling narrowed the run (external review of R10)
+
+- **Found by review:** codex-2. In a batch, one task's scope was read before
+  awaiting its sandbox, and a sibling's input could narrow the run in
+  between. The call then went out with the wider tools and egress.
+- **Chosen:** `runTask` checks again, with no await between the check and
+  the call, whether the run's narrowing changed since the scope was read. If
+  it did, the call is not made and the attempt is spent as a retry, rebuilt
+  under the narrowed scope. A model call already in flight when a run
+  narrows still ends under its own scope, and never receives the input
+  (D-A-TR-03).
+- **Rejected:** *resolve every batch member's input before provisioning any
+  of them.* That works only for input known at the batch's start, and later
+  sources can bring input at other points.
+- **Reverse by:** removing the check; D-A-TR-03's in-flight rule then
+  covers the provisioning window too.

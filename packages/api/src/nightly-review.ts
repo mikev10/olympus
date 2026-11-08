@@ -133,6 +133,7 @@ function decisionFields(d: EnforcementDecision, violation: IntegrityViolation | 
     case 'relay-refused': return { ...base, refused: decision.refused, exhausted: decision.exhausted };
     case 'tier-escalated': return { ...base, from: decision.from, to: decision.to, failedGates: decision.failedGates };
     case 'task-conflict': return { ...base, with: decision.with.length, paths: decision.paths.length };
+    case 'capability-narrowed': return { ...base, narrowedBy: decision.narrowing.kind, level: decision.level, roles: Object.keys(decision.scopes).length };
   }
 }
 

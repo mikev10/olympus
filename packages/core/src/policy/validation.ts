@@ -31,6 +31,7 @@ import {
 import type {
   ApprovalKey, ApprovalOutcome, CapabilityScope, EscalationGrant, PolicyDocument, TriggerPolicy,
   NightlyPolicy, NightlyScanner, ObservePolicy, TriggerSchedule, TriggerSubscription,
+  NarrowedScope, SensitiveClass,
 } from './types.js';
 import {
   CHAR_CLASSES, LABEL_CLASS, SIGNAL_KINDS, TEMPLATE_IDS, hasFieldSchema, isJobTemplate, isObserveTemplate, isSignalTemplate, isTemplateId,
@@ -62,13 +63,23 @@ export type DocumentValidation =
  */
 const DOCUMENT_KEYS: Readonly<Record<keyof PolicyDocument, true>> = {
   globalCap: true, stationCaps: true, approvals: true, roles: true,
-  protectedPaths: true, triggers: true, concurrency: true,
+  protectedPaths: true, sensitivePaths: true, triggers: true, concurrency: true,
 };
 
 const SCOPE_KEYS: Readonly<Record<keyof CapabilityScope, true>> = {
   stations: true, writableGlobs: true, tools: true, network: true,
   tier: true, tierByStation: true, escalation: true, autonomyCeiling: true, triggerKinds: true, budget: true,
+  sensitiveGrants: true, narrowed: true,
 };
+
+const NARROWED_KEYS: Readonly<Record<keyof NarrowedScope, true>> = { tools: true, network: true, autonomyCeiling: true };
+
+/** A sensitive class's name: an identifier, so it reads the same in a grant, a record, and a log (A-R10-01). */
+const SENSITIVE_CLASS = /^[a-z][a-z0-9-]*$/u;
+
+function isSensitiveClass(value: unknown): value is SensitiveClass {
+  return typeof value === 'string' && SENSITIVE_CLASS.test(value) && !RESERVED_ROLE_IDS.includes(value);
+}
 
 const ESCALATION_KEYS: Readonly<Record<keyof Exclude<EscalationGrant, 'none'>, true>> = {
   afterFailedGates: true, ceiling: true,
@@ -82,7 +93,7 @@ const BUDGET_KEYS: Readonly<Record<keyof Budget, true>> = {
 
 const TRIGGER_KEYS: Readonly<Record<keyof TriggerPolicy, true>> = {
   enabled: true, entryStation: true, taskTemplate: true, maxAutonomy: true,
-  minAuthorTrust: true, maxTriggerDepth: true, budgetPerWindow: true,
+  minAuthorTrust: true, narrowBelow: true, maxTriggerDepth: true, budgetPerWindow: true,
   subscriptions: true, schedules: true, maxDeliveryAgeMs: true, candidateExpiryMs: true, nightly: true, observe: true,
 };
 
@@ -427,10 +438,57 @@ function validateScope(value: unknown, path: string, defects: PolicyDefect[]): C
     || autonomyCeiling === undefined || triggerKinds === undefined
     || network === undefined || budget === undefined
   ) return undefined;
-  const scope: CapabilityScope = { stations, writableGlobs, tools, network, tier, tierByStation, escalation, autonomyCeiling, triggerKinds, budget };
+  // Absent from a document written before R10: no grant, and no narrowed scope (A-R10-01, I4).
+  const sensitiveGrants = Object.hasOwn(record, 'sensitiveGrants')
+    ? readArray<SensitiveClass>(record, 'sensitiveGrants', path, 'a sensitive class name', isSensitiveClass, defects)
+    : [];
+  const narrowed = !Object.hasOwn(record, 'narrowed') || record.narrowed === null
+    ? null
+    : validateNarrowed(record.narrowed, child(path, 'narrowed'), defects);
+  if (sensitiveGrants === undefined || narrowed === undefined) return undefined;
+  const scope: CapabilityScope = {
+    stations, writableGlobs, tools, network, tier, tierByStation, escalation, autonomyCeiling, triggerKinds, budget, sensitiveGrants, narrowed,
+  };
   const before = defects.length;
   tierDefects(scope, path, defects);
+  narrowedDefects(scope, child(path, 'narrowed'), defects);
   return defects.length === before ? scope : undefined;
+}
+
+function validateNarrowed(value: unknown, path: string, defects: PolicyDefect[]): NarrowedScope | undefined {
+  const record = shape(value, path, keysOf(NARROWED_KEYS), defects);
+  if (record === undefined) return undefined;
+  const tools = readArray<string>(record, 'tools', path, 'a non-empty tool name', isNonEmptyString, defects);
+  const autonomyCeiling = read<AutonomyLevel>(record, 'autonomyCeiling', path, 'an autonomy level 0-3', isAutonomyLevel, defects);
+  const network = Object.hasOwn(record, 'network') ? validateEgress(record.network, child(path, 'network'), defects) : undefined;
+  if (!Object.hasOwn(record, 'network')) defects.push({ path: child(path, 'network'), problem: 'required key is missing; expected { egress }' });
+  if (tools === undefined || autonomyCeiling === undefined || network === undefined) return undefined;
+  return { tools, network, autonomyCeiling };
+}
+
+/**
+ * A narrowed scope only takes away (A-R10-01, I4): every tool and host it
+ * names is one the role already has, and its ceiling is no higher. A wider one
+ * is refused, never clipped to fit.
+ */
+function narrowedDefects(scope: CapabilityScope, path: string, defects: PolicyDefect[]): void {
+  const narrowed = scope.narrowed;
+  if (narrowed === null) return;
+  const extraTools = narrowed.tools.filter((tool) => !scope.tools.includes(tool));
+  if (extraTools.length > 0) {
+    defects.push({ path: child(path, 'tools'), problem: `a narrowed scope may not grant a tool the role lacks: ${extraTools.join(', ')}` });
+  }
+  const own = scope.network.egress === 'none' ? [] : scope.network.egress;
+  const extraHosts = narrowed.network.egress === 'none' ? [] : narrowed.network.egress.filter((host) => !own.includes(host));
+  if (extraHosts.length > 0) {
+    defects.push({ path: child(child(path, 'network'), 'egress'), problem: `a narrowed scope may not reach a host the role cannot: ${extraHosts.join(', ')}` });
+  }
+  if (narrowed.autonomyCeiling > scope.autonomyCeiling) {
+    defects.push({
+      path: child(path, 'autonomyCeiling'),
+      problem: `a narrowed ceiling of L${String(narrowed.autonomyCeiling)} is above the role's own L${String(scope.autonomyCeiling)}`,
+    });
+  }
 }
 
 function validateTriggers(value: unknown, path: string, defects: PolicyDefect[]): TriggerPolicy | undefined {
@@ -450,6 +508,10 @@ function validateTriggers(value: unknown, path: string, defects: PolicyDefect[])
   const minAuthorTrust = readPartialMap<TriggerKind, AuthorTrust>(
     record, 'minAuthorTrust', path, 'a trigger kind', isTriggerKind, 'an author trust level', isAuthorTrust, defects,
   );
+  // Absent from a document written before R10: every entry is the floor, so nothing is narrowed by trust (A-R10-01).
+  const narrowBelow = Object.hasOwn(record, 'narrowBelow')
+    ? readPartialMap<TriggerKind, AuthorTrust>(record, 'narrowBelow', path, 'a trigger kind', isTriggerKind, 'an author trust level', isAuthorTrust, defects)
+    : {};
   const maxTriggerDepth = read(record, 'maxTriggerDepth', path, 'a non-negative integer', isNonNegativeInteger, defects);
   const window = Object.hasOwn(record, 'budgetPerWindow')
     ? shape(record.budgetPerWindow, child(path, 'budgetPerWindow'), keysOf(WINDOW_KEYS), defects)
@@ -476,12 +538,12 @@ function validateTriggers(value: unknown, path: string, defects: PolicyDefect[])
   const observe = Object.hasOwn(record, 'observe') ? validateObserve(record.observe, child(path, 'observe'), defects) ?? null : undefined;
   if (
     enabled === undefined || entryStation === undefined || taskTemplate === undefined
-    || maxAutonomy === undefined || minAuthorTrust === undefined || maxTriggerDepth === undefined
+    || maxAutonomy === undefined || minAuthorTrust === undefined || narrowBelow === undefined || maxTriggerDepth === undefined
     || runs === undefined || windowMs === undefined || subscriptions === undefined || schedules === undefined
     || maxDeliveryAgeMs === null || candidateExpiryMs === null || nightly === null || observe === null
   ) return undefined;
   const triggers: TriggerPolicy = {
-    enabled, entryStation, taskTemplate, maxAutonomy, minAuthorTrust,
+    enabled, entryStation, taskTemplate, maxAutonomy, minAuthorTrust, narrowBelow,
     maxTriggerDepth, budgetPerWindow: { runs, windowMs }, subscriptions, schedules,
     ...(maxDeliveryAgeMs === undefined ? {} : { maxDeliveryAgeMs }),
     ...(candidateExpiryMs === undefined ? {} : { candidateExpiryMs }),
@@ -747,6 +809,8 @@ export function validatePolicyDocument(input: unknown): DocumentValidation {
     `one of 'auto', 'human-required', 'blocked'`, isApprovalOutcome, defects,
   );
   const protectedPaths = readArray<string>(record, 'protectedPaths', '', 'a non-empty path or glob', isNonEmptyString, defects);
+  // Absent from a document written before R10: no path is sensitive (A-R10-01).
+  const sensitivePaths = Object.hasOwn(record, 'sensitivePaths') ? validateSensitivePaths(record.sensitivePaths, defects) : {};
   const roles = Object.hasOwn(record, 'roles')
     ? validateRoles(record.roles, 'roles', defects)
     : undefined;
@@ -774,7 +838,7 @@ export function validatePolicyDocument(input: unknown): DocumentValidation {
 
   if (
     globalCap === undefined || stationCaps === undefined || approvals === undefined
-    || protectedPaths === undefined || roles === undefined || triggers === undefined
+    || protectedPaths === undefined || sensitivePaths === undefined || roles === undefined || triggers === undefined
     || maxParallelTasks === undefined || maxConflictRetries === undefined
     || defects.length > 0
   ) {
@@ -782,13 +846,67 @@ export function validatePolicyDocument(input: unknown): DocumentValidation {
     // unknown key without failing the fields around it.
     return { ok: false, defects };
   }
+  // A grant names a class the policy declares; one it does not would mount nothing and read as a grant (I4).
+  for (const [roleId, scope] of Object.entries(roles)) {
+    scope.sensitiveGrants.forEach((grant, i) => {
+      if (!Object.hasOwn(sensitivePaths, grant)) {
+        defects.push({ path: `roles.${roleId}.sensitiveGrants[${String(i)}]`, problem: `'${grant}' is not a class sensitivePaths declares` });
+      }
+    });
+  }
+  if (defects.length > 0) return { ok: false, defects };
   return {
     ok: true,
     document: {
-      globalCap, stationCaps, approvals, roles, protectedPaths, triggers,
+      globalCap, stationCaps, approvals, roles, protectedPaths, sensitivePaths, triggers,
       concurrency: { maxParallelTasks, maxConflictRetries },
     },
   };
+}
+
+/** Whether `glob` can match a path as the runtime names one: relative to the tree's root, `/`-separated, never leaving it. */
+function isTreeRelativeGlob(glob: string): boolean {
+  if (glob.startsWith('/') || glob.startsWith('./') || glob.includes('\\') || /^[A-Za-z]:/u.test(glob)) return false;
+  return !glob.split('/').some((segment) => segment === '..' || segment === '.' || segment === '');
+}
+
+/** Each class an identifier holding at least one non-empty glob (A-R10-01). */
+function validateSensitivePaths(value: unknown, defects: PolicyDefect[]): Record<SensitiveClass, string[]> | undefined {
+  if (!isRecord(value)) {
+    defects.push({ path: 'sensitivePaths', problem: `expected an object keyed by class name, found ${describe(value)}` });
+    return undefined;
+  }
+  const out: Record<SensitiveClass, string[]> = {};
+  let ok = true;
+  for (const name of Object.keys(value)) {
+    if (!isSensitiveClass(name)) {
+      ok = false;
+      defects.push({ path: child('sensitivePaths', name), problem: 'not a class name: lower-case letters, digits, and hyphens, starting with a letter' });
+      continue;
+    }
+    const globs = readArray<string>(value, name, 'sensitivePaths', 'a non-empty glob string', isNonEmptyString, defects);
+    if (globs === undefined) {
+      ok = false;
+      continue;
+    }
+    if (globs.length === 0) {
+      ok = false;
+      defects.push({ path: child('sensitivePaths', name), problem: 'a class with no glob classifies nothing' });
+      continue;
+    }
+    // Matched against tree-relative paths with `/`, so a glob that cannot name one would classify nothing (codex-4).
+    const unrooted = globs.filter((glob) => !isTreeRelativeGlob(glob));
+    if (unrooted.length > 0) {
+      ok = false;
+      defects.push({
+        path: child('sensitivePaths', name),
+        problem: `a glob must be tree-relative, with '/' separators and no leading '/', './', drive, or '..' segment: ${unrooted.map((g) => JSON.stringify(g)).join(', ')}`,
+      });
+      continue;
+    }
+    out[name] = globs;
+  }
+  return ok ? out : undefined;
 }
 
 /** Formats defects for a refusal message: one per line, path first. */

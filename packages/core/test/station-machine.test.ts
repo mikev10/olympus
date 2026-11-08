@@ -91,6 +91,7 @@ function state(overrides: Partial<RunState> = {}): RunState {
     usage: [],
     cancelled: null,
     halted: null,
+    narrowed: null,
     drafts: {},
     version: '1',
     ...overrides,

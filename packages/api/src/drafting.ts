@@ -20,6 +20,7 @@ import {
   capabilityRefusal,
   CRITIC_CONTRACTS,
   DRAFT_ROLES,
+  levelOf,
   gradeAgainst,
   gradeOf,
   grantedContext,
@@ -59,6 +60,8 @@ import { baseMismatches, baseRefusal } from './base.js';
 import { recordDecision } from './decisions.js';
 import {
   attemptsOf,
+  omitWithheld,
+  withheldOf,
   commit,
   joinParts,
   pinnedRole,
@@ -67,6 +70,7 @@ import {
   recordTamper,
   runOnBase,
   runTask,
+  roleScope,
   scopeFor,
   spendRetry,
   specArtifacts,
@@ -272,7 +276,8 @@ export function builderModels(ctx: Pick<LineContext, 'graph' | 'policy' | 'compo
   const models = new Map<string, ModelIdentity>();
   for (const task of ctx.graph.tasks) {
     if (task.station !== 'build') continue;
-    const scope = scopeFor(ctx as LineContext, task);
+    // Tiers and escalation are the role's own whether or not the run is narrowed.
+    const scope = roleScope(ctx.policy, task);
     const from = tierRank(stationTier(scope, 'build'));
     const to = scope.escalation === 'none' ? from : Math.max(from, tierRank(scope.escalation.ceiling));
     for (let rank = from; rank <= to; rank++) {
@@ -364,7 +369,7 @@ async function draft(ctx: LineContext, station: DraftStation, current: DraftAtte
   // At L3 a test drafter of the builder's family is refused, as a same-family reviewer is (R9, R19).
   if (station === 'test-design') {
     const model = driver.resolveModel(tierFor(scopeFor(ctx, seat), station, attemptsOf(ctx.state, seat)));
-    const seated = seatTestDrafter(model, builderModels(ctx), ctx.run.requestedLevel);
+    const seated = seatTestDrafter(model, builderModels(ctx), levelOf(ctx.run.requestedLevel, ctx.state.narrowed));
     if (!seated.ok) return seated;
   }
 
@@ -385,6 +390,8 @@ async function draft(ctx: LineContext, station: DraftStation, current: DraftAtte
   const base = basePath(workspaces, ctx.run.id);
   if (station === 'spec') await copyTree(base, start);
   else await copyOnly(base, start, specArtifacts(ctx).map((a) => a.path));
+  // What the drafter is not given is left out of the tree it is handed (D-A-TR-04).
+  await omitWithheld(ctx, DRAFT_ROLES[station].drafter, start);
   await copyTree(start, work);
   // The run's drafts directory, so where a drafter writes its draft is in the tree it is handed.
   await mkdir(join(work, DRAFT_DIR, ctx.run.id), { recursive: true });
@@ -405,6 +412,10 @@ async function draft(ctx: LineContext, station: DraftStation, current: DraftAtte
   for (const path of writesOutsideGrant(entries, scopeFor(ctx, seat).writableGlobs, STATION_CONTRACTS[station].writeBoundary.workspaceGlobs)) {
     read.problems.push({ path, code: 'outside-grant' });
   }
+  // A drafted path a sensitive class matches goes back too: once locked, a draft is every later seat's context, and the
+  // critic is handed its files whatever its own tree omits, so no grant can make one safe to carry (D-R10-09).
+  const sensitive = withheldOf(Object.values(ctx.policy.sensitivePaths).flat(), entries.map((e) => e.path));
+  for (const path of sensitive) read.problems.push({ path, code: 'sensitive-path' });
   const record: DraftRecord = {
     runId: ctx.run.id,
     station,
@@ -695,6 +706,7 @@ async function critique(ctx: LineContext, station: DraftStation, current: DraftA
   const base = basePath(workspaces, ctx.run.id);
   if (station === 'spec') await copyTree(base, work);
   else await copyOnly(base, work, specArtifacts(ctx).map((a) => a.path));
+  await omitWithheld(ctx, DRAFT_ROLES[station].critic, work);
   await writeFiles(work, record.files.map((f) => ({ path: f.path, bytes: bytesOf(f) })));
 
   const role = pinnedRole(ctx, DRAFT_ROLES[station].critic);

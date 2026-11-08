@@ -10,8 +10,8 @@
  * way. A request over the cap is refused, never clamped (I5).
  */
 import type { PolicyRefusal, TriggerPolicy } from '../policy/types.js';
-import type { AuthorTrust, AutonomyLevel, RoleId, TriggerKind } from '../run/types.js';
-import type { CapabilityScope } from '../policy/types.js';
+import type { AuthorTrust, AutonomyLevel, NarrowingCause, RoleId, TriggerKind } from '../run/types.js';
+import type { CapabilityScope, NarrowedScope } from '../policy/types.js';
 import { trustRank } from './schemas.js';
 
 /** Why admission refused a run's trigger (A-R22-05). */
@@ -88,4 +88,92 @@ export function admitTrigger(
     }
   }
   return { ok: true };
+}
+
+/**
+ * What a narrowed run keeps: each seated role's narrowed scope, and the level
+ * every exit reads its approval at once the run is narrowed (A-R10-01).
+ */
+export interface RunNarrowingPlan {
+  readonly scopes: Readonly<Record<RoleId, NarrowedScope>>;
+  readonly level: AutonomyLevel;
+}
+
+export type NarrowingPlan =
+  | { readonly ok: true; readonly plan: RunNarrowingPlan }
+  | { readonly ok: false; readonly role: RoleId; readonly refusal: PolicyRefusal };
+
+/**
+ * Every seated role's narrowed scope, or the first role that declares none,
+ * refused (I5). The level is the lowest of `requested` and every narrowed
+ * ceiling, so a narrowed run's exits read approvals no higher than any of its
+ * roles may run at (D-R10-02).
+ */
+export function planNarrowing(
+  requested: AutonomyLevel,
+  roles: ReadonlyArray<readonly [RoleId, CapabilityScope]>,
+): NarrowingPlan {
+  const scopes: Record<RoleId, NarrowedScope> = {};
+  let level = requested;
+  for (const [role, scope] of roles) {
+    if (scope.narrowed === null) {
+      return {
+        ok: false,
+        role,
+        refusal: { ok: false, reason: 'capability-missing', detail: `the run is narrowed and role '${role}' declares no narrowed scope, so it cannot be seated in it` },
+      };
+    }
+    scopes[role] = scope.narrowed;
+    if (scope.narrowed.autonomyCeiling < level) level = scope.narrowed.autonomyCeiling;
+  }
+  return { ok: true, plan: { scopes, level } };
+}
+
+export type AdmissionNarrowing =
+  | { readonly ok: true; readonly narrowing: { readonly cause: NarrowingCause; readonly plan: RunNarrowingPlan } | null }
+  | { readonly ok: false; readonly role: RoleId; readonly refusal: PolicyRefusal };
+
+/**
+ * Whether admission narrows the run, read after `admitTrigger` admitted it
+ * (A-R10-01). An author below the kind's `narrowBelow` narrows it, and so does
+ * any seated role granted a sensitive class; trust is named first where both
+ * hold. A narrowed run is refused where a seated role declares no narrowed
+ * scope, and where the level asked for is above a narrowed ceiling: known
+ * before anything runs, that is an over-request, never a downgrade (D-R10-02).
+ */
+export function narrowAtAdmission(
+  trigger: AdmittedTrigger,
+  requested: AutonomyLevel,
+  roles: ReadonlyArray<readonly [RoleId, CapabilityScope]>,
+  policy: TriggerPolicy,
+): AdmissionNarrowing {
+  const below = own(policy.narrowBelow, trigger.kind);
+  const granted = roles.filter(([, scope]) => scope.sensitiveGrants.length > 0).map(([role]) => role);
+  const cause: NarrowingCause | null = below !== undefined && trustRank(trigger.authorTrust) < trustRank(below)
+    ? { kind: 'author-trust', trust: trigger.authorTrust }
+    : granted.length > 0 ? { kind: 'sensitive-grant', roles: granted } : null;
+  if (cause === null) return { ok: true, narrowing: null };
+  const planned = planNarrowing(requested, roles);
+  if (!planned.ok) return planned;
+  if (planned.plan.level < requested) {
+    const binding = roles.find(([, scope]) => scope.narrowed?.autonomyCeiling === planned.plan.level);
+    // The plan lowered the level only to a seated role's narrowed ceiling, so one holds it.
+    if (binding === undefined) throw new Error('admission: a narrowed level below the request names no role');
+    return {
+      ok: false,
+      role: binding[0],
+      refusal: { ok: false, reason: 'exceeds-cap', detail: `L${String(requested)} exceeds the narrowed ceiling of L${String(planned.plan.level)} this run is admitted under` },
+    };
+  }
+  return { ok: true, narrowing: { cause, plan: planned.plan } };
+}
+
+/**
+ * The level a run's exits read their approvals at: the level it was admitted
+ * at, or, once narrowed, the narrowing's, which is never higher (D-R10-02).
+ * Every exit, every approval key, and every grade read from a run's level
+ * reads it here, so a narrowed run's approvals are asked at the lower level.
+ */
+export function levelOf(requested: AutonomyLevel, narrowed: { readonly level: AutonomyLevel } | null): AutonomyLevel {
+  return narrowed === null || narrowed.level > requested ? requested : narrowed.level;
 }

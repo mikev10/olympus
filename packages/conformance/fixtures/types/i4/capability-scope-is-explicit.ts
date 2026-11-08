@@ -15,6 +15,8 @@ export const withoutTools: CapabilityScope = { // expect-error TS2741: Property 
   autonomyCeiling: scope.autonomyCeiling,
   triggerKinds: scope.triggerKinds,
   budget: scope.budget,
+  sensitiveGrants: scope.sensitiveGrants,
+  narrowed: scope.narrowed,
 };
 
 export const withoutStations: CapabilityScope = { // expect-error TS2741: Property 'stations' is missing
@@ -27,6 +29,8 @@ export const withoutStations: CapabilityScope = { // expect-error TS2741: Proper
   autonomyCeiling: scope.autonomyCeiling,
   triggerKinds: scope.triggerKinds,
   budget: scope.budget,
+  sensitiveGrants: scope.sensitiveGrants,
+  narrowed: scope.narrowed,
 };
 
 export const allEgress: CapabilityScope = { ...scope, network: { egress: 'all' } }; // expect-error TS2322: Type '"all"' is not assignable
@@ -45,5 +49,22 @@ export const withoutEscalation: CapabilityScope = { // expect-error TS2741: Prop
   autonomyCeiling: scope.autonomyCeiling,
   triggerKinds: scope.triggerKinds,
   budget: scope.budget,
+  sensitiveGrants: scope.sensitiveGrants,
+  narrowed: scope.narrowed,
 };
 export const unboundedEscalation: CapabilityScope = { ...scope, escalation: { afterFailedGates: 1 } }; // expect-error TS2322: Property 'ceiling' is missing
+
+// A sensitive grant and a narrowed scope are stated too, never implied by their absence (A-R10-01).
+export const withoutSensitiveGrants: CapabilityScope = { // expect-error TS2741: Property 'sensitiveGrants' is missing
+  stations: scope.stations,
+  writableGlobs: scope.writableGlobs,
+  tools: scope.tools,
+  network: scope.network,
+  tier: scope.tier,
+  tierByStation: scope.tierByStation,
+  escalation: scope.escalation,
+  autonomyCeiling: scope.autonomyCeiling,
+  triggerKinds: scope.triggerKinds,
+  budget: scope.budget,
+  narrowed: scope.narrowed,
+};

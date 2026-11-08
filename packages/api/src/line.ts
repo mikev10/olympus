@@ -50,8 +50,11 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import picomatch from 'picomatch';
 import {
   capabilityRefusal,
+  DRAFT_ROLES,
+  DRAFT_STATIONS,
   effectiveApproval,
   escalationAt,
   grantClears,
@@ -64,6 +67,8 @@ import {
   nextStep,
   parkRefusal,
   isSecuritySeat,
+  levelOf,
+  planNarrowing,
   REVIEWER_ROLE,
   seatReviewer,
   SECURITY_REVIEWER_ROLE,
@@ -78,6 +83,9 @@ import {
 } from '@olympus-ai/core';
 import type {
   AgentClaim,
+  CapabilityScope,
+  InputSource,
+  RunNarrowing,
   RunCancellation,
   ApprovalGrant,
   ApprovalKey,
@@ -130,6 +138,7 @@ import {
   baseRunPath,
   composeDiff,
   copyOnly,
+  omitPaths,
   copyTree,
   dependencyEntry,
   diffDigest,
@@ -192,6 +201,13 @@ export interface LineContext {
   readonly cancelRequested?: () => RunCancellation | null;
   /** Told of every state the line commits, after the Vault stored it. Serves the event stream; it cannot change what is committed. */
   readonly onCommit?: (state: RunState) => void;
+  /**
+   * Asked before each build task runs, for input a declared source brought for
+   * it. Whatever it returns narrows the run before it reaches a model, through
+   * `narrowRun` (A-R10-02, D-R10-06). The runtime's own sources set it; no
+   * caller of the service can.
+   */
+  readonly inputFor?: (task: Task) => { readonly source: InputSource; readonly text: string } | null;
 }
 
 const engine = new StrictPolicyEngine();
@@ -269,7 +285,7 @@ export async function runLine(ctx: LineContext, changed: readonly TamperedPath[]
         const next = transition({
           from: step.from,
           to: step.to,
-          level: ctx.run.requestedLevel,
+          level: levelOf(ctx.run.requestedLevel, ctx.state.narrowed),
           policy: ctx.policy,
           tampered,
           grants: ctx.state.approvals,
@@ -385,7 +401,7 @@ async function recordViolation(ctx: LineContext, violation: IntegrityViolation):
  */
 async function recordFloor(ctx: LineContext, station: DraftStation, floor: DraftFloor): Promise<void> {
   const contract = STATION_CONTRACTS[station];
-  const level = ctx.run.requestedLevel;
+  const level = levelOf(ctx.run.requestedLevel, ctx.state.narrowed);
   if (effectiveApproval(contract, ctx.policy, level, []) !== 'auto') return;
   if (effectiveApproval(contract, ctx.policy, level, [], floor) === 'auto') return;
   await recordDecision(
@@ -787,11 +803,118 @@ function checkSandbox(ctx: LineContext, tree: string, check: CheckSpec): Sandbox
   return workspaceOnly(ctx, tree, 'ro', { mode: 'deny-all', allow: [] }, 'check', check.timeoutMs);
 }
 
-export function scopeFor(ctx: LineContext, task: Task) {
-  const resolved = engine.resolveCapabilities(task.role, task.station, ctx.policy);
+/** The scope a role holds as admitted, before any narrowing; for what narrowing never touches, such as tiers (R14). */
+export function roleScope(policy: Policy, task: Task): CapabilityScope {
+  const resolved = engine.resolveCapabilities(task.role, task.station, policy);
   // Admission resolved every role the graph schedules, against the same admitted policy.
   if (!resolved.ok) throw new Error(`line: role ${task.role} lost its scope at ${task.station}: ${resolved.detail}`);
   return resolved.scope;
+}
+
+export function scopeFor(ctx: LineContext, task: Task): CapabilityScope {
+  return narrowedScope(ctx.state.narrowed, task.role, roleScope(ctx.policy, task));
+}
+
+/**
+ * A role's scope as the run holds it: its own until the run is narrowed, and
+ * from then on its tools, egress, and ceiling replaced by its narrowed scope
+ * (A-R10-01, D-A-TR-03). Every sandbox, tool list, and budget a task gets is
+ * read through here, so no task after the commit gets more. A narrowed run
+ * seating a role with no narrowed scope was refused before it narrowed; one
+ * found here stops the run rather than running at full scope (I5).
+ */
+export function narrowedScope(narrowed: RunNarrowing | null, role: RoleId, scope: CapabilityScope): CapabilityScope {
+  if (narrowed === null) return scope;
+  if (scope.narrowed === null) throw new Error(`line: the run is narrowed and role ${role} declares no narrowed scope; refusing to run it at full scope`);
+  return {
+    ...scope,
+    tools: [...scope.narrowed.tools],
+    network: scope.narrowed.network.egress === 'none' ? { egress: 'none' } : { egress: [...scope.narrowed.network.egress] },
+    autonomyCeiling: scope.narrowed.autonomyCeiling,
+  };
+}
+
+/** Narrowing causes decided at admission: only in such a run does a sensitive grant mount its class (D-A-TR-04, D-R10-05). */
+const ADMISSION_CAUSES: ReadonlySet<string> = new Set(['author-trust', 'sensitive-grant']);
+
+/**
+ * The globs of every sensitive class `role` is not given in this run: all of
+ * them, unless the run was narrowed at admission and the role is granted the
+ * class (D-A-TR-04). What these match is left out of every tree a model is
+ * handed, and a task that writes one is refused (D-R10-05).
+ */
+export function withheldGlobs(ctx: Pick<LineContext, 'policy' | 'state'>, role: RoleId): string[] {
+  const scope = Object.hasOwn(ctx.policy.roles, role) ? ctx.policy.roles[role] : undefined;
+  const narrowedAtAdmission = ctx.state.narrowed !== null && ADMISSION_CAUSES.has(ctx.state.narrowed.cause.kind);
+  const granted = narrowedAtAdmission && scope !== undefined ? scope.sensitiveGrants : [];
+  return Object.entries(ctx.policy.sensitivePaths).filter(([name]) => !granted.includes(name)).flatMap(([, globs]) => globs);
+}
+
+/** Leaves out of `tree` every path `role` is not given in this run (D-A-TR-04). */
+export async function omitWithheld(ctx: Pick<LineContext, 'policy' | 'state'>, role: RoleId, tree: string): Promise<void> {
+  const globs = withheldGlobs(ctx, role);
+  if (globs.length === 0) return;
+  await omitPaths(tree, picomatch(globs, { dot: true }));
+}
+
+/** The paths in `paths` that match a withheld glob. */
+export function withheldOf(globs: readonly string[], paths: readonly string[]): string[] {
+  if (globs.length === 0) return [];
+  const matches = picomatch([...globs], { dot: true });
+  return paths.filter((path) => matches(path));
+}
+
+/**
+ * Input a declared source brought to the run, held back until `narrowRun` has
+ * recorded and committed the narrowing; only an input `narrowRun` released is
+ * placed in a request, and only in a narrowed run (D-A-TR-03, D-R10-06).
+ */
+export interface WithheldInput {
+  readonly source: InputSource;
+  readonly text: string;
+}
+
+const RELEASED = new WeakSet<WithheldInput>();
+
+/** Every role the run seats: each role the graph names, and the drafting seats of each station it drafts. */
+function seatedRoles(ctx: LineContext): RoleId[] {
+  const roles = new Set<RoleId>(ctx.graph.tasks.map((t) => t.role));
+  for (const station of DRAFT_STATIONS) {
+    if (!ctx.drafting.drafted[station]) continue;
+    roles.add(DRAFT_ROLES[station].drafter);
+    roles.add(DRAFT_ROLES[station].critic);
+  }
+  return [...roles];
+}
+
+/**
+ * The narrowing API (A-R10-02, D-A-TR-03): what a later input source calls
+ * with its input before any model sees it. The narrowing is recorded, then
+ * committed to run state, and only then is the input released; a failure in
+ * between throws, so the input is never placed and the drive stops (I5). A run
+ * already narrowed stays as it is: nothing here widens or re-narrows it, and
+ * nothing anywhere clears it.
+ */
+export async function narrowRun(ctx: LineContext, source: InputSource, text: string, at: TaskId | null): Promise<WithheldInput> {
+  const input: WithheldInput = Object.freeze({ source, text });
+  if (ctx.state.narrowed === null) {
+    const seated: Array<readonly [RoleId, CapabilityScope]> = seatedRoles(ctx).map((role) => {
+      const scope = Object.hasOwn(ctx.policy.roles, role) ? ctx.policy.roles[role] : undefined;
+      if (scope === undefined) throw new Error(`line: role ${role} is seated and the admitted policy does not define it`);
+      return [role, scope] as const;
+    });
+    const planned = planNarrowing(ctx.run.requestedLevel, seated);
+    if (!planned.ok) throw new Error(`line: input from '${source}' would narrow the run, and ${planned.refusal.detail}; the input is withheld and the run stops (I5)`);
+    const cause = { kind: 'input', source } as const;
+    // Recorded before it is committed, so the record never under-counts a narrowing (D-R10-03).
+    await recordDecision(
+      { vault: ctx.components.vault, runId: ctx.run.id, taskId: at, station: ctx.state.station },
+      { cause: 'capability-narrowed', decidedBy: 'line', narrowing: cause, scopes: planned.plan.scopes, level: planned.plan.level },
+    );
+    await commit(ctx, { narrowed: { cause, at: new Date().toISOString(), level: planned.plan.level } });
+  }
+  RELEASED.add(input);
+  return input;
 }
 
 /**
@@ -809,9 +932,17 @@ export function scopeFor(ctx: LineContext, task: Task) {
  */
 export async function runTask(
   ctx: LineContext, task: Task, driver: Driver, role: CompiledRole, context: string, workspace: string,
-  options: { readonly mode?: 'ro' | 'rw'; readonly suffix?: string } = {},
+  options: { readonly mode?: 'ro' | 'rw'; readonly suffix?: string; readonly input?: WithheldInput } = {},
 ): Promise<{ ok: true; result: TaskResult; model: ModelIdentity } | { ok: false; error: unknown }> {
   const { sandbox } = ctx.components;
+  // Input that narrows a run is placed only once `narrowRun` released it into a narrowed run, so the scope read
+  // below, and the sandbox built from it, are the narrowed ones (D-A-TR-03). Anything else is withheld (I5).
+  if (options.input !== undefined && (!RELEASED.has(options.input) || ctx.state.narrowed === null)) {
+    throw new Error(`line: input from '${options.input.source}' reached task ${task.id} without a committed narrowing; it is withheld and the run stops`);
+  }
+  // Whether the scope below was read narrowed. A sibling in the same batch can narrow the run while this task's
+  // sandbox is provisioned; the call is then not made with the wider scope already read (codex-2, D-R10-10).
+  const readNarrowed = ctx.state.narrowed !== null;
   const scope = scopeFor(ctx, task);
   // A critic's tree is read-only whatever its station's contract says: it writes nothing (R19).
   const mode = options.mode ?? (STATION_CONTRACTS[task.station].writeBoundary.workspaceGlobs.length === 0 ? 'ro' : 'rw');
@@ -844,12 +975,18 @@ export async function runTask(
   }
   let outcome: { ok: true; result: TaskResult; model: ModelIdentity } | { ok: false; error: unknown };
   try {
+    // Checked with no await between it and the call: a narrowing committed since the scope was read means this
+    // sandbox and these tools are wider than the run now allows, so the call is not made and the attempt is retried (I5).
+    if ((ctx.state.narrowed !== null) !== readNarrowed) {
+      throw new Error(`line: the run narrowed while task ${task.id}'s sandbox was provisioned; its call is not made under the wider scope`);
+    }
     const request: TaskRequest = {
       taskId: task.id,
       role,
       stablePrefix: context,
       // A drafter's retry carries what sent its last draft back, typed, here and never in the prefix (D-A-DS-02).
-      variableSuffix: options.suffix === undefined ? task.id : `${task.id}\n${options.suffix}`,
+      // Released input is data in the suffix too, never in the prefix or a role prompt (I7, D-R10-06).
+      variableSuffix: [task.id, ...(options.suffix === undefined ? [] : [options.suffix]), ...(options.input === undefined ? [] : [options.input.text])].join('\n'),
       tier,
       tools: [...scope.tools],
       sandbox: handle,
@@ -1190,13 +1327,18 @@ async function build(ctx: LineContext, task: Task): Promise<StationRefusal | und
   const { start, work } = attemptPaths(workspaces, ctx.run.id, task.id, attemptsOf(ctx.state, task).iterations);
   const base = await accepted(ctx);
   await materialize(workspaces, ctx.run.id, start, base.diff, () => base.tree);
+  // What the role is not given is left out of both copies, so the model never has it and its diff never shows it (D-A-TR-04).
+  await omitWithheld(ctx, task.role, start);
   await copyTree(start, work);
+  // Input a declared source brought for this task narrows the run before it is placed, and is placed only after (D-A-TR-03).
+  const brought = ctx.inputFor?.(task) ?? null;
+  const input = brought === null ? undefined : await narrowRun(ctx, brought.source, brought.text, task.id);
   const offered: Partial<Record<ContextGrant, string>> = {
     'locked-spec': spec.text,
     'acceptance-tests': tests.text,
     'task-graph': JSON.stringify(ctx.graph.tasks.map(({ id, station, role, dependsOn }) => ({ id, station, role, dependsOn }))),
   };
-  const ran = await runTask(ctx, task, driver, pinnedRole(ctx, task.role), joinParts(grantedContext(STATION_CONTRACTS.build, offered)), work);
+  const ran = await runTask(ctx, task, driver, pinnedRole(ctx, task.role), joinParts(grantedContext(STATION_CONTRACTS.build, offered)), work, input === undefined ? {} : { input });
   if (!ran.ok) return spendRetry(ctx, task);
   // I2: a result is recorded only as the contract shapes it. A key it does not name, `status`
   // among them, is a driver speaking outside the contract; it is not recorded, and the run stops.
@@ -1304,6 +1446,9 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
 
   const { start, work } = attemptPaths(workspaces, ctx.run.id, task.id, attemptsOf(ctx.state, task).iterations);
   const written = await ownDiff(start, work);
+  // A path the role is not given, written or created, is refused: an omitted file is never replaced unseen (D-R10-05).
+  const sensitive = withheldOf(withheldGlobs(ctx, task.role), written.map((entry) => entry.path));
+  if (sensitive.length > 0) return recordEscape(ctx, task, sensitive);
   // D-R15-05: what the task wrote under node_modules is recorded and escalated, never carried. Every
   // check, and the runner a suite check starts, runs over the base's dependency trees.
   const own = written.filter((entry) => !inDependencyTree(entry.path));
@@ -1489,7 +1634,8 @@ async function reviewView(ctx: LineContext, task: Task, contract: StationContrac
   const current = await accepted(ctx);
   if (grants.includes('diff')) for (const entry of current.diff) if (entry.sha256 !== null) keep.add(entry.path);
   const view = reviewPath(workspaces, ctx.run.id, task.id, attemptsOf(ctx.state, task).iterations);
-  await copyOnly(current.tree, view, [...keep].sort());
+  const withheld = new Set(withheldOf(withheldGlobs(ctx, task.role), [...keep]));
+  await copyOnly(current.tree, view, [...keep].filter((path) => !withheld.has(path)).sort());
   return view;
 }
 
@@ -1558,7 +1704,7 @@ async function review(ctx: LineContext, task: Task): Promise<StationRefusal | un
   const reviewed = ctx.graph.tasks.filter((t) => task.dependsOn.includes(t.id));
   const authored = await Promise.all(reviewed.map((t) => readResult(ctx, t)));
   const authors = await authorsOf(ctx, reviewed, authored);
-  const level = ctx.run.requestedLevel;
+  const level = levelOf(ctx.run.requestedLevel, ctx.state.narrowed);
   const planned = seatReviewer(task.id, kind, authors, seatOf(reviewer.resolveModel(tierFor(scopeFor(ctx, task), 'review', attemptsOf(ctx.state, task)))), level);
   if (!planned.ok) return planned;
 
@@ -1655,6 +1801,8 @@ export interface StateChange {
   readonly cancelled?: RunCancellation;
   /** Drafting stations whose record this change replaces, whole (R19). */
   readonly drafts?: RunState['drafts'];
+  /** The run's narrowing, kept only where the run holds none yet (A-R10-02). */
+  readonly narrowed?: RunNarrowing;
 }
 
 /** Each drive's commits, one after another: the tail of its queue. */
@@ -1694,6 +1842,8 @@ async function apply(ctx: LineContext, change: StateChange): Promise<void> {
       usage: change.usage === undefined ? state.usage : [...state.usage, change.usage],
       cancelled: change.cancelled ?? state.cancelled,
       drafts: change.drafts === undefined ? state.drafts : { ...state.drafts, ...change.drafts },
+      // Written once and never cleared: a narrowing already committed is kept over any other (A-R10-02).
+      narrowed: state.narrowed ?? change.narrowed ?? null,
     },
     state.version,
   );

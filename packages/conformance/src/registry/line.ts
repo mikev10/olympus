@@ -71,7 +71,7 @@ export function lineScope(stations: CapabilityScope['stations'], tier: ModelTier
     escalation: 'none',
     autonomyCeiling: 2,
     triggerKinds: ['human'],
-    budget: { maxTokens: 1000, maxCostUsd: 1, maxWallClockMs: 60_000 },
+    budget: { maxTokens: 1000, maxCostUsd: 1, maxWallClockMs: 60_000 }, sensitiveGrants: [], narrowed: null,
   };
 }
 
@@ -90,12 +90,14 @@ export async function linePolicy(cells: Partial<Record<ApprovalKey, ApprovalOutc
     approvals: { ...auto, ...cells },
     roles: { ['builder' as RoleId]: lineScope(['build', 'verify'], 'standard'), ['reviewer' as RoleId]: lineScope(['review'], 'deep') },
     protectedPaths: ['.github/**'],
+    sensitivePaths: {},
     triggers: {
       enabled: ['human'],
       entryStation: { human: 'intake' },
       taskTemplate: {},
       maxAutonomy: { human: 2 },
       minAuthorTrust: { human: 'owner' },
+      narrowBelow: {},
       maxTriggerDepth: 2,
       budgetPerWindow: { runs: 20, windowMs: 3_600_000 },
     },
