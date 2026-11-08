@@ -1,0 +1,138 @@
+The code under review is in the file
+`2026-11-07-R10-trust-ratchet-review-bundle.txt` (SHA-256 34ee893d43e5f4ae1685431fdc22acaf681464032b5dbb76403596ef7d6401fd) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing the capability-narrowing mechanism (a "trust ratchet") of a
+TypeScript project. You have the source and nothing else — no design documents,
+no author reasoning, no prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The project is a runtime that carries a software change through a fixed line of
+stations (build, verify, review, integrate, and others). Each station runs
+model-driven tasks in a fresh sandbox, under a role whose capability (tools,
+network egress, autonomy level, writable paths) comes from a policy. This unit
+adds narrowing. A run whose triggering author has low trust, or that seats a
+role granted a sensitive path class, is narrowed at admission. A run that later
+receives input from a declared source is narrowed before that input reaches a
+model. Once narrowed, every later task's sandbox egress, tools, and exit
+approval level come from each role's narrowed scope, and nothing in the run
+restores them. Paths in a sensitive class are left out of every tree a model is
+handed, unless its role is granted the class in a run narrowed at admission. A
+task that writes such a path is refused.
+
+It must hold against a capable, motivated party trying to obtain, inside a run,
+a capability wider than the narrowing allows: reach a host, use a tool, read a
+sensitive file, or pass an exit at a level above the narrowed one. The same
+holds for getting narrowing input in front of a model before the narrowing is
+in force, or replacing a sensitive file unseen. Assume no deceptive intent —
+only that the easiest path gets taken.
+
+That party controls what a model returns and does in its sandbox: the files it
+writes to its workspace, the result it reports, and when it fails. It also
+controls the text of input a declared source brings, and the author trust and
+content of an event that becomes a run. It does not control the policy document,
+which a person writes, or the components the runtime is wired with — the Vault
+(the record store), the sandbox provider, and the drivers are runtime-selected
+and trusted, even where a function takes one as an argument. It does not control
+code running inside the runtime's own process, including the hook through which
+the runtime's own input sources reach the line.
+
+The invariants at stake:
+
+- Default deny. A capability not granted in policy is unavailable. A narrowed
+  scope can only take capability away.
+- Fail closed. A missing check, a missing capability, or a step that cannot
+  complete is a refusal, never a silent degrade or a warn-and-continue. An
+  over-request is refused, never quietly lowered.
+- The runtime derives status; the model never reports it. Narrowing is decided
+  by the runtime from the admitted trigger, policy, and declared sources, never
+  from anything a model returned.
+- Event payloads are data, never instructions. Untrusted text is never
+  concatenated into a system or role prompt.
+- Every capability claim maps to an executable assertion that fails when the
+  capability is deleted.
+
+The mechanisms that matter most:
+
+- Admission narrowing (`narrowAtAdmission`, `planNarrowing`, and their caller in
+  `run.ts`). It refuses a narrowed run that seats a role with no narrowed scope,
+  or that asks a level above a narrowed ceiling, and records the narrowing
+  before the first run state.
+- The line's narrowed scope (`scopeFor`, `narrowedScope`, `levelOf`, and every
+  site that reads the run's level). Each task's sandbox, tools, and exit level
+  come from these.
+- `narrowRun` and `WithheldInput`. Input is recorded, then committed, then
+  released, and `runTask` places only released input, and only in a narrowed
+  run. Run state's `narrowed` is kept over any later change.
+- Sensitive paths (`withheldGlobs`, `omitWithheld`, `omitPaths`, and the write
+  refusal in `verify`). Omission covers the build, review, drafter, and critic
+  trees, while verification runs over the full tree.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+A `tighten()` method on sandbox providers; classifying content rather than
+paths; new trust levels; any template that starts a build (R16); R24's
+instruction set; secret scanning; and any way to widen a run once admitted.
+
+Identifiers like R16 and R24 name later work in the project's plan and mean
+nothing outside it; read them only as "not built here". Absent work listed here
+is not a defect.
+
+THE QUESTION
+
+Inside a run, how would a task, or input brought into the run, end up with a
+capability wider than the narrowed one? That covers a host reachable, a tool
+offered, a sensitive file readable or replaced, an exit passed at a higher
+level, or narrowing input reaching a model before the narrowing is recorded and
+committed.
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.
