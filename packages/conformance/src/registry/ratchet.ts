@@ -461,6 +461,15 @@ export const SENSITIVE_PATH_WITHHELD: LocalAssertion = runtime({
       });
     }
     await grantNarrowing();
+    // A locked artifact is context every seat is offered as text, so none may be sensitive: admission refuses it (codex-1).
+    await withLine('r10-sensitive-artifact-', async (rig) => {
+      const { admitRun } = await api();
+      const policy = await linePolicy({}, { sensitivePaths: { specs: ['spec.md'] }, roles: roles({ builder: narrowTo(1), reviewer: narrowTo(1) }) });
+      const outcome = await admitRun(await rig.request(await rig.components(), { policy }));
+      if (outcome.ok || outcome.reason !== 'invalid-request' || !outcome.problems.some((p) => p.code === 'sensitive-artifact' && p.message.includes('spec.md'))) {
+        throw new Error(`R10: a run whose locked spec is sensitive was ${JSON.stringify(outcome.ok ? 'admitted' : outcome)}`);
+      }
+    });
   },
 });
 

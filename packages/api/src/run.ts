@@ -12,6 +12,7 @@
 import { createHash } from 'node:crypto';
 import { readFile, realpath } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
+import picomatch from 'picomatch';
 import {
   approvalKey,
   capabilityRefusal,
@@ -741,6 +742,32 @@ function policyRefusal(level: AutonomyLevel, graph: TaskGraph, policy: Policy, d
 }
 
 /**
+ * Every admitted artifact whose path a sensitive class matches (D-R10-09). A
+ * locked artifact is offered to seats as text in their context, which tree
+ * omission cannot reach, so classifying one sensitive would withhold nothing.
+ */
+function sensitiveArtifacts(artifacts: unknown, policy: Policy): RequestProblem[] {
+  const globs = Object.values(policy.sensitivePaths).flat();
+  if (globs.length === 0) return [];
+  const paths: string[] = [];
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) value.forEach(walk);
+    else if (typeof value === 'object' && value !== null) {
+      const record = value as Record<string, unknown>;
+      if (typeof record.path === 'string') paths.push(record.path);
+      Object.values(record).forEach(walk);
+    }
+  };
+  walk(artifacts);
+  const matches = picomatch(globs, { dot: true });
+  return [...new Set(paths)].filter((path) => matches(path)).sort().map((path) => ({
+    path: 'artifacts',
+    code: 'sensitive-artifact',
+    message: `${path} is an admitted artifact and a sensitive class matches it; an artifact is every seat's context, so it cannot be withheld`,
+  }));
+}
+
+/**
  * No sandbox the line provisions may reach the git remote: the merge is the
  * runtime's, from the host, and an agent that could reach the remote could
  * push its own change (D-A-I1-07, D-I1b-05). The remote's domains are the
@@ -916,6 +943,9 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
   if (!admitted.ok) return { ok: false, reason: 'invalid-request', problems: admitted.problems };
   const unplanned = planProblems(req, policy.policy);
   if (unplanned.length > 0) return { ok: false, reason: 'invalid-request', problems: unplanned };
+  // A locked artifact reaches every seat as text, whatever its tree omits, so none may be sensitive (codex-1, D-R10-09).
+  const sensitive = sensitiveArtifacts(admitted.admitted.artifacts, policy.policy);
+  if (sensitive.length > 0) return { ok: false, reason: 'invalid-request', problems: sensitive };
   const drafted = draftedStations(admitted.admitted.drafted);
   const drafting = draftingProblems(req, admitted.admitted.drafted, policy.policy);
   if (drafting.length > 0) return { ok: false, reason: 'invalid-request', problems: drafting };
