@@ -387,8 +387,14 @@ function requireRunState(value: unknown, file: string): RunState {
   }
   // A state committed before R10 was never narrowed (A-R10-02).
   const narrowed = value.narrowed === undefined ? null : value.narrowed;
-  if (narrowed !== null && !(isRecord(narrowed) && hasString(narrowed, 'at') && isRecord(narrowed.cause) && hasString(narrowed.cause, 'kind'))) {
-    throw new Error(`LocalVault: ${file} holds a narrowing that is not a cause and a time; refusing to return a partial record`);
+  // Every later exit reads its level from here, so a level outside 0-3 or a cause not one of the three is refused (A-R10-02).
+  const narrowedOk = narrowed === null || (
+    isRecord(narrowed) && hasString(narrowed, 'at') && isRecord(narrowed.cause) &&
+    (narrowed.cause.kind === 'author-trust' || narrowed.cause.kind === 'sensitive-grant' || narrowed.cause.kind === 'input') &&
+    (narrowed.level === 0 || narrowed.level === 1 || narrowed.level === 2 || narrowed.level === 3)
+  );
+  if (!narrowedOk) {
+    throw new Error(`LocalVault: ${file} holds a narrowing that is not a cause, a time, and a level; refusing to return a partial record`);
   }
   return { ...value, drafts, approvals, stations, narrowed, reviews: (value.reviews as unknown[]).map(seatBeforeR9) } as unknown as RunState;
 }
