@@ -8433,3 +8433,37 @@ open questions on 2026-11-07, each the recommended answer.
 - **Rejected:** *a new refusal reason.* A contract change outside the
   unit's declared gate paths, which would stop the unit.
 - **Reverse by:** an amendment adding the reason; `narrowRun` then returns it.
+
+### D-R10-09: no locked artifact and no draft may be sensitive (external review of R10)
+
+- **Found by review:** codex-1, and codex-3 with gemini-1. A locked
+  artifact reaches every seat as context text, which tree omission cannot
+  withhold. A drafted file is handed to the critic whatever the critic's tree
+  omits, and once locked it becomes every later seat's context.
+- **Chosen:** admission refuses a run whose admitted artifact a sensitive
+  class matches (`sensitive-artifact`), and a drafted path a sensitive class
+  matches sends the draft back (`sensitive-path`), whatever the drafter is
+  granted.
+- **Rejected:** *filter each seat's context by its grants.* The spec and the
+  tests are context every seat needs, so filtering them would refuse every
+  seat. Refusing at admission is the same outcome, decided earlier and
+  recorded once.
+- **Reverse by:** removing `sensitiveArtifacts` from admission and the
+  `sensitive-path` check from drafting.
+
+### D-R10-10: a call is not made under a scope read before a sibling narrowed the run (external review of R10)
+
+- **Found by review:** codex-2. In a batch, one task's scope was read before
+  awaiting its sandbox, and a sibling's input could narrow the run in
+  between. The call then went out with the wider tools and egress.
+- **Chosen:** `runTask` checks again, with no await between the check and
+  the call, whether the run's narrowing changed since the scope was read. If
+  it did, the call is not made and the attempt is spent as a retry, rebuilt
+  under the narrowed scope. A model call already in flight when a run
+  narrows still ends under its own scope, and never receives the input
+  (D-A-TR-03).
+- **Rejected:** *resolve every batch member's input before provisioning any
+  of them.* That works only for input known at the batch's start, and later
+  sources can bring input at other points.
+- **Reverse by:** removing the check; D-A-TR-03's in-flight rule then
+  covers the provisioning window too.

@@ -1,3 +1,37 @@
+# External review of R10, codex, 2026-11-07
+
+An adversarial review of the trust ratchet: admission and mid-run narrowing,
+the narrowed scope the line hands each task, the withheld-input API, and
+sensitive-path omission. Triage: `2026-11-07-R10-trust-ratchet-triage.md`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex. A headless `codex exec` run
+  (Codex CLI 0.155.1) under a read-only sandbox, with recorded approval
+  policy `never`, in an empty scratch working directory and a scratch config
+  home holding only `auth.json`, with an environment of `CODEX_HOME` alone.
+  The pre-run listing of both is the manifest's `cleanRoom`.
+- **Cross-family agreement:** codex-3 (drafter writes reach the critic's
+  tree) was raised by gemini too, as gemini-1. codex-1, codex-2, codex-4, and
+  the test-coverage notes were raised by codex alone.
+- **Date:** 2026-11-07
+- **Bundle:** `2026-11-07-R10-trust-ratchet-review-bundle.txt`, SHA-256
+  `34ee893d43e5f4ae1685431fdc22acaf681464032b5dbb76403596ef7d6401fd`, base
+  `7502a2a` (`reviewed/R8b`), head `0edf3ae` (the unit's implementation).
+  New files in full and modified files as function-context diffs;
+  `docs/decisions.md`, `docs/plan/`, `docs/reviews/`, and `pnpm-lock.yaml`
+  excluded. Prompt: `2026-11-07-R10-trust-ratchet-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer said it had no prior project
+  context and made no external lookups. That is a self-report and cannot be
+  verified independently.
+- **Coverage, and any gap:** items 1, 2 (no tautology found, with
+  test-coverage notes), 3 (the failure-masking test helpers), 4 (no escape
+  found), 5 (codex-4), 6, and 7 were all answered.
+- **Citations:** line numbers refer to positions in the bundle, not the
+  repository. They are hints, located during triage.
+
+---
+
 BASE: reviewed/R8b  
 HEAD: 0edf3ae  
 packages/vault/test/stub.test.ts  
