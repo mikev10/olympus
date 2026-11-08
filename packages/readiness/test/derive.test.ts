@@ -35,13 +35,14 @@ describe('resolveWithReadiness', () => {
     roles: {
       [role]: {
         stations: ['build'], writableGlobs: ['**'], tools: [], network: { egress: 'none' }, tier: 'standard', tierByStation: {},
-        escalation: 'none', autonomyCeiling: 3, triggerKinds: ['human'], budget: { maxTokens: 1000, maxCostUsd: 1, maxWallClockMs: 60_000 },
+        escalation: 'none', autonomyCeiling: 3, triggerKinds: ['human'], budget: { maxTokens: 1000, maxCostUsd: 1, maxWallClockMs: 60_000 }, sensitiveGrants: [], narrowed: null,
       },
     },
     protectedPaths: [],
+    sensitivePaths: {},
     triggers: {
       enabled: ['human'], entryStation: { human: 'intake' }, taskTemplate: {}, maxAutonomy: { human: 3 },
-      minAuthorTrust: { human: 'owner' }, maxTriggerDepth: 1, budgetPerWindow: { runs: 1, windowMs: 1000 },
+      minAuthorTrust: { human: 'owner' }, narrowBelow: {}, maxTriggerDepth: 1, budgetPerWindow: { runs: 1, windowMs: 1000 },
     },
     concurrency: { maxParallelTasks: 1, maxConflictRetries: 0 },
   };

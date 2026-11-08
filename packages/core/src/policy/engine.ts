@@ -74,6 +74,12 @@ function cloneScope(scope: CapabilityScope): CapabilityScope {
     autonomyCeiling: scope.autonomyCeiling,
     triggerKinds: frozenCopy(scope.triggerKinds),
     budget: frozen({ ...scope.budget }),
+    sensitiveGrants: frozenCopy(scope.sensitiveGrants),
+    narrowed: scope.narrowed === null ? null : frozen({
+      tools: frozenCopy(scope.narrowed.tools),
+      network: frozen(scope.narrowed.network.egress === 'none' ? { egress: 'none' as const } : { egress: frozenCopy(scope.narrowed.network.egress) }),
+      autonomyCeiling: scope.narrowed.autonomyCeiling,
+    }),
   });
 }
 
@@ -113,6 +119,7 @@ function cloneTriggers(triggers: TriggerPolicy): TriggerPolicy {
     taskTemplate: frozen({ ...triggers.taskTemplate }),
     maxAutonomy: frozen({ ...triggers.maxAutonomy }),
     minAuthorTrust: frozen({ ...triggers.minAuthorTrust }),
+    narrowBelow: frozen({ ...triggers.narrowBelow }),
     maxTriggerDepth: triggers.maxTriggerDepth,
     budgetPerWindow: frozen({ ...triggers.budgetPerWindow }),
     // An absent list is an empty one (D-R22-10), so the resolved policy always carries both.
@@ -218,6 +225,8 @@ export class StrictPolicyEngine implements PolicyEngine {
       approvals: totalApprovals(valid.approvals),
       roles: cloneRoles(valid.roles),
       protectedPaths: frozenCopy(valid.protectedPaths),
+      // On a null prototype, as the role map is: a class is read only as an own key (D-P3-11).
+      sensitivePaths: frozen(Object.assign(Object.create(null) as Record<string, string[]>, Object.fromEntries(Object.entries(valid.sensitivePaths).map(([c, globs]) => [c, frozenCopy(globs)])))),
       triggers: cloneTriggers(valid.triggers),
       concurrency: frozen({ ...valid.concurrency }),
     });

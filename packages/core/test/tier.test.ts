@@ -18,6 +18,8 @@ function scope(overrides: Partial<CapabilityScope> = {}): CapabilityScope {
     autonomyCeiling: 2,
     triggerKinds: ['human'],
     budget: { maxTokens: 1000, maxCostUsd: 1, maxWallClockMs: 60_000 },
+    sensitiveGrants: [],
+    narrowed: null,
     ...overrides,
   };
 }

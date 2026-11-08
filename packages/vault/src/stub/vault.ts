@@ -350,12 +350,12 @@ export class StubVault implements Vault {
     if (state === undefined) return Promise.reject(Object.assign(new Error(`StubVault: no run state for ${runId}`), { code: 'no-run-state' as const, runId }) satisfies NoRunState);
     // As the filesystem Vault reads a state committed before R19: no drafts, and grants that name none;
     // and before R12: no station entries (A-R12-02).
-    const read = structuredClone(state) as Omit<RunState, 'drafts' | 'approvals' | 'stations'> & { drafts?: RunState['drafts']; stations?: RunState['stations']; approvals: ReadonlyArray<Omit<RunState['approvals'][number], 'draft'> & { draft?: RunState['approvals'][number]['draft'] }> };
+    const read = structuredClone(state) as Omit<RunState, 'drafts' | 'approvals' | 'stations' | 'narrowed'> & { drafts?: RunState['drafts']; stations?: RunState['stations']; narrowed?: RunState['narrowed']; approvals: ReadonlyArray<Omit<RunState['approvals'][number], 'draft'> & { draft?: RunState['approvals'][number]['draft'] }> };
     // Only an absent history is a legacy one; a present one that is not a list is refused, as the filesystem Vault refuses it (codex-7).
     if (read.stations !== undefined && !Array.isArray(read.stations)) {
       return Promise.reject(new Error(`StubVault: run ${runId} holds station entries that are not a list`));
     }
-    return Promise.resolve({ ...read, reviews: read.reviews.map((seat) => seatBeforeR9(seat) as RunState['reviews'][number]), drafts: read.drafts ?? {}, stations: read.stations ?? [], approvals: read.approvals.map((g) => ({ ...g, draft: g.draft ?? null })) });
+    return Promise.resolve({ ...read, reviews: read.reviews.map((seat) => seatBeforeR9(seat) as RunState['reviews'][number]), drafts: read.drafts ?? {}, stations: read.stations ?? [], narrowed: read.narrowed ?? null, approvals: read.approvals.map((g) => ({ ...g, draft: g.draft ?? null })) });
   }
 
   /**

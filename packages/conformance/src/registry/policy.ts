@@ -54,6 +54,8 @@ function scope(): CapabilityScope {
     autonomyCeiling: ROLE_CEILING,
     triggerKinds: ['human'],
     budget: { maxTokens: 1000, maxCostUsd: 1, maxWallClockMs: 60_000 },
+    sensitiveGrants: [],
+    narrowed: null,
   };
 }
 
@@ -71,12 +73,14 @@ export function grantingDocument(): PolicyDocument {
     approvals: { 'build:1': 'auto' },
     roles: { [GRANTED_ROLE]: scope() },
     protectedPaths: ['.github/**'],
+    sensitivePaths: {},
     triggers: {
       enabled: ['human'],
       entryStation: { human: 'intake' },
       taskTemplate: {},
       maxAutonomy: { human: 2 },
       minAuthorTrust: { human: 'owner' },
+      narrowBelow: {},
       maxTriggerDepth: 2,
       budgetPerWindow: { runs: 20, windowMs: 3_600_000 },
     },

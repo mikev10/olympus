@@ -18,6 +18,7 @@ import { R20_I4 } from './roles.js';
 import { R13A_I4 } from './nightly.js';
 import { R13B_I4 } from './nightly-review.js';
 import { R22_I4 } from './triggers.js';
+import { R10_I4 } from './ratchet.js';
 import { R19_ASSERTIONS } from './drafting.js';
 import { LOCAL_TOKEN_REACHES_NO_SANDBOX, SECURITY_SEAT_READS_ONLY_ITS_GRANTS } from './separation.js';
 
@@ -31,6 +32,8 @@ export const I4: InvariantEntry = {
     ...R20_I4,
     // R22: the trigger framework.
     ...R22_I4,
+    // R10: the trust ratchet.
+    ...R10_I4,
     // R13a: the nightly checks that call no model.
     ...R13A_I4,
     // R13b: the nightly reviewers.

@@ -41,6 +41,7 @@ import { R8B_I5 } from './observe-plan.js';
 import { R8A_REVIEW_I5 } from './observe-review.js';
 import { R13B_I5 } from './nightly-review.js';
 import { R22_I5 } from './triggers.js';
+import { R10_I5 } from './ratchet.js';
 import { R19_ASSERTIONS } from './drafting.js';
 
 /** The declaration order the graph builder promises: vault, sandbox, driver, then the integrator a stub graph lacks (D-I1b-05). */
@@ -59,6 +60,8 @@ export const I5: InvariantEntry = {
     ...R20_I5,
     // R22: the trigger framework.
     ...R22_I5,
+    // R10: the trust ratchet.
+    ...R10_I5,
     // R13a: the nightly checks that call no model.
     ...R13A_I5,
     ...R8A_I5,

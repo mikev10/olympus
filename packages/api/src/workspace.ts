@@ -400,3 +400,18 @@ export async function filesIn(root: string): Promise<string[]> {
 export async function existsIn(root: string, path: string): Promise<boolean> {
   return present(join(root, ...path.split('/')));
 }
+
+/**
+ * Removes from `root` every entry whose tree-relative path `withheld` matches
+ * (D-A-TR-04). For a tree a model is handed: what is removed is never there
+ * to read, and since a task's change is its work copy against its start copy,
+ * a path removed from both is never in it, as a deletion or otherwise.
+ */
+export async function omitPaths(root: string, withheld: (path: string) => boolean): Promise<void> {
+  const entries = await walkTree(root, WALK);
+  for (const path of [...entries.keys()].sort()) {
+    if (!withheld(path)) continue;
+    await refuseLinkedParent(root, path, 'remove');
+    await rm(join(root, ...path.split('/')), { recursive: true, force: true });
+  }
+}

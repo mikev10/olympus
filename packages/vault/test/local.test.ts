@@ -95,7 +95,7 @@ function state(version: string): RunState {
     reviews: [],
     usage: [],
     cancelled: null,
-    halted: null,
+    halted: null, narrowed: null,
     drafts: {},
     version,
   };

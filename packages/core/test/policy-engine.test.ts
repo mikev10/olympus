@@ -29,6 +29,8 @@ function scope(overrides: Partial<CapabilityScope> = {}): CapabilityScope {
     autonomyCeiling: 3,
     triggerKinds: ['human'],
     budget: { maxTokens: 1000, maxCostUsd: 1, maxWallClockMs: 60_000 },
+    sensitiveGrants: [],
+    narrowed: null,
     ...overrides,
   };
 }
@@ -203,8 +205,11 @@ describe('default deny: an ungranted role or station has nothing (I4)', () => {
     if (!outcome.ok) throw new Error('unreachable');
     expect(outcome.scope.tools).toStrictEqual(['read', 'write']);
     expect(outcome.scope.network.egress).toBe('none');
+    // Nothing granted that the policy did not state: no sensitive class, and no narrowed scope (A-R10-01).
+    expect(outcome.scope.sensitiveGrants).toStrictEqual([]);
+    expect(outcome.scope.narrowed).toBeNull();
     expect(Object.keys(outcome.scope).sort()).toStrictEqual([
-      'autonomyCeiling', 'budget', 'escalation', 'network', 'stations', 'tier', 'tierByStation', 'tools', 'triggerKinds', 'writableGlobs',
+      'autonomyCeiling', 'budget', 'escalation', 'narrowed', 'network', 'sensitiveGrants', 'stations', 'tier', 'tierByStation', 'tools', 'triggerKinds', 'writableGlobs',
     ]);
   });
 

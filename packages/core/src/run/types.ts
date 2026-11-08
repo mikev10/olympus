@@ -262,6 +262,34 @@ export interface StationEntry {
 }
 
 /**
+ * A later source of input that narrows a run before its input reaches a model
+ * (A-R10-03, D-R10-04): R16's extracted trigger fields and R24's repository
+ * instructions. Closed: a source a unit adds is a contract edit.
+ */
+export type InputSource = 'trigger-fields' | 'repo-instructions';
+
+/**
+ * Why a run was narrowed. `author-trust` and `sensitive-grant` are decided at
+ * admission; `input` by the line, when a declared source's input arrived.
+ */
+export type NarrowingCause =
+  | { readonly kind: 'author-trust'; readonly trust: AuthorTrust }
+  | { readonly kind: 'sensitive-grant'; readonly roles: readonly RoleId[] }
+  | { readonly kind: 'input'; readonly source: InputSource };
+
+/**
+ * The run's narrowing, committed once and never cleared (A-R10-02). From the
+ * commit on, every task's sandbox, tools, and exit level come from each
+ * role's narrowed scope; nothing in the run restores them.
+ */
+export interface RunNarrowing {
+  readonly cause: NarrowingCause;
+  readonly at: string;
+  /** The level every exit reads its approval at from the commit on: never above the level the run was admitted at (D-R10-02, D-R10-07). */
+  readonly level: AutonomyLevel;
+}
+
+/**
  * Read-only: a consumer holding a state cannot alter it. A new state is a
  * new record, committed through the Vault; that is the only way status or
  * station changes (I2).
@@ -316,5 +344,10 @@ export interface RunState {
    * its status reads stopped and a cancel cannot relabel it (A-P9-02).
    */
   readonly halted: RunHalt | null;
+  /**
+   * Null while the run holds its admitted scope. Once set it is never cleared
+   * (A-R10-02). The Vault reads a state committed before R10 as null.
+   */
+  readonly narrowed: RunNarrowing | null;
   readonly version: string;             // optimistic concurrency
 }

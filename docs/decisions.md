@@ -8403,3 +8403,33 @@ open questions on 2026-11-07, each the recommended answer.
 - **Rejected:** *a field on the run request.* A caller could put text into a
   model's context through an API meant for the runtime's own code.
 - **Reverse by:** removing the hook; `narrowRun` stays.
+
+### D-R10-07: the narrowed level is committed with the narrowing
+
+- **Found while building:** the exit level is read in eleven places across
+  `line.ts`, `run.ts`, `drafting.ts`, and `outcomes.ts`: each exit, each
+  approval key, the standing, and each seat's grade. Recomputing the lowest
+  narrowed ceiling at each would need the seated roles, which half of them do
+  not hold.
+- **Chosen:** `RunNarrowing` carries `level`, computed once when the
+  narrowing is planned and recorded in the same decision, and every site
+  reads `levelOf(requested, state.narrowed)` from core, which never returns
+  more than the level the run was admitted at. This adds one field to the
+  type A-R10-02 declared, in a gate path this unit owns; the reviewers are
+  asked to challenge it.
+- **Rejected:** *recompute at every site.* Eleven copies of one rule, and a
+  site that forgets one reads its approvals at the admitted level.
+- **Reverse by:** removing the field and computing the level from the
+  seated roles at each site.
+
+### D-R10-08: a narrowing that cannot complete stops the drive
+
+- **Found while building:** `StationRefusal` has no reason for a narrowing
+  that failed, and adding one changes `core/src/station/types.ts`, a contract
+  file this unit does not declare.
+- **Chosen:** `narrowRun` throws when a seated role declares no narrowed
+  scope, or when the record or the commit fails. The drive stops with the
+  input unplaced, and the service records the halt (A-P9-02).
+- **Rejected:** *a new refusal reason.* A contract change outside the
+  unit's declared gate paths, which would stop the unit.
+- **Reverse by:** an amendment adding the reason; `narrowRun` then returns it.

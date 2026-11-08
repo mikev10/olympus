@@ -31,6 +31,28 @@ export interface CapabilityScope {
   autonomyCeiling: AutonomyLevel;
   triggerKinds: TriggerKind[];
   budget: Budget;
+  /**
+   * The sensitive classes this role may read, by name in `sensitivePaths`
+   * (A-R10-01). None unless granted (I4). A grant takes effect only in a run
+   * narrowed at admission, and seating a role that holds one narrows the run.
+   */
+  sensitiveGrants: SensitiveClass[];
+  /**
+   * What this role keeps in a narrowed run, or null where it declares none, so
+   * a narrowed run seating it is refused (I5, A-R10-01). Validated as no wider
+   * than the role's own tools, egress, and ceiling.
+   */
+  narrowed: NarrowedScope | null;
+}
+
+/** A name for a set of paths a model may not read unless granted (A-R10-01). */
+export type SensitiveClass = string;
+
+/** A role's capability once its run is narrowed: each part no wider than its own (A-R10-01). */
+export interface NarrowedScope {
+  tools: string[];
+  network: { egress: 'none' | string[] };
+  autonomyCeiling: AutonomyLevel;
 }
 
 /**
@@ -64,6 +86,12 @@ export interface TriggerPolicy {
   taskTemplate: Partial<Record<TriggerKind, TemplateId>>;   // from the closed registry; payload cannot name it (A-R22-02)
   maxAutonomy: Partial<Record<TriggerKind, AutonomyLevel>>;
   minAuthorTrust: Partial<Record<TriggerKind, AuthorTrust>>;
+  /**
+   * Per kind, the trust below which an admitted run is narrowed rather than
+   * run at full scope (A-R10-01). An absent entry is the floor, so nothing
+   * admitted under it is narrowed by trust; absent from a document, it is empty.
+   */
+  narrowBelow: Partial<Record<TriggerKind, AuthorTrust>>;
   maxTriggerDepth: number;
   /** Candidates recorded, across non-human kinds, in a sliding window; a person's own runs do not count (D-R22-07). */
   budgetPerWindow: { runs: number; windowMs: number };
@@ -148,6 +176,8 @@ export interface PolicyDocument {
   approvals: Partial<Record<ApprovalKey, ApprovalOutcome>>;
   roles: Record<RoleId, CapabilityScope>;
   protectedPaths: string[];           // in-repo but escalating: CI, test config, package scripts
+  /** Globs by class, of paths left out of every tree a model is handed unless its role is granted the class (A-R10-01). Empty when absent. */
+  sensitivePaths: Record<SensitiveClass, string[]>;
   triggers: TriggerPolicy;
   concurrency: { maxParallelTasks: number; maxConflictRetries: number };
 }
@@ -167,6 +197,8 @@ export interface Policy {
   approvals: Record<ApprovalKey, ApprovalOutcome>;
   roles: Record<RoleId, CapabilityScope>;
   protectedPaths: string[];           // in-repo but escalating: CI, test config, package scripts
+  /** Globs by class, of paths left out of every tree a model is handed unless its role is granted the class (A-R10-01). Empty when absent. */
+  sensitivePaths: Record<SensitiveClass, string[]>;
   triggers: TriggerPolicy;
   concurrency: { maxParallelTasks: number; maxConflictRetries: number };
 }

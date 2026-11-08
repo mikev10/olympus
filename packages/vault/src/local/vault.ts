@@ -385,7 +385,12 @@ function requireRunState(value: unknown, file: string): RunState {
   if (!isStationHistory(stations)) {
     throw new Error(`LocalVault: ${file} holds station entries that are not a station and a time each; refusing to return a partial record`);
   }
-  return { ...value, drafts, approvals, stations, reviews: (value.reviews as unknown[]).map(seatBeforeR9) } as unknown as RunState;
+  // A state committed before R10 was never narrowed (A-R10-02).
+  const narrowed = value.narrowed === undefined ? null : value.narrowed;
+  if (narrowed !== null && !(isRecord(narrowed) && hasString(narrowed, 'at') && isRecord(narrowed.cause) && hasString(narrowed.cause, 'kind'))) {
+    throw new Error(`LocalVault: ${file} holds a narrowing that is not a cause and a time; refusing to return a partial record`);
+  }
+  return { ...value, drafts, approvals, stations, narrowed, reviews: (value.reviews as unknown[]).map(seatBeforeR9) } as unknown as RunState;
 }
 
 
@@ -478,6 +483,7 @@ const DECIDERS: Readonly<Record<DecisionCause['cause'], readonly string[]>> = {
   'relay-refused': ['model-relay'],
   'tier-escalated': ['line'],
   'task-conflict': ['line'],
+  'capability-narrowed': ['admission', 'line'],
   'approval-rejected': ['approval'],
   'draft-sent-back': ['line'],
   'draft-floor-applied': ['line'],

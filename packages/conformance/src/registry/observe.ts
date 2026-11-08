@@ -48,6 +48,7 @@ export async function observePolicy(): Promise<Policy> {
   return linePolicy({}, {
     triggers: {
       ...ROUTE,
+      narrowBelow: {},
       maxTriggerDepth: 2,
       budgetPerWindow: { runs: 20, windowMs: 3_600_000 },
       subscriptions: [CHECKS, PUSHES],
@@ -118,7 +119,7 @@ export async function seedAdmitted(vault: Vault, runId: RunId, plan?: AdmittedPl
   } as unknown as AdmissionRecord);
   await vault.commitRunState({
     runId, admission, station: 'observe', stations: [], phase: 'working', tasks: {}, attempts: {}, results: {}, evidenceRefs: [],
-    violations: [], approvals: [], reviews: [], drafts: {}, usage: [], cancelled: null, halted: null, version: '0',
+    violations: [], approvals: [], reviews: [], drafts: {}, usage: [], cancelled: null, halted: null, narrowed: null, version: '0',
   }, '0');
 }
 

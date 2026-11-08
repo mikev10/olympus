@@ -50,6 +50,7 @@ async function reviewPolicy(level: AutonomyLevel): Promise<Policy> {
       taskTemplate: { scheduled: 'intake-candidate' },
       maxAutonomy: { human: 2, scheduled: level },
       minAuthorTrust: { human: 'owner', scheduled: 'owner' },
+      narrowBelow: {},
       maxTriggerDepth: 2,
       budgetPerWindow: { runs: 20, windowMs: 3_600_000 },
       schedules: [FINDINGS, TREE],

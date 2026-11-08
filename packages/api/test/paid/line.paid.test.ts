@@ -41,6 +41,8 @@ function paidScope(stations: CapabilityScope['stations'], tools: string[]): Capa
     autonomyCeiling: 2,
     triggerKinds: ['human'],
     budget: { maxTokens: 400_000, maxCostUsd: 0.5, maxWallClockMs: 300_000 },
+    sensitiveGrants: [],
+    narrowed: null,
   };
 }
 

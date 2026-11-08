@@ -9,7 +9,7 @@
  * Two kinds of number, never blended: safety (work the line called done that
  * was not) and throughput (how much it finishes without a human).
  */
-import { approvalKey, gatedIterations } from '@olympus-ai/core';
+import { approvalKey, gatedIterations, levelOf } from '@olympus-ai/core';
 import type { AutonomyLevel, ModelIdentity, RunId, RunState, StationId, TaskId, TaskStatus } from '@olympus-ai/core';
 import {
   isNoRunState, type AdmissionRecord, type CriticRecord, type EnforcementDecision, type EvidenceBundle, type IntegrationRecord, type ObservationRecord,
@@ -324,7 +324,7 @@ export async function readRunRecords(vault: Vault, runId: RunId): Promise<RunRec
       ? 'cancelled'
       : state.halted !== null
         ? 'halted'
-        : state.approvals.some((g) => g.key === approvalKey('integrate', admission.run.requestedLevel) && g.usedAt !== null)
+        : state.approvals.some((g) => g.key === approvalKey('integrate', levelOf(admission.run.requestedLevel, state.narrowed)) && g.usedAt !== null)
           // The grant for the last exit is spent in the commit that ends a passed run, as `runStanding` reads it (D-P9-08).
           ? 'passed'
           : Object.values(state.tasks).includes('parked') || Object.values(state.drafts).some((d) => d.parked)
@@ -341,7 +341,7 @@ export async function readRunRecords(vault: Vault, runId: RunId): Promise<RunRec
     mergeCommit: merged?.kind === 'merged' ? merged.mergeCommit : null,
     // The drive merges before it spends the integrate grant (D-I1b-01), so on a merged run that grant
     // was consumed by the merge, spent in state or not yet.
-    approvalsSpent: state.approvals.filter((g) => g.usedAt !== null || (merged !== undefined && g.key === approvalKey('integrate', admission.run.requestedLevel))).length,
+    approvalsSpent: state.approvals.filter((g) => g.usedAt !== null || (merged !== undefined && g.key === approvalKey('integrate', levelOf(admission.run.requestedLevel, state.narrowed)))).length,
     tasks,
     decisions,
     usage,

@@ -50,6 +50,8 @@ export const DEFAULT_POLICY_DOCUMENT: PolicyDocument = {
   // I4. P4 and P5 add roles when they have them.
   roles: {},
   protectedPaths: [...PROTECTED_PATHS],
+  // No path is sensitive until a person classifies it (A-R10-01).
+  sensitivePaths: {},
   triggers: {
     // M1 is human trigger only.
     enabled: ['human'],
@@ -60,6 +62,8 @@ export const DEFAULT_POLICY_DOCUMENT: PolicyDocument = {
     taskTemplate: {},
     maxAutonomy: { human: 2 },
     minAuthorTrust: { human: 'owner' },
+    // No kind narrows by trust: every entry is the floor (A-R10-01).
+    narrowBelow: {},
     maxTriggerDepth: 2,
     budgetPerWindow: { runs: 20, windowMs: 3_600_000 },
     // No subscription and no schedule: an event source is a grant a person adds (I4).

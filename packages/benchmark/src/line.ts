@@ -164,6 +164,8 @@ export function benchPolicyDocument(repo: RepoPolicy): PolicyDocument {
     autonomyCeiling: 1,
     triggerKinds: ['human'],
     budget: { maxTokens: 1000, maxCostUsd: 1, maxWallClockMs: 600_000 },
+    sensitiveGrants: [],
+    narrowed: null,
   });
   const approvals: Partial<Record<ApprovalKey, ApprovalOutcome>> = Object.fromEntries(
     ['intake', 'spec', 'test-design', 'plan', 'build', 'verify', 'review', 'integrate'].map((station) => [`${station}:1`, 'auto']),
@@ -174,12 +176,14 @@ export function benchPolicyDocument(repo: RepoPolicy): PolicyDocument {
     approvals,
     roles: { [BUILDER]: scope(['build', 'verify'], repo.builderGlobs, 'standard'), [REVIEWER]: scope(['review'], ['**'], 'deep') },
     protectedPaths: ['.github/**'],
+    sensitivePaths: {},
     triggers: {
       enabled: ['human'],
       entryStation: { human: 'intake' },
       taskTemplate: {},
       maxAutonomy: { human: 1 },
       minAuthorTrust: { human: 'owner' },
+      narrowBelow: {},
       maxTriggerDepth: 1,
       budgetPerWindow: { runs: 1000, windowMs: 3_600_000 },
     },
