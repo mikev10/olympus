@@ -8141,3 +8141,128 @@ was shown failing on the code as reviewed.
   that pins workflow definitions.
 - **Known limit:** two runs of one app and one name on one commit cannot be
   told from a rerun, so the latest decisive one decides.
+
+## Amendment: trust ratchet (R10)
+
+R10 was started on `v2` at 7502a2a and stopped before any code. Its entry
+states a goal and nothing that bounds it: no deliverables, no out-of-scope
+list, no conformance, no gate paths. And what it names does not exist yet:
+policy classifies no file as sensitive, a below-owner author is refused rather
+than narrowed, and nothing in a run can lower a sandbox's egress, a task's
+tools, or a run's level once admitted. Each needs a contract change, so this
+is an amendment, confirmed before it is built. The maintainer chose all four
+open questions on 2026-11-07, each the recommended answer.
+
+### D-A-TR-01: what R10 found on `v2`
+
+- **Author trust is refused, never narrowed.** `AuthorTrust` is `owner`,
+  `collaborator`, `outside`, or `anonymous` (`packages/core/src/run/types.ts:42`).
+  Admission refuses an author below `minAuthorTrust[kind]` with cause `trust`
+  (`packages/core/src/trigger/admission.ts:66-76`), and nothing lowers a level
+  or a scope by trust. A candidate's trust reaches the run's `AdmittedTrigger`
+  (`packages/api/src/run.ts:938-940`).
+- **No payload reaches a model today.** The compiler takes no
+  `UntrustedPayload` (`packages/compiler/src/compile.ts:12`); only extracted,
+  schema-bounded fields go further, and R22 ships no template that starts a
+  build. So R10's trigger rule binds the first template that does (R16), and
+  binds it from that template's first run.
+- **No sensitive classification.** `protectedPaths` means CI, test config, and
+  package scripts that escalate at `integrate`
+  (`packages/core/src/policy/types.ts:150`, `:169`). Nothing classifies a file
+  as one a model may not read.
+- **Capability is fixed per task, and every task has a fresh sandbox.**
+  `runTask` resolves the role's scope, builds the spec's egress from it, hands
+  `tools: [...scope.tools]` to the driver, and provisions a sandbox destroyed
+  when the task ends (`packages/api/src/line.ts:797-860`). The proxy takes its
+  allowlist at provision (`packages/sandbox/src/local/proxy.ts:69`), and
+  `SandboxProvider` has no method to change it (`packages/sandbox/src/types.ts:335`).
+- **A task's tree is a copy, and its diff is its own.** Attempt trees are
+  copied from the run's base (`packages/api/src/workspace.ts:108`, `:346`), the
+  sandbox mounts that one tree (`line.ts:774-783`), and a task's change is
+  `ownDiff(start, work)` (`workspace.ts:264`). A path absent from both copies is
+  absent from the diff, never a deletion in it.
+- **Levels are read at each station exit.** The approval key is the station and
+  the level (`packages/core/src/station/machine.ts:108`, `:141`, `:199`).
+- **The probe is not an egress check.** `SandboxProvider.probe` observes a
+  product over HTTP (A-P11-01, `packages/sandbox/src/local/probe.ts`); it
+  cannot confirm a sandbox's allowlist, so adoption is not proved by probing.
+- **No R10 entries are pending** in `packages/conformance/src/registry`.
+
+### D-A-TR-02: R10 narrows on both inputs, under new policy
+
+- **Chosen:** policy gains a sensitive-path classification and, per role, a
+  narrowed scope; the trigger policy gains a trust level below which an
+  admitted run is narrowed rather than run at full scope (A-R10-01). A role
+  whose run is narrowed and that declares no narrowed scope is refused at
+  admission (I5).
+- **Rejected:** *trigger trust only, sensitive files to R24.* R24 would build
+  its above-L2 grant on a mechanism nobody owns, and a classification read only
+  for repository instructions would miss every other sensitive path.
+- **Reverse by:** removing the classification and the narrowed scope from the
+  policy contract; admission returns to refusing below the floor.
+
+### D-A-TR-03: narrowing takes effect at the task boundary
+
+- **Chosen:** the narrowed state is run state, written once and never cleared
+  (A-R10-02). Every task dispatched after it builds its spec, its tools, and
+  its level from the narrowed scope, in the fresh sandbox `runTask` already
+  provisions. Input that narrows a run is placed only in a request whose
+  sandbox was provisioned from the narrowed scope, after the narrowing is
+  committed to run state and to P14's record. Until then the input is
+  withheld, and a failure anywhere in that order refuses the task (I5). A
+  task already running when a run narrows never received the input and ends
+  under its own scope; nothing it returns restores a capability.
+- **Rejected:** *a `tighten()` method on every sandbox provider.* It would
+  change the provider contract and need a race-free live swap of the proxy that
+  every provider proves, to narrow a sandbox the next task replaces anyway.
+  *Confirming adoption with the probe.* It observes HTTP behaviour, not the
+  allowlist (D-A-TR-01).
+- **Reverse by:** adding a provider method in its own amendment; run state and
+  the record are unchanged by it.
+
+### D-A-TR-04: a sensitive path is not mounted unless granted
+
+- **Chosen:** a path a sensitive class matches is left out of every attempt's
+  start and work copies, so a model never has it to read. A role granted the
+  class gets those paths only in a run that was narrowed at admission, before
+  any task. Verification still runs over the full tree, since no model reads
+  it, and a task's diff never shows an omitted path as deleted. A task that
+  writes a path its copy omitted is refused (I5), so an omitted file cannot be
+  replaced unseen.
+- **Rejected:** *scan the base at admission and narrow the whole run if any
+  sensitive path exists.* One such file in a repository would narrow every
+  run, and the run would still mount the file. *Count only context the
+  runtime renders.* A model could still read the file with its own tools,
+  which leaves a gap that is never reported.
+- **Reverse by:** copying the full tree again; the grant check then has
+  nothing to protect.
+
+### D-A-TR-05: R24 builds on R10, and its interim refusal is dropped
+
+- **Chosen:** R24 has not shipped, so the refusal R10 was to lift will not
+  exist when R10 lands. This amendment rewrites R24's entry: above L2 the
+  `'repo-instructions'` grant narrows the run under R10 before the set reaches a
+  model, and a target that classifies those paths as sensitive gets them
+  unmounted under D-A-TR-04.
+- **Rejected:** *leave R24 as written.* Its entry would name a step by R10
+  that never happens, and R24 would need its own amendment to remove it.
+
+### The amendments
+
+- **A-R10-01** (`packages/core/src/policy/types.ts`): `Policy` and
+  `PolicyDocument` gain `sensitivePaths: Record<SensitiveClass, string[]>`,
+  globs by class; `CapabilityScope` gains `sensitiveGrants: SensitiveClass[]`
+  (default none, I4) and `narrowed: NarrowedScope | null`, holding `tools`,
+  `network`, and `autonomyCeiling`, each validated as no wider than the role's
+  own; `TriggerPolicy` gains `narrowBelow: Partial<Record<TriggerKind,
+  AuthorTrust>>`. An author at or above the floor and below `narrowBelow` is
+  admitted narrowed. An absent entry is the floor, so a policy written before
+  R10 admits and refuses exactly as it does today.
+- **A-R10-02** (`packages/core/src/run/types.ts`): `RunState` gains
+  `narrowed: RunNarrowing | null`, holding the cause and when it was committed.
+  It is written once and never cleared. The Vault reads a state committed
+  before R10 as not narrowed.
+- **A-R10-03** (`packages/vault/src/types.ts`): `DecisionCause` gains
+  `capability-narrowed`, decided by `admission` or `line`, naming the cause
+  (`author-trust`, `sensitive-grant`, or a declared input source) and the scope
+  each role narrowed to.
