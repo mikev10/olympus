@@ -37,6 +37,8 @@ const REVIEWER = 'reviewer' as RoleId;
 const HOST = 'api.example.test';
 const INPUT = 'r10-input-from-a-declared-source';
 const SECRET = 'secrets/key.txt';
+const SECOND = 'second' as TaskRequest['taskId'];
+const SECOND_INPUT = 'r10-second-input-from-another-source';
 
 /** What a role keeps once narrowed: read only, no network, at most `ceiling`. */
 function narrowTo(ceiling: 0 | 1 | 2): NarrowedScope {
@@ -99,6 +101,19 @@ function failingNarrowings(vault: Vault): Vault {
   });
 }
 
+/** `vault`, whose commit of a narrowed state fails, as a store that cannot be written would. */
+function failingNarrowedCommits(vault: Vault): Vault {
+  return new Proxy(vault, {
+    get(target, key) {
+      if (key === 'commitRunState') {
+        return (s: RunState, ifVersion: string) => (s.narrowed === null ? target.commitRunState(s, ifVersion) : Promise.reject(new Error('stand-in: the state cannot be written')));
+      }
+      const value: unknown = Reflect.get(target, key, target);
+      return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+    },
+  });
+}
+
 async function decisionsOf(vault: Vault, runId: RunState['runId']): Promise<EnforcementDecision[]> {
   const refs = await vault.readDecisions(runId);
   return Promise.all(refs.map((ref) => readRecord<EnforcementDecision>(vault, ref)));
@@ -114,7 +129,10 @@ async function history(rig: LineRig): Promise<RunState[]> {
   const states: RunState[] = [];
   for (let v = 0; v <= Number(latest.version); v++) {
     // A version a commit skipped is not in the history; every one written is read.
-    const raw = await readFile(join(rig.dirs.store, 'runs', rig.runId, 'state', `${String(v)}.json`), 'utf8').catch(() => null);
+    const raw = await readFile(join(rig.dirs.store, 'runs', rig.runId, 'state', `${String(v)}.json`), 'utf8').catch((error: unknown) => {
+      if ((error as { code?: unknown }).code === 'ENOENT') return null;
+      throw error;
+    });
     if (raw !== null) states.push(JSON.parse(raw) as RunState);
   }
   if (states.length === 0) throw new Error(`R10: no state of run ${rig.runId} was read back`);
@@ -381,14 +399,14 @@ export async function inputNarrowing(): Promise<void> {
 
 export const NARROWING_INPUT_WITHHELD: LocalAssertion = runtime({
   id: 'I5.narrowing-input-withheld-until-narrowed',
-  title: "input a declared source brings reaches a model only in a request whose sandbox was provisioned from the narrowed scope, after the narrowing was recorded and committed; where the record cannot be written, or a seated role has no narrowed scope, the input reaches no model and the drive stops (R10, D-A-TR-03, D-R10-03)",
+  title: "input a declared source brings reaches a model only in a request whose sandbox was provisioned from the narrowed scope, after the narrowing was recorded and committed; where the record cannot be written, the narrowed state cannot be committed, or a seated role has no narrowed scope, the input reaches no model and the drive stops (R10, D-A-TR-03, D-R10-03)",
   run: async () => {
     await inputNarrowing();
-    for (const failure of ['record', 'role'] as const) {
+    for (const failure of ['record', 'commit', 'role'] as const) {
       await withLine(`r10-withheld-${failure}-`, async (rig) => {
         const driver = await stubDriver();
         const built = await rig.components({ driver, reviewer: driver });
-        const components = failure === 'record' ? await rig.components({ driver, reviewer: driver, vault: failingNarrowings(built.vault) }) : built;
+        const components = failure === 'role' ? built : await rig.components({ driver, reviewer: driver, vault: failure === 'record' ? failingNarrowings(built.vault) : failingNarrowedCommits(built.vault) });
         const outcome = await inputRun(rig, { ceiling: 1, input: true, components, ...(failure === 'role' ? { reviewer: null } : {}) });
         if (!outcome.ok) throw new Error(`R10: the ${failure} run was refused at admission: ${JSON.stringify(outcome)}`);
         let stopped = false;
@@ -407,7 +425,7 @@ export const NARROWING_INPUT_WITHHELD: LocalAssertion = runtime({
 
 export const NO_CALL_RESTORES_CAPABILITY: LocalAssertion = runtime({
   id: 'I4.no-call-restores-a-narrowed-capability',
-  title: "once committed, a run's narrowing is in every later state, through an approval, a resume with no input, and a second input, and the tasks after it are handed only the narrowed scope (R10, A-R10-02)",
+  title: "once committed, a run's narrowing is in every later state: a second input, delivered to another build task, leaves it as it was and records nothing, and an approval and a resume carry it on, while every task after it is handed only the narrowed scope (R10, A-R10-02)",
   run: async () => {
     await withLine('r10-ratchet-', async (rig) => {
       const { approveStation, resumeRun } = await api();
@@ -423,8 +441,7 @@ export const NO_CALL_RESTORES_CAPABILITY: LocalAssertion = runtime({
       if (!approved.ok) throw new Error(`R10: build's exit at the narrowed level could not be approved: ${JSON.stringify(approved)}`);
       const before = specs.length;
       const reopened = await rig.components({ sandbox, driver, reviewer: driver });
-      // A second input on resume finds the run narrowed and leaves it so.
-      await resumeRun({ runId: rig.runId, components: reopened }, { inputFor: () => ({ source: 'trigger-fields', text: INPUT }) });
+      await resumeRun({ runId: rig.runId, components: reopened });
       const states = await history(rig);
       const from = states.findIndex((s) => s.narrowed !== null);
       const cleared = states.slice(from).find((s) => JSON.stringify(s.narrowed) !== JSON.stringify(first));
@@ -432,6 +449,38 @@ export const NO_CALL_RESTORES_CAPABILITY: LocalAssertion = runtime({
       if ((await rig.state()).tasks[HELLO_REVIEW] !== 'passed') throw new Error('R10: the narrowed run did not reach its review after the approval');
       withinNarrowed(specs.slice(before), driver.requests.slice(1), 'R10');
       if (specs.length === before) throw new Error('R10: no task ran after the narrowing, so nothing was checked');
+      if (narrowings(await decisionsOf(components.vault, rig.runId)).length !== 1) throw new Error('R10: the run was narrowed more than once');
+    });
+    // A second input, delivered: two independent build tasks run one after the other, the first narrowing the
+    // run and the second bringing input from another source, which finds it narrowed and leaves it so (codex review).
+    await withLine('r10-second-input-', async (rig) => {
+      const driver = await stubDriver();
+      const components = await rig.components({ driver, reviewer: driver }, { work: false });
+      await writeFile(join(rig.dirs.artifacts, 'graph.json'), JSON.stringify({
+        tasks: [
+          { id: HELLO_TASK, station: 'build', role: 'builder', dependsOn: [], dependencySet: ['a/**'] },
+          { id: SECOND, station: 'build', role: 'builder', dependsOn: [], dependencySet: ['b/**'] },
+          { id: HELLO_REVIEW, station: 'review', role: 'reviewer', dependsOn: [HELLO_TASK, SECOND], dependencySet: ['**'] },
+        ],
+      }));
+      const outcome = await inputRun(rig, { ceiling: 1, input: true, components });
+      if (!outcome.ok) throw new Error(`R10: the second-input run was refused at admission: ${JSON.stringify(outcome)}`);
+      const committed: Array<RunState['narrowed']> = [];
+      await outcome.admitted.drive({
+        inputFor: (t) => (t.id === HELLO_TASK ? { source: 'repo-instructions', text: INPUT } : t.id === SECOND ? { source: 'trigger-fields', text: SECOND_INPUT } : null),
+        onCommit: (state) => { committed.push(state.narrowed); },
+      });
+      const second = driver.requests.filter((r) => r.variableSuffix.includes(SECOND_INPUT));
+      // The task is rebuilt after its gate fails, and each attempt brings its input again: every delivery is to it, narrowed.
+      if (second.length === 0 || second.some((r) => r.taskId !== SECOND)) throw new Error(`R10: the second input reached ${JSON.stringify(second.map((r) => r.taskId))}, not only the second build task`);
+      withinNarrowed([], second, 'R10 (second input)');
+      const from = committed.findIndex((n) => n !== null);
+      const firstNarrowing = committed[from];
+      if (from === -1 || firstNarrowing?.cause.kind !== 'input' || firstNarrowing.cause.source !== 'repo-instructions') {
+        throw new Error(`R10: the first input did not narrow the run: ${JSON.stringify(firstNarrowing)}`);
+      }
+      const changed = committed.slice(from).find((n) => JSON.stringify(n) !== JSON.stringify(firstNarrowing));
+      if (changed !== undefined) throw new Error(`R10: a second input changed the narrowing to ${JSON.stringify(changed)}`);
       if (narrowings(await decisionsOf(components.vault, rig.runId)).length !== 1) throw new Error('R10: a second input narrowed the run again');
     });
   },
@@ -452,7 +501,10 @@ async function withSecret(rig: LineRig): Promise<void> {
 function mounted(specs: readonly SandboxSpec[], req: TaskRequest, path: string): Promise<boolean> {
   const spec = specs.at(-1);
   if (spec === undefined) throw new Error(`R10: no sandbox was provisioned for task ${req.taskId}`);
-  return readFile(join(spec.mounts.workspace.source, ...path.split('/'))).then(() => true, () => false);
+  return readFile(join(spec.mounts.workspace.source, ...path.split('/'))).then(() => true, (error: unknown) => {
+    if ((error as { code?: unknown }).code === 'ENOENT') return false;
+    throw error;
+  });
 }
 
 /** A run of the hello fixture with `secrets/**` classified; the builder granted it when `granted`, and `onBuild` run in its sandbox. */
