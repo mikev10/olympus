@@ -27,6 +27,7 @@ import { runtime } from '../kit/assert.js';
 import type { LocalAssertion } from '../kit/types.js';
 import { HELLO_REVIEW, HELLO_TASK, lineScope, linePolicy, readRecord, stubDriver, withLine, writeManifest, type LineRig, type ObservedDriver } from './line.js';
 import { issuePolicy, plantCandidate } from './triggers.js';
+import { sensitiveDraftGoesBack } from './drafting.js';
 
 const api = async () => import('@olympus-ai/api');
 const core = async () => import('@olympus-ai/core');
@@ -461,6 +462,7 @@ export const SENSITIVE_PATH_WITHHELD: LocalAssertion = runtime({
       });
     }
     await grantNarrowing();
+    await sensitiveDraftGoesBack();
     // A locked artifact is context every seat is offered as text, so none may be sensitive: admission refuses it (codex-1).
     await withLine('r10-sensitive-artifact-', async (rig) => {
       const { admitRun } = await api();

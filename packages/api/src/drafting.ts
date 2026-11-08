@@ -61,6 +61,7 @@ import { recordDecision } from './decisions.js';
 import {
   attemptsOf,
   omitWithheld,
+  withheldOf,
   commit,
   joinParts,
   pinnedRole,
@@ -411,6 +412,10 @@ async function draft(ctx: LineContext, station: DraftStation, current: DraftAtte
   for (const path of writesOutsideGrant(entries, scopeFor(ctx, seat).writableGlobs, STATION_CONTRACTS[station].writeBoundary.workspaceGlobs)) {
     read.problems.push({ path, code: 'outside-grant' });
   }
+  // A drafted path a sensitive class matches goes back too: once locked, a draft is every later seat's context, and the
+  // critic is handed its files whatever its own tree omits, so no grant can make one safe to carry (D-R10-09).
+  const sensitive = withheldOf(Object.values(ctx.policy.sensitivePaths).flat(), entries.map((e) => e.path));
+  for (const path of sensitive) read.problems.push({ path, code: 'sensitive-path' });
   const record: DraftRecord = {
     runId: ctx.run.id,
     station,
