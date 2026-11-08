@@ -266,6 +266,7 @@ export const NO_TASK_BEYOND_NARROWED_SCOPE: LocalAssertion = runtime({
       }
       if (!wideSeen) throw new Error('R10 control: an unnarrowed run was handed only the narrowed scope');
     });
+    await raceAcrossABatch();
     // Narrowed by input at build: build's exit is read at the narrowed L0, where it needs a person.
     for (const narrowed of [true, false]) {
       await withLine(`r10-level-${String(narrowed)}-`, async (rig) => {
@@ -278,6 +279,57 @@ export const NO_TASK_BEYOND_NARROWED_SCOPE: LocalAssertion = runtime({
     }
   },
 });
+
+/**
+ * Two independent build tasks in one batch: `ra`'s sandbox is held while being
+ * provisioned until `rb`'s input has narrowed the run. No driver call made
+ * after the narrowing may carry the wide scope `ra` read before it (codex-2).
+ */
+async function raceAcrossABatch(): Promise<void> {
+  await withLine('r10-race-', async (rig) => {
+    const { admitRun } = await api();
+    const { StubSandboxProvider } = await import('@olympus-ai/sandbox');
+    await writeFile(join(rig.dirs.artifacts, 'graph.json'), JSON.stringify({
+      tasks: [
+        { id: 'ra', station: 'build', role: 'builder', dependsOn: [], dependencySet: ['a/**'] },
+        { id: 'rb', station: 'build', role: 'builder', dependsOn: [], dependencySet: ['b/**'] },
+        { id: HELLO_REVIEW, station: 'review', role: 'reviewer', dependsOn: ['ra', 'rb'], dependencySet: ['**'] },
+      ],
+    }));
+    let release: () => void = () => undefined;
+    const narrowed = new Promise<void>((resolve) => { release = resolve; });
+    // Bounded, so a schedule that never narrows fails on the check below rather than hanging.
+    const bound = setTimeout(() => { release(); }, 20_000);
+    const inner = new StubSandboxProvider();
+    const sandbox = new Proxy(inner, {
+      get(target, key) {
+        if (key === 'provision') {
+          return async (spec: SandboxSpec) => {
+            // `ra`'s work copy: held until the narrowing is committed.
+            if (/[\\/]tasks[\\/]ra\.\d+[\\/]work$/u.test(spec.mounts.workspace.source)) await narrowed;
+            return target.provision(spec);
+          };
+        }
+        const value: unknown = Reflect.get(target, key, target);
+        return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+      },
+    }) as SandboxProvider;
+    const driver = await stubDriver({ capabilities: { parallelism: 2 } });
+    const components = await rig.components({ sandbox, driver, reviewer: driver }, { work: false });
+    const policy = await linePolicy({}, { roles: roles({ builder: narrowTo(1), reviewer: narrowTo(1) }), concurrency: { maxParallelTasks: 2, maxConflictRetries: 0 } });
+    const outcome = await admitRun(await rig.request(components, { policy }));
+    if (!outcome.ok) throw new Error(`R10: the batch run was refused at admission: ${JSON.stringify(outcome)}`);
+    await outcome.admitted.drive({
+      inputFor: (t) => (t.id === 'rb' ? { source: 'repo-instructions', text: INPUT } : null),
+      onCommit: (state) => { if (state.narrowed !== null) release(); },
+    });
+    clearTimeout(bound);
+    const ra = driver.requests.filter((r) => r.taskId === ('ra' as TaskRequest['taskId']));
+    if (ra.length === 0) throw new Error('R10: task ra never reached a model, so the race was not exercised');
+    if ((await rig.state()).narrowed === null) throw new Error('R10: the batch run was never narrowed');
+    withinNarrowed([], driver.requests, 'R10 (batch)');
+  });
+}
 
 /** A person's run of the hello fixture under wide, narrowable roles at `ceiling`, with `cells` added to the approvals. */
 async function inputRun(

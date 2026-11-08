@@ -940,6 +940,9 @@ export async function runTask(
   if (options.input !== undefined && (!RELEASED.has(options.input) || ctx.state.narrowed === null)) {
     throw new Error(`line: input from '${options.input.source}' reached task ${task.id} without a committed narrowing; it is withheld and the run stops`);
   }
+  // Whether the scope below was read narrowed. A sibling in the same batch can narrow the run while this task's
+  // sandbox is provisioned; the call is then not made with the wider scope already read (codex-2, D-R10-10).
+  const readNarrowed = ctx.state.narrowed !== null;
   const scope = scopeFor(ctx, task);
   // A critic's tree is read-only whatever its station's contract says: it writes nothing (R19).
   const mode = options.mode ?? (STATION_CONTRACTS[task.station].writeBoundary.workspaceGlobs.length === 0 ? 'ro' : 'rw');
@@ -972,6 +975,11 @@ export async function runTask(
   }
   let outcome: { ok: true; result: TaskResult; model: ModelIdentity } | { ok: false; error: unknown };
   try {
+    // Checked with no await between it and the call: a narrowing committed since the scope was read means this
+    // sandbox and these tools are wider than the run now allows, so the call is not made and the attempt is retried (I5).
+    if ((ctx.state.narrowed !== null) !== readNarrowed) {
+      throw new Error(`line: the run narrowed while task ${task.id}'s sandbox was provisioned; its call is not made under the wider scope`);
+    }
     const request: TaskRequest = {
       taskId: task.id,
       role,
