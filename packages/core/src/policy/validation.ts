@@ -864,6 +864,12 @@ export function validatePolicyDocument(input: unknown): DocumentValidation {
   };
 }
 
+/** Whether `glob` can match a path as the runtime names one: relative to the tree's root, `/`-separated, never leaving it. */
+function isTreeRelativeGlob(glob: string): boolean {
+  if (glob.startsWith('/') || glob.startsWith('./') || glob.includes('\\') || /^[A-Za-z]:/u.test(glob)) return false;
+  return !glob.split('/').some((segment) => segment === '..' || segment === '.' || segment === '');
+}
+
 /** Each class an identifier holding at least one non-empty glob (A-R10-01). */
 function validateSensitivePaths(value: unknown, defects: PolicyDefect[]): Record<SensitiveClass, string[]> | undefined {
   if (!isRecord(value)) {
@@ -886,6 +892,16 @@ function validateSensitivePaths(value: unknown, defects: PolicyDefect[]): Record
     if (globs.length === 0) {
       ok = false;
       defects.push({ path: child('sensitivePaths', name), problem: 'a class with no glob classifies nothing' });
+      continue;
+    }
+    // Matched against tree-relative paths with `/`, so a glob that cannot name one would classify nothing (codex-4).
+    const unrooted = globs.filter((glob) => !isTreeRelativeGlob(glob));
+    if (unrooted.length > 0) {
+      ok = false;
+      defects.push({
+        path: child('sensitivePaths', name),
+        problem: `a glob must be tree-relative, with '/' separators and no leading '/', './', drive, or '..' segment: ${unrooted.map((g) => JSON.stringify(g)).join(', ')}`,
+      });
       continue;
     }
     out[name] = globs;

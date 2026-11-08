@@ -462,6 +462,12 @@ export const SENSITIVE_PATH_WITHHELD: LocalAssertion = runtime({
       });
     }
     await grantNarrowing();
+    // A class is matched against tree-relative paths, so a glob that is not one would classify nothing and is refused (codex-4).
+    const { DEFAULT_POLICY_DOCUMENT, validatePolicyDocument } = await core();
+    for (const glob of ['/secrets/key.txt', './secrets/**', 'secrets\\key.txt', '../secrets/**', 'secrets/../../x', 'C:/secrets/**']) {
+      if (validatePolicyDocument({ ...DEFAULT_POLICY_DOCUMENT, sensitivePaths: { secrets: [glob] } }).ok) throw new Error(`R10: the sensitive glob ${JSON.stringify(glob)}, which no tree-relative path matches, validated`);
+    }
+    if (!validatePolicyDocument({ ...DEFAULT_POLICY_DOCUMENT, sensitivePaths: { secrets: ['secrets/**', '**/.env'] } }).ok) throw new Error('R10 control: tree-relative sensitive globs were refused');
     await sensitiveDraftGoesBack();
     // A locked artifact is context every seat is offered as text, so none may be sensitive: admission refuses it (codex-1).
     await withLine('r10-sensitive-artifact-', async (rig) => {
