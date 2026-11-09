@@ -2067,7 +2067,9 @@ Binding:
   being judged cannot write what it receives (I3).
 - **A granted context, off by default.** `ContextGrant` gains
   `'repo-instructions'`. A station receives it only where its contract allows
-  it and policy grants it (I4). The contracts allow it at `spec`, `plan`,
+  it and policy grants it (I4): the task's role scope sets
+  `repoInstructions`, which is `false` when absent (D-A-RI-03). The
+  contracts allow it at `spec`, `plan`,
   `build`, and `review`. They never allow it at `test-design`, whose seat
   sees only the locked spec, so the acceptance oracle is written from the
   spec alone.
@@ -2078,10 +2080,12 @@ Binding:
   `references/`, and `assets/` are not, since a script is code the line did
   not pin, and a reference is open-ended. A seat that needs them reads them
   through `base-repo-readonly`.
-- **Rendered after the role, before the granted context.** The driver renders
-  the set inside `stablePrefix`, after `CompiledRole.instructions` and marked
-  as the target's text, so a role the maintainer wrote comes first and two
-  tasks under one role and one base still share a cacheable prefix.
+- **Rendered after the role, before the granted context.** At L0 to L2 the
+  set is rendered inside `stablePrefix`, after `CompiledRole.instructions` and
+  marked as the target's text, so a role the maintainer wrote comes first and
+  two tasks under one role and one base still share a cacheable prefix. Above
+  L2 it is input `narrowRun` released, placed in the variable suffix as R10
+  places all such input (D-R10-06, D-A-RI-04).
 - **Who wrote it is policy's question.** These files reached the base through
   the target's own merge process, not the line's. Policy may grant
   `'repo-instructions'` at L0 to L2. Above L2 the grant narrows the run under
@@ -2095,11 +2099,18 @@ Binding:
   judging content is the target's own text. It is recorded like any other,
   as R20's known limits say of role files.
 
-**Contract amendments, owed by the unit's pull request:** `ContextGrant`
-gains `'repo-instructions'`; `AdmissionRecord` gains the repository
-instruction set with each file's path and hash; station contracts allow the
-grant where listed above; and an admission refusal for a file the reader
-refuses, and for a run above L2 whose policy grants it.
+**Contract amendments, owed by the unit's pull request (A-R24-01 to
+A-R24-04):** `ContextGrant` gains `'repo-instructions'`; `CapabilityScope`
+gains `repoInstructions: boolean`, `false` when absent; `AdmissionRecord`
+gains the repository instruction set with each file's path and hash and each
+file whose front matter was dropped; station contracts allow the grant where
+listed above; and an admission refusal for a file the reader refuses. A run
+above L2 is narrowed, never refused (D-A-RI-02).
+
+**Gate paths:** `packages/core/src/station/types.ts`,
+`packages/core/src/policy/types.ts`, `packages/vault/src/types.ts`, and
+`packages/conformance/` are protected, so the pull request carries the
+`gate-change` label and the squash body carries `Gate-Change: acknowledged`.
 
 **Not in this unit:** a skill's scripts or references; any file outside the
 fixed list; reading instruction files from the workspace; measuring whether
@@ -2112,8 +2123,11 @@ run's tasks receive; a planted workspace copy that differs from the base copy
 is not what is delivered; an oversized, non-UTF-8, or non-regular entry
 refuses admission and names it; a skill whose front matter declares
 `allowed-tools` changes no grant; `test-design`'s seat never receives the
-grant, whatever policy says; and a run above L2 whose policy grants it is
-refused.
+grant, whatever policy says; a role whose scope does not set
+`repoInstructions` receives nothing at a station whose contract allows it;
+and a run above L2 granted the set is narrowed through `narrowRun`, the
+narrowing recorded and committed before any model receives the set, which
+arrives in the suffix and not the prefix.
 
 **Why M2:** R23 closes the side door, and without this unit the line seats
 agents that ignore the target's documented conventions. The cost of that

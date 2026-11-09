@@ -8467,3 +8467,86 @@ open questions on 2026-11-07, each the recommended answer.
   sources can bring input at other points.
 - **Reverse by:** removing the check; D-A-TR-03's in-flight rule then
   covers the provisioning window too.
+
+## Amendment: repository instructions (R24)
+
+R24 was started on `v2` at 0cc8f46 and stopped before any code. Its entry
+contradicts itself on a run above L2, it needs a policy field it does not
+list, and its placement rule conflicts with R10's. Each is a contract or
+acceptance change, so this is an amendment, confirmed before it is built. The
+maintainer chose all three open questions on 2026-11-08, each the recommended
+answer.
+
+### D-A-RI-02: a run above L2 granted the set is narrowed, never refused
+
+- **Found:** D-A-TR-05 rewrote R24's binding text so that above L2 the grant
+  narrows the run under R10, with no interim refusal. It left the entry's
+  contract-amendment list ("an admission refusal ... for a run above L2 whose
+  policy grants it") and its conformance clause ("a run above L2 whose policy
+  grants it is refused") as they were, so the entry asserts both.
+- **Chosen:** D-A-TR-05 holds. The refusal is dropped from the amendment
+  list. The conformance clause becomes: a run above L2 granted the set is
+  narrowed through `narrowRun` with source `'repo-instructions'`
+  (`packages/core/src/run/types.ts:269` already names it), the narrowing
+  recorded and committed before any model receives the set. A run whose
+  seated roles declare no narrowed scope stops under R10's own rule, with
+  the set withheld (`packages/api/src/line.ts:907`).
+- **Rejected:** *keep the refusal.* It reverses a confirmed decision and
+  leaves R10's narrowing API with a declared source nothing calls.
+- **Reverse:** restore the two sentences and add the refusal at admission.
+
+### D-A-RI-03: policy grants the set per role
+
+- **Found:** a station's context comes from its contract alone
+  (`grantedContext`, `packages/core/src/station/machine.ts:297`). No policy
+  field grants any `ContextGrant` (`CapabilityScope`,
+  `packages/core/src/policy/types.ts:16`), so "only where its contract allows
+  it and policy grants it" has nothing for policy to say it with.
+- **Chosen:** A-R24-02 below. `CapabilityScope` gains
+  `repoInstructions: boolean`, read as `false` when absent, so a policy
+  written before R24 validates and admits exactly as it does today (I4). A
+  task receives the set when its station's contract allows the grant and its
+  scope, as `scopeFor` resolves it, sets the flag. A review seat therefore
+  reads the reviewed task's scope, as its other grants do (D-A-RC-06).
+- **Rejected:** *`contextGrants: ContextGrant[]` per role.* It puts every
+  context kind under policy, which is wider than this unit and would need
+  every station's defaults restated. *`Policy.repoInstructions: StationId[]`.*
+  One switch for every role at a station, coarser than the per-role grants
+  the rest of policy uses (`sensitiveGrants`, `tools`).
+- **Reverse:** drop the field; the contracts then decide alone.
+
+### D-A-RI-04: prefix at L0 to L2, the narrowed suffix above
+
+- **Found:** R24 renders the set inside `stablePrefix`, after the role. R10
+  places input released by `narrowRun` only in a narrowed run's variable
+  suffix, never in the prefix or a role prompt (D-R10-06,
+  `packages/api/src/line.ts:988`). Above L2 the set is exactly such input.
+- **Chosen:** split by level. At L0 to L2 the set is rendered in the prefix,
+  after `CompiledRole.instructions` and before the granted context, marked
+  as the target's text, as R24 states. Above L2 it is released through
+  `narrowRun` and placed in the suffix as D-R10-06 requires. The cost is the
+  cache above L2, where the author of the text is the reason for narrowing.
+- **Rejected:** *prefix always,* which amends D-R10-06 to put text R10 treats
+  as untrusted into a system prompt; *suffix always,* which contradicts R24's
+  binding and gives up the cache at every level.
+- **Reverse:** render above L2 in the prefix after the narrowing commits,
+  and amend D-R10-06 to allow it for this source.
+
+### The amendments
+
+- **A-R24-01** (`packages/core/src/station/types.ts`,
+  `packages/core/src/station/contracts.ts`): `ContextGrant` gains
+  `'repo-instructions'`. The contracts allow it at `spec`, `plan`, `build`,
+  and `review`, and `contractTableProblems` refuses it at `test-design`.
+- **A-R24-02** (`packages/core/src/policy/types.ts`): `CapabilityScope`
+  gains `repoInstructions: boolean`, default `false` when absent.
+- **A-R24-03** (`packages/vault/src/types.ts`): `AdmissionRecord` gains the
+  repository instruction set: each file's path and SHA-256, and each file
+  whose front matter was dropped. A record committed before R24 is read as
+  holding an empty set.
+- **A-R24-04:** an admission refusal for a file the reader refuses, naming
+  it.
+
+**Gate paths:** the three `types.ts` files above and `packages/conformance/`
+are protected, so R24's pull request carries `gate-change` and its squash
+body carries `Gate-Change: acknowledged`.
