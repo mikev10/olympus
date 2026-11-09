@@ -357,7 +357,7 @@ export const UNGRANTED_ROLE_RECEIVES_NOTHING: LocalAssertion = runtime({
 export const ABOVE_L2_NARROWS_AND_RIDES_THE_SUFFIX = external({
   id: 'I7.above-l2-repo-instructions-narrow-the-run-and-ride-the-suffix',
   title:
-    "a run above L2 granted the set is narrowed through narrowRun with source repo-instructions, the narrowing recorded and committed before any model is called with the set, which arrives in the granted seat's variable suffix and never its stable prefix; at L2 it is offered as granted context with nothing narrowed; a run whose seated roles declare no narrowed scope stops with the set withheld (R24, D-A-RI-02, D-A-RI-04, D-R10-06)",
+    "a run above L2 granted the set is narrowed through narrowRun with source repo-instructions, the narrowing recorded and committed before any model is called with the set, which the line's build and review steps place in each granted seat's variable suffix and never its stable prefix; at L2 the same steps place it in the prefix with nothing narrowed; a run whose seated roles declare no narrowed scope stops with the set withheld (R24, D-A-RI-02, D-A-RI-04, D-R10-06)",
   level: 'runtime',
   package: '@olympus-ai/api',
   file: 'test/paid/repo-instructions.test.ts',
