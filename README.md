@@ -1,3 +1,9 @@
+> [!WARNING]
+> **v1 is no longer maintained.** 4.5.16 is the final v1 release; no fixes or updates will follow.
+> Olympus is being rewritten as a software factory runtime on the [`v2` branch](https://github.com/mikev10/olympus/tree/v2).
+> The rewrite is not released yet and is not an upgrade path from v1: it is a different product with its own workflow.
+> It will ship on npm as `olympus-ai@5.0.0`, the next major after v1's 4.x.
+
 <div align="center">
 
 # ⚡ Olympus
