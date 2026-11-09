@@ -8764,3 +8764,152 @@ body carries `Gate-Change: acknowledged`.
   function asserted alone, which passes when the line stops calling it (I8).
 - **Reverse:** drive the clause through a real L3 admission once M3 can make
   one, and retire the external assertion.
+
+## Amendment: bug-fix intake (R16)
+
+R16 was started on `v2` at 5465731 and stopped before any code. Its
+dependencies have shipped (R15, R19, P14, R22, each tagged `reviewed/*`), and
+the two I7 controls it waits on are registered
+(`packages/conformance/src/registry/triggers.ts:216`, `:261`). But its entry
+names no contract amendments, no gate paths, and no way to declare a run a bug
+fix, and what it binds needs five contract changes. So this is an amendment,
+confirmed before it is built. The maintainer chose all six open questions on
+2026-11-09, each the recommended answer.
+
+### D-A-BG-01: what R16 found on `v2`
+
+- **No bug-fix template.** The registry is `intake-candidate`,
+  `observe-signal`, and the job templates
+  (`packages/core/src/trigger/schemas.ts:35`). The `issue` kind and its schema
+  exist: repository, number, allowlisted labels, author trust, and no free
+  text (`schemas.ts:155-160`).
+- **A person's run names no template.** The default policy gives `human` an
+  empty template and enters it at `intake`
+  (`packages/core/src/policy/default.ts:55-60`, D-P3-05). Nothing a person
+  sends says what kind of work a run is.
+- **An intent is free text.** `Intent` is `{ text, from: 'principal' }`
+  (`packages/api/src/run.ts:169`), checked only for shape and a 32 KiB cap
+  (`run.ts:543-554`). It has no parts to require.
+- **The spec has three parts beside `spec.md`.** `SpecPart` is `security`,
+  `run-requirements`, and `questions`
+  (`packages/core/src/station/types.ts:192`). None holds where a defect shows
+  or what a check needs to run it.
+- **Every run already needs a check failing on the base.** Validation refuses
+  a manifest with no required acceptance or behavioral check declaring
+  `onBase: 'fails'` (`packages/api/src/validate.ts:267`, D-A-BF-01), so R16's
+  `test-design` rule adds only what ties that check to the defect.
+- **A candidate is admitted or expires, and nothing else.** `IntakeEntry`
+  carries `admittedAs` and `expiredAt` (`packages/vault/src/types.ts:752-761`);
+  the Vault has `markCandidateAdmitted` and `markCandidateExpired`. A person
+  cannot record that a report was not worked.
+- **R10 named a source for R16.** `InputSource` includes `'trigger-fields'`
+  (`packages/core/src/run/types.ts:269`), and `narrowRun` narrows a run
+  whenever it is called (`packages/api/src/line.ts:905`). Its only caller today
+  is R10's conformance (`packages/conformance/src/registry/ratchet.ts:414`).
+
+### D-A-BG-02: `bug-fix` is a registered template, and policy names the templates a person's run may take
+
+- **Chosen (A-R16-01):** `TemplateId` gains `'bug-fix'`, valid on `issue`
+  alone. A `bug-fix` delivery records a candidate exactly as `intake-candidate`
+  does; nothing runs. `TriggerPolicy` gains `runTemplates`, the templates a
+  person's own run may name, empty by default. `RunRequest` gains `template`
+  (A-R16-02). A run admitted from a `bug-fix` candidate is a bug-fix run, and a
+  request naming another template is refused. A person's run naming a template
+  `runTemplates` does not list is refused. The admission record holds the
+  template.
+- **Rejected:** *`taskTemplate.human: 'bug-fix'`.* Every human run would be a
+  bug fix. *A template inferred from the intent's shape.* A shape the caller
+  chose would select the route, where policy must (I4).
+- **Must hold:** I4, because no run is a bug fix unless a person's policy lists
+  the template or its trigger's template is `bug-fix`. A run with no template
+  admits exactly as before.
+- **Reverse:** drop `runTemplates`, so a bug fix enters only through an `issue`
+  candidate.
+
+### D-A-BG-03: a bug-fix intent is three required parts, and the run drafts both artifacts
+
+- **Chosen (A-R16-02):** `Intent` becomes a union. The R19 arm is unchanged.
+  The bug-fix arm is `{ from: 'principal', template: 'bug-fix', steps, actual,
+  expected }`, each a non-empty string, under the existing cap on their sum.
+  Admission refuses one missing a part, naming the part, and refuses a bug-fix
+  run whose spec or acceptance tests are supplied rather than drafted, naming
+  the artifact. The intent record holds the parts as given.
+- **Rejected:** *a supplied spec.* The entry gives the spec to R19's drafter
+  and the check to R19's test drafter, which sees the locked spec only. A
+  supplied test would be written by someone who read the report, which is the
+  path D-A-BF-02 closed. *Parts as headings inside free text.* A heading can be
+  forged or omitted, so the check would be a parse, not a type.
+- **Reverse:** allow a supplied spec, checked for the same parts.
+
+### D-A-BG-04: the spec gains `defect`, written by the runtime, and `reproduction`, written by the drafter
+
+- **Chosen (A-R16-03):** `SpecPart` gains `'defect'` and `'reproduction'`. The
+  runtime writes `.drafts/<run id>/defect.json` from the intent record's three
+  parts before the spec drafter runs. The drafter writes
+  `.drafts/<run id>/reproduction.json`: `{ where, needs: { data, accounts,
+  services } }`, `where` a non-empty string and each `needs` entry a list,
+  empty meaning none. Both lock with the spec. In a bug-fix run either part
+  missing or failing to parse is refused at `spec`, naming it, and a `defect`
+  part whose bytes are not the runtime's is refused there too. The security
+  part (R17) stays required.
+- **Why the runtime writes `defect`:** the test drafter is granted the locked
+  spec only, so the steps it follows must be in the spec. A drafter copying
+  them could reword them, and the check would follow the drafter's account,
+  not the person's.
+- **Rejected:** *steps, actual, and expected inside `reproduction`, written by
+  the drafter.* It is the rewording above.
+- **Reverse:** one `reproduction` part written by the drafter, compared against
+  the intent by the critic.
+
+### D-A-BG-05: a check declares that it reproduces the defect, and the runtime checks the declaration
+
+- **Chosen (A-R16-04):** `AcceptanceCheckSpec` gains optional
+  `reproduces: true`, which must sit with `onBase: 'fails'`. A bug-fix
+  manifest with no required check declaring it is refused at the `test-design`
+  exit, named. A non-bug-fix manifest declaring it is refused as not
+  applicable. R15's base run proves that the check fails. Whether it follows
+  the spec's steps is a line added to the shipped `test-design` rubric, which
+  the critic judges.
+- **Known limit:** no code can tell that a check follows prose steps. A check
+  that fails on the base for an unrelated reason passes the runtime and rests
+  on the critic, and with one driver on a person. That is D-A-BF-01's limit,
+  and mutation testing (M3) is its control.
+- **Rejected:** *any failing check counts.* It is already true for every run
+  (`validate.ts:267`), so it would bind nothing R16 adds. *Matching the check's
+  name or text against the steps.* It is a heuristic that passes on wording.
+- **Reverse:** drop `reproduces`, and rely on the rubric alone.
+
+### D-A-BG-06: a report that never becomes a spec is recorded beside the runs
+
+- **Found:** the entry says such a report is recorded in P14's record, but P14
+  keeps a run's record and a dismissed report has no run.
+- **Chosen (A-R16-05):** the Vault gains `dismissCandidate(id, cause, at)`, and
+  `IntakeEntry` gains `dismissed: { cause, at } | null`. `DismissalCause` is
+  closed: `not-a-defect`, `duplicate`, `insufficient-detail`,
+  `not-reproducible`. `POST /intake/:id/dismiss` takes the cause and no text. A
+  dismissed candidate admits no run. A dismissal and an expiry are decisions
+  kept beside the runs, as R22 keeps a delivery's (D-R22-03). A refusal at
+  `spec` or at the `test-design` exit stays in its run's P14 record. Both carry
+  the template, so R2 can count by it. The entry's wording is corrected to
+  match.
+- **Rejected:** *a free-text reason.* A person reading a report could paste
+  its text there, and R13b's findings review reads these records. *An empty
+  run record for a dismissal.* It would put a run nobody admitted into R2's
+  counts.
+- **Reverse:** count expiries alone, and drop dismissal.
+
+### D-A-BG-07: extracted fields reach no prompt
+
+- **Chosen:** the candidate's repository, number, and labels are recorded in
+  the admission record and named in the run's report, and placed in no
+  request. The drafter needs the defect, not the tracker's reference.
+- **Consequence:** R16 does not call `narrowRun` with `'trigger-fields'`, so
+  that source keeps R10's conformance as its only caller. It is not owed work:
+  a later template that places fields in a prompt calls it then. A run whose
+  author trust is below `narrowBelow` is still narrowed at admission under
+  R10.
+- **Rejected:** *labels given to the drafter, through `narrowRun`.* Every bug
+  fix from a tracker would narrow for a hint the drafter does not need, and
+  attacker-chosen bytes would enter a prompt, if only from an allowlist.
+- **Reverse:** grant the fields to the spec drafter as input through
+  `narrowRun('trigger-fields')`.

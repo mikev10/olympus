@@ -1299,9 +1299,50 @@ D-A-DS-05). Binding:
 - R19's test drafter writes the acceptance check. It is granted the locked
   spec only, so it never sees the report, and it is compared with the model
   that builds the fix at R19's grades
-- a report that never becomes a spec, and a spec refused at `spec` or at the
-  `test-design` exit, is recorded in P14's record with its cause, so R2 can
-  count reports that went nowhere and why
+- a report that never becomes a spec is recorded beside the runs, as R22
+  records a delivery's outcome (D-R22-03), since no run exists to hold it: a
+  candidate a person dismissed, with a cause from a fixed set, or one that
+  expired. A spec refused at `spec` or at the `test-design` exit is in its
+  run's P14 record with its cause. Both name the template, so R2 can count
+  reports that went nowhere and why (D-A-BG-06)
+
+**Amendment:** A-R16-01 to A-R16-05, which this unit builds (D-A-BG-01 to
+D-A-BG-07). The registry gains `bug-fix`, valid on `issue` alone, and policy
+names the templates a person's own run may take, none by default. A run names
+its template, or takes its candidate's. A bug-fix intent is three required
+parts in place of free text, and a bug-fix run drafts both its spec and its
+acceptance tests. The spec gains two parts: `defect`, which the runtime writes
+from the intent's parts, and `reproduction`, which the drafter writes. An
+acceptance check may declare that it reproduces the defect, and a bug-fix
+manifest needs one that does. The Vault gains a candidate's dismissal.
+
+Binding, beyond the above:
+
+- the run's template is recorded in its admission record. A run admitted from
+  a `bug-fix` candidate is a bug-fix run whatever its request says; a request
+  naming another template, or a person's run naming one the policy does not
+  list, is refused (I4)
+- a bug-fix run with a supplied spec or supplied acceptance tests is refused at
+  admission, naming the artifact: the drafter writes the spec from the parts,
+  and the test drafter, granted the locked spec only, writes the check
+- `defect.json` holds the intent's three parts as the runtime read them from
+  the intent record, and the runtime writes it, never a seat. A locked spec
+  whose `defect` part is not those bytes is refused at `spec`
+- a check declaring `reproduces` must declare `onBase: 'fails'`. Whether it
+  follows the spec's steps is the `test-design` critic's rubric to judge; the
+  runtime checks the declaration and the base run, never the resemblance
+  (D-A-BG-05)
+- the candidate's extracted fields reach no prompt. The admission record names
+  the candidate, and the run's report names the issue from that record
+  (D-A-BG-07)
+- a dismissed candidate admits no run, and a dismissal names no text of the
+  report, only its cause
+
+**Gate paths:** `packages/core/src/policy/types.ts`,
+`packages/core/src/station/types.ts`, `packages/integrity/src/types.ts`, and
+`packages/vault/src/types.ts` for the amendment, and `packages/conformance/`
+for the registry entries. The pull request takes `gate-change`, and the squash
+merge carries `Gate-Change: acknowledged`.
 
 **Not in this unit:** writing back to the tracker, such as asking the reporter
 for missing steps (a provider adapter); following the pull request through CI
@@ -1311,11 +1352,19 @@ finding defects that recur in one area (R11, R13); and a model that summarises
 reports for the person writing the spec. If that summariser is ever built, its
 output is untrusted too, and it reaches a person, never a prompt.
 
-**Conformance:** a tracker event whose extractor would carry body text is
-refused; no driver request in a bug-fix run contains any of the report's text;
-a bug-fix intent missing a part is refused at admission; a spec missing a
-required part is refused, naming it; `test-design` with no acceptance check
-declared `'fails'` is refused.
+**Conformance:** `pnpm typecheck`, `pnpm lint`, `pnpm test`, and
+`pnpm conformance` pass, and the report names an assertion for each, failing
+when its check is deleted: a tracker event whose extractor would carry body
+text is refused; no driver request in a bug-fix run contains any of the
+report's text or any extracted field; `bug-fix` on a kind other than `issue`
+does not validate; a person's run naming a template the policy does not list
+is refused; a bug-fix intent missing a part is refused at admission, naming
+it; a bug-fix run with a supplied spec or supplied tests is refused; a spec
+missing a required part, or whose `defect` part is not the intent's, is
+refused, naming it; `test-design` in a bug-fix run with no check declared
+`reproduces`, or with one that does not declare `'fails'`, is refused; a
+dismissed candidate admits no run, and its dismissal is recorded with its
+cause and the template; and a run with no template admits exactly as before.
 
 **Depends on** the two I7 controls owed before any non-human trigger is
 enabled, `I7.extracted-field-schemas` and `I7.untrusted-sink-lint-rule`,
