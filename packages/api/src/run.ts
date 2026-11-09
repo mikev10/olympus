@@ -1303,7 +1303,7 @@ async function draftingOf(vault: Vault, record: AdmissionRecord): Promise<Drafti
   return { drafted, intent, rubrics };
 }
 
-interface Loaded {
+export interface Loaded {
   readonly artifacts: LineArtifacts;
   readonly graph: TaskGraph;
   readonly checks: CheckSpec[];
@@ -1320,7 +1320,7 @@ interface Loaded {
  * re-read from the artifact root and checked against their hashes before
  * they are parsed.
  */
-async function loadLine(vault: Vault, record: AdmissionRecord, state: RunState): Promise<Loaded> {
+export async function loadLine(vault: Vault, record: AdmissionRecord, state: RunState): Promise<Loaded> {
   let artifacts = lineArtifactsOf(record.artifacts);
   for (const station of DRAFT_STATIONS) {
     const locked = state.drafts[station]?.locked ?? null;
