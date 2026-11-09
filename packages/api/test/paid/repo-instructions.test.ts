@@ -18,11 +18,11 @@ import { invariantTest } from '@olympus-ai/conformance/vitest';
 import { STATION_CONTRACTS, StubDriver, type CapabilityScope, type NarrowedScope, type Policy, type RunId, type TaskRequest, type TaskResult } from '@olympus-ai/core';
 import type { AdmissionRecord, EnforcementDecision, Vault } from '@olympus-ai/vault';
 import { afterEach, expect } from 'vitest';
-import { admitRun, parseGraph } from '../src/index.js';
-import { NOT_DRAFTING } from '../src/drafting.js';
-import { repoInstructionsFor, runTask, type LineContext } from '../src/line.js';
-import { BUILDER, makeWorkspace, policy, removeWorkspace, REVIEWER, roleScope, runRequest, stubComponents } from './harness.js';
-import { DelegatingDriver } from './wrappers.js';
+import { admitRun, parseGraph } from '../../src/index.js';
+import { NOT_DRAFTING } from '../../src/drafting.js';
+import { repoInstructionsFor, runTask, type LineContext } from '../../src/line.js';
+import { BUILDER, makeWorkspace, policy, removeWorkspace, REVIEWER, roleScope, runRequest, stubComponents } from '../harness.js';
+import { DelegatingDriver } from '../wrappers.js';
 
 const MARKER = 'r24-claude-marker: write small commits.';
 const NARROW: NarrowedScope = { tools: ['read'], network: { egress: 'none' }, autonomyCeiling: 1 };

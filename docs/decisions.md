@@ -8742,14 +8742,21 @@ body carries `Gate-Change: acknowledged`.
   wrapper that dropped a stub's declaration (D-I1a-06). Above L1 means Docker
   and a paid model, and above L2 controls no adapter set has.
 - **Chosen:** an external assertion over `@olympus-ai/api
-  test/repo-instructions.test.ts`. It admits a real run at L1, builds the
+  test/paid/repo-instructions.test.ts`. It sits in the paid suite because
+  that is the api package's one reported suite: only `vitest.config.paid.ts`
+  runs the conformance reporter, so a free test elsewhere is never reconciled.
+  It calls no model, and CI runs it under `run-driver` with the line's paid
+  test. It admits a real run at L1, builds the
   context a resume builds from its record with the admitted level read as
   L3, and calls the line's own `repoInstructionsFor` and `runTask`. It
   asserts the narrowing decision and the committed state before any driver
   call, the set in the suffix and not the prefix, the same set offered as
   granted context at L2, and a run with an unnarrowable seat stopping with
   the set withheld. Setting the placement test to `<= 3` fails it.
-- **Rejected:** hiding the stubs' declarations to get past attestation,
+- **Rejected:** exporting `runTask` and the line's context from `api`'s
+  entry, which lets any caller make a driver call outside admission; a second
+  reporter on the free config, which overwrites the paid suite's report;
+  hiding the stubs' declarations to get past attestation,
   which weakens D-I1a-06's check to meet a criterion (rule 6); a placement
   function asserted alone, which passes when the line stops calling it (I8).
 - **Reverse:** drive the clause through a real L3 admission once M3 can make

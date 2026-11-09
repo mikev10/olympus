@@ -339,7 +339,8 @@ export const UNGRANTED_ROLE_RECEIVES_NOTHING: LocalAssertion = runtime({
  * No run above L2 can be admitted in M2, and none above L1 resumed on
  * components the graph builder cannot attest (D-I1a-06), so this clause is
  * the api package's test of the line's own delivery and `runTask` over the
- * context a resume builds for a real admitted run, read at L3 (D-R24-09).
+ * context a resume builds for a real admitted run, read at L3. It is in the
+ * paid suite, the api package's one reported suite, and calls no model (D-R24-09).
  */
 export const ABOVE_L2_NARROWS_AND_RIDES_THE_SUFFIX = external({
   id: 'I7.above-l2-repo-instructions-narrow-the-run-and-ride-the-suffix',
@@ -347,7 +348,7 @@ export const ABOVE_L2_NARROWS_AND_RIDES_THE_SUFFIX = external({
     "a run above L2 granted the set is narrowed through narrowRun with source repo-instructions, the narrowing recorded and committed before any model is called with the set, which arrives in the granted seat's variable suffix and never its stable prefix; at L2 it is offered as granted context with nothing narrowed; a run whose seated roles declare no narrowed scope stops with the set withheld (R24, D-A-RI-02, D-A-RI-04, D-R10-06)",
   level: 'runtime',
   package: '@olympus-ai/api',
-  file: 'test/repo-instructions.test.ts',
+  file: 'test/paid/repo-instructions.test.ts',
 });
 
 export const R24_I3: readonly LocalAssertion[] = [SET_RECORDED_BY_PATH_AND_HASH, LATER_BASE_COMMIT_CHANGES_NOTHING, WORKSPACE_COPY_NOT_DELIVERED, TEST_DESIGN_NEVER_GRANTED];
