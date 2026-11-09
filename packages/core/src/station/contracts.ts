@@ -172,19 +172,24 @@ function runtimeStation(id: StationId, allowedContext: ContextGrant[], approval:
  * directory, which no static glob names, so `**` here and the runtime reads
  * the test directory and the manifest alone. Three attempts at each.
  *
+ * `repo-instructions` is first wherever it is allowed, so a granted seat's
+ * set renders after its role and before the rest of its context; it is
+ * allowed at `spec`, `plan`, `build`, and `review`, and never at
+ * `test-design`, whose seat sees the locked spec alone (A-R24-01).
+ *
  * `integrate` states `human-required` as its own floor. M1 claims no
  * lights-off autonomy, and the effective approval is the stricter of this and
  * the policy cell, so no policy relaxes it (D-P4-03).
  */
 export const STATION_CONTRACTS: StationContractTable = {
   intake: runtimeStation('intake', ['conversation']),
-  spec: drafterStation('spec', ['intent', 'base-repo-readonly'], ['.drafts/**']),
+  spec: drafterStation('spec', ['repo-instructions', 'intent', 'base-repo-readonly'], ['.drafts/**']),
   'test-design': { ...drafterStation('test-design', [], ['**']), allowedContext: ['locked-spec'] },
-  plan: runtimeStation('plan', ['locked-spec', 'base-repo-readonly']),
+  plan: runtimeStation('plan', ['repo-instructions', 'locked-spec', 'base-repo-readonly']),
   build: {
     id: 'build',
     requires: ['parallelism'],
-    allowedContext: ['locked-spec', 'acceptance-tests', 'task-graph', 'base-repo-readonly'],
+    allowedContext: ['repo-instructions', 'locked-spec', 'acceptance-tests', 'task-graph', 'base-repo-readonly'],
     tier: 'standard',
     writeBoundary: boundary(['**']),
     maxIterations: 3,
@@ -195,7 +200,7 @@ export const STATION_CONTRACTS: StationContractTable = {
   review: {
     id: 'review',
     requires: ['parallelism'],
-    allowedContext: ['locked-spec', 'acceptance-tests', 'diff', 'evidence-bundle'],
+    allowedContext: ['repo-instructions', 'locked-spec', 'acceptance-tests', 'diff', 'evidence-bundle'],
     tier: 'deep',
     writeBoundary: boundary([]),
     maxIterations: 1,
@@ -228,7 +233,7 @@ export const CRITIC_CONTRACTS: CriticContractTable = {
   spec: {
     station: 'spec',
     requires: ['parallelism'],
-    allowedContext: ['intent', 'base-repo-readonly', 'draft', 'rubric'],
+    allowedContext: ['repo-instructions', 'intent', 'base-repo-readonly', 'draft', 'rubric'],
     writeBoundary: { workspaceGlobs: [], vault: 'never', protectedPathPolicy: 'escalate' },
     retry: { max: 2, backoffMs: 100 },
   },

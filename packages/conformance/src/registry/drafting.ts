@@ -48,7 +48,7 @@ const core = async () => import('@olympus-ai/core');
 const INTENT = { text: 'Write hello.txt at the repository root, holding the word hello.', from: 'principal' } as const;
 
 /** The scopes the rig's policy grants each drafting seat; none of the test seats has egress (I3). */
-function draftingScopes(): Record<RoleId, ReturnType<typeof lineScope>> {
+export function draftingScopes(): Record<RoleId, ReturnType<typeof lineScope>> {
   return {
     ['spec-drafter' as RoleId]: lineScope(['spec'], 'deep'),
     ['spec-critic' as RoleId]: lineScope(['spec'], 'deep'),
@@ -58,7 +58,7 @@ function draftingScopes(): Record<RoleId, ReturnType<typeof lineScope>> {
 }
 
 /** The rig's policy with the drafting seats granted: every M1 station `auto` at L0 and L1 unless `cells` says otherwise. */
-async function draftingPolicy(cells: Parameters<typeof linePolicy>[0] = {}, roles: Record<RoleId, ReturnType<typeof lineScope>> = {}): Promise<Policy> {
+export async function draftingPolicy(cells: Parameters<typeof linePolicy>[0] = {}, roles: Record<RoleId, ReturnType<typeof lineScope>> = {}): Promise<Policy> {
   return linePolicy(cells, {
     roles: {
       ['builder' as RoleId]: lineScope(['build', 'verify'], 'standard'),
@@ -74,7 +74,7 @@ async function draftingPolicy(cells: Parameters<typeof linePolicy>[0] = {}, role
  * drafted spec names no parts, which are drafted with it; supplied, it keeps
  * the fixture's, or `parts` where given.
  */
-function artifactsFor(spec: boolean, tests: boolean, parts?: NonNullable<RunRequest['artifacts']['specParts']>): RunRequest['artifacts'] {
+export function artifactsFor(spec: boolean, tests: boolean, parts?: NonNullable<RunRequest['artifacts']['specParts']>): RunRequest['artifacts'] {
   const { specParts, ...rest } = ARTIFACTS;
   return {
     ...rest,
@@ -198,7 +198,7 @@ interface Seats {
   readonly sandbox?: SandboxProvider;
 }
 
-interface DraftingRig {
+export interface DraftingRig {
   readonly drivers: Record<keyof DraftingDrivers, ObservedSeat>;
   readonly components: () => Promise<BuiltGraph>;
   readonly request: (overrides?: Partial<RunRequest>) => Promise<RunRequest>;
@@ -218,7 +218,7 @@ async function boundGraph(rig: LineRig, path: string): Promise<TaskGraph> {
  * also writes through. The rubrics are the shipped ones, copied beside the
  * roles, inside neither the workspace nor the store.
  */
-async function drafting(rig: LineRig, seats: Seats = {}): Promise<DraftingRig> {
+export async function drafting(rig: LineRig, seats: Seats = {}): Promise<DraftingRig> {
   const { StubSandboxProvider } = await import('@olympus-ai/sandbox');
   const { DEFAULT_RUBRICS_DIRECTORY, worstCaseCost } = await api();
   const sandbox = seats.sandbox ?? new StubSandboxProvider();
@@ -282,7 +282,7 @@ function criticAttempt(req: TaskRequest): number {
 }
 
 /** Admits and drives a drafting run to its first stop. */
-async function admitAndDrive(r: DraftingRig, overrides: Partial<RunRequest> = {}): Promise<RunOutcome> {
+export async function admitAndDrive(r: DraftingRig, overrides: Partial<RunRequest> = {}): Promise<RunOutcome> {
   const { admitRun } = await api();
   const admission: AdmissionOutcome = await admitRun(await r.request(overrides));
   if (!admission.ok) throw new Error(`R19: a drafting run was refused at admission as ${admission.reason}: ${JSON.stringify(admission)}`);
@@ -290,14 +290,14 @@ async function admitAndDrive(r: DraftingRig, overrides: Partial<RunRequest> = {}
 }
 
 /** The station's last attempt in run state, or a failure naming what the state holds instead. */
-function lastAttempt(state: RunState, station: DraftStation): NonNullable<RunState['drafts'][DraftStation]>['attempts'][number] {
+export function lastAttempt(state: RunState, station: DraftStation): NonNullable<RunState['drafts'][DraftStation]>['attempts'][number] {
   const attempt = state.drafts[station]?.attempts.at(-1);
   if (attempt === undefined) throw new Error(`R19: run state holds no ${station} attempt: ${JSON.stringify(state.drafts)}`);
   return attempt;
 }
 
 /** The refusal a drive stopped on, which must be a person's approval of `key`. */
-function awaiting(outcome: RunOutcome, key: string, what: string): void {
+export function awaiting(outcome: RunOutcome, key: string, what: string): void {
   const refusal = refusalOf(outcome, what);
   if (refusal.transition.reason !== 'approval-required' || refusal.transition.key !== key) {
     throw new Error(`R19: ${what} stopped as ${refusal.transition.reason}${refusal.transition.reason === 'approval-required' ? ` for ${refusal.transition.key}` : ''}, not for a person's approval of ${key}: ${refusal.transition.message}`);
@@ -305,7 +305,7 @@ function awaiting(outcome: RunOutcome, key: string, what: string): void {
 }
 
 /** Approves the draft waiting at `key`, by its hash, and drives on. */
-async function approveAndResume(rig: LineRig, r: DraftingRig, key: ApprovalKey, sha256: string): Promise<RunOutcome> {
+export async function approveAndResume(rig: LineRig, r: DraftingRig, key: ApprovalKey, sha256: string): Promise<RunOutcome> {
   const { approveStation, resumeRun } = await api();
   const components = await r.components();
   const approved = await approveStation({ runId: rig.runId, key, draft: sha256, approvedBy: 'conformance', vault: components.vault });

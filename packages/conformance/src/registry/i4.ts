@@ -21,11 +21,14 @@ import { R22_I4 } from './triggers.js';
 import { R10_I4 } from './ratchet.js';
 import { R19_ASSERTIONS } from './drafting.js';
 import { LOCAL_TOKEN_REACHES_NO_SANDBOX, SECURITY_SEAT_READS_ONLY_ITS_GRANTS } from './separation.js';
+import { R24_I4 } from './repo-instructions.js';
 
 /** I4: Default deny. */
 export const I4: InvariantEntry = {
   title: INVARIANTS.I4,
   assertions: [
+    // R24: the target repository's instructions as granted context.
+    ...R24_I4,
     // R20: the role compiler.
     // R19: drafting at spec and test-design.
     ...R19_ASSERTIONS.I4,

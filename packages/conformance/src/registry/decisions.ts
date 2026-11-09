@@ -12,7 +12,7 @@
 import { REHASH_FINDS_DRIFT } from './nightly.js';
 import { OPEN_WINDOW_IN_NO_DENOMINATOR } from './observe.js';
 import { createHash } from 'node:crypto';
-import { cp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ComponentGraph } from '@olympus-ai/api';
 import type { NarrowingCause, ParkCause, RoleId, RunId, RunState, StationId, StationRefusal, TaskId } from '@olympus-ai/core';
@@ -379,6 +379,14 @@ export const DECISION_TABLE: Readonly<Record<CauseKey, Row>> = {
     await cp(rig.roles, roles, { recursive: true });
     await writeFile(join(roles, 'builder.md'), '');
     await startRun(await rig.request(await rig.components(), { roles }));
+  }),
+  'admission:instructions-refused': admissionRow('admission:instructions-refused', 'p14-instructions-refused-', async (rig) => {
+    const { startRun } = await api();
+    // A directory where the base's CLAUDE.md would be: not a regular file, so the reader refuses it (A-R24-04).
+    await mkdir(join(rig.dirs.artifacts, 'CLAUDE.md'), { recursive: true });
+    await startRun(await rig.request(await rig.components()));
+    // Removed after, so the control admission that follows reads a base the reader accepts.
+    await rm(join(rig.dirs.artifacts, 'CLAUDE.md'), { recursive: true });
   }),
   'admission:role-undefined': admissionRow('admission:role-undefined', 'p14-role-undefined-', async (rig) => {
     const { startRun } = await api();

@@ -138,6 +138,7 @@ function scope(stations: CapabilityScope['stations'], tier: ModelTier): Capabili
     budget: { maxTokens: 1000, maxCostUsd: 1, maxWallClockMs: 60_000 },
     sensitiveGrants: [],
     narrowed: null,
+    repoInstructions: false,
   };
 }
 

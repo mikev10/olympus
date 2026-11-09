@@ -35,7 +35,7 @@ describe('resolveWithReadiness', () => {
     roles: {
       [role]: {
         stations: ['build'], writableGlobs: ['**'], tools: [], network: { egress: 'none' }, tier: 'standard', tierByStation: {},
-        escalation: 'none', autonomyCeiling: 3, triggerKinds: ['human'], budget: { maxTokens: 1000, maxCostUsd: 1, maxWallClockMs: 60_000 }, sensitiveGrants: [], narrowed: null,
+        escalation: 'none', autonomyCeiling: 3, triggerKinds: ['human'], budget: { maxTokens: 1000, maxCostUsd: 1, maxWallClockMs: 60_000 }, sensitiveGrants: [], narrowed: null, repoInstructions: false,
       },
     },
     protectedPaths: [],

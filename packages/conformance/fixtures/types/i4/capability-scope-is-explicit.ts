@@ -17,6 +17,7 @@ export const withoutTools: CapabilityScope = { // expect-error TS2741: Property 
   budget: scope.budget,
   sensitiveGrants: scope.sensitiveGrants,
   narrowed: scope.narrowed,
+  repoInstructions: scope.repoInstructions,
 };
 
 export const withoutStations: CapabilityScope = { // expect-error TS2741: Property 'stations' is missing
@@ -31,6 +32,7 @@ export const withoutStations: CapabilityScope = { // expect-error TS2741: Proper
   budget: scope.budget,
   sensitiveGrants: scope.sensitiveGrants,
   narrowed: scope.narrowed,
+  repoInstructions: scope.repoInstructions,
 };
 
 export const allEgress: CapabilityScope = { ...scope, network: { egress: 'all' } }; // expect-error TS2322: Type '"all"' is not assignable
@@ -51,6 +53,7 @@ export const withoutEscalation: CapabilityScope = { // expect-error TS2741: Prop
   budget: scope.budget,
   sensitiveGrants: scope.sensitiveGrants,
   narrowed: scope.narrowed,
+  repoInstructions: scope.repoInstructions,
 };
 export const unboundedEscalation: CapabilityScope = { ...scope, escalation: { afterFailedGates: 1 } }; // expect-error TS2322: Property 'ceiling' is missing
 
@@ -66,5 +69,22 @@ export const withoutSensitiveGrants: CapabilityScope = { // expect-error TS2741:
   autonomyCeiling: scope.autonomyCeiling,
   triggerKinds: scope.triggerKinds,
   budget: scope.budget,
+  narrowed: scope.narrowed,
+  repoInstructions: scope.repoInstructions,
+};
+
+// Whether a role receives the target's instructions is stated too, never implied by its absence (A-R24-02).
+export const withoutRepoInstructions: CapabilityScope = { // expect-error TS2741: Property 'repoInstructions' is missing
+  stations: scope.stations,
+  writableGlobs: scope.writableGlobs,
+  tools: scope.tools,
+  network: scope.network,
+  tier: scope.tier,
+  tierByStation: scope.tierByStation,
+  escalation: scope.escalation,
+  autonomyCeiling: scope.autonomyCeiling,
+  triggerKinds: scope.triggerKinds,
+  budget: scope.budget,
+  sensitiveGrants: scope.sensitiveGrants,
   narrowed: scope.narrowed,
 };

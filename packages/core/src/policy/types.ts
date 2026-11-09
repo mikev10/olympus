@@ -43,6 +43,13 @@ export interface CapabilityScope {
    * than the role's own tools, egress, and ceiling.
    */
   narrowed: NarrowedScope | null;
+  /**
+   * Whether this role's tasks receive the target repository's instructions
+   * at a station whose contract allows `'repo-instructions'` (A-R24-02). A
+   * review seat reads the reviewed task's scope, as its other grants do.
+   * `false` when absent from a document (I4, D-A-RI-03).
+   */
+  repoInstructions: boolean;
 }
 
 /** A name for a set of paths a model may not read unless granted (A-R10-01). */

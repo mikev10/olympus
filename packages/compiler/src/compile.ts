@@ -104,6 +104,57 @@ function sameFile(a: BigIntStats, b: BigIntStats): boolean {
   return a.dev === b.dev && a.ino === b.ino;
 }
 
+/** A listed regular file read under R20's rules, or why it was not. */
+export type ListedRead =
+  | { readonly ok: true; readonly bytes: Uint8Array; readonly text: string }
+  | { readonly ok: false; readonly code: Extract<RoleFileCode, 'unreadable' | 'not-regular' | 'too-large' | 'not-utf8'>; readonly message: string };
+
+/**
+ * Reads the regular file `listed` describes at `path` under R20's rules,
+ * shared by the role compiler and the repository instruction reader so the
+ * two cannot drift (D-R24-02): opened without following a link where the
+ * platform can refuse one, refused if the file opened is not the file listed,
+ * capped at `max` bytes before a byte is decoded, and decoded as UTF-8 with
+ * any byte-order mark kept, so the text encodes back to the bytes hashed.
+ * `label` names the file in every message.
+ */
+export async function readListed(path: string, listed: BigIntStats, max: number, label: string): Promise<ListedRead> {
+  let bytes: Uint8Array;
+  let handle: FileHandle;
+  try {
+    handle = await open(path, OPEN_FLAGS);
+  } catch (error) {
+    // ELOOP is the platform refusing a link that replaced the file after it was listed.
+    const code = (error as { code?: unknown }).code === 'ELOOP' ? 'not-regular' : 'unreadable';
+    return { ok: false, code, message: `${label} could not be opened: ${describe(error)}` };
+  }
+  try {
+    // The file opened is the file listed: a swap between the two is refused, not followed.
+    const opened = await handle.stat({ bigint: true });
+    if (!opened.isFile() || !sameFile(listed, opened)) {
+      return { ok: false, code: 'not-regular', message: `${label} changed between being listed and being opened` };
+    }
+    if (opened.size > BigInt(max)) {
+      return { ok: false, code: 'too-large', message: `${label} is ${String(opened.size)} bytes; the limit is ${String(max)}` };
+    }
+    bytes = await readCapped(handle, max);
+  } catch (error) {
+    return { ok: false, code: 'unreadable', message: `${label} could not be read: ${describe(error)}` };
+  } finally {
+    await handle.close();
+  }
+  // Checked again on what was read, before a byte is decoded: a file that grew after the stat is still refused.
+  if (bytes.byteLength > max) {
+    return { ok: false, code: 'too-large', message: `${label} is more than ${String(max)} bytes, the limit` };
+  }
+  try {
+    // `ignoreBOM` keeps a byte-order mark in the text, so the text encodes back to exactly the bytes hashed.
+    return { ok: true, bytes, text: new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes) };
+  } catch {
+    return { ok: false, code: 'not-utf8', message: `${label} is not UTF-8` };
+  }
+}
+
 async function compileEntry(directory: string, entry: string): Promise<EntryOutcome> {
   const path = join(directory, entry);
   let listed: BigIntStats;
@@ -118,41 +169,9 @@ async function compileEntry(directory: string, entry: string): Promise<EntryOutc
     return refused(entry, 'invalid-name', `role file '${entry}' is not named <role-id>.md, where a role id is lowercase words joined by hyphens, at most ${String(ROLE_ID_MAX_LENGTH)} characters`);
   }
   const role = entry.slice(0, -EXTENSION.length) as RoleId;
-  let bytes: Uint8Array;
-  let handle: FileHandle;
-  try {
-    handle = await open(path, OPEN_FLAGS);
-  } catch (error) {
-    // ELOOP is the platform refusing a link that replaced the file after it was listed.
-    const code = (error as { code?: unknown }).code === 'ELOOP' ? 'not-regular' : 'unreadable';
-    return refused(entry, code, `role file '${entry}' could not be opened: ${describe(error)}`);
-  }
-  try {
-    // The file opened is the file listed: a swap between the two is refused, not followed.
-    const opened = await handle.stat({ bigint: true });
-    if (!opened.isFile() || !sameFile(listed, opened)) {
-      return refused(entry, 'not-regular', `role file '${entry}' changed between being listed and being opened`);
-    }
-    if (opened.size > BigInt(ROLE_FILE_MAX_BYTES)) {
-      return refused(entry, 'too-large', `role file '${entry}' is ${String(opened.size)} bytes; the limit is ${String(ROLE_FILE_MAX_BYTES)}`);
-    }
-    bytes = await readCapped(handle, ROLE_FILE_MAX_BYTES);
-  } catch (error) {
-    return refused(entry, 'unreadable', `role file '${entry}' could not be read: ${describe(error)}`);
-  } finally {
-    await handle.close();
-  }
-  // Checked again on what was read, before a byte is decoded: a file that grew after the stat is still refused.
-  if (bytes.byteLength > ROLE_FILE_MAX_BYTES) {
-    return refused(entry, 'too-large', `role file '${entry}' is more than ${String(ROLE_FILE_MAX_BYTES)} bytes, the limit`);
-  }
-  let instructions: string;
-  try {
-    // `ignoreBOM` keeps a byte-order mark in the text, so the text encodes back to exactly the bytes hashed.
-    instructions = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
-  } catch {
-    return refused(entry, 'not-utf8', `role file '${entry}' is not UTF-8`);
-  }
+  const read = await readListed(path, listed, ROLE_FILE_MAX_BYTES, `role file '${entry}'`);
+  if (!read.ok) return refused(entry, read.code, read.message);
+  const { bytes, text: instructions } = read;
   // `trim` removes a byte-order mark with the rest of the whitespace.
   if (instructions.trim() === '') {
     return refused(entry, 'empty', `role file '${entry}' holds no instructions`);

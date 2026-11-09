@@ -13,6 +13,16 @@ export {
   type RoleFileCode,
   type RoleFileRefusal,
 } from './compile.js';
+export {
+  readRepoInstructions,
+  REPO_INSTRUCTION_FILE_MAX_BYTES,
+  REPO_INSTRUCTIONS_MAX_BYTES,
+  splitFrontMatter,
+  type ReadInstructionFile,
+  type RepoInstructionCode,
+  type RepoInstructionRead,
+  type RepoInstructionRefusal,
+} from './instructions.js';
 
 /**
  * The roles shipped with the runtime: `builder`, `reviewer`, `security-reviewer`,

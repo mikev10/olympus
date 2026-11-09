@@ -72,10 +72,11 @@ import type {
   VaultRef,
 } from '@olympus-ai/core';
 import { adapterAdmission, buildAdapterSet, missingControls, type AdapterSet } from '@olympus-ai/adapters';
-import { compileRoles, type RoleFileRefusal } from '@olympus-ai/compiler';
+import { compileRoles, readRepoInstructions, type RepoInstructionRefusal, type RoleFileRefusal } from '@olympus-ai/compiler';
 import type { CheckSpec } from '@olympus-ai/integrity';
 import type { SandboxProvider } from '@olympus-ai/sandbox';
 import type { AdmissionRecord, AdmissionRefusal, AdmittedArtifact, AdmittedManifest, AdmittedPlan, AdmittedSet, CriticRecord, DraftLockRecord, DraftRecord, EvidenceBundle, IntakeEntry, IntentRecord, ResumeRefusal, RubricRecord, RubricVersion, Vault } from '@olympus-ai/vault';
+import { repoInstructionsProblem } from '@olympus-ai/vault';
 import { readUsage, unsettledCalls, worstCaseCost, type WorstCaseCost } from './cost.js';
 import { estimateCost, type CostEstimate, type EstimateCell } from './outcomes.js';
 import { problemCodes, recordDecision } from './decisions.js';
@@ -299,6 +300,8 @@ export type RunOutcome =
    * fallback (D-A-RC-06).
    */
   | { readonly ok: false; readonly reason: 'role-undefined'; readonly roles: readonly RoleId[] }
+  /** The base's repository instructions were refused: every file the reader refused, each named by its path in the base (A-R24-04). */
+  | { readonly ok: false; readonly reason: 'instructions-refused'; readonly refused: readonly RepoInstructionRefusal[] }
   | {
       readonly ok: false;
       readonly reason: 'refused';
@@ -848,6 +851,9 @@ function admissionRefusalOf(outcome: Exclude<AdmissionOutcome, { ok: true }>): A
       return { reason: 'roles-refused', refused: outcome.refused.map(({ entry, code }) => ({ entry, code })) };
     case 'role-undefined':
       return { reason: 'role-undefined', roles: [...outcome.roles] };
+    case 'instructions-refused':
+      // Each path is one in the fixed list, in the target's own base; the message is left out, as a role file's is (D-R24-05).
+      return { reason: 'instructions-refused', refused: outcome.refused.map(({ path, code }) => ({ path, code })) };
     case 'refused':
       return { reason: 'refused', at: outcome.at, refusal: outcome.transition };
     case 'trigger-refused':
@@ -1028,6 +1034,13 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
     return { ok: false, reason: 'invalid-request', problems: unscanned };
   }
   const controls = unavailableControls(set, req.requestedLevel);
+  // The target's own instructions, read from the base just taken and never from a workspace, and pinned in the
+  // record before anything runs: a later commit changes later runs, never this one (I3, A-R24-03).
+  const instructions = await readRepoInstructions(basePath(workspaces, req.runId));
+  if (!instructions.ok) {
+    await discardRun(workspaces, req.runId);
+    return { ok: false, reason: 'instructions-refused', refused: instructions.refused };
+  }
 
   const now = new Date().toISOString();
   const run: Run = {
@@ -1069,6 +1082,7 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
     stack: set.stack,
     // The delivery the run came from, by the stored decision's hash (D-R22-03).
     candidate: candidate === null ? null : { id: candidate.candidate.id, decisionSha256: candidate.sha256 },
+    repoInstructions: instructions.files,
   };
   const refusedControls = admissionRefusal(unrecorded);
   if (refusedControls !== undefined) {
@@ -1131,6 +1145,7 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
         run,
         policy: policy.policy,
         roles: record.roles,
+        repoInstructions: instructions.files,
         artifacts: lineArtifactsOf(record.artifacts),
         graph: admitted.admitted.graph,
         checks: admitted.admitted.checks,
@@ -1243,9 +1258,12 @@ async function readAdmission(vault: Vault, state: RunState): Promise<{ record: A
   // A run admitted before R20 pinned no roles, and its seats have none to run under; it is not resumed under today's files (D-A-RC-06).
   const roles = rolesProblem(r.roles);
   if (roles !== undefined) throw new Error(`run ${state.runId}: ${roles}; refusing to resume from it`);
+  // What a run's seats are given of the target's instructions comes from the record alone, so a set that does not verify is not resumed (A-R24-03, I5).
+  const instructions = repoInstructionsProblem(r.repoInstructions);
+  if (instructions !== undefined) throw new Error(`run ${state.runId}: the admission record: ${instructions}; refusing to resume from it`);
   const policy = checkedPolicy(r.policy);
   if (!policy.ok) throw new Error(`run ${state.runId}: the admitted policy no longer validates; refusing to resume under it:\n${policy.message}`);
-  const record = { ...(r as AdmissionRecord), artifacts, intent: (r.intent ?? null) as AdmissionRecord['intent'], rubrics: (r.rubrics ?? []) as AdmissionRecord['rubrics'] };
+  const record = { ...(r as AdmissionRecord), repoInstructions: (r.repoInstructions ?? []) as NonNullable<AdmissionRecord['repoInstructions']>, artifacts, intent: (r.intent ?? null) as AdmissionRecord['intent'], rubrics: (r.rubrics ?? []) as AdmissionRecord['rubrics'] };
   return { record, policy: policy.policy };
 }
 
@@ -1418,6 +1436,7 @@ export async function resumeRun(req: ResumeRequest, hooks: DriveHooks = {}): Pro
     run: record.run,
     policy,
     roles: record.roles,
+    repoInstructions: record.repoInstructions ?? [],
     artifacts: loaded.artifacts,
     graph: loaded.graph,
     checks: loaded.checks,

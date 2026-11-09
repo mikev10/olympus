@@ -10,12 +10,17 @@ import type { ModelTier, RoleId, StationId, TaskId, VaultRef } from '../run/type
  * `intent` is the person's text a spec-less run was admitted with, `draft`
  * the bytes of a recorded draft, and `rubric` the person's rubric a critic
  * checks a draft against (R19).
+ *
+ * `repo-instructions` is the target repository's own instruction files, read
+ * from the base at admission and pinned in its record, never from a
+ * workspace. It is never allowed at `test-design` (A-R24-01).
  */
 export type ContextGrant =
   | 'locked-spec' | 'acceptance-tests' | 'task-graph' | 'plan'
   | 'base-repo-readonly' | 'diff' | 'evidence-bundle'
   | 'author-narrative' | 'conversation'
-  | 'intent' | 'draft' | 'rubric';
+  | 'intent' | 'draft' | 'rubric'
+  | 'repo-instructions';
 
 export interface WriteBoundary {
   workspaceGlobs: string[];

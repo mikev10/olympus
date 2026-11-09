@@ -67,6 +67,8 @@ import {
   pinnedRole,
   readRecord,
   readText,
+  repoInstructionsFor,
+  withInstructions,
   recordTamper,
   runOnBase,
   runTask,
@@ -374,8 +376,10 @@ async function draft(ctx: LineContext, station: DraftStation, current: DraftAtte
   }
 
   let context: string;
+  // The target's instructions, where the drafter is granted them; never at `test-design`, whose contract does not allow them (R24).
+  const instructions = await repoInstructionsFor(ctx, seat, STATION_CONTRACTS[station], DRAFT_ROLES[station].drafter);
   if (station === 'spec') {
-    context = joinParts(grantedContext(STATION_CONTRACTS.spec, { intent: ctx.drafting.intent ?? undefined } as Partial<Record<ContextGrant, string>>));
+    context = joinParts(grantedContext(STATION_CONTRACTS.spec, withInstructions({ intent: ctx.drafting.intent ?? undefined } as Partial<Record<ContextGrant, string>>, instructions)));
   } else {
     const spec = await readText(ctx, specArtifacts(ctx));
     if (spec.tampered.length > 0) return recordTamper(ctx, station, null, spec.tampered, { phase: 'context' }, null);
@@ -397,7 +401,7 @@ async function draft(ctx: LineContext, station: DraftStation, current: DraftAtte
   await mkdir(join(work, DRAFT_DIR, ctx.run.id), { recursive: true });
 
   const role = pinnedRole(ctx, DRAFT_ROLES[station].drafter);
-  const ran = await runTask(ctx, seat, driver, role, context, work, { suffix });
+  const ran = await runTask(ctx, seat, driver, role, context, work, { suffix, inputs: instructions.input === undefined ? [] : [instructions.input] });
   if (!ran.ok) return spendRetry(ctx, seat);
   const problems = taskResultProblems(ran.result);
   if (problems.length > 0) {
@@ -697,7 +701,9 @@ async function critique(ctx: LineContext, station: DraftStation, current: DraftA
     if (spec.tampered.length > 0) return recordTamper(ctx, station, null, spec.tampered, { phase: 'context' }, null);
     offered['locked-spec'] = spec.text;
   }
-  const context = joinParts(grantedCriticContext(contract, offered));
+  // The critic is granted what its drafter was, the target's instructions included (R24).
+  const instructions = await repoInstructionsFor(ctx, seat, contract, DRAFT_ROLES[station].critic);
+  const context = joinParts(grantedCriticContext(contract, withInstructions(offered, instructions)));
 
   const started = await startAttempt(ctx, seat);
   if (started !== undefined) return started;
@@ -711,7 +717,7 @@ async function critique(ctx: LineContext, station: DraftStation, current: DraftA
 
   const role = pinnedRole(ctx, DRAFT_ROLES[station].critic);
   // Which attempt's draft it reads, and nothing else of the drafter's history.
-  const ran = await runTask(ctx, seat, driver, role, context, work, { mode: 'ro', suffix: retrySuffix(station, current.attempt, []) });
+  const ran = await runTask(ctx, seat, driver, role, context, work, { mode: 'ro', suffix: retrySuffix(station, current.attempt, []), inputs: instructions.input === undefined ? [] : [instructions.input] });
   if (!ran.ok) return spendRetry(ctx, seat);
   const problems = taskResultProblems(ran.result);
   if (problems.length > 0) {

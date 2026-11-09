@@ -43,6 +43,7 @@ function paidScope(stations: CapabilityScope['stations'], tools: string[]): Capa
     budget: { maxTokens: 400_000, maxCostUsd: 0.5, maxWallClockMs: 300_000 },
     sensitiveGrants: [],
     narrowed: null,
+    repoInstructions: false,
   };
 }
 
