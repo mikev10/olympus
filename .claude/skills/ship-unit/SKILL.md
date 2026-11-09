@@ -33,34 +33,37 @@ tracked planning documents live under `docs/plan/`, so a search for the word
 open a PR with a failing gate and a note explaining it.
 
 **One exception, and only this one: the paid suites run in CI.** There are
-two: the driver's, and the composed line's in `@olympus-ai/api`'s
+three: the two model drivers' (`@olympus-ai/driver-claude-code` and
+`@olympus-ai/driver-codex`), and the composed line's in `@olympus-ai/api`'s
 `test/paid/` (D-I1a-07), which CI runs under the same `run-driver` label and
-caches the same way. Everything below about the driver's report holds for the
+caches the same way. Everything below about a driver's report holds for each driver and for the
 line's report too. The
-model credential exists only as CI's Actions secret, so
-`pnpm --filter @olympus-ai/driver-claude-code test` cannot run on a
-maintainer's machine, and any change under `packages/` leaves the driver's
+model credentials exist only as CI's Actions secrets, so neither
+`pnpm --filter @olympus-ai/driver-claude-code test` nor
+`pnpm --filter @olympus-ai/driver-codex test` can run on a
+maintainer's machine, and any change under `packages/` leaves each driver's
 recorded report stale (D-A-CI-07). A unit's "the driver test runs once"
 criterion is met by the pull request's `run-driver` job, not locally. Run
-everything else with the driver package excluded:
+everything else with both driver packages excluded:
 
 ```
-pnpm -r --no-bail --filter '!@olympus-ai/driver-claude-code' test
+pnpm -r --no-bail --filter '!@olympus-ai/driver-claude-code' --filter '!@olympus-ai/driver-codex' test
 ```
 
-That run passes when every failure in it is the driver's report and nothing
+That run passes when every failure in it is a paid suite's report and nothing
 else. Locally that report is stale, absent on a fresh clone, or the record of
 a run that refused for want of a key; none of those is evidence, and CI's is
 the only one that counts:
 
 - every failing test is a registry entry marked
-  `(external: @olympus-ai/driver-claude-code …)` or
+  `(external: @olympus-ai/driver-claude-code …)`,
+  `(external: @olympus-ai/driver-codex …)`, or
   `(external: @olympus-ai/api test/paid/…)`, or one of the two registry
   meta-tests that aggregate them (`registry > no entry is missing…` and
   `I8.registry-complete`)
 - every problem line those meta-tests print is either about an external
-  entry of `@olympus-ai/driver-claude-code` or of `@olympus-ai/api`'s paid
-  suite — it names that package's report
+  entry of `@olympus-ai/driver-claude-code`, of `@olympus-ai/driver-codex`,
+  or of `@olympus-ai/api`'s paid suite — it names that package's report
   and cites `I8.external-assertion-execution-reconciled` — or is
   `<claim>: missing` for a `driver.*` claim
 
@@ -68,7 +71,7 @@ Any other failure, in any package, stops the ship as above. Say in the PR's
 acceptance section that the paid criteria are pending CI, and never mark them
 passed. The merge gate still holds: WORKFLOW step 7 merges only on green pull
 request checks, and those include the paid run and a fully green conformance
-registry against both fresh reports.
+registry against every fresh report.
 
 ## 3. Verify nothing ignored is staged
 
