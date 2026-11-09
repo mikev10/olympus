@@ -65,12 +65,14 @@ import type {
   RunCancellation,
   RunId,
   RunState,
+  RunTemplateId,
   StationId,
   StationRefusal,
   TaskGraph,
   TaskId,
   VaultRef,
 } from '@olympus-ai/core';
+import { isRunTemplate } from '@olympus-ai/core';
 import { adapterAdmission, buildAdapterSet, missingControls, type AdapterSet } from '@olympus-ai/adapters';
 import { compileRoles, readRepoInstructions, type RepoInstructionRefusal, type RoleFileRefusal } from '@olympus-ai/compiler';
 import type { CheckSpec } from '@olympus-ai/integrity';
@@ -84,12 +86,12 @@ import { integrateEscalations, readIntegration, runLine, type LineArtifacts, typ
 import { draftFloorOf, lockedArtifacts, NOT_DRAFTING, seatDriver, settleArtifactRoot, settleBase, type DraftingContext, type DraftingDrivers } from './drafting.js';
 import { readRubrics, rubricsProblems, type ReadRubric } from './rubrics.js';
 import { parsePlan } from './observation-plan.js';
-import { DRAFT_DIR, parseQuestions, parseRunRequirements, type RunRequirements } from './spec-parts.js';
+import { DRAFT_DIR, defectIntentText, parseQuestions, parseRunRequirements, type DefectPart, type RunRequirements } from './spec-parts.js';
 import type { BuiltGraph } from './graph.js';
 import { reachesRemote, type Integrator } from './integrate.js';
 import { unsafeComponents, type UnsafeDeclaration } from './safety.js';
 import { parseSecurityPart, type SecurityPart, type SecurityScanners } from './security.js';
-import { mergedCheckProblems, parseGraph, parseManifest, requestProblems, securityProblems, type RequestProblem } from './validate.js';
+import { mergedCheckProblems, parseGraph, parseManifest, reproductionProblems, requestProblems, securityProblems, type RequestProblem } from './validate.js';
 import { suiteBindingProblems } from './verification.js';
 import { basePath, discardRun, existsIn, snapshotBase, treeDigest, within, type WorkspaceStore } from './workspace.js';
 
@@ -162,13 +164,27 @@ export interface RequestedArtifacts {
 }
 
 /**
- * A person's intent for a run that drafts its spec: free text, from the
- * human principal's channel and nothing else (R19, I7). A trigger's payload
- * is never one; `from` says so in the type.
+ * A person's intent for a run that drafts its spec, from the human
+ * principal's channel and nothing else (R19, I7): free text, or a bug fix's
+ * three parts (A-R16-02). A trigger's payload is never one; `from` says so in
+ * the type.
  */
-export interface Intent {
+export type Intent = TextIntent | BugFixIntent;
+
+export interface TextIntent {
   readonly text: string;
   readonly from: 'principal';
+}
+
+/**
+ * What a person who read a defect report writes of it: the steps that show
+ * the defect, what happens, and what should happen (A-R16-02). These are the
+ * facts only the report holds, carried across by a person; no model reads
+ * the report (D-A-BF-02).
+ */
+export interface BugFixIntent extends DefectPart {
+  readonly from: 'principal';
+  readonly template: 'bug-fix';
 }
 
 export interface RunRequest {
@@ -219,6 +235,12 @@ export interface RunRequest {
    * candidate supplies none (R19, I7).
    */
   readonly candidate?: CandidateId | null;
+  /**
+   * The run's template, or absent or null for none (A-R16-02). A person's own
+   * run may name one the policy's `runTemplates` lists; a run from a candidate
+   * takes the candidate's, and naming another is refused (I4).
+   */
+  readonly template?: RunTemplateId | null;
 }
 
 /** What a caller of the line may observe and ask of it while it drives. Neither can change what is committed. */
@@ -538,11 +560,14 @@ function draftedStations(drafted: Readonly<Record<DraftStation, boolean>>): Draf
  * directory the workspace already holds, and a test drafter or critic
  * granted egress, which would let it reach what the black box keeps from it.
  */
-function draftingProblems(req: RunRequest, drafted: Readonly<Record<DraftStation, boolean>>, policy: Policy): RequestProblem[] {
+function draftingProblems(req: RunRequest, drafted: Readonly<Record<DraftStation, boolean>>, policy: Policy, template: RunTemplateId | null): RequestProblem[] {
   const problems: RequestProblem[] = [];
   const intent: unknown = req.intent ?? null;
-  if (drafted.spec) {
-    const i = intent as Partial<Intent> | null;
+  if (template === 'bug-fix') problems.push(...bugFixProblems(req));
+  else if (isRecord(intent) && Object.hasOwn(intent, 'template')) {
+    problems.push({ path: 'intent', code: 'not-applicable', message: 'a bug-fix intent is for a bug-fix run, and this run names no template' });
+  } else if (drafted.spec) {
+    const i = intent as Partial<TextIntent> | null;
     if (i === null) problems.push({ path: 'intent', code: 'missing', message: 'a run that drafts its spec is drafted from a person\'s intent, and none was given' });
     else if (typeof i !== 'object' || typeof i.text !== 'string' || i.text.trim() === '' || i.from !== 'principal' || Object.keys(i).length !== 2) {
       problems.push({ path: 'intent', code: 'not-an-intent', message: 'an intent is a person\'s text from the principal\'s channel: { text, from: \'principal\' }' });
@@ -574,6 +599,74 @@ function draftingProblems(req: RunRequest, drafted: Readonly<Record<DraftStation
 
 /** The most bytes an intent may hold: it reaches the spec drafter in its prompt. */
 const INTENT_MAX_BYTES = 32 * 1024;
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+const BUG_FIX_PARTS = ['steps', 'actual', 'expected'] as const;
+
+/**
+ * Why a bug-fix run cannot be admitted (A-R16-02): its spec or its tests
+ * supplied rather than drafted, or an intent that is not the three parts,
+ * naming each part missing. A person who read the report writes the parts;
+ * the drafters write the rest, so nothing written by someone who read the
+ * report is judged as a check (D-A-BF-02).
+ */
+function bugFixProblems(req: RunRequest): RequestProblem[] {
+  const problems: RequestProblem[] = [];
+  if (req.artifacts.spec !== 'draft') {
+    problems.push({ path: 'artifacts.spec', code: 'supplied', message: "a bug-fix run drafts its spec from the intent's parts; a supplied spec is refused" });
+  }
+  if (req.artifacts.acceptanceTests !== 'draft') {
+    problems.push({ path: 'artifacts.acceptanceTests', code: 'supplied', message: 'a bug-fix run drafts its acceptance tests from the locked spec alone; supplied tests are refused' });
+  }
+  const intent: unknown = req.intent ?? null;
+  if (intent === null) {
+    problems.push({ path: 'intent', code: 'missing', message: 'a bug-fix run is drafted from the steps, what happens, and what should happen, and no intent was given' });
+    return problems;
+  }
+  if (!isRecord(intent) || intent.from !== 'principal' || intent.template !== 'bug-fix') {
+    problems.push({ path: 'intent', code: 'not-an-intent', message: "a bug-fix intent is { from: 'principal', template: 'bug-fix', steps, actual, expected }" });
+    return problems;
+  }
+  for (const key of Object.keys(intent)) {
+    if (!['from', 'template', ...BUG_FIX_PARTS].includes(key)) problems.push({ path: `intent.${key}`, code: 'not-applicable', message: `'${key}' is not a part of a bug-fix intent` });
+  }
+  for (const part of BUG_FIX_PARTS) {
+    const value = intent[part];
+    if (typeof value !== 'string' || value.trim() === '') problems.push({ path: `intent.${part}`, code: 'missing', message: `a bug-fix intent's '${part}' is a person's non-empty text` });
+  }
+  const bytes = BUG_FIX_PARTS.reduce((sum, part) => {
+    const value = intent[part];
+    return sum + (typeof value === 'string' ? Buffer.byteLength(value, 'utf8') : 0);
+  }, 0);
+  if (bytes > INTENT_MAX_BYTES) problems.push({ path: 'intent', code: 'not-an-intent', message: `an intent is at most ${String(INTENT_MAX_BYTES)} bytes, its parts together` });
+  return problems;
+}
+
+/**
+ * The run's template, or why the request cannot have it (A-R16-02, I4). A
+ * run from a candidate takes the candidate's, read here with no side effect;
+ * a person's run takes the one it names, which the policy must list.
+ */
+async function templateOf(req: RunRequest, policy: Policy): Promise<{ ok: true; template: RunTemplateId | null } | { ok: false; problems: RequestProblem[] }> {
+  const named: unknown = req.template ?? null;
+  if (named !== null && !isRunTemplate(named)) return { ok: false, problems: [{ path: 'template', code: 'not-a-template', message: "a run's template is one of the registry's run templates: 'bug-fix'" }] };
+  if (req.candidate != null) {
+    const entry = await req.components.vault.readCandidate(req.candidate);
+    if (entry?.candidate == null) return { ok: false, problems: [{ path: 'candidate', code: 'unknown-candidate', message: `no intake candidate ${req.candidate}` }] };
+    const own = isRunTemplate(entry.candidate.template) ? entry.candidate.template : null;
+    if (named !== null && named !== own) {
+      return { ok: false, problems: [{ path: 'template', code: 'not-the-candidates', message: `candidate ${req.candidate} was recorded under '${entry.candidate.template}', and a run from it takes that template, never another` }] };
+    }
+    return { ok: true, template: own };
+  }
+  if (named !== null && !(policy.triggers.runTemplates ?? []).includes(named)) {
+    return { ok: false, problems: [{ path: 'template', code: 'not-granted', message: `the policy's triggers.runTemplates does not list '${named}', so a person's own run may not take it` }] };
+  }
+  return { ok: true, template: named };
+}
 
 /**
  * I5: an L3 run is refused while any control is unavailable, naming each one,
@@ -910,6 +1003,10 @@ async function candidateFor(
   if (entry.admittedAs !== null) {
     return { ok: false, reason: 'invalid-request', problems: [{ path: 'candidate', code: 'already-admitted', message: `candidate ${id} admitted run ${entry.admittedAs}; a candidate admits one run` }] };
   }
+  // A person dismissed it: it admits no run (A-R16-05).
+  if (entry.dismissed !== null) {
+    return { ok: false, reason: 'invalid-request', problems: [{ path: 'candidate', code: 'dismissed', message: `candidate ${id} was dismissed as ${entry.dismissed.cause}; a dismissed candidate admits no run` }] };
+  }
   if (entry.expiredAt !== null || pastWindow(entry.candidate, policy, now)) {
     await vault.markCandidateExpired(id, new Date(now).toISOString());
     return { ok: false, reason: 'candidate-expired', candidate: id };
@@ -953,8 +1050,15 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
   const sensitive = sensitiveArtifacts(admitted.admitted.artifacts, policy.policy);
   if (sensitive.length > 0) return { ok: false, reason: 'invalid-request', problems: sensitive };
   const drafted = draftedStations(admitted.admitted.drafted);
-  const drafting = draftingProblems(req, admitted.admitted.drafted, policy.policy);
+  const templated = await templateOf(req, policy.policy);
+  if (!templated.ok) return { ok: false, reason: 'invalid-request', problems: templated.problems };
+  const { template } = templated;
+  const drafting = draftingProblems(req, admitted.admitted.drafted, policy.policy, template);
   if (drafting.length > 0) return { ok: false, reason: 'invalid-request', problems: drafting };
+  // A supplied check is written by whoever wrote the request, so it never stands as a reproduction: a bug fix's is drafted
+  // from the locked spec, and any other run has no defect to reproduce (A-R16-04).
+  const declared = reproductionProblems(admitted.admitted.checks, template === 'bug-fix', 'artifacts', true);
+  if (declared.length > 0) return { ok: false, reason: 'invalid-request', problems: declared };
   // Where the run's drafts are written; a workspace that already holds it would have them mixed with what it holds (R19).
   if (drafted.length > 0 && (await existsIn(req.workspace, `${DRAFT_DIR}/${req.runId}`))) {
     return { ok: false, reason: 'invalid-request', problems: [{ path: 'workspace', code: 'exists', message: `the workspace already holds ${DRAFT_DIR}/${req.runId}, where this run's drafts are written` }] };
@@ -1056,10 +1160,16 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
     createdAt: now,
   };
   // The intent and each rubric are recorded before the admission record that names them (R19).
-  // `draftingProblems` refused a drafted spec with no intent, so a drafted spec has one here.
-  const intentText = admitted.admitted.drafted.spec ? (req.intent?.text ?? null) : null;
+  // `draftingProblems` refused a drafted spec with no intent, so a drafted spec has one here, of its template's arm.
+  const given = req.intent ?? null;
+  const intentRecord: IntentRecord | null = !admitted.admitted.drafted.spec || given === null
+    ? null
+    : 'template' in given
+      ? { runId: req.runId, template: 'bug-fix', steps: given.steps, actual: given.actual, expected: given.expected, from: 'principal', collectedBy: 'runtime' }
+      : { runId: req.runId, text: given.text, from: 'principal', collectedBy: 'runtime' };
+  const draftingIntent = intentOf(intentRecord);
   const draftingRecords = async (): Promise<{ intent: AdmissionRecord['intent']; rubrics: RubricVersion[] }> => {
-    const intent = intentText === null ? null : await vault.recordIntent({ runId: req.runId, text: intentText, from: 'principal', collectedBy: 'runtime' } satisfies IntentRecord);
+    const intent = intentRecord === null ? null : await vault.recordIntent(intentRecord);
     const versions: RubricVersion[] = [];
     for (const station of drafted) {
       const rubric = rubrics[station];
@@ -1083,6 +1193,7 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
     // The delivery the run came from, by the stored decision's hash (D-R22-03).
     candidate: candidate === null ? null : { id: candidate.candidate.id, decisionSha256: candidate.sha256 },
     repoInstructions: instructions.files,
+    template,
   };
   const refusedControls = admissionRefusal(unrecorded);
   if (refusedControls !== undefined) {
@@ -1100,7 +1211,7 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
   }
   if (candidate !== null && !(await vault.markCandidateAdmitted(candidate.candidate.id, req.runId))) {
     await discardRun(workspaces, req.runId);
-    return { ok: false, reason: 'invalid-request', problems: [{ path: 'candidate', code: 'already-admitted', message: `candidate ${candidate.candidate.id} admitted another run first` }] };
+    return { ok: false, reason: 'invalid-request', problems: [{ path: 'candidate', code: 'already-admitted', message: `candidate ${candidate.candidate.id} admitted another run, or was dismissed, first` }] };
   }
   // Recorded before the state that carries it, so no narrowed run exists that the record cannot count (D-R10-03).
   if (narrowing.narrowing !== null) {
@@ -1151,7 +1262,7 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
         checks: admitted.admitted.checks,
         securityPart: admitted.admitted.securityPart,
         requirements: admitted.admitted.requirements,
-        drafting: { drafted: admitted.admitted.drafted, intent: intentText, rubrics },
+        drafting: { drafted: admitted.admitted.drafted, ...draftingIntent, template, rubrics },
         components: req.components,
         baseTreeSha256,
         state,
@@ -1293,14 +1404,28 @@ async function readVaultJson<T>(vault: Vault, ref: VaultRef): Promise<T> {
 async function draftingOf(vault: Vault, record: AdmissionRecord): Promise<DraftingContext> {
   const drafted = { spec: record.artifacts.spec.source === 'drafted', 'test-design': record.artifacts.acceptanceTests.source === 'drafted' };
   if (!drafted.spec && !drafted['test-design']) return NOT_DRAFTING;
-  const intent = record.intent === null ? null : (await readVaultJson<IntentRecord>(vault, record.intent)).text;
+  const intent = intentOf(record.intent === null ? null : await readVaultJson<IntentRecord>(vault, record.intent));
   const rubrics: Partial<Record<DraftStation, ReadRubric>> = {};
   for (const version of record.rubrics) {
     const rubric = await readVaultJson<RubricRecord>(vault, version.ref);
     if (rubric.sha256 !== version.sha256) throw new Error(`run ${record.run.id}: the ${version.station} rubric recorded does not hash to the version admission pinned`);
     rubrics[version.station] = { text: rubric.text, sha256: rubric.sha256 };
   }
-  return { drafted, intent, rubrics };
+  return { drafted, ...intent, template: record.template ?? null, rubrics };
+}
+
+/**
+ * What the drafters are given of an intent record: its text, or a bug fix's
+ * three parts as one text for the spec drafter's prompt and as the parts the
+ * runtime writes `defect.json` from (A-R16-03).
+ */
+function intentOf(record: IntentRecord | null): { intent: string | null; defect: DefectPart | null } {
+  if (record === null) return { intent: null, defect: null };
+  if ('template' in record) {
+    const defect = { steps: record.steps, actual: record.actual, expected: record.expected };
+    return { intent: defectIntentText(defect), defect };
+  }
+  return { intent: record.text, defect: null };
 }
 
 export interface Loaded {

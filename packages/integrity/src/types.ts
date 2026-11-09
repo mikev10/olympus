@@ -78,6 +78,14 @@ export interface AcceptanceCheckSpec extends SuiteCheckFields, DenialFields {
  */
 interface DenialFields {
   deniesRule?: string;
+  /**
+   * That the check follows the spec's steps and so reproduces the defect a
+   * bug-fix run fixes (A-R16-04). Valid only with `onBase: 'fails'`, so R15's
+   * base run is what shows it fails; whether it follows the steps is the
+   * `test-design` critic's to judge. A bug-fix manifest needs a required one,
+   * and any other run's manifest may declare none.
+   */
+  reproduces?: true;
 }
 
 /** A unit check runs every suite the tree's test framework is configured to run. */

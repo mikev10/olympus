@@ -10,7 +10,7 @@
 import type {
   AgentClaim, ApprovalKey, AutonomyLevel, BaseRefusalPart, CompiledRole, DraftCondition, DraftRef, DraftStation, IndependenceGrade, ModelIdentity, ModelTier, Policy, PolicyRefusal,
   RecordCategory, RejectionReason, RoleId, Run, RunId, RunState, SeatIdentity, StationId, StationRefusal, TaskId, TaskResult, TreeCategory, VaultRef,
-  AuthorTrust, CandidateId, CandidateSchema, FieldDefect, JobTemplateId, SchemaKind, TemplateId, TriggerAdmissionCause, TriggerLineage,
+  AuthorTrust, CandidateId, CandidateSchema, FieldDefect, JobTemplateId, RunTemplateId, SchemaKind, TemplateId, TriggerAdmissionCause, TriggerLineage,
   NarrowedScope, NarrowingCause,
 } from '@olympus-ai/core';
 import type { CheckResult, IntegrityViolation, TamperReport } from '@olympus-ai/integrity';
@@ -487,10 +487,30 @@ export interface RubricVersion {
   readonly ref: VaultRef;
 }
 
-/** The intent a spec-less run was admitted with: a person's text, from the principal's channel alone (R19, I7). */
-export interface IntentRecord {
+/**
+ * The intent a spec-less run was admitted with, from the principal's channel
+ * alone (R19, I7): a person's text, or, for a bug fix, the three parts a
+ * person wrote from the report they read, as given (A-R16-02). No part is the
+ * report's text: no field of a candidate is ever one.
+ */
+export type IntentRecord = TextIntentRecord | BugFixIntentRecord;
+
+export interface TextIntentRecord {
   readonly runId: RunId;
   readonly text: string;
+  readonly from: 'principal';
+  readonly collectedBy: 'runtime';
+}
+
+export interface BugFixIntentRecord {
+  readonly runId: RunId;
+  readonly template: 'bug-fix';
+  /** The steps that show the defect. */
+  readonly steps: string;
+  /** What happens when they are followed. */
+  readonly actual: string;
+  /** What should happen instead. */
+  readonly expected: string;
   readonly from: 'principal';
   readonly collectedBy: 'runtime';
 }
@@ -657,6 +677,12 @@ export interface AdmissionRecord {
    */
   readonly candidate?: { readonly id: CandidateId; readonly decisionSha256: string } | null;
   /**
+   * The run's template: the one a person's run named, which the policy's
+   * `runTemplates` lists, or its candidate's (A-R16-02). Null for a run with
+   * none; absent on a record written before R16, which is read as null.
+   */
+  readonly template?: RunTemplateId | null;
+  /**
    * The target repository's instruction files, read from the base snapshot
    * at admission, in the reader's fixed order (A-R24-03). A run's seats
    * receive these and only these: a later commit changes later runs, never
@@ -757,6 +783,26 @@ export interface IntakeEntry {
   readonly admittedAs: RunId | null;
   /** When the candidate was recorded as expired, by the runtime's clock; null if it has not been. */
   readonly expiredAt: string | null;
+  /**
+   * A person's dismissal of the candidate, with its cause and no text, once;
+   * null until then (A-R16-05). A dismissed candidate admits no run.
+   */
+  readonly dismissed: CandidateDismissal | null;
+}
+
+/**
+ * Why a person did not work a candidate, from a closed set so a rate can be
+ * kept by it (A-R16-05, D-A-BG-06). No free text: a person reading a report
+ * could paste it there, and the findings review reads these records.
+ */
+export type DismissalCause = 'not-a-defect' | 'duplicate' | 'insufficient-detail' | 'not-reproducible';
+
+export const DISMISSAL_CAUSES: readonly DismissalCause[] = Object.freeze(['not-a-defect', 'duplicate', 'insufficient-detail', 'not-reproducible']);
+
+export interface CandidateDismissal {
+  readonly cause: DismissalCause;
+  /** The runtime's clock when it was recorded. */
+  readonly at: string;
 }
 
 /** One hour's counted refusals for one bucket (D-R22-03). `hour` is the UTC hour, `YYYY-MM-DDTHH`. */
@@ -1234,6 +1280,12 @@ export interface Vault {
   markCandidateAdmitted(id: CandidateId, runId: RunId): Promise<boolean>;
   /** Records a candidate as expired, on the runtime's clock; never deletes it. A second call keeps the first time (D-R22-04). */
   markCandidateExpired(id: CandidateId, at: string): Promise<void>;
+  /**
+   * Records a person's dismissal of a candidate, once (A-R16-05). `false`
+   * where the candidate was admitted or dismissed before: a dismissal and an
+   * admission spend the same mark, so only one of them ever lands (D-R16-06).
+   */
+  dismissCandidate(id: CandidateId, cause: DismissalCause, at: string): Promise<boolean>;
   /** Adds one to a bucket's count for an hour and a cause (D-R22-03). */
   countRefusedDelivery(bucket: string, hour: string, cause: CountedRefusalCause): Promise<void>;
   /** Every bucket's counts, sorted by hour then bucket. */

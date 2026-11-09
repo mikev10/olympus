@@ -23,7 +23,7 @@ import type {
 import type { IntegrityViolation } from '@olympus-ai/integrity';
 import type { ExecOptions, ExecResult, SandboxCapabilities, SandboxHandle, SandboxProvider, SandboxSpec, Teardown } from '@olympus-ai/sandbox';
 import type {
-  AdmissionRecord, BaseRunRecord, CandidateRecord, CountedRefusalCause, CriticRecord, DraftLockRecord, DraftRecord, EnforcementDecision, EvidenceBundle, IntakeEntry, IntegrationRecord, IntentRecord, LockManifest, LockVerdict, NightlyEntry, NightlyRecord, ObservationEntry, ObservationRecord, RefusedDeliveryCount, StoredObject, RubricRecord, TriggerDecision, UsageRecord, Vault,
+  AdmissionRecord, BaseRunRecord, CandidateRecord, CountedRefusalCause, CriticRecord, DismissalCause, DraftLockRecord, DraftRecord, EnforcementDecision, EvidenceBundle, IntakeEntry, IntegrationRecord, IntentRecord, LockManifest, LockVerdict, NightlyEntry, NightlyRecord, ObservationEntry, ObservationRecord, RefusedDeliveryCount, StoredObject, RubricRecord, TriggerDecision, UsageRecord, Vault,
 } from '@olympus-ai/vault';
 
 export class DelegatingVault implements Vault {
@@ -132,6 +132,10 @@ export class DelegatingVault implements Vault {
 
   markCandidateAdmitted(id: CandidateId, runId: RunId): Promise<boolean> {
     return this.inner.markCandidateAdmitted(id, runId);
+  }
+
+  dismissCandidate(id: CandidateId, cause: DismissalCause, at: string): Promise<boolean> {
+    return this.inner.dismissCandidate(id, cause, at);
   }
 
   markCandidateExpired(id: CandidateId, at: string): Promise<void> {

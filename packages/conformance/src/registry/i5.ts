@@ -43,6 +43,7 @@ import { R13B_I5 } from './nightly-review.js';
 import { R22_I5 } from './triggers.js';
 import { R10_I5 } from './ratchet.js';
 import { R19_ASSERTIONS } from './drafting.js';
+import { R16_ASSERTIONS } from './bug-fix.js';
 import { R24_I5 } from './repo-instructions.js';
 
 /** The declaration order the graph builder promises: vault, sandbox, driver, then the integrator a stub graph lacks (D-I1b-05). */
@@ -60,6 +61,7 @@ export const I5: InvariantEntry = {
     // R20: the role compiler.
     // R19: drafting at spec and test-design.
     ...R19_ASSERTIONS.I5,
+    ...R16_ASSERTIONS.I5,
     ...R20_I5,
     // R22: the trigger framework.
     ...R22_I5,

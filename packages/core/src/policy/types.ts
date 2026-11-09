@@ -8,7 +8,7 @@
  * from one to the other.
  */
 import type { Budget } from '../driver/contract.js';
-import type { TemplateId } from '../trigger/schemas.js';
+import type { RunTemplateId, TemplateId } from '../trigger/schemas.js';
 import type {
   AuthorTrust, AutonomyLevel, ModelTier, RoleId, StationId, TriggerKind,
 } from '../run/types.js';
@@ -102,6 +102,12 @@ export interface TriggerPolicy {
   maxTriggerDepth: number;
   /** Candidates recorded, across non-human kinds, in a sliding window; a person's own runs do not count (D-R22-07). */
   budgetPerWindow: { runs: number; windowMs: number };
+  /**
+   * The templates a person's own run may name (A-R16-01). Absent or empty,
+   * a person's run names none, and one that does is refused (I4). A run
+   * admitted from a candidate takes the candidate's template, listed or not.
+   */
+  runTemplates?: RunTemplateId[];
   /** Each a grant: a delivery for an id not here is refused before its body is read (D-A-TF-05). */
   subscriptions?: TriggerSubscription[];
   /** Daily firings of the `scheduled` kind (D-A-TF-08). */

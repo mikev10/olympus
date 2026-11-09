@@ -115,7 +115,17 @@ export type RequestProblemCode =
   /** The roles or rubrics the run needs, or the drivers that seat a drafter or a critic, are not given (R19). */
   | 'unseated'
   /** An observation plan that does not hold its shape: a check that is not an app slug and an exact name, an empty list, or a rollback condition that indexes nothing (R8b, D-A-OB-11). */
-  | 'invalid-plan';
+  | 'invalid-plan'
+  /** A bug-fix run's spec or tests supplied rather than drafted (A-R16-02). */
+  | 'supplied'
+  /** A template that is not a run template, one the policy does not list for a person's run, or not the candidate's (A-R16-02, I4). */
+  | 'not-a-template' | 'not-granted' | 'not-the-candidates'
+  /** A candidate a person dismissed, which admits no run (A-R16-05). */
+  | 'dismissed'
+  /** A `reproduces` declaration that is not `true`, or not beside `onBase: 'fails'` (A-R16-04). */
+  | 'not-true' | 'not-fails'
+  /** A bug-fix test draft with no required check declaring that it reproduces the defect (A-R16-04). */
+  | 'no-reproduction';
 
 export interface RequestProblem {
   /** The field, as a path into the request or an artifact: `graph.tasks[1].dependsOn[0]`. */
@@ -466,6 +476,14 @@ function checkProblems(checks: unknown, report: Report, alone: boolean): void {
       // An optional denial check can fail every verify and stop nothing, yet still satisfy test-design (codex-2, gemini-1).
       else if (c.required === false) report(`${at}.required`, 'not-required', `${at} names a rule it denies, so it must be required; an optional check holds the gate to nothing`);
     }
+    // A reproduction is a check the base run shows failing, so it declares that it fails there (A-R16-04, D-R16-05).
+    const repro = (check as { reproduces?: unknown }).reproduces;
+    if (repro !== undefined) {
+      if (c.kind !== 'acceptance' && c.kind !== 'behavioral') {
+        report(`${at}.reproduces`, 'not-applicable', `${at}.reproduces is declared on a check that is neither an acceptance nor a behavioral check; only a check that runs on the base can reproduce a defect`);
+      } else if (repro !== true) report(`${at}.reproduces`, 'not-true', `${at}.reproduces is true or absent`);
+      else if (c.onBase !== 'fails') report(`${at}.onBase`, 'not-fails', `${at} declares that it reproduces the defect, so it declares onBase 'fails'`);
+    }
     if (c.kind === 'acceptance') testsProblems(c.tests, `${at}.tests`, report);
     else if (c.tests !== undefined) {
       report(`${at}.tests`, 'not-applicable', `${at}.tests is named on a check that is not an acceptance check; no other kind runs named tests`);
@@ -502,6 +520,23 @@ function checkProblems(checks: unknown, report: Report, alone: boolean): void {
   if (reproduces === 0 && alone) {
     report('manifest.checks', 'none-fails-on-base', "manifest.checks: at least one required acceptance or behavioral check must declare onBase 'fails'; a run with nothing failing before the change has nothing to show the change did");
   }
+}
+
+/**
+ * What a run's template requires of its checks' `reproduces` declarations
+ * (A-R16-04): a bug-fix run's drafted tests need a required check declaring
+ * it; no other run, and no supplied check, may declare one, since a supplied
+ * check is written by someone who could have read the report (D-A-BF-02).
+ * `at` names the manifest the problems are reported at.
+ */
+export function reproductionProblems(checks: readonly CheckSpec[], bugFix: boolean, at: string, supplied: boolean): RequestProblem[] {
+  const declaring = checks.filter((c) => (c.kind === 'acceptance' || c.kind === 'behavioral') && c.reproduces === true);
+  if (!bugFix || supplied) {
+    const why = bugFix ? "a bug-fix run's reproduction is drafted from the locked spec, and this check was supplied" : 'this run is not a bug fix';
+    return declaring.map((c) => ({ path: `${at}#${c.id}.reproduces`, code: 'not-applicable', message: `'${c.id}' declares that it reproduces a defect, and ${why}` }));
+  }
+  if (declaring.some((c) => c.required)) return [];
+  return [{ path: `${at}.checks`, code: 'no-reproduction', message: "a bug-fix run needs a required check that declares reproduces: true and onBase 'fails': the runtime running it over the unchanged tree is the reproduction" }];
 }
 
 export interface GraphBinding {

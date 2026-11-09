@@ -35,8 +35,11 @@ import type { CandidateId, RunId, RunState, StationId, TaskResult, VaultRef, Vau
 import type { IntegrityViolation } from '@olympus-ai/integrity';
 import type {
   AdmissionRecord, BaseRunRecord, CandidateRecord, CountedRefusalCause, CriticRecord, DecisionCause, DraftLockRecord, DraftRecord, EnforcementDecision, EvidenceBundle, IntakeEntry, IntegrationRecord, IntentRecord, NightlyEntry, NightlyRecord, RefusedDeliveryCount, StoredObject, TriggerDecision,
-  LockEntry, LockManifest, LockVerdict, NoRunState, ObservationEntry, ObservationRecord, RubricRecord, UsageRecord, Vault,
+  LockEntry, LockManifest, LockVerdict, NoRunState, ObservationEntry, ObservationRecord, RubricRecord, UsageRecord, Vault, DismissalCause,
 } from '../types.js';
+
+/** Repeated from `DISMISSAL_CAUSES` in the contract: this module carries no value import (header). */
+const LOCAL_DISMISSAL_CAUSES: ReadonlySet<string> = new Set(['not-a-defect', 'duplicate', 'insufficient-detail', 'not-reproducible']);
 
 /** Reported as `actual` for a locked path that no longer exists: a deleted artifact is a mismatch, not an empty file (D-S1-02). */
 const MISSING = 'missing';
@@ -1005,7 +1008,13 @@ export class LocalVault implements Vault {
 
   /** I7: only a person's intent, as the principal's channel supplied it (R19). */
   recordIntent(r: IntentRecord): Promise<VaultRef> {
-    if (!isRecord(r) || !hasString(r, 'runId') || !hasString(r, 'text') || r.text.trim() === '') return Promise.reject(new Error('LocalVault: refusing an intent that names no run or carries no text'));
+    if (!isRecord(r) || !hasString(r, 'runId')) return Promise.reject(new Error('LocalVault: refusing an intent that names no run'));
+    // A bug fix's intent is its three parts, each a person's text; any other is one text (A-R16-02).
+    const filled = (v: unknown): boolean => typeof v === 'string' && v.trim() !== '';
+    const parts = 'template' in r
+      ? (r.template as string) === 'bug-fix' && filled(r.steps) && filled(r.actual) && filled(r.expected) && !('text' in r)
+      : filled((r as { text?: unknown }).text);
+    if (!parts) return Promise.reject(new Error('LocalVault: refusing an intent that carries no text, or a bug fix missing a part'));
     if ((r.from as string) !== 'principal') return Promise.reject(new Error("LocalVault: refusing an intent that did not come from the principal's channel"));
     if ((r.collectedBy as string) !== 'runtime') return Promise.reject(new Error("LocalVault: refusing an intent: collectedBy is not 'runtime'"));
     return storeObject(this.#store, r.runId, 'intent', r);
@@ -1130,6 +1139,14 @@ export class LocalVault implements Vault {
   async markCandidateAdmitted(id: CandidateId, runId: RunId): Promise<boolean> {
     if ((await this.readCandidate(id)) === null) throw new Error(`LocalVault: no candidate ${id}`);
     return createExclusive(join(this.#store, 'intake', 'admitted', `${id}.json`), encode({ runId: requireRunId(runId) }));
+  }
+
+  /** The same exclusive mark an admission takes, so a dismissal and an admission cannot both land (D-R16-06). */
+  async dismissCandidate(id: CandidateId, cause: DismissalCause, at: string): Promise<boolean> {
+    if ((await this.readCandidate(id)) === null) throw new Error(`LocalVault: no candidate ${id}`);
+    if (!LOCAL_DISMISSAL_CAUSES.has(cause)) throw new Error(`LocalVault: '${cause}' is not a dismissal cause`);
+    if (Number.isNaN(Date.parse(at))) throw new Error(`LocalVault: '${at}' is not a time`);
+    return createExclusive(join(this.#store, 'intake', 'admitted', `${id}.json`), encode({ dismissed: { cause, at } }));
   }
 
   async markCandidateExpired(id: CandidateId, at: string): Promise<void> {
@@ -1302,6 +1319,10 @@ export class LocalVault implements Vault {
       sha256: sha256(bytes),
       admittedAs: isRecord(admitted) && typeof admitted.runId === 'string' ? (admitted.runId as RunId) : null,
       expiredAt: isRecord(expired) && typeof expired.at === 'string' ? expired.at : null,
+      // The spend mark holds a run or a dismissal, never both (D-R16-06).
+      dismissed: isRecord(admitted) && isRecord(admitted.dismissed) && typeof admitted.dismissed.cause === 'string' && typeof admitted.dismissed.at === 'string'
+        ? { cause: admitted.dismissed.cause as DismissalCause, at: admitted.dismissed.at }
+        : null,
     };
   }
   async #objects(runId: RunId, kind: 'decision' | 'usage' | 'integration'): Promise<readonly VaultRef[]> {

@@ -5,7 +5,7 @@
  * claim appears only as the runtime's diff of it against the evidence.
  */
 import { M1_STATIONS } from '@olympus-ai/core';
-import type { ModelIdentity, RunId, StationId, TaskAttempts, TaskId, TaskStatus } from '@olympus-ai/core';
+import type { CandidateId, ModelIdentity, RunId, RunTemplateId, StationId, TaskAttempts, TaskId, TaskStatus, TemplateId, TriggerKind } from '@olympus-ai/core';
 import type { EnforcementDecision, EvidenceBundle, IntegrationRecord, Vault } from '@olympus-ai/vault';
 import { costTotals, readUsage, type CostTotals } from './cost.js';
 import { readIntegration } from './line.js';
@@ -28,6 +28,15 @@ export interface StationReport {
 export interface RunReport {
   readonly runId: RunId;
   readonly requestedLevel: number;
+  /** The run's template, from its admission record; null for none (A-R16-02). */
+  readonly template: RunTemplateId | null;
+  /**
+   * The candidate the run was admitted from, as its record names it: the
+   * kind, the template, and the schema's fields, such as an issue's
+   * repository and number (D-A-BG-07). For a person to read; no field of it
+   * reaches a request. Null for a person's own run.
+   */
+  readonly candidate: { readonly id: CandidateId; readonly kind: TriggerKind; readonly template: TemplateId; readonly extracted: Readonly<Record<string, string>> } | null;
   readonly standing: RunStanding;
   /** `records` when the standing was read from the Vault alone; `workspace` when it includes a live lock check of the working copy (D-I1b-15). */
   readonly standingSource: StandingSource;
@@ -66,7 +75,7 @@ function gateAt(index: number, current: number, standing: RunStanding): GateOutc
 
 export async function runReport(vault: Vault, runId: RunId): Promise<RunReport> {
   const { state, standing, source } = await runStanding(vault, runId);
-  const admission = decode(await vault.read(state.admission)) as { run?: { requestedLevel?: unknown } } | null;
+  const admission = decode(await vault.read(state.admission)) as { run?: { requestedLevel?: unknown }; template?: RunTemplateId | null; candidate?: { id: CandidateId } | null } | null;
   const requestedLevel = admission?.run?.requestedLevel;
   if (typeof requestedLevel !== 'number') throw new Error(`report: the admission record of run ${runId} names no level`);
 
@@ -126,9 +135,17 @@ export async function runReport(vault: Vault, runId: RunId): Promise<RunReport> 
     if (bundle.claimEvidenceDiff.length > 0) mismatches.push({ taskId: bundle.taskId, diffSha256: bundle.diffSha256, differences: bundle.claimEvidenceDiff });
   }
 
+  // The issue a run came from, named from the candidate the admission record names (D-A-BG-07).
+  const from = admission?.candidate ?? null;
+  const entry = from === null ? null : await vault.readCandidate(from.id);
+  const candidate = entry?.candidate == null
+    ? null
+    : { id: entry.candidate.id, kind: entry.candidate.kind, template: entry.candidate.template, extracted: entry.candidate.extracted };
   return {
     runId,
     requestedLevel,
+    template: admission?.template ?? null,
+    candidate,
     standing,
     standingSource: source,
     cost,

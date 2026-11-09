@@ -8913,3 +8913,150 @@ confirmed before it is built. The maintainer chose all six open questions on
   attacker-chosen bytes would enter a prompt, if only from an allowlist.
 - **Reverse:** grant the fields to the spec drafter as input through
   `narrowRun('trigger-fields')`.
+
+## R16: Bug-fix intake
+
+Started on `v2` at 95b3d0a, after the amendment (#108). Builds A-R16-01 to
+A-R16-05 as D-A-BG-02 to D-A-BG-07 chose them.
+
+### D-R16-01: boundary, verified
+
+- **Deliverables:**
+  - `TemplateId` gains `'bug-fix'`, valid on `issue` alone; a `bug-fix`
+    delivery records a candidate as `intake-candidate` does.
+  - `TriggerPolicy.runTemplates`, the templates a person's own run may name,
+    absent or empty by default; `RunRequest.template`; the admission record's
+    `template`.
+  - `Intent` a union: the R19 text arm, and the bug-fix arm of `steps`,
+    `actual`, and `expected`; the intent record holds the parts as given.
+  - A bug-fix run drafts both its spec and its tests, and is refused at
+    admission with either supplied.
+  - `SpecPart` gains `defect` and `reproduction`: the runtime writes
+    `defect.json` before the drafter runs; the drafter writes
+    `reproduction.json`; both lock with the spec.
+  - A drafted or supplied check may declare `reproduces: true`, only with
+    `onBase: 'fails'`; a bug-fix test draft needs a required one, and a run
+    that is not a bug fix may declare none.
+  - `Vault.dismissCandidate`, `IntakeEntry.dismissed`, the closed
+    `DismissalCause`, and `POST /intake/:id/dismiss`.
+  - The run report names the template and the candidate's issue.
+  - The shipped `test-design` rubric gains the point that a check declaring
+    `reproduces` follows the defect part's steps (D-A-BG-05).
+  - Conformance assertions, one per sentence of the entry's conformance
+    paragraph.
+- **Out of scope (verbatim):** writing back to the tracker, such as asking the
+  reporter for missing steps (a provider adapter); following the pull request
+  through CI and review comments, whose text is untrusted for the same reason;
+  seeding the data and accounts a reproduction needs (R1 probes whether a
+  target can); finding defects that recur in one area (R11, R13); and a model
+  that summarises reports for the person writing the spec.
+- **Acceptance:** `pnpm typecheck`, `pnpm lint`, `pnpm test`, and
+  `pnpm conformance` pass, and the registry holds an assertion for each
+  clause of the conformance paragraph, each failing when its check is deleted.
+- **Invariants:** I7 (no report text and no extracted field reaches a
+  request), I4 (no run is a bug fix unless policy lists the template or the
+  candidate's trigger routes to it), I3 (the runtime writes `defect`, and the
+  test drafter sees only the locked spec), I5 (a missing part is refused,
+  naming it). No pending registry entry is owed by R16; it adds its own.
+- **Gate paths:** `packages/core/src/policy/types.ts`,
+  `packages/core/src/station/types.ts`, `packages/integrity/src/types.ts`,
+  `packages/vault/src/types.ts`, and `packages/conformance/`.
+
+### D-R16-02: assumptions, each verified
+
+- Dependencies shipped: `reviewed/R15`, `reviewed/R19`, `reviewed/P14`,
+  `reviewed/R22` are tags on `origin` (`git tag -l 'reviewed/*'`).
+- The `issue` schema carries no free text: repository, number, labels,
+  author trust (`packages/core/src/trigger/schemas.ts:155-160`).
+- A candidate's template is the policy's `taskTemplate[kind]`, never the
+  payload's (`packages/api/src/intake.ts:132-147`), so a `bug-fix` route needs
+  only the registry entry and the validator's kind check.
+- A draft with problems cannot be approved (`packages/api/src/run.ts:337`)
+  and cannot be locked (`packages/api/src/drafting.ts:793`), and the drafter
+  is sent back while attempts remain (`drafting.ts:186-191`). So a problem
+  recorded on the draft is a refusal at the station: nothing proceeds from it.
+- Every run already needs a required check failing on the base
+  (`packages/api/src/validate.ts:267`), and R15's base run is what proves a
+  declared `'fails'` (`drafting.ts:192-205`).
+- A candidate is spent by one exclusive file, `intake/admitted/<id>.json`
+  (`packages/vault/src/local/vault.ts:1129-1133`).
+- Every non-human kind enters at `intake` (`packages/core/src/policy/validation.ts:706-709`).
+
+### D-R16-03: where the code differs from the entry
+
+- **"Entered at `spec`."** The validator keeps every kind at `intake`, where
+  admission runs. A bug-fix run's first work is the spec draft, so it is
+  entered at `spec` in the only sense the line has: `intake` does nothing
+  but admit. No validator change.
+- **"Both carry the template."** A P14 decision names its run, and the run's
+  admission record names the template; a dismissal names its candidate,
+  whose record names the template. No copy is added to each decision, which
+  could disagree with the record it copies.
+
+### D-R16-04: the defect and reproduction checks are draft problems
+
+- **Chosen:** in a bug-fix run the spec draft must hold `defect.json` with
+  exactly the runtime's bytes and a `reproduction.json` that parses; any
+  other is a problem on the draft, naming the file (`missing`,
+  `not-the-intent`, `not-a-spec-part`). A problem sends the draft back, and
+  on the last attempt a draft with problems cannot be approved. The
+  `test-design` entry then re-checks the locked parts, as it does the
+  security part, refusing `spec-part-missing` naming `defect` or
+  `reproduction`.
+- **Why:** the drafted spec is the only spec a bug-fix run has, and the draft
+  read is the one place its bytes are judged before anything locks them.
+- **Rejected:** *a new `StationRefusal` arm for a defect mismatch.* No locked
+  defect can differ from the runtime's bytes once the draft read refuses it,
+  so the arm would be unreachable.
+- **Reverse:** add the arm and check at the `spec` exit.
+
+### D-R16-05: `reproduces` sits on acceptance and behavioral checks
+
+- **Ambiguous:** A-R16-04 says `AcceptanceCheckSpec` gains it, while the
+  rule it extends (`validate.ts:267`) counts acceptance and behavioral
+  checks alike, and `deniesRule` sits on both (`DenialFields`).
+- **Chosen:** both, beside `deniesRule`. A defect in a CLI or an HTTP surface
+  is reproduced by a behavioral check.
+- **Rejected:** *acceptance only.* A bug fix in a stack with no test adapter
+  could not declare its reproduction at all.
+- **Reverse:** move the field to `AcceptanceCheckSpec`.
+
+### D-R16-06: a dismissal and an admission share one exclusive file
+
+- **Chosen:** `dismissCandidate` writes the same exclusive file
+  `markCandidateAdmitted` does, holding `{ dismissed: { cause, at } }` in
+  place of `{ runId }`. Whichever is first wins, and the other returns
+  `false`.
+- **Rejected:** *a second file for dismissals.* A dismissal and an admission
+  racing could both succeed.
+- **Reverse:** a separate file, with a lock across both.
+
+### D-R16-07: the template is resolved before the intent is checked
+
+- **Chosen:** admission reads the candidate's template before the drafting
+  checks, by a read with no side effect, since the template decides what
+  intent is valid. The existing read that marks expiry stays where it is.
+- **Reverse:** move the template checks after the candidate read.
+
+### D-R16-08: only the HTTP route takes a bug-fix intent
+
+- **Chosen:** `POST /runs` takes `template` and, with it, an `intent` object
+  of the three parts. The CLI's `--intent` stays text; a bug-fix flag set
+  is a client change noted for later.
+- **Reverse:** add `--bug-fix --steps --actual --expected` to the CLI.
+
+### D-R16-09: each assertion fails when its check is deleted (I8)
+
+Thirteen mutants, each one check removed, run against the assertion that
+claims it; every one failed it: the defect bytes check and the locked parts
+(`I3.bug-fix-spec-carries-the-defect`); the drafted and the parsed
+`reproduces` rules (`I5.bug-fix-tests-need-a-reproduction`); the intent's
+parts (`I5.bug-fix-intent-needs-its-parts`); the `runTemplates` grant and the
+candidate's template (`I4.run-template-granted-by-policy`); the dismissed
+check and the shared spend mark (`I5.dismissed-candidate-admits-no-run`); the
+validator's kind check (`I4.bug-fix-template-valid-on-issue-alone`); the
+supplied-spec and supplied-reproduction refusals
+(`I3.bug-fix-run-drafts-both-artifacts`); and the report's issue
+(`I7.bug-fix-run-sends-no-report-text`). The absence of report text in every
+request is a property, not a check, so it has no single mutant: the assertion
+seats a stub in every seat and fails on any marker, body, or field byte.

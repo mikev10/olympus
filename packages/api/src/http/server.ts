@@ -14,9 +14,9 @@
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { isAbsolute } from 'node:path';
-import { isApprovalKey, type CandidateId, type RunCancellation, type RunId, type RunState } from '@olympus-ai/core';
+import { isApprovalKey, isRunTemplate, type CandidateId, type RunCancellation, type RunId, type RunState } from '@olympus-ai/core';
 import { MAX_DELIVERY_BYTES } from '@olympus-ai/triggers';
-import { UNSUBSCRIBED_BUCKET, isNoRunState, type CandidateRecord, type IntakeEntry } from '@olympus-ai/vault';
+import { DISMISSAL_CAUSES, UNSUBSCRIBED_BUCKET, isNoRunState, type CandidateRecord, type DismissalCause, type IntakeEntry } from '@olympus-ai/vault';
 import { Intake, type DeliveryOutcome, type SecretSource } from '../intake.js';
 import { startSchedules, type Scheduler } from '../schedule.js';
 import { NightlyJobs, type NightlyTarget } from '../nightly.js';
@@ -27,7 +27,7 @@ import { imageFor, type BuiltGraph } from '../graph.js';
 import { runReport, type RunReport } from '../report.js';
 import { outcomes, type OutcomeWindow } from '../outcomes.js';
 import { telemetryOf, type TelemetryExport } from '../telemetry.js';
-import type { ApproveBody, CandidateSummary, CandidateView, CreateRunBody, CreatedRun, DeliveryAnswer, DriveEnd, ErrorBody, ErrorCode, RejectBody, RunEvent, RunView } from './wire.js';
+import type { ApproveBody, BugFixIntentBody, CandidateSummary, CandidateView, CreateRunBody, DismissBody, CreatedRun, DeliveryAnswer, DriveEnd, ErrorBody, ErrorCode, RejectBody, RunEvent, RunView } from './wire.js';
 
 export interface ApiServerOptions {
   readonly components: BuiltGraph;
@@ -145,10 +145,20 @@ function isStringArray(value: unknown): value is string[] {
 function createBody(value: unknown): CreateRunBody {
   if (!isRecord(value)) throw new HttpError(400, 'bad-request', 'the body must be an object');
   // `intent` is the person's text a drafted spec is drafted from (R19); `candidate`, the intake candidate the run is admitted from (R22).
-  const { intent, candidate, ...required } = value;
+  // `template` names the run's template, and with `bug-fix` the intent is its three parts (A-R16-02).
+  const { intent, candidate, template, ...required } = value;
   if (candidate !== undefined && (typeof candidate !== 'string' || !/^[0-9a-f]{64}$/.test(candidate))) throw new HttpError(400, 'bad-request', 'candidate is the id of an intake candidate');
   exactKeys(required, ['workspace', 'baseCommit', 'requestedLevel', 'artifacts', 'approvedCostUsd'], '');
-  if (intent !== undefined && (typeof intent !== 'string' || intent.trim() === '')) throw new HttpError(400, 'bad-request', 'intent is the text a drafted spec is drafted from');
+  if (template !== undefined && !isRunTemplate(template)) throw new HttpError(400, 'bad-request', "template is a run template: 'bug-fix'");
+  let bugFix: BugFixIntentBody | undefined;
+  if (template === 'bug-fix' && intent !== undefined) {
+    if (!isRecord(intent)) throw new HttpError(400, 'bad-request', 'a bug-fix intent is { steps, actual, expected }');
+    exactKeys(intent, ['steps', 'actual', 'expected'], 'intent.');
+    const { steps, actual, expected } = intent;
+    // Each part is checked again at admission, which names a blank one; here only its type.
+    if (typeof steps !== 'string' || typeof actual !== 'string' || typeof expected !== 'string') throw new HttpError(400, 'bad-request', 'intent.steps, intent.actual, and intent.expected are strings');
+    bugFix = { steps, actual, expected };
+  } else if (intent !== undefined && (typeof intent !== 'string' || intent.trim() === '')) throw new HttpError(400, 'bad-request', 'intent is the text a drafted spec is drafted from');
   const { workspace, baseCommit, requestedLevel, artifacts, approvedCostUsd } = required;
   if (typeof workspace !== 'string' || !isAbsolute(workspace)) throw new HttpError(400, 'bad-request', 'workspace must be an absolute path on the server');
   if (typeof baseCommit !== 'string' || baseCommit === '') throw new HttpError(400, 'bad-request', 'baseCommit must be a non-empty string');
@@ -196,9 +206,20 @@ function createBody(value: unknown): CreateRunBody {
       ...(parts === undefined ? {} : { specParts: parts }),
     },
     approvedCostUsd,
-    ...(typeof intent === 'string' ? { intent } : {}),
+    ...(bugFix !== undefined ? { intent: bugFix } : typeof intent === 'string' ? { intent } : {}),
     ...(typeof candidate === 'string' ? { candidate: candidate as CandidateId } : {}),
+    ...(template === 'bug-fix' ? { template } : {}),
   };
+}
+
+function dismissBody(value: unknown): DismissBody {
+  if (!isRecord(value)) throw new HttpError(400, 'bad-request', 'the body must be an object');
+  exactKeys(value, ['cause'], '');
+  const { cause } = value;
+  if (typeof cause !== 'string' || !DISMISSAL_CAUSES.includes(cause as DismissalCause)) {
+    throw new HttpError(400, 'bad-request', `cause is one of ${DISMISSAL_CAUSES.join(', ')}; a dismissal carries no text`);
+  }
+  return { cause: cause as DismissalCause };
 }
 
 /**
@@ -253,7 +274,7 @@ function summary(entry: IntakeEntry & { candidate: CandidateRecord }): Candidate
   const c = entry.candidate;
   return {
     id: c.id, kind: c.kind, template: c.template, extracted: c.extracted, authorTrust: c.authorTrust,
-    lineage: c.lineage, recordedAt: c.recordedAt, admittedAs: entry.admittedAs, expiredAt: entry.expiredAt,
+    lineage: c.lineage, recordedAt: c.recordedAt, admittedAs: entry.admittedAs, expiredAt: entry.expiredAt, dismissed: entry.dismissed,
   };
 }
 
@@ -415,8 +436,8 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
     const admission = await admitRun({
       runId,
       ...request,
-      // Only this route, authenticated as the principal, supplies an intent (R19, I7).
-      intent: intent === undefined ? null : { text: intent, from: 'principal' },
+      // Only this route, authenticated as the principal, supplies an intent (R19, I7), a bug fix's as its parts (A-R16-02).
+      intent: intent === undefined ? null : typeof intent === 'string' ? { text: intent, from: 'principal' } : { ...intent, from: 'principal', template: 'bug-fix' },
       rubrics: options.rubricsDirectory ?? null,
       policy: policy.policy,
       roles: options.rolesDirectory,
@@ -542,6 +563,19 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
     return { ...summary({ ...entry, candidate: c }), body: c.body, signedAt: c.signedAt, decisionSha256: entry.sha256 };
   };
 
+  /** A person's dismissal: once, of a candidate neither admitted nor expired, with a cause and no text (A-R16-05). */
+  const dismissIntake = async (id: string, body: DismissBody): Promise<CandidateSummary> => {
+    const entry = /^[0-9a-f]{64}$/.test(id) ? await components.vault.readCandidate(id as CandidateId) : null;
+    if (entry?.candidate == null) throw new HttpError(404, 'not-found', `no intake candidate ${id}`);
+    if (entry.expiredAt !== null) throw new HttpError(409, 'conflict', `candidate ${id} expired at ${entry.expiredAt}; an expired candidate is already recorded as not worked`);
+    if (!(await components.vault.dismissCandidate(entry.candidate.id, body.cause, new Date().toISOString()))) {
+      throw new HttpError(409, 'conflict', `candidate ${id} was admitted or dismissed before`);
+    }
+    const after = await components.vault.readCandidate(entry.candidate.id);
+    if (after?.candidate == null) throw new Error(`server: candidate ${id} is gone after its dismissal`);
+    return summary({ ...after, candidate: after.candidate });
+  };
+
   const route = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const url = new URL(req.url ?? '/', 'http://server.invalid');
     const parts = url.pathname.split('/').filter((p) => p !== '');
@@ -553,6 +587,11 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
     }
     const presented = digest(req.headers.authorization ?? '');
     if (!timingSafeEqual(presented, expected)) throw new HttpError(401, 'unauthorized', 'a valid local token is required');
+    if (parts[0] === 'intake' && parts.length === 3 && parts[2] === 'dismiss') {
+      if (method !== 'POST') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
+      send(res, 200, await dismissIntake(decodeURIComponent(parts[1] ?? ''), dismissBody(await readJson(req))));
+      return;
+    }
     if (parts[0] === 'intake' && parts.length <= 2) {
       if (method !== 'GET') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
       send(res, 200, parts.length === 1 ? await listIntake() : await readIntake(decodeURIComponent(parts[1] ?? '')));
