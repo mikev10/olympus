@@ -1,3 +1,17 @@
+# External review of R16, gemini, 2026-11-09
+
+The external review of R16, bug-fix intake, by the Gemini family. Triage: `2026-11-09-R16-bug-fix-intake-triage.md`.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini. A direct `generateContent` API call to `gemini-3.1-pro-preview`, offering no tools. `cleanRoom` is `null` because an API call loads no local configuration. Ingestion 105,550 input tokens against a floor of 73,553; all four markers echoed.
+- **Cross-family agreement:** it raised no findings; Codex's three are its own.
+- **Date:** 2026-11-09
+- **Bundle:** `2026-11-09-R16-bug-fix-intake-review-bundle.txt`, SHA-256 `25983451d371591ade6b3b37d51217a3fd7e13890b0a1ca2c9916ad29857a021` (the manifest's `bundleSha256`), base `6118b1e` (`reviewed/R24`), head `770ae1c` (R16's unit commit, before review fixes). Every new file in full and every modified file as a function-context diff; `docs/decisions.md`, `docs/reviews/`, `docs/plan/`, and `pnpm-lock.yaml` excluded. Prompt: `2026-11-09-R16-bug-fix-intake-review-prompt.txt`.
+- **Prior context and lookups:** it disclosed no prior context and no external lookups. A self-report, not independently verifiable.
+- **Coverage, and any gap:** only items 6 (every mechanism assessed sound) and 7 (framing judged correct) were answered. Items 1–5 came back empty, with no section of their own; that silence is recorded here, not read as clearance.
+- **Citations:** it cited files but no line numbers.
+
 BASE: 6118b1e
 HEAD: 770ae1c
 packages/vault/src/types.ts

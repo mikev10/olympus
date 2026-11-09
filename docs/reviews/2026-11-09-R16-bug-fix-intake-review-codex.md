@@ -1,3 +1,17 @@
+# External review of R16, codex, 2026-11-09
+
+The external review of R16, bug-fix intake, by the Codex family. Triage: `2026-11-09-R16-bug-fix-intake-triage.md`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex. A headless `codex exec` run under a read-only sandbox, with recorded approval policy `never`, in an empty scratch working directory and a scratch config home holding only `auth.json`, with an environment of `CODEX_HOME` alone. The pre-run listing of both is the manifest's `cleanRoom`. Ingestion 107,360 input tokens against a floor of 73,553; all four markers echoed.
+- **Cross-family agreement:** none. Gemini raised no findings, so all three below were raised by Codex alone.
+- **Date:** 2026-11-09
+- **Bundle:** `2026-11-09-R16-bug-fix-intake-review-bundle.txt`, SHA-256 `25983451d371591ade6b3b37d51217a3fd7e13890b0a1ca2c9916ad29857a021` (the manifest's `bundleSha256`), base `6118b1e` (`reviewed/R24`), head `770ae1c` (R16's unit commit, before review fixes). Every new file in full and every modified file as a function-context diff; `docs/decisions.md`, `docs/reviews/`, `docs/plan/`, and `pnpm-lock.yaml` excluded. Prompt: `2026-11-09-R16-bug-fix-intake-review-prompt.txt`.
+- **Prior context and lookups:** it disclosed no prior context and no external lookups, and said a local file-listing attempt was blocked. A self-report, not independently verifiable.
+- **Coverage, and any gap:** items 1 (codex-1, codex-2), 6, and 7 (codex-3) were answered; for items 2–5 it reported finding nothing, and said the base-run execution code was not in the bundle.
+- **Citations:** line numbers are positions in the bundle's new side of each diff, not the repository; they are hints.
+
 BASE: 6118b1e  
 HEAD: 770ae1c  
 packages/vault/src/types.ts  
