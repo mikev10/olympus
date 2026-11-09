@@ -6,7 +6,7 @@
  * says so. The store is a Map that dies with the process. P1 replaces this
  * file.
  */
-import { seatBeforeR9 } from '../local/vault.js';
+import { repoInstructionsProblem, seatBeforeR9 } from '../local/vault.js';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -133,6 +133,8 @@ export class StubVault implements Vault {
     if (!Array.isArray(a.roles)) {
       return Promise.reject(new Error(`StubVault: the admission record of run ${runId} does not pin its roles; nothing was stored`));
     }
+    const instructions = repoInstructionsProblem(a.repoInstructions);
+    if (instructions !== undefined) return Promise.reject(new Error(`StubVault: the admission record of run ${runId}: ${instructions}; nothing was stored`));
     if (this.admitted.has(runId)) {
       return Promise.reject(new Error(`StubVault: run ${runId} already has an admission record; nothing was stored`));
     }

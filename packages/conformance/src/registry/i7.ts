@@ -11,6 +11,7 @@ import { R13B_I7 } from './nightly-review.js';
 import { R22_I7 } from './triggers.js';
 import { R19_ASSERTIONS } from './drafting.js';
 import { TELEMETRY_EXPORTS_NO_TEXT } from './telemetry.js';
+import { R24_I7 } from './repo-instructions.js';
 
 /**
  * The typed lint rules I7 depends on. The type system stops UntrustedText
@@ -39,6 +40,8 @@ const CAST_ALLOWLIST: readonly string[] = ['packages/triggers/src/github.ts'];
 export const I7: InvariantEntry = {
   title: INVARIANTS.I7,
   assertions: [
+    // R24: the target repository's instructions as granted context.
+    ...R24_I7,
     // R22: the trigger framework, which registers the three entries M2 owed.
     ...R22_I7,
     // R13a: the nightly checks that call no model.

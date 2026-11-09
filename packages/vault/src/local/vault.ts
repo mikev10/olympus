@@ -918,6 +918,9 @@ export class LocalVault implements Vault {
     // The roles a run's seats run under cannot be supplied later, so a record without them is refused (D-A-RC-01).
     const roles = rolesProblem(a.roles);
     if (roles !== undefined) throw new Error(`LocalVault: the admission record of run ${a.run.id} does not pin its roles: ${roles}; nothing was stored`);
+    // What a run's seats are given of the target's instructions is fixed here, so a set that does not verify is refused (A-R24-03).
+    const instructions = repoInstructionsProblem(a.repoInstructions);
+    if (instructions !== undefined) throw new Error(`LocalVault: the admission record of run ${a.run.id}: ${instructions}; nothing was stored`);
     const runId = a.run.id;
     const bytes = encode(a);
     if (!(await createExclusive(join(runDir(this.#store, runId), ADMISSION_FILE), bytes))) {
@@ -1368,4 +1371,39 @@ export class LocalVault implements Vault {
     }
     return stored;
   }
+}
+
+/**
+ * The one check every reader of an admission record's repository
+ * instructions makes (A-R24-03): each file names a path in the fixed list,
+ * once, and its hash is the hash of its text, so the record holds exactly the
+ * versions it names and a resume delivers what admission read (I3, I5).
+ */
+
+/** A path the reader can list: the two root files, a rule, or a skill's `SKILL.md`. */
+const LISTED = /^(?:CLAUDE\.md|AGENTS\.md|\.claude\/rules\/[^/]+\.md|\.(?:claude|agents)\/skills\/[^/]+\/SKILL\.md)$/u;
+
+/** Whether `path` is one the fixed list can name. */
+export function isRepoInstructionPath(path: string): boolean {
+  return LISTED.test(path) && !path.split('/').some((part) => part === '.' || part === '..');
+}
+
+/** Why `value` is not a repository instruction set a record can hold, or undefined. Absent is the empty set. */
+export function repoInstructionsProblem(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) return 'its repository instructions are not a list';
+  const seen = new Set<string>();
+  for (const file of value as unknown[]) {
+    const f = (typeof file === 'object' && file !== null ? file : {}) as Record<string, unknown>;
+    if (typeof f.path !== 'string' || typeof f.sha256 !== 'string' || typeof f.text !== 'string' || typeof f.frontMatterDropped !== 'boolean') {
+      return 'a repository instruction file carries no path, hash, text, and front-matter mark';
+    }
+    if (!isRepoInstructionPath(f.path)) return `'${f.path}' is not a path the repository instruction list names`;
+    if (seen.has(f.path)) return `repository instruction file '${f.path}' is listed twice`;
+    seen.add(f.path);
+    if (createHash('sha256').update(f.text, 'utf8').digest('hex') !== f.sha256) {
+      return `repository instruction file '${f.path}': its hash is not the hash of its text`;
+    }
+  }
+  return undefined;
 }

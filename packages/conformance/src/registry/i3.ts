@@ -21,6 +21,7 @@ import { R20_I3 } from './roles.js';
 import { R23_I3 } from './workspace-instructions.js';
 import { R19_ASSERTIONS } from './drafting.js';
 import { R8B_I3 } from './observe-plan.js';
+import { R24_I3 } from './repo-instructions.js';
 
 /** The entry for `path`, or a failure naming what the manifest holds instead. */
 function entryFor(entries: readonly LockEntry[], path: string): LockEntry {
@@ -46,6 +47,8 @@ function soleTampered(verdict: LockVerdict, context: string): { path: string; ex
 export const I3: InvariantEntry = {
   title: INVARIANTS.I3,
   assertions: [
+    // R24: the target repository's instructions as granted context.
+    ...R24_I3,
     // R20: the role compiler.
     // R19: drafting at spec and test-design.
     ...R19_ASSERTIONS.I3,

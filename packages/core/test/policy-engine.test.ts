@@ -31,6 +31,7 @@ function scope(overrides: Partial<CapabilityScope> = {}): CapabilityScope {
     budget: { maxTokens: 1000, maxCostUsd: 1, maxWallClockMs: 60_000 },
     sensitiveGrants: [],
     narrowed: null,
+    repoInstructions: false,
     ...overrides,
   };
 }
@@ -209,7 +210,7 @@ describe('default deny: an ungranted role or station has nothing (I4)', () => {
     expect(outcome.scope.sensitiveGrants).toStrictEqual([]);
     expect(outcome.scope.narrowed).toBeNull();
     expect(Object.keys(outcome.scope).sort()).toStrictEqual([
-      'autonomyCeiling', 'budget', 'escalation', 'narrowed', 'network', 'sensitiveGrants', 'stations', 'tier', 'tierByStation', 'tools', 'triggerKinds', 'writableGlobs',
+      'autonomyCeiling', 'budget', 'escalation', 'narrowed', 'network', 'repoInstructions', 'sensitiveGrants', 'stations', 'tier', 'tierByStation', 'tools', 'triggerKinds', 'writableGlobs',
     ]);
   });
 

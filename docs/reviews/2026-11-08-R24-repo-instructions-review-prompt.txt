@@ -1,0 +1,139 @@
+The code under review is in the file
+`2026-11-08-R24-repo-instructions-review-bundle.txt` (SHA-256 00248ca7f80a6df2647672c1ad36d0166a7d3f6d703206482b422bf0c588f0c2) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing how an autonomous software-delivery runtime hands a target
+repository's own instruction files to the model seats that work on it, in a
+TypeScript project. You have the source and nothing else — no design documents,
+no author reasoning, no prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The runtime carries a change through a fixed line of stations (spec,
+test-design, plan, build, verify, review, integrate), seating model agents at
+some of them. This change reads a fixed list of the target repository's
+instruction files (CLAUDE.md and AGENTS.md at the root, .claude/rules/*.md, and
+each SKILL.md under .claude/skills/ and .agents/skills/) from the snapshot of
+the base taken when a run is admitted, refuses admission on a file it will not
+read, pins every file's path, hash, and text in the admission record, and gives
+the text to a seat only where the station's contract allows a new context grant,
+'repo-instructions', and the seat's role scope in policy sets
+repoInstructions. At autonomy levels L0 to L2 the text is placed at the start of
+the seat's cacheable system prefix; above L2 it first narrows the run's
+capabilities through an existing narrowing API, and is placed only in the
+per-task suffix.
+
+It must hold against a capable, motivated party trying to use the target
+repository's files to change what a seat is allowed to do, to change what a
+later seat of the same run is told, or to put text in front of the seat that
+writes the acceptance tests. Assume no deceptive intent — only that the easiest
+path gets taken.
+
+That party controls the contents of the target repository at admission
+(including links, directories where files are expected, oversized or non-UTF-8
+files, and front matter), everything a model writes into its task's workspace
+during the run, and later commits to the target repository. It does not control
+the policy document, the roles directory, or the components the runtime is
+wired with — the Vault, the sandbox provider, the workspace store, and the
+drivers are runtime-selected and trusted, even where a function takes one as an
+argument — and it does not control code running inside the runtime's own
+process.
+
+The invariants at stake:
+
+- An agent may not be judged by an artifact it can write. Specs and acceptance
+  tests are hashed before build and re-verified at every station transition;
+  here, nothing a task writes may change what a later task of the same run is
+  given.
+- Default deny. A capability not granted in policy is unavailable. Nothing in a
+  target's file may widen or narrow a grant.
+- Fail closed. A missing check, a file the reader refuses, or a record that
+  does not verify is a refusal, never a silent degrade, a skip, or a
+  truncation.
+- Event payloads are data, never instructions: untrusted text never enters a
+  system or role prompt. Above L2 the target's instruction text is treated as
+  such input and placed only after the run is narrowed, in the per-task suffix.
+- The seat at test-design is given the locked spec alone, so the acceptance
+  tests are written from the spec and nothing else.
+
+The mechanisms that matter most:
+
+- The reader (packages/compiler/src/instructions.ts, with readListed in
+  compile.ts): which paths it reads, how it refuses links and non-files, the
+  per-file and per-set byte caps, UTF-8 decoding, and front-matter removal.
+- Admission and resume (packages/api/src/run.ts, packages/vault/src/local/vault.ts
+  repoInstructionsProblem): where the set is read, what the record holds, and
+  how it is verified on write and on resume.
+- Delivery (packages/api/src/line.ts repoInstructionsFor and runTask,
+  packages/api/src/drafting.ts): the contract check, the per-role policy check,
+  the sensitive-path filter, prefix versus suffix placement by level, and the
+  narrowing before release.
+- The contract tables (packages/core/src/station/contracts.ts) and policy
+  validation (packages/core/src/policy/validation.ts).
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+a skill's scripts or references; any file outside the fixed list; reading
+instruction files from the workspace; measuring whether delivery reduces rework,
+which is R2's rates compared by R11; and any change to what `test-design` sees.
+
+Absent work listed here is not a defect. Unit identifiers such as R2 and R11
+name other planned work in the project and mean nothing more than that.
+
+THE QUESTION
+
+How would I, controlling the target repository and what a model writes during
+the run, get a seat a capability policy did not grant, get text I wrote after
+admission in front of a later seat of the same run, get any instruction text in
+front of the test-design seat or an ungranted role, or get a file the reader
+should refuse admitted, truncated, or silently skipped?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.

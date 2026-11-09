@@ -202,6 +202,12 @@ export type AdmissionRefusal =
   | { readonly reason: 'roles-refused'; readonly refused: ReadonlyArray<{ readonly entry: string; readonly code: string }> }
   /** A seat with no role: every role the task graph names, and `reviewer`, that the directory does not define (D-A-RC-06). */
   | { readonly reason: 'role-undefined'; readonly roles: readonly RoleId[] }
+  /**
+   * The base's repository instructions were refused: each file the reader
+   * refused, by its path in the base and the reader's code, and not its
+   * message (A-R24-04, D-R24-05).
+   */
+  | { readonly reason: 'instructions-refused'; readonly refused: ReadonlyArray<{ readonly path: string; readonly code: string }> }
   | { readonly reason: 'refused'; readonly at: StationId; readonly refusal: StationRefusal }
   /** The trigger policy refused the run's trigger, for any kind, `human` included (A-R22-05, D-R22-06). */
   | { readonly reason: 'trigger-refused'; readonly cause: TriggerAdmissionCause }
@@ -579,6 +585,21 @@ export interface DraftLockRecord {
  * admission; the station that locks it refuses a lock whose hash differs,
  * so what a station locks is what was admitted (I3).
  */
+/**
+ * One of the target repository's instruction files, as admission read it from
+ * the base (A-R24-03). `text` is the whole file as read, and `sha256` the
+ * hash of its bytes, so a reader checks one against the other. What a seat is
+ * given is `text` with its front matter dropped, never read (D-R24-04).
+ */
+export interface RepoInstructionFile {
+  /** Its path in the base, `/`-separated: `CLAUDE.md`, `AGENTS.md`, `.claude/rules/<name>.md`, or `<.claude|.agents>/skills/<name>/SKILL.md`. */
+  readonly path: string;
+  readonly sha256: string;
+  readonly text: string;
+  /** Whether the file opened with front matter, which was dropped and not read. */
+  readonly frontMatterDropped: boolean;
+}
+
 export interface AdmissionRecord {
   readonly run: Run;
   readonly policy: Policy;
@@ -635,6 +656,14 @@ export interface AdmissionRecord {
    * absent on a record written before R22.
    */
   readonly candidate?: { readonly id: CandidateId; readonly decisionSha256: string } | null;
+  /**
+   * The target repository's instruction files, read from the base snapshot
+   * at admission, in the reader's fixed order (A-R24-03). A run's seats
+   * receive these and only these: a later commit changes later runs, never
+   * this one (I3). Absent on a record written before R24, which is read as
+   * holding none.
+   */
+  readonly repoInstructions?: readonly RepoInstructionFile[];
 }
 
 /**

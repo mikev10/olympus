@@ -69,7 +69,7 @@ const DOCUMENT_KEYS: Readonly<Record<keyof PolicyDocument, true>> = {
 const SCOPE_KEYS: Readonly<Record<keyof CapabilityScope, true>> = {
   stations: true, writableGlobs: true, tools: true, network: true,
   tier: true, tierByStation: true, escalation: true, autonomyCeiling: true, triggerKinds: true, budget: true,
-  sensitiveGrants: true, narrowed: true,
+  sensitiveGrants: true, narrowed: true, repoInstructions: true,
 };
 
 const NARROWED_KEYS: Readonly<Record<keyof NarrowedScope, true>> = { tools: true, network: true, autonomyCeiling: true };
@@ -445,9 +445,13 @@ function validateScope(value: unknown, path: string, defects: PolicyDefect[]): C
   const narrowed = !Object.hasOwn(record, 'narrowed') || record.narrowed === null
     ? null
     : validateNarrowed(record.narrowed, child(path, 'narrowed'), defects);
-  if (sensitiveGrants === undefined || narrowed === undefined) return undefined;
+  // Absent from a document written before R24: the role receives no repository instructions (A-R24-02, I4).
+  const repoInstructions = Object.hasOwn(record, 'repoInstructions')
+    ? read<boolean>(record, 'repoInstructions', path, 'true or false', (x): x is boolean => typeof x === 'boolean', defects)
+    : false;
+  if (sensitiveGrants === undefined || narrowed === undefined || repoInstructions === undefined) return undefined;
   const scope: CapabilityScope = {
-    stations, writableGlobs, tools, network, tier, tierByStation, escalation, autonomyCeiling, triggerKinds, budget, sensitiveGrants, narrowed,
+    stations, writableGlobs, tools, network, tier, tierByStation, escalation, autonomyCeiling, triggerKinds, budget, sensitiveGrants, narrowed, repoInstructions,
   };
   const before = defects.length;
   tierDefects(scope, path, defects);

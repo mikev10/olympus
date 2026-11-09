@@ -75,6 +75,7 @@ function cloneScope(scope: CapabilityScope): CapabilityScope {
     triggerKinds: frozenCopy(scope.triggerKinds),
     budget: frozen({ ...scope.budget }),
     sensitiveGrants: frozenCopy(scope.sensitiveGrants),
+    repoInstructions: scope.repoInstructions,
     narrowed: scope.narrowed === null ? null : frozen({
       tools: frozenCopy(scope.narrowed.tools),
       network: frozen(scope.narrowed.network.egress === 'none' ? { egress: 'none' as const } : { egress: frozenCopy(scope.narrowed.network.egress) }),

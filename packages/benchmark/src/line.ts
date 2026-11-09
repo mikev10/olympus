@@ -166,6 +166,7 @@ export function benchPolicyDocument(repo: RepoPolicy): PolicyDocument {
     budget: { maxTokens: 1000, maxCostUsd: 1, maxWallClockMs: 600_000 },
     sensitiveGrants: [],
     narrowed: null,
+    repoInstructions: false,
   });
   const approvals: Partial<Record<ApprovalKey, ApprovalOutcome>> = Object.fromEntries(
     ['intake', 'spec', 'test-design', 'plan', 'build', 'verify', 'review', 'integrate'].map((station) => [`${station}:1`, 'auto']),

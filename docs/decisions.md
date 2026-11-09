@@ -8550,3 +8550,217 @@ answer.
 **Gate paths:** the three `types.ts` files above and `packages/conformance/`
 are protected, so R24's pull request carries `gate-change` and its squash
 body carries `Gate-Change: acknowledged`.
+
+## R24: Repository instructions as granted context
+
+### D-R24-01: the boundary R24 was started on
+
+- **Unit:** R24, repository instructions as granted context
+  (`docs/plan/DECOMPOSITION.md`, as amended by #106, D-A-RI-02 to D-A-RI-04,
+  A-R24-01 to A-R24-04). Depends on P1, P4, R10, R20, and R23, each merged
+  into `v2` and tagged (`reviewed/P1`, `reviewed/P4`, `reviewed/R10`,
+  `reviewed/R20`, `reviewed/R23`). Started on `v2` at e2132d1.
+- **Deliverables:**
+  - A-R24-01: `ContextGrant` gains `'repo-instructions'`; the contracts allow
+    it at `spec` (drafter and critic), `plan`, `build`, and `review`; the
+    table checks refuse it at `test-design`, drafter and critic;
+  - A-R24-02: `CapabilityScope.repoInstructions: boolean`, `false` when absent
+    from a document;
+  - A-R24-03: `AdmissionRecord.repoInstructions`, each file's path, SHA-256,
+    and whether its front matter was dropped; a record without it is read as
+    holding an empty set;
+  - A-R24-04: the admission refusal `instructions-refused`, naming each file,
+    and its row in P14's decision table;
+  - a reader in `compiler` applying R20's rules to the fixed path list, read
+    from the base snapshot admission takes;
+  - delivery in the line: first in `stablePrefix` at L0 to L2; through
+    `narrowRun` into the suffix above L2.
+- **Out of scope (verbatim):** a skill's scripts or references; any file
+  outside the fixed list; reading instruction files from the workspace;
+  measuring whether delivery reduces rework, which is R2's rates compared by
+  R11; and any change to what `test-design` sees.
+- **Acceptance:** `pnpm typecheck`, `pnpm lint`, `pnpm conformance`, and
+  `pnpm test` pass, and the report names one assertion for each of the eight
+  clauses of R24's conformance, each failing when its check is deleted.
+- **Invariants touched:** I3, an agent is never judged by what it can write:
+  the set comes from the base snapshot and is pinned in the admission record
+  before any driver call, so nothing a task writes changes what a later task
+  receives. I4, default deny: no seat receives the set unless its station's
+  contract allows the grant and its role's scope sets `repoInstructions`, and
+  nothing in a target file widens or narrows a grant. I5, fail closed: a file
+  the reader refuses refuses admission and is named, and a resumed record
+  whose text no longer hashes to its recorded hash refuses the resume. I7,
+  payloads are data: above L2 the set is input `narrowRun` released, placed
+  only in the variable suffix. **Pending registry entries owed:** none
+  (`grep -rn "R24" packages/conformance/src` finds none).
+- **Assumptions, each verified:**
+  - "The base" is the snapshot admission takes of `req.workspace`
+    (`api/src/run.ts:1015`, `snapshotBase`), from which every task tree is
+    built; a task writes only its own attempt copy (`line.ts:1327-1331`).
+    Reading from `basePath(workspaces, runId)` after the snapshot is reading
+    from the base, never from a workspace.
+  - The snapshot copies a link as a link (`api/src/workspace.ts:335`, `:372`),
+    so the reader sees a link that was in the target and can refuse it.
+  - Every driver renders `role.instructions`, then `stablePrefix`, as one
+    system text (`drivers/claude-code/src/driver.ts:741`,
+    `drivers/codex/src/driver.ts:483`,
+    `drivers/openai-compatible/src/driver.ts:344`). A part placed first in
+    `stablePrefix` is therefore after the role and before the granted
+    context.
+  - `grantedContext` emits offered parts in the contract's order and only
+    those the contract allows (`core/src/station/machine.ts:297-312`); the
+    line offers parts per seat at build (`line.ts:1336`), review
+    (`line.ts:1723`), the drafter (`drafting.ts:378`), and the critic
+    (`drafting.ts:692`).
+  - `plan` is a runtime station: no seat runs there (`isAgentStation`,
+    `core/src/station/contracts.ts:61`). Allowing the grant there delivers
+    nothing until a plan seat exists; it is allowed because A-R24-01 says
+    so, and it costs nothing.
+  - The security seat's contract is the review contract cut to
+    `SECURITY_SEAT_GRANTS` (`contracts.ts:120-130`). A-R24-01 does not add
+    the grant to that list, so the security seat receives nothing; see
+    D-R24-07.
+  - `contractTableProblems` already refuses any `test-design` contract
+    granted more than `locked-spec` (`contracts.ts:311`), and
+    `criticContractProblems` any test critic granted more than its three
+    (`contracts.ts:368`); `grantedContext` throws on the first
+    (`machine.ts:302`).
+  - `narrowRun` records, commits, then releases, and throws when a seated
+    role declares no narrowed scope (`line.ts:898-925`); `runTask` places a
+    released input in the suffix only (`line.ts:989`). It takes one input.
+  - **No run above L2 can be admitted in M2.** Admission refuses L3 while the
+    adapter set lacks a control, and no adapter set provides mutation
+    (`run.ts:1069`, `admissionRefusal`; asserted by
+    `conformance/src/registry/composition.ts:78-98`). The suffix path is
+    therefore reached only through a resume of a record at L3; see D-R24-09.
+  - A model-facing tree omits each sensitive class the seat's role is not
+    granted (`line.ts:845-857`, `withheldGlobs`). The set reaches a seat as
+    text, past every tree, so the same globs have to filter it; see D-R24-06.
+  - A role scope literal is built in 15 files (`grep -rln sensitiveGrants
+    packages --include=*.ts`), each of which gains the new field.
+- **Where the code differs from the entry:** `plan` has no seat, and the
+  security seat holds a cut contract (both above); and a run above L2 exists
+  only as a record until M3 can admit one.
+
+### D-R24-02: the reader lives in `compiler`, beside R20's
+
+- **Ambiguous:** the entry says to apply R20's compiler rules and names no
+  package.
+- **Chosen:** `compiler` exports `readRepoInstructions(base)`, sharing the
+  capped, link-refusing, identity-checked read that `compileRoles` uses, so
+  the two cannot drift.
+- **Rejected:** a copy of the read in `api`, a second implementation of the
+  same rules.
+- **Reverse:** move the function; its one caller is admission.
+
+### D-R24-03: the caps, and what is refused
+
+- **Ambiguous:** the entry names a byte cap and does not size it, and is
+  silent on the set's total, on empty files, and on links in the directories
+  walked.
+- **Chosen:** each file at most `ROLE_FILE_MAX_BYTES` (32 KiB, R20's cap), and
+  the whole set at most 36 KiB as rendered, each file costing its bytes, its
+  path, and a 16-byte heading allowance, refused as `set-too-large` naming
+  the file that crossed it, with nothing read after it. (Review fix codex-1,
+  gemini-2: the cap first counted content bytes alone, so a thousand empty
+  files passed it; 36 KiB lets one file at the file cap fit with its heading.) The set shares the Claude Code driver's one system argv
+  element with a role of up to 32 KiB and the granted context, and Linux
+  refuses one past 128 KiB (D-R20-03). A link anywhere on a listed path (the
+  file, `.claude`, `.claude/rules`, a skills directory or one of its
+  entries) is refused as `not-regular`, as is a listed path that is not a
+  file. An absent path holds nothing. An empty file is recorded and
+  delivered as it is, since it grants nothing and hides nothing.
+- **Rejected:** no total cap, which lets a target with many skills make
+  every task's argv fail at the driver rather than at admission (I5 puts the
+  refusal first); refusing an empty file, which refuses a target for a file
+  that says nothing.
+- **Reverse:** change `REPO_INSTRUCTIONS_MAX_BYTES` and the figure in the
+  conformance.
+
+### D-R24-04: front matter is dropped from every file, and the record keeps the text
+
+- **Ambiguous:** the entry drops a skill's front matter; `.claude/rules`
+  files carry front matter too (a `paths:` list). A-R24-03 lists path and
+  hash without saying where the text a resume delivers comes from.
+- **Chosen:** front matter, a first line `---` up to the next line `---`, is
+  dropped from every file in the set, and each file it was dropped from is
+  marked. The record holds each file's full text as read, so its hash is
+  checked against its text on every read, as a role's is (D-A-RC-01), and a
+  resume delivers exactly what admission read even after a locked draft
+  rewrites the base snapshot (R19).
+- **Rejected:** dropping it from skills alone, which delivers a rule's
+  metadata as if it were an instruction; re-reading the base on resume,
+  which reads a tree a locked draft may have rewritten.
+- **Reverse:** drop the `text` field and re-read from the base, checking each
+  hash.
+
+### D-R24-05: the refusal is its own reason, as roles' is
+
+- **Chosen:** `instructions-refused`, carrying each refused file's path, code,
+  and message in the outcome, and path and code alone in the P14 record, as
+  `roles-refused` does (D-P14-07). Its P14 row is added.
+- **Rejected:** an `invalid-request` problem: the request is valid, and the
+  base is what was refused.
+- **Reverse:** fold it into `invalid-request` under path `base`.
+
+### D-R24-06: a sensitive class withheld from a seat's tree is withheld from its set
+
+- **Found:** D-A-TR-04 leaves a sensitive path out of every tree whose role
+  is not granted it. The set is text, and reaches the seat past the tree.
+- **Chosen:** a seat is delivered each file of the set that no withheld glob
+  of its tree's role matches. The record still holds every file read.
+- **Rejected:** refusing admission when a sensitive class matches an
+  instruction path, as a locked artifact is (`run.ts:746`): an artifact
+  reaches every seat, while the set reaches only granted ones, so a target
+  that classifies its instructions as sensitive can still grant them to the
+  roles it chooses.
+- **Reverse:** drop the filter; the trees still omit the files.
+
+### D-R24-07: the security seat is not given the set
+
+- **Chosen:** `SECURITY_SEAT_GRANTS` is unchanged. A-R24-01 names stations,
+  and the security seat's contract is cut from review's to exactly what a
+  security judgement needs (R9).
+- **Reverse:** add the grant to `SECURITY_SEAT_GRANTS`.
+
+### D-R24-08: placement is by the admitted level, and every granted seat narrows
+
+- **Chosen:** at a `run.requestedLevel` of L0 to L2 the set is offered as the
+  first part in the contract's order, so it renders first in
+  `stablePrefix`. Above L2, each seat granted it calls
+  `narrowRun(ctx, 'repo-instructions', …)` and `runTask` places the released
+  text in the suffix. `runTask` takes a list of released inputs, since a
+  build task can carry another source's input as well. The level is the
+  admitted one, so placement does not move mid-run when a narrowing lowers
+  the exit level.
+- **Rejected:** the narrowed level, which would move the set from the suffix
+  into the prefix of a run narrowed by its author's own text.
+- **Reverse:** read `levelOf(requested, narrowed)` instead.
+
+### D-R24-09: the above-L2 clause is the api package's test of the line itself
+
+- **Found:** no L3 run can be admitted in M2 (D-R24-01). A resume of a record
+  presented at L3 was tried first and refused, correctly: a run above L1 is
+  refused on any component the graph builder cannot attest, a stub or a
+  wrapper that dropped a stub's declaration (D-I1a-06). Above L1 means Docker
+  and a paid model, and above L2 controls no adapter set has.
+- **Chosen:** an external assertion over `@olympus-ai/api
+  test/paid/repo-instructions.test.ts`. It sits in the paid suite because
+  that is the api package's one reported suite: only `vitest.config.paid.ts`
+  runs the conformance reporter, so a free test elsewhere is never reconciled.
+  It calls no model, and CI runs it under `run-driver` with the line's paid
+  test. It admits a real run at L1, builds the
+  context a resume builds from its record with the admitted level read as
+  L3, and calls the line's own `repoInstructionsFor` and `runTask`. It
+  asserts the narrowing decision and the committed state before any driver
+  call, the set in the suffix and not the prefix, the same set offered as
+  granted context at L2, and a run with an unnarrowable seat stopping with
+  the set withheld. Setting the placement test to `<= 3` fails it.
+- **Rejected:** exporting `runTask` and the line's context from `api`'s
+  entry, which lets any caller make a driver call outside admission; a second
+  reporter on the free config, which overwrites the paid suite's report;
+  hiding the stubs' declarations to get past attestation,
+  which weakens D-I1a-06's check to meet a criterion (rule 6); a placement
+  function asserted alone, which passes when the line stops calling it (I8).
+- **Reverse:** drive the clause through a real L3 admission once M3 can make
+  one, and retire the external assertion.
