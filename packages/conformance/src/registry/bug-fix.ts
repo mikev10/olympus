@@ -283,6 +283,30 @@ const RUN_TEMPLATE_IS_GRANTED: LocalAssertion = runtime({
       const outcome = await admitRun(await bugRequest(r, { policy, candidate }));
       names(problemsOf(outcome, 'a bug fix from an intake-candidate candidate'), 'template', 'not-the-candidates', 'a bug fix from an intake-candidate candidate');
     });
+    // Through POST /runs: a run from a bug-fix candidate names no template and takes the candidate's, so the
+    // route reads the three parts without one, and admission goes on to the cost it asks a person to approve (codex-2).
+    await withLine('r16-http-inherit-', async (rig) => {
+      const { createApiServer } = await api();
+      const policy = await bugFixPolicy([]);
+      const candidate = await reportCandidate(rig, policy);
+      const policyFile = join(rig.dirs.artifacts, '..', 'policy.yaml');
+      await writeFile(policyFile, JSON.stringify(policy));
+      const r = await drafting(rig);
+      const server = createApiServer({ components: await r.components(), token: TOKEN, principal: 'conformance', policyFile, rolesDirectory: rig.roles, rubricsDirectory: join(rig.roles, '..', 'rubrics'), secrets: SECRETS });
+      const address = await server.listen(0, '127.0.0.1');
+      try {
+        const { from: _from, template: _template, ...parts } = BUG_INTENT;
+        const res = await fetch(`${address}/runs`, {
+          method: 'POST',
+          headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+          body: JSON.stringify({ workspace: rig.dirs.artifacts, baseCommit: '0', requestedLevel: 1, artifacts: artifactsFor(true, true), approvedCostUsd: null, candidate, intent: parts }),
+        });
+        const body = await res.json() as { refusal?: { reason?: string } };
+        if (res.status !== 422 || body.refusal?.reason !== 'cost-unapproved') throw new Error(`R16: a run from a bug-fix candidate through POST /runs, naming no template, answered ${String(res.status)} ${JSON.stringify(body)}, not the cost to approve`);
+      } finally {
+        await server.close();
+      }
+    });
   },
 });
 

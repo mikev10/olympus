@@ -9060,3 +9060,16 @@ supplied-spec and supplied-reproduction refusals
 (`I7.bug-fix-run-sends-no-report-text`). The absence of report text in every
 request is a property, not a check, so it has no single mutant: the assertion
 seats a stub in every seat and fails on any marker, body, or field byte.
+
+### D-R16-10: POST /runs reads a three-part intent without a template (review fix, codex-2)
+
+- **Found:** `createBody` read an object intent only when the body named
+  `template: 'bug-fix'`, so a run from a bug-fix candidate, which takes the
+  candidate's template without naming it, was refused 400 before admission
+  could resolve the template.
+- **Chosen:** the route reads either shape whatever the body names, and
+  admission, which resolves the template, refuses a shape that does not fit:
+  a three-part intent in a run with no template is `not-applicable`.
+- **Rejected:** *requiring `template` beside `candidate`.* It restates what
+  the candidate already fixes, and a mismatch is already refused.
+- **Reverse:** read the object shape only beside `template: 'bug-fix'`.

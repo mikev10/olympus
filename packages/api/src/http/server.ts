@@ -151,8 +151,10 @@ function createBody(value: unknown): CreateRunBody {
   exactKeys(required, ['workspace', 'baseCommit', 'requestedLevel', 'artifacts', 'approvedCostUsd'], '');
   if (template !== undefined && !isRunTemplate(template)) throw new HttpError(400, 'bad-request', "template is a run template: 'bug-fix'");
   let bugFix: BugFixIntentBody | undefined;
-  if (template === 'bug-fix' && intent !== undefined) {
-    if (!isRecord(intent)) throw new HttpError(400, 'bad-request', 'a bug-fix intent is { steps, actual, expected }');
+  // The shape is read whatever the body names: a run from a candidate takes the candidate's template without naming it,
+  // so admission, which resolves the template, decides whether the shape fits (codex-2).
+  if (template === 'bug-fix' && intent !== undefined && !isRecord(intent)) throw new HttpError(400, 'bad-request', 'a bug-fix intent is { steps, actual, expected }');
+  if (isRecord(intent)) {
     exactKeys(intent, ['steps', 'actual', 'expected'], 'intent.');
     const { steps, actual, expected } = intent;
     // Each part is checked again at admission, which names a blank one; here only its type.
