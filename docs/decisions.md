@@ -8734,15 +8734,23 @@ body carries `Gate-Change: acknowledged`.
   into the prefix of a run narrowed by its author's own text.
 - **Reverse:** read `levelOf(requested, narrowed)` instead.
 
-### D-R24-09: the above-L2 clause runs through a resume of an L3 record
+### D-R24-09: the above-L2 clause is the api package's test of the line itself
 
-- **Found:** no L3 run can be admitted in M2 (D-R24-01).
-- **Chosen:** the assertion admits a run at L2, then resumes it through a
-  Vault whose admission read presents the same record at L3 with no
-  unavailable controls and a policy at cap 3, as a later milestone's
-  admission would write. It drives the real line. Deleting the suffix
-  placement or the narrowing fails it.
-- **Rejected:** a placement function asserted alone, which passes when the
-  line stops calling it (I8).
-- **Reverse:** replace the stand-in with a real L3 admission once one can be
-  made.
+- **Found:** no L3 run can be admitted in M2 (D-R24-01). A resume of a record
+  presented at L3 was tried first and refused, correctly: a run above L1 is
+  refused on any component the graph builder cannot attest, a stub or a
+  wrapper that dropped a stub's declaration (D-I1a-06). Above L1 means Docker
+  and a paid model, and above L2 controls no adapter set has.
+- **Chosen:** an external assertion over `@olympus-ai/api
+  test/repo-instructions.test.ts`. It admits a real run at L1, builds the
+  context a resume builds from its record with the admitted level read as
+  L3, and calls the line's own `repoInstructionsFor` and `runTask`. It
+  asserts the narrowing decision and the committed state before any driver
+  call, the set in the suffix and not the prefix, the same set offered as
+  granted context at L2, and a run with an unnarrowable seat stopping with
+  the set withheld. Setting the placement test to `<= 3` fails it.
+- **Rejected:** hiding the stubs' declarations to get past attestation,
+  which weakens D-I1a-06's check to meet a criterion (rule 6); a placement
+  function asserted alone, which passes when the line stops calling it (I8).
+- **Reverse:** drive the clause through a real L3 admission once M3 can make
+  one, and retire the external assertion.
