@@ -29,11 +29,22 @@ import { readListed, ROLE_FILE_MAX_BYTES } from './compile.js';
 export const REPO_INSTRUCTION_FILE_MAX_BYTES = ROLE_FILE_MAX_BYTES;
 
 /**
- * The most bytes the whole set may hold. The set shares the Claude Code
- * driver's one system argv element with a role of up to 32 KiB and the
- * granted context, and Linux refuses one past 128 KiB (D-R20-03, D-R24-03).
+ * The most bytes the whole set may take once rendered for a seat: each file's
+ * bytes, its path, and its heading. The set shares the Claude Code driver's
+ * one system argv element with a role of up to 32 KiB and the granted
+ * context, and Linux refuses one past 128 KiB (D-R20-03, D-R24-03). A path
+ * costs as much as content does, so a set of empty files is bounded too
+ * (codex-1). Above the file cap by enough that one file at that cap, with its
+ * heading, fits.
  */
-export const REPO_INSTRUCTIONS_MAX_BYTES = 32 * 1024;
+export const REPO_INSTRUCTIONS_MAX_BYTES = 36 * 1024;
+
+/**
+ * What a file adds to the rendered set beyond its bytes and its path: the
+ * heading's `--- ` and ` ---` and newline, and the blank line between files,
+ * rounded up so the rendering can grow a little without passing the cap.
+ */
+export const REPO_INSTRUCTION_HEADING_BYTES = 16;
 
 export type RepoInstructionCode = 'unreadable' | 'not-regular' | 'too-large' | 'not-utf8' | 'set-too-large';
 
@@ -94,6 +105,7 @@ export async function readRepoInstructions(base: string): Promise<RepoInstructio
   const files: ReadInstructionFile[] = [];
   const refusals: RepoInstructionRefusal[] = [];
   let total = 0;
+  /** Set once the set passes its cap: nothing more is read, so a base of a million files costs no more than one past the cap (gemini-2). */
   let overSet = false;
 
   /** A directory on a listed path: its entries, sorted, or none where it is absent or not a directory. A link is refused. */
@@ -119,6 +131,7 @@ export async function readRepoInstructions(base: string): Promise<RepoInstructio
 
   /** A listed file: read where present, refused where it is a link or anything but a regular file. */
   const file = async (rel: string): Promise<void> => {
+    if (overSet) return;
     const path = join(base, ...rel.split('/'));
     const at = await listed(path);
     if (at.kind === 'absent') return;
@@ -135,10 +148,10 @@ export async function readRepoInstructions(base: string): Promise<RepoInstructio
       refusals.push({ path: rel, code: read.code, message: read.message });
       return;
     }
-    total += read.bytes.byteLength;
-    if (total > REPO_INSTRUCTIONS_MAX_BYTES && !overSet) {
+    total += read.bytes.byteLength + Buffer.byteLength(rel, 'utf8') + REPO_INSTRUCTION_HEADING_BYTES;
+    if (total > REPO_INSTRUCTIONS_MAX_BYTES) {
       overSet = true;
-      refusals.push({ path: rel, code: 'set-too-large', message: `with '${rel}' the repository instructions are ${String(total)} bytes or more; the limit for the set is ${String(REPO_INSTRUCTIONS_MAX_BYTES)}` });
+      refusals.push({ path: rel, code: 'set-too-large', message: `with '${rel}' the repository instructions take ${String(total)} bytes or more as rendered, paths and headings included; the limit for the set is ${String(REPO_INSTRUCTIONS_MAX_BYTES)}` });
       return;
     }
     files.push({ path: rel, sha256: createHash('sha256').update(read.bytes).digest('hex'), text: read.text, frontMatterDropped: splitFrontMatter(read.text).dropped });
@@ -148,13 +161,17 @@ export async function readRepoInstructions(base: string): Promise<RepoInstructio
   await file('AGENTS.md');
   const claude = await directory('.claude');
   if (claude.includes('rules')) {
-    for (const name of await directory('.claude/rules')) if (name.endsWith('.md')) await file(`.claude/rules/${name}`);
+    for (const name of await directory('.claude/rules')) {
+      if (overSet) break;
+      if (name.endsWith('.md')) await file(`.claude/rules/${name}`);
+    }
   }
   const roots: string[] = [];
   if (claude.includes('skills')) roots.push('.claude/skills');
   if ((await directory('.agents')).includes('skills')) roots.push('.agents/skills');
   for (const root of roots) {
     for (const name of await directory(root)) {
+      if (overSet) break;
       const rel = `${root}/${name}`;
       const at = await listed(join(base, ...rel.split('/')));
       // A link in a skills directory is refused wherever it points; a file there is no skill, and holds nothing.

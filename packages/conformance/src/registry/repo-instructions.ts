@@ -214,7 +214,7 @@ async function refusesNaming(rig: LineRig, path: string, code: string, what: str
 export const REFUSED_FILE_REFUSES_ADMISSION: LocalAssertion = runtime({
   id: 'I5.refused-instruction-file-refuses-admission',
   title:
-    "an instruction file over the byte cap, one that is not UTF-8, a listed path that is a directory or a link, and a set over the set's cap each refuse admission as instructions-refused naming the file, with nothing driven or stored; a file at the cap is admitted (R24, A-R24-04)",
+    "an instruction file over the byte cap, one that is not UTF-8, a listed path that is a directory or a link, a set over the set's cap, and a set of empty files whose paths and headings alone pass that cap each refuse admission as instructions-refused naming the file, with nothing driven or stored; a file at the cap is admitted (R24, A-R24-04)",
   run: async () => {
     const { REPO_INSTRUCTION_FILE_MAX_BYTES, REPO_INSTRUCTIONS_MAX_BYTES } = await import('@olympus-ai/compiler');
     await withLine('r24-oversized-', async (rig) => {
@@ -239,6 +239,18 @@ export const REFUSED_FILE_REFUSES_ADMISSION: LocalAssertion = runtime({
       const half = 'y'.repeat(REPO_INSTRUCTIONS_MAX_BYTES / 2 + 1);
       await plant(rig.dirs.artifacts, { 'CLAUDE.md': half, 'AGENTS.md': half });
       await refusesNaming(rig, 'AGENTS.md', 'set-too-large', 'a set over its cap');
+    });
+    await withLine('r24-many-', async (rig) => {
+      // Empty files cost nothing in bytes and everything in headings: each path reaches the seat (codex-1).
+      const many: Record<string, string> = {};
+      for (let i = 0; i < 1000; i++) many[`.claude/rules/${String(i).padStart(4, '0')}${'n'.repeat(200)}.md`] = '';
+      await plant(rig.dirs.artifacts, many);
+      const { startRun } = await api();
+      const outcome = await startRun(await rig.request((await observed(rig)).components, { policy: await grantedPolicy() }));
+      if (outcome.ok || outcome.reason !== 'instructions-refused' || !outcome.refused.some((x) => x.code === 'set-too-large')) {
+        throw new Error(`R24: a thousand empty rules whose paths alone pass the set's cap were ${outcome.ok ? 'admitted' : `refused as ${outcome.reason}`}`);
+      }
+      if (outcome.refused.length !== 1) throw new Error(`R24: reading went on past the set's cap: ${String(outcome.refused.length)} refusals`);
     });
     await withLine('r24-at-cap-', async (rig) => {
       await plant(rig.dirs.artifacts, { 'CLAUDE.md': 'z'.repeat(REPO_INSTRUCTION_FILE_MAX_BYTES) });

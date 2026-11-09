@@ -16,6 +16,7 @@ export {
 export {
   readRepoInstructions,
   REPO_INSTRUCTION_FILE_MAX_BYTES,
+  REPO_INSTRUCTION_HEADING_BYTES,
   REPO_INSTRUCTIONS_MAX_BYTES,
   splitFrontMatter,
   type ReadInstructionFile,
