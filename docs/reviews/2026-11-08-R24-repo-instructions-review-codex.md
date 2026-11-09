@@ -1,3 +1,19 @@
+# External review of R24, codex, 2026-11-08
+
+The external Codex review of R24, repository instructions as granted context: the reader, admission and resume, delivery in the line, and the contract tables. The triage is `2026-11-08-R24-repo-instructions-triage.md`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex. A headless `codex exec` run under a read-only sandbox, with recorded approval policy `never`, in an empty scratch working directory and a scratch config home holding only `auth.json`, with an environment of `CODEX_HOME` alone. The pre-run listing of both is the manifest's `cleanRoom`.
+- **Cross-family agreement:** codex-1 (the set's cap does not bound what is rendered) was raised by Gemini too, as gemini-2 (reading continues past the cap). codex-2 and codex-3 were raised by Codex alone.
+- **Date:** 2026-11-08
+- **Bundle:** `2026-11-08-R24-repo-instructions-review-bundle.txt`, SHA-256 `00248ca7f80a6df2647672c1ad36d0166a7d3f6d703206482b422bf0c588f0c2` (the manifest's `bundleSha256`), base `0cc8f46` (`reviewed/R10`), head `2a6e69e` (the unit's tip when the review was requested). It held every new file in full and every modified file as a diff with each changed function whole; `docs/decisions.md`, `docs/reviews/`, `docs/plan/`, and `pnpm-lock.yaml` were excluded. Prompt: `2026-11-08-R24-repo-instructions-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated no prior project context and no external lookups, and that a local directory listing was blocked. A self-report, not independently verifiable.
+- **Coverage, and any gap:** items 1, 5, 6, and 7 answered; item 4 answered as none found; items 2 (tautological checks) and 3 (fails open) received no finding of their own.
+- **Citations:** line numbers refer to positions in the bundle, not the repository; each was located in the code during triage.
+
+---
+
 BASE: 0cc8f46
 HEAD: 2a6e69e
 packages/vault/src/types.ts

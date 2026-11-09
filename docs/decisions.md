@@ -8659,8 +8659,11 @@ body carries `Gate-Change: acknowledged`.
   silent on the set's total, on empty files, and on links in the directories
   walked.
 - **Chosen:** each file at most `ROLE_FILE_MAX_BYTES` (32 KiB, R20's cap), and
-  the whole set at most 32 KiB, refused as `set-too-large` naming the file
-  that crossed it. The set shares the Claude Code driver's one system argv
+  the whole set at most 36 KiB as rendered, each file costing its bytes, its
+  path, and a 16-byte heading allowance, refused as `set-too-large` naming
+  the file that crossed it, with nothing read after it. (Review fix codex-1,
+  gemini-2: the cap first counted content bytes alone, so a thousand empty
+  files passed it; 36 KiB lets one file at the file cap fit with its heading.) The set shares the Claude Code driver's one system argv
   element with a role of up to 32 KiB and the granted context, and Linux
   refuses one past 128 KiB (D-R20-03). A link anywhere on a listed path (the
   file, `.claude`, `.claude/rules`, a skills directory or one of its
