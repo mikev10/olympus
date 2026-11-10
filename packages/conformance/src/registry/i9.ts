@@ -3,6 +3,7 @@ import { moduleSpecifiers, packageProgram, propertyChains, sourceFilesOutsidePro
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { workspacePackages } from '../kit/workspace.js';
 import { assertApiRunsHeadless } from './headless.js';
+import { assertPackagedHostRuns } from './release.js';
 import { SANDBOX_OUTPUT_IS_BOUNDED } from './output.js';
 
 /**
@@ -73,6 +74,13 @@ export const I9: InvariantEntry = {
       id: 'I9.api-runs-headless',
       title: 'the API process, spawned with stdin closed and no TTY, serves a run from create to passed, and the CLI, a separate process given only a URL and a token, drives every step over HTTP',
       run: assertApiRunsHeadless,
+    }),
+    runtime({
+      id: 'I9.packaged-host-runs',
+      title: 'the packed packages install into an empty directory; factory-host, started from its installed bin, refuses an empty environment with every required variable in one list and no stack frame, and configured from the shipped examples listens headless; olympus-ai, from its own installed bin, reaches it over HTTP (R35)',
+      run: assertPackagedHostRuns,
+      // Builds, packs, installs, and composes the host, which builds the driver image on a cold Docker cache.
+      timeoutMs: 1_200_000,
     }),
     compileError({
       id: 'I9.no-dom-in-lib',
