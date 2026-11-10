@@ -13,7 +13,10 @@ import { writeFile } from 'node:fs/promises';
 
 const TOKEN = 't'.repeat(40);
 const COMMIT = 'a'.repeat(40);
-const REPORT = { commit: COMMIT, ceiling: { kind: 'scanned', level: 1, commit: COMMIT }, probes: [], skipped: [], collectedBy: 'runtime' } as unknown as ReadinessReport;
+// Typed, never cast, so a change to the report's contract breaks this fixture (review: gemini-5).
+const REPORT: ReadinessReport = {
+  commit: COMMIT, ceiling: { kind: 'scanned', level: 1, heldBy: { kind: 'scan-limit' }, commit: COMMIT }, probes: [], skipped: [], collectedBy: 'runtime',
+};
 
 let workspace: string;
 let server: ApiServer | undefined;
