@@ -82,3 +82,42 @@ describe('<command> --help', () => {
     expect(out.lines).toEqual([]);
   });
 });
+
+describe('what the table makes the parser send (review: codex-6)', () => {
+  test('create sends every flag the table names into the body, repeated flags as lists', async () => {
+    const bodies: unknown[] = [];
+    const out = io();
+    const capture = { ...out, fetch: ((_u: URL | string, init?: RequestInit) => { bodies.push(JSON.parse(init?.body as string)); return Promise.resolve(new Response('{}', { status: 201 })); }) as typeof fetch };
+    const args = [
+      'create', '--workspace', '/w', '--base-commit', 'c', '--level', '1',
+      '--spec', 'a.md', '--spec', 'b.md', '--tests', 't1.md', '--tests', 't2.md',
+      '--manifest', 'verify.json', '--graph', 'graph.json', '--security-part', 's.json', '--run-requirements', 'r.json', '--questions', 'q.json',
+      '--acceptance-manifest', 'am.json', '--approve-cost', '2.5', '--intent', 'why',
+      '--url', 'http://127.0.0.1:1', '--token', 't',
+    ];
+    expect(await runCli(args, capture)).toBe(0);
+    expect(bodies).toEqual([{
+      workspace: '/w', baseCommit: 'c', requestedLevel: 1,
+      artifacts: {
+        spec: ['a.md', 'b.md'], acceptanceTests: ['t1.md', 't2.md'], verificationManifest: 'verify.json', taskGraph: 'graph.json',
+        acceptanceManifest: 'am.json', specParts: { security: 's.json', runRequirements: 'r.json', questions: 'q.json' },
+      },
+      approvedCostUsd: 2.5, intent: 'why',
+    }]);
+  });
+
+  test('the drafting flags send draft, and approve, reject, and outcomes send what they were given', async () => {
+    const sent: Array<{ url: string; body: unknown }> = [];
+    const out = io();
+    const capture = { ...out, fetch: ((u: URL | string, init?: RequestInit) => { sent.push({ url: String(u), body: init?.body === undefined ? null : JSON.parse(init.body as string) }); return Promise.resolve(new Response('{}', { status: 200 })); }) as typeof fetch };
+    const target = ['--url', 'http://127.0.0.1:1', '--token', 't'];
+    await runCli(['create', '--workspace', '/w', '--base-commit', 'c', '--level', '1', '--draft-spec', '--draft-tests', '--intent', 'i', '--manifest', 'm', '--graph', 'g', '--run-requirements', 'r', ...target], capture);
+    await runCli(['approve', 'run-1', 'spec:1', '--draft', 'h', ...target], capture);
+    await runCli(['reject', 'run-1', 'test-design:1', '--draft', 'h', '--reason', 'not-runnable', '--notes', 'n', ...target], capture);
+    await runCli(['outcomes', '--from', '2026-01-01', '--to', '2026-02-01', ...target], capture);
+    expect(sent[0]?.body).toMatchObject({ artifacts: { spec: 'draft', acceptanceTests: 'draft' }, intent: 'i' });
+    expect(sent[1]).toEqual({ url: 'http://127.0.0.1:1/runs/run-1/approve', body: { key: 'spec:1', draft: 'h' } });
+    expect(sent[2]).toEqual({ url: 'http://127.0.0.1:1/runs/run-1/reject', body: { key: 'test-design:1', draft: 'h', notes: 'n', reason: 'not-runnable' } });
+    expect(sent[3]?.url).toBe('http://127.0.0.1:1/outcomes?from=2026-01-01&to=2026-02-01');
+  });
+});
