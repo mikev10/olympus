@@ -9166,3 +9166,144 @@ three open questions on 2026-11-10, each the recommended answer.
 - **A-R29-01:** `AdapterSet` names its dependency trees and its installer, so
   D-R15-05's rule and R34's install are keyed off the set rather than off
   `node_modules` (`packages/adapters/src/types.ts`).
+
+## R35: Runnable release and first-run docs
+
+Started on `v2` at 6086f8f, after the amendment (#128). Issues #54, #55, #28,
+#121, #123 to #127.
+
+### D-R35-01: boundary, verified
+
+- **Deliverables:**
+  - A build step: each package's `tsconfig.build.json` emits `dist/`, a
+    `build` script per package and `pnpm build` at the root; the packed
+    manifest's `main`, `types`, and `bin` name `dist/` (D-R35-03).
+  - `scripts/local-release.ts <dir>`: builds, packs every package, and
+    installs the tarballs into `<dir>`, the one supported way to run from a
+    checkout until npm publishing.
+  - A conformance assertion that packs, installs into an empty directory,
+    starts `factory-host` from its `bin`, and drives it with `olympus-ai`.
+  - The CLI's version: a major changeset so the release is `olympus-ai@5.0.0`;
+    the manifest's description marks 4.5.16 as v1's (D-R35-04).
+  - `packages/api/src/host/config.ts`: one table of every variable the host
+    reads; `main.ts` reads only through it; start-up refuses with every
+    problem in one list, no stack trace, exit 1, a pointer to the README.
+  - A shipped `.env.example`, and a README table, both checked against the
+    table.
+  - A start-up symlink probe under `FACTORY_TREES`, on every platform; the
+    README's "Supported hosts".
+  - `examples/`: a commented L1 `policy.yaml`, `roles/`, `rubrics/`, and the
+    spec, acceptance, manifest, security part, and graph files `create`
+    reads; a test admits a run under them; README "Configure policy" and
+    "First run".
+  - Per-command `--help` from the table the parser reads.
+  - `GET /readiness?revision=<rev>` and `olympus-ai readiness`; the README
+    says where to see it.
+- **Out of scope (verbatim):** publishing to npm, and any release automation;
+  enforcing the readiness ceiling at admission, which changes what admission
+  refuses and needs its own decision; installers or packages for any OS;
+  making native Windows work without Developer Mode.
+- **Acceptance:** `pnpm typecheck`, `pnpm lint`, `pnpm test`,
+  `pnpm typecheck:tooling`, `pnpm test:tooling`, and `pnpm conformance` pass;
+  the packaged-run assertion fails when a `bin` names a file the tarball does
+  not hold; the docs test fails when the table gains a variable the docs do
+  not list; the examples test fails when the examples no longer admit.
+- **Invariants:** I5 (configuration and symlink refusals happen before the
+  host listens, never a partial start); I8 (each claim has a test that fails
+  when it is deleted); I9 (the packaged host runs headless and the CLI
+  reaches it only over HTTP, still importing no runtime code); I10 (the
+  executable name stays the scan's one exemption; no Greek name in examples
+  or code); I4 (readiness is read-only and grants nothing; admission is
+  untouched).
+- **Pending registry entries owed:** none name R35. One assertion is added.
+- **Gate paths touched, declared by the entry:** every package manifest
+  ("every `bin` and `main` points at it", plus `build` scripts and `files`),
+  a new `tsconfig.build.json` per package, the root `package.json` (`build`),
+  and `packages/conformance/` for the added assertion. No vitest config,
+  `tsconfig.base.json`, or existing assertion changes. The PR needs the
+  `gate-change` label and the squash body `Gate-Change: acknowledged`.
+  Changing the two driver manifests changes the driver tree hash, so the
+  paid `run-driver` run is needed before merge.
+
+### D-R35-02: assumptions, each verified
+
+- Dependencies shipped: `reviewed/P3`, `reviewed/P9`, `reviewed/R1`,
+  `reviewed/R19`, `reviewed/R20` are tags (`git tag -l 'reviewed/*'`).
+- Every `bin` and `main` names `.ts` source and `tsconfig.base.json` sets
+  `noEmit: true` (`packages/*/package.json`, `tsconfig.base.json:19`).
+- Relative imports use `.js` specifiers (731 of them, none `.ts`), so `tsc`
+  emits runnable ESM without rewriting.
+- Node refuses to strip types under `node_modules`, so an installed `.ts`
+  `bin` cannot run; the build is required, not a convenience.
+- `pnpm pack` applies `publishConfig.main`/`types` and rewrites `workspace:*`
+  to `0.0.0` (ran it on `@olympus-ai/core`, read the tarball's manifest).
+- Assets read beside the code resolve from `dist/` as from `src/`, one level
+  under the package: `packages/api/src/rubrics.ts:25`,
+  `packages/compiler/src/index.ts:36`, `packages/drivers/*/src/image.ts`.
+  Each directory must be in the package's `files`.
+- Every variable the host reads is read in `packages/api/src/host/main.ts`
+  (`grep -rn process.env packages/*/src`: no other host reader), so one
+  table there can see them all.
+- `composeHost` needs Docker (`LocalDockerProvider.create`, `ensureImage`,
+  `packages/api/src/host/compose.ts:212,231`); CI has a daemon
+  (`.github/workflows/ci.yml:76`), so the packaged-run assertion runs there.
+- The copy that fails on Windows without Developer Mode is `cp` with
+  `verbatimSymlinks` (`packages/api/src/workspace.ts:222,312,349`).
+- Nothing calls `scan` outside its tests (`grep -rln "scan(" packages`); a
+  `null` branch-protection checker reports `indeterminate`
+  (`packages/readiness/src/scan.ts:290`).
+- `I8.fixture-paths-match-published-entries` requires each workspace
+  manifest's `main` and `types` to name the conformance `paths` target,
+  today `src/` (`packages/conformance/src/registry/i8.ts:99`).
+
+### D-R35-03: where the build points `main` and `bin`
+
+- **Chosen:** the workspace manifests keep `main`/`types`/`bin` on `src/`,
+  which typecheck, vitest, and conformance resolve; each manifest's
+  `publishConfig` names `dist/` for all three, and `files` ships `dist/` and
+  the asset directories. Every packed or published package points at
+  JavaScript. From a checkout the supported way is
+  `node scripts/local-release.ts <dir>`, the same path the assertion runs.
+- **Rejected:** `main` on `dist/` in the workspace with a source export
+  condition for development. It needs the condition in every vitest config
+  and in `tsconfig.base.json`, and a rewrite of the I8 assertion above, which
+  would then check something weaker; every test would also depend on a
+  build having run. A loader shipped as a runtime dependency (the entry
+  rejects it). A bundler (a new dependency, and the packages stop being
+  importable as libraries).
+- **Reverse:** move the `publishConfig` fields to the top level and add the
+  condition.
+
+### D-R35-04: the CLI's version
+
+- **Chosen:** `version` stays 4.5.16 and a changeset bumps `olympus-ai`
+  major, which `changeset version` turns into 5.0.0 at release; the
+  description says 4.5.16 is v1's. A test fails while the version is 4.x and
+  no pending changeset bumps it major.
+- **Rejected:** writing 5.0.0 now, which claims a release nobody made.
+- **Reverse:** set the version by hand at release.
+
+### D-R35-05: installing the tarballs
+
+- **Chosen:** the release script writes a `package.json` in the empty
+  directory naming every tarball as a `file:` dependency, with `overrides`
+  mapping each workspace package name to its tarball, then runs
+  `npm install`. No workspace package is looked up on the registry;
+  third-party dependencies come from it as a user's install would.
+- **Rejected:** `npm install a.tgz b.tgz ...`, which may resolve a
+  transitive `@olympus-ai/core@0.0.0` against the registry.
+- **Reverse:** drop the overrides once the packages are published.
+
+### D-R35-06: readiness over the API
+
+- **Chosen:** `GET /readiness?revision=<rev>` (default `HEAD`) scans
+  `FACTORY_REPOSITORY` at that revision with the host's sandbox provider,
+  build image, limits, and user, the policy's protected paths, and a GitHub
+  branch-protection checker reading the `protected` field of
+  `GET /repos/{repo}/branches/{base}` with the merge token, and returns the
+  report. It writes nothing and admission does not read it (out of scope).
+  The CLI prints the JSON.
+- **Rejected:** a `null` checker, which holds every host at what an
+  indeterminate probe allows for a question the host can answer; storing
+  the report, which nothing reads yet.
+- **Reverse:** pass `null`, or add a store.
