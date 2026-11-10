@@ -139,7 +139,7 @@ function optionsOf(name: string): Record<string, { type: 'string' | 'boolean'; m
 }
 
 /** A command's own arguments, parsed strictly against its row of the table. */
-function parseOwn(name: string, args: string[]): { values: Record<string, string | boolean | (string | boolean)[] | undefined>; positionals: string[] } {
+function parseOwn(name: string, args: string[]): { values: Record<string, string | boolean | Array<string | boolean> | undefined>; positionals: string[] } {
   return parseArgs({ args, strict: true, allowPositionals: true, options: optionsOf(name) });
 }
 
