@@ -1,0 +1,143 @@
+# A minimal policy for a supervised (L1) run, started by a person.
+#
+# factory-host reads this file (FACTORY_POLICY_FILE) at every run's admission.
+# Everything it does not grant is unavailable: a role, a station, a tool, a
+# network host, a level. Asking for more than it allows is refused, never
+# quietly lowered. A test in packages/api admits runs under this exact file.
+
+# The highest autonomy level any run may reach. 0 manual, 1 supervised,
+# 2 delegated, 3 autonomous. This example stops at 1.
+globalCap: 1
+
+# A tighter cap per station, where one station should stay lower than the rest.
+stationCaps: {}
+
+# Who passes each gate, per station and level: auto, human-required, or
+# blocked. Every station:level not listed here is human-required. At L1 a
+# person approves the spec, the acceptance tests, and the merge; the line runs
+# the stations between on their own evidence. Approve with
+#   olympus-ai approve <run id> <station>:1
+approvals:
+  intake:1: auto
+  spec:1: human-required
+  test-design:1: human-required
+  plan:1: auto
+  build:1: auto
+  verify:1: auto
+  review:1: auto
+  integrate:1: human-required
+
+# The seats a run fills, each a role file in the roles directory
+# (FACTORY_ROLES_DIR; examples/roles). A role acts only at its stations, writes
+# only its globs, uses only its tools, and spends only its budget.
+roles:
+  builder:
+    stations: [build, verify]
+    writableGlobs: ["**"]          # narrow to the paths a change may touch, e.g. ["src/**", "test/**"]
+    tools: [read, write]
+    network: { egress: none }      # or a list of hosts, e.g. [registry.npmjs.org]
+    tier: standard                 # fast, standard, or deep: the model size this seat asks for
+    tierByStation: {}
+    escalation: none
+    autonomyCeiling: 1
+    triggerKinds: [human]
+    # Per task. The worst-case cost a run must approve is summed from these.
+    budget: { maxTokens: 200000, maxCostUsd: 1, maxWallClockMs: 600000 }
+    sensitiveGrants: []
+    narrowed: null
+    repoInstructions: false
+  reviewer:
+    stations: [review]
+    writableGlobs: ["**"]
+    tools: [read, write]
+    network: { egress: none }
+    tier: deep
+    tierByStation: {}
+    escalation: none
+    autonomyCeiling: 1
+    triggerKinds: [human]
+    budget: { maxTokens: 200000, maxCostUsd: 1, maxWallClockMs: 600000 }
+    sensitiveGrants: []
+    narrowed: null
+    repoInstructions: false
+  # The four drafting seats, used only by a run that drafts its spec
+  # (create --draft-spec) or its tests (--draft-tests). Delete them if no run
+  # drafts. A drafting run also needs FACTORY_RUBRICS_DIR (examples/rubrics).
+  spec-drafter:
+    stations: [spec]
+    writableGlobs: ["**"]
+    tools: [read, write]
+    network: { egress: none }
+    tier: standard
+    tierByStation: {}
+    escalation: none
+    autonomyCeiling: 1
+    triggerKinds: [human]
+    budget: { maxTokens: 200000, maxCostUsd: 0.5, maxWallClockMs: 600000 }
+    sensitiveGrants: []
+    narrowed: null
+    repoInstructions: false
+  spec-critic:
+    stations: [spec]
+    writableGlobs: ["**"]
+    tools: [read, write]
+    network: { egress: none }
+    tier: standard
+    tierByStation: {}
+    escalation: none
+    autonomyCeiling: 1
+    triggerKinds: [human]
+    budget: { maxTokens: 200000, maxCostUsd: 0.5, maxWallClockMs: 600000 }
+    sensitiveGrants: []
+    narrowed: null
+    repoInstructions: false
+  test-drafter:
+    stations: [test-design]
+    writableGlobs: ["**"]
+    tools: [read, write]
+    network: { egress: none }
+    tier: standard
+    tierByStation: {}
+    escalation: none
+    autonomyCeiling: 1
+    triggerKinds: [human]
+    budget: { maxTokens: 200000, maxCostUsd: 0.5, maxWallClockMs: 600000 }
+    sensitiveGrants: []
+    narrowed: null
+    repoInstructions: false
+  test-critic:
+    stations: [test-design]
+    writableGlobs: ["**"]
+    tools: [read, write]
+    network: { egress: none }
+    tier: standard
+    tierByStation: {}
+    escalation: none
+    autonomyCeiling: 1
+    triggerKinds: [human]
+    budget: { maxTokens: 200000, maxCostUsd: 0.5, maxWallClockMs: 600000 }
+    sensitiveGrants: []
+    narrowed: null
+    repoInstructions: false
+
+# Paths a change may touch only with a person's approval: CI, test
+# configuration, package scripts. A change touching one is escalated.
+protectedPaths:
+  - ".github/**"
+  - "package.json"
+
+# Paths left out of every tree a model reads unless its role is granted the class.
+sensitivePaths: {}
+
+# Only a person starts a run in this example. Webhook triggers are declared here too.
+triggers:
+  enabled: [human]
+  entryStation: { human: intake }
+  taskTemplate: {}
+  maxAutonomy: { human: 1 }
+  minAuthorTrust: { human: owner }
+  narrowBelow: {}
+  maxTriggerDepth: 1
+  budgetPerWindow: { runs: 20, windowMs: 3600000 }
+
+concurrency: { maxParallelTasks: 1, maxConflictRetries: 0 }

@@ -9276,10 +9276,13 @@ Started on `v2` at 6086f8f, after the amendment (#128). Issues #54, #55, #28,
 
 ### D-R35-04: the CLI's version
 
-- **Chosen:** `version` stays 4.5.16 and a changeset bumps `olympus-ai`
+- **Chosen:** `version` stays 4.5.16; a pending changeset bumps `olympus-ai`
   major, which `changeset version` turns into 5.0.0 at release; the
   description says 4.5.16 is v1's. A test fails while the version is 4.x and
   no pending changeset bumps it major.
+- **Correction, found while building:** P9 already left that major bump
+  (`.changeset/p9-cli.md`), so 5.0.0 was already the computed release. R35's
+  own changeset is a minor; the test fails with P9's removed (run).
 - **Rejected:** writing 5.0.0 now, which claims a release nobody made.
 - **Reverse:** set the version by hand at release.
 

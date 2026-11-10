@@ -1,7 +1,7 @@
 {
   "name": "olympus-ai",
   "version": "4.5.16",
-  "description": "The command line: a client of the runtime's HTTP API, and nothing more",
+  "description": "The command line: a client of the runtime's HTTP API, and nothing more. Version 4.5.16 is v1's last release; v2 releases as 5.0.0 (a pending major changeset), so nothing here is 4.x",
   "license": "MIT",
   "type": "module",
   "main": "./src/cli.ts",

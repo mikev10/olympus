@@ -1,0 +1,12 @@
+{
+  "checks": [
+    {
+      "id": "hello-written", "kind": "behavioral", "onBase": "fails", "required": true, "timeoutMs": 10000,
+      "command": ["node", "-e", "const fs = require('node:fs'); const file = ['hello', 'txt'].join('.'); process.exit(fs.existsSync(file) && fs.readFileSync(file, 'utf8').trim() === 'hello' ? 0 : 1)"]
+    },
+    {
+      "id": "secret-scan", "kind": "secret-scan", "required": true, "timeoutMs": 60000, "config": null,
+      "image": "zricethezav/gitleaks@sha256:0e99e8821643ea5b235718642b93bb32486af9c8162c8b8731f7cbdc951a7f46"
+    }
+  ]
+}
