@@ -622,6 +622,12 @@ order between them is settled before any of them is picked up.
 | R24 | Repository instructions as granted context | M2 | P1, P4, R10, R20, R23 | — |
 | R25 | Property checks | M3 | P6, P8, R7, R15, R19 | — |
 | R26 | Driver: Codex | M2 | P5, P10, P12, P13, R23 | — |
+| R28 | Finding outcomes, derived by the runtime ([#109](https://github.com/mikev10/olympus/issues/109)) | M2 | P14, R2, R9, R13b, R19 | — |
+| R29 | Adapter sets beyond TypeScript, Python first ([#113](https://github.com/mikev10/olympus/issues/113)) | M2 | P8, R1, R18 | — |
+| R30 | Hosting-platform integration ([#111](https://github.com/mikev10/olympus/issues/111)) | M3 | R8a, R8b, R22, P10, P11 | — |
+| R31 | Multi-seat review panel ([#112](https://github.com/mikev10/olympus/issues/112)) | M3 | R9, R14, R20 | — |
+| R32 | Policy-granted preview of a running sandbox ([#114](https://github.com/mikev10/olympus/issues/114)) | M3 | P2, P9, P10, P11, P14 | — |
+| R33 | Chat as a trigger source ([#110](https://github.com/mikev10/olympus/issues/110)) | M3 | R22 | — |
 
 ### R1 — Readiness
 
@@ -2307,6 +2313,114 @@ entry for this driver.
 
 **Why M2:** it is the second family R9, and so R13, wait on. One driver
 proves the contract is neutral, and two prove reviewer independence.
+
+### R28 — Finding outcomes, derived by the runtime
+
+Issue [#109](https://github.com/mikev10/olympus/issues/109). Findings are
+raised at `review` by the reviewer and security seats (R9), at `spec` and
+`test-design` by the critic (R19), and nightly as `ReviewFinding` (R13b).
+Nothing records what happened to one afterwards, so the line cannot say
+whether a family's or a seat's findings are worth acting on.
+
+- Every finding gets an outcome the runtime derives; no model reports it.
+  `resolved`: a later change touches what the finding cited and a check
+  covering it passes, derived from the diff and check results. `dismissed`: a
+  human dismissed it with a cause from a closed set, no free text. `open`:
+  neither; an unknown outcome is open, never read as resolved.
+- Outcome records are write-once and content-addressed, like the other Vault
+  records. R2 derives resolved, dismissed, and open rates per reviewer family
+  and per seat kind.
+
+**Out of scope:** changing which reviewers are seated based on the rate (R11's).
+
+**Why M2:** it measures what R9 and R13b already produce, and R11 and R31 read it.
+
+### R29 — Adapter sets beyond TypeScript, Python first
+
+Issue [#113](https://github.com/mikev10/olympus/issues/113). P8 ships
+TypeScript adapters only, and readiness correctly derives `L0` for any stack
+without an `AdapterSet.test` (`I5.unsupported-stack-refuses`), so no other
+stack can use the line.
+
+- One unit per stack, each a full `AdapterSet`: test enumeration and run,
+  coverage, tamper-analysis inputs (P7), and lockfile install (#40). A stack
+  is supported exactly when it passes the same conformance kit the TypeScript
+  set passes. R29 is Python; later stacks take their own ids.
+- The stack is recorded per run (R18), so outcomes compare across stacks.
+
+**Out of scope:** partial support. A stack with tests and no tamper analysis
+gets the readiness level R1 already derives, never presented as full support.
+
+**Why M2:** without it the line serves one stack.
+
+### R30 — Hosting-platform integration
+
+Issue [#111](https://github.com/mikev10/olympus/issues/111). Olympus does not
+deploy: the target's own pipeline ships, and `observe` reads what happened
+(D-A-LC-03). This unit keeps that boundary.
+
+- **Deploy signals in `observe`.** A trigger source for hosting-platform
+  deploy events (succeeded, failed, rolled back, error-rate alert),
+  attributed to the merge commit by commit identity. They are untrusted
+  payloads admitted through R22's signed-webhook path, with the subscription
+  granted in policy. An observation plan (R8b) may name them as signals.
+- **Preview deploys as verify evidence, a later step.** A declared check runs
+  behavioral scenarios against a per-PR preview URL; the preview host is an
+  egress allowlist entry granted in policy (P10). A preview that never comes
+  up fails the check and is never skipped.
+
+**Out of scope:** provisioning infrastructure, databases, auth, or hosting;
+triggering deploys from Olympus. The target's pipeline owns both.
+
+### R31 — Multi-seat review panel
+
+Issue [#112](https://github.com/mikev10/olympus/issues/112). The spine names
+the review panel as M3, and P4 refuses a contract with `requiresPanel: true`
+rather than seating one reviewer. No unit delivered it until this one.
+
+- `review` seats N reviewers, each graded for independence against every
+  author as one seat is today. Composition is declared in policy; families
+  are explicit, never inferred.
+- Each reviewer's findings are recorded separately before any merge. A
+  combining step links its output to source findings: it cannot introduce a
+  finding no reviewer raised, and a dropped finding is recorded with a
+  reason, so omission cannot clear one.
+- A panel that cannot be fully seated is refused, never run short.
+
+**Out of scope:** weighting reviewers by track record (R11's, reading R28).
+
+### R32 — Policy-granted preview of a running sandbox
+
+Issue [#114](https://github.com/mikev10/olympus/issues/114). A person
+reviewing a UI change sees only evidence; P11's probe reaches the sandbox's
+loopback for checks, and no route lets a person reach it.
+
+- An API operation opens a read-only view of one port of a running build or
+  verify sandbox. Granted per run in policy (default deny), authenticated with
+  the API token (P9), closed when the sandbox stops, and every view opened is
+  recorded (P14).
+- The view is for a person's judgment only. Nothing seen through it becomes
+  evidence or status; checks remain the only source of status.
+
+**Out of scope:** any client UI for the view. The API is the surface.
+
+### R33 — Chat as a trigger source
+
+Issue [#110](https://github.com/mikev10/olympus/issues/110). R22 ships one
+trigger source, GitHub, over signed webhooks. Much work starts in a chat
+thread and is retyped into an issue before the line can see it.
+
+- A second source in the trigger framework: a signed chat event (a message in
+  a subscribed channel, or an explicit command) becomes an envelope selecting
+  a pre-declared template, as every R22 trigger does.
+- The message text is an untrusted payload. It selects a template and
+  supplies parameters only, and never enters a prompt.
+- Run records keep a reference to the originating thread. An unsigned event,
+  an unknown workspace, or a template policy does not enable is refused.
+  Results posted back are runtime-derived status only.
+
+**Out of scope:** conversational steering of a running run; approvals stay on
+the API's approve path.
 
 ---
 
