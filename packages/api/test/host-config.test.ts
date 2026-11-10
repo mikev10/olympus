@@ -34,10 +34,13 @@ describe('the configuration table and the docs', () => {
 
   test('the README\'s configuration table has a row for every variable, saying whether it is required and secret', async () => {
     const readme = await readFile(join(ROOT, 'README.md'), 'utf8');
+    // Each column by its position, so a row with Required and Secret swapped is caught (review: codex-8, gemini-2).
+    const rows = readme.split(/\r?\n/u).filter((line) => line.startsWith('| `')).map((line) => line.split('|').slice(1, -1).map((cell) => cell.trim()));
     for (const v of HOST_VARIABLES) {
-      const row = readme.split('\n').find((line) => line.startsWith(`| \`${documented(v)}\` |`));
+      const row = rows.find((cells) => cells[0] === `\`${documented(v)}\``);
       expect(row, `README.md has no row for ${documented(v)}`).toBeDefined();
-      expect(row).toContain(v.required ? '| yes |' : '| no |');
+      expect(row?.[1], `${documented(v)}: Required`).toBe(v.required ? 'yes' : 'no');
+      expect(row?.[2], `${documented(v)}: Secret`).toBe(v.secret ? 'yes' : 'no');
     }
   });
 
