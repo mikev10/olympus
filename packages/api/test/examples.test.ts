@@ -12,7 +12,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { createApiServer, SCANNERS, type ApiServer } from '../src/index.js';
-import { StubDriver } from '@olympus-ai/core';
+import { StrictPolicyEngine, StubDriver, type RoleId } from '@olympus-ai/core';
+import { loadPolicyFile } from '../src/policy-file.js';
 import { BASE_COMMIT, removeWorkspace, stubComponents } from './harness.js';
 
 const EXAMPLES = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'examples');
@@ -72,11 +73,17 @@ describe('the shipped examples', () => {
     expect(created.status, JSON.stringify(created.body)).toBe(201);
   });
 
-  test('refuse a run above the level the example policy allows', async () => {
-    const res = await create({
-      workspace, baseCommit: BASE_COMMIT, requestedLevel: 2, approvedCostUsd: 100,
-      artifacts: { spec: ['spec.md'], acceptanceTests: ['acceptance.md'], verificationManifest: 'verify.json', taskGraph: 'graph.json', specParts: { security: 'security.json' } },
-    });
-    expect(res.status).not.toBe(201);
+  // The stub graph refuses every run above L1 for its own components, so an L2 create here would be refused
+  // whatever the policy said (review: codex-7, gemini-3). The policy's cap is checked where it is enforced.
+  test('cap every seated role at L1, refusing L2 for the policy\'s own cap', async () => {
+    const loaded = await loadPolicyFile(join(EXAMPLES, 'policy.yaml'));
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+    const engine = new StrictPolicyEngine();
+    const seats = [['build', 'builder'], ['review', 'reviewer'], ['spec', 'spec-drafter'], ['spec', 'spec-critic'], ['test-design', 'test-drafter'], ['test-design', 'test-critic']] as const;
+    for (const [station, role] of seats) {
+      expect(engine.resolveAutonomy(1, station, role as RoleId, loaded.policy), `${role} at ${station}, L1`).toEqual({ ok: true, level: 1 });
+      expect(engine.resolveAutonomy(2, station, role as RoleId, loaded.policy), `${role} at ${station}, L2`).toMatchObject({ ok: false, reason: 'exceeds-cap' });
+    }
   });
 });
