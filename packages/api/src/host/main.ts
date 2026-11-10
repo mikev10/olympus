@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /**
  * The `factory-host` executable: the runtime as a service over the production
  * composition. Configured from its environment and nothing else, it touches

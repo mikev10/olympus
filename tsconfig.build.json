@@ -1,0 +1,24 @@
+{
+  // The build step (R35, D-R35-03): each released package's tsconfig.build.json
+  // extends this and emits its src/ to dist/. A sibling resolves to the
+  // declarations its own build emitted, never to its source, so each package
+  // emits only its own files; `pnpm build` runs the packages in dependency order.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "paths": {
+      "@olympus-ai/core": ["./packages/core/dist/index.d.ts"],
+      "@olympus-ai/sandbox": ["./packages/sandbox/dist/index.d.ts"],
+      "@olympus-ai/vault": ["./packages/vault/dist/index.d.ts"],
+      "@olympus-ai/integrity": ["./packages/integrity/dist/index.d.ts"],
+      "@olympus-ai/adapters": ["./packages/adapters/dist/index.d.ts"],
+      "@olympus-ai/readiness": ["./packages/readiness/dist/index.d.ts"],
+      "@olympus-ai/compiler": ["./packages/compiler/dist/index.d.ts"],
+      "@olympus-ai/triggers": ["./packages/triggers/dist/index.d.ts"],
+      "@olympus-ai/api": ["./packages/api/dist/index.d.ts"],
+      "@olympus-ai/driver-claude-code": ["./packages/drivers/claude-code/dist/index.d.ts"],
+      "@olympus-ai/driver-codex": ["./packages/drivers/codex/dist/index.d.ts"],
+      "@olympus-ai/driver-openai-compatible": ["./packages/drivers/openai-compatible/dist/index.d.ts"]
+    }
+  }
+}
