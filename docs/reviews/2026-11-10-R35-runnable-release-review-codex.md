@@ -1,3 +1,20 @@
+# External review of R35, codex, 2026-11-10
+
+The review of R35, the runnable release and first-run docs, by the codex family. Triage: `2026-11-10-R35-runnable-release-triage.md`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex.
+  A headless `codex exec` run under a read-only sandbox, with recorded approval policy `never`, in an empty scratch working directory and a scratch config home holding only `auth.json`, with an environment of `CODEX_HOME` alone. The pre-run listing of both is the manifest's `cleanRoom`.
+- **Cross-family agreement:** codex-2, codex-4, codex-7, and codex-8 were raised by gemini too (gemini-4, gemini-1, gemini-3, gemini-2). codex-1, codex-3, codex-5, codex-6, and codex-9 were raised by codex alone.
+- **Date:** 2026-11-10
+- **Bundle:** `2026-11-10-R35-runnable-release-review-bundle.txt`, SHA-256 `403fcc2bec86d0b5a3f6152f69901b57e6a9d2cf882d85f3a176d973f30a55a7`, base `49ae3fe` (`reviewed/R16`), head `31da607` (the R35 unit branch as shipped in PR #130). Every new file in full and every modified file as a function-context diff; `docs/decisions.md`, `docs/reviews/`, `docs/plan/`, and `pnpm-lock.yaml` excluded. Prompt: `2026-11-10-R35-runnable-release-review-prompt.txt`.
+- **Prior context and lookups:** Says it had no prior project context and performed no external lookups, that local execution was blocked, and that it did not verify the bundle hash. A self-report, not independently verifiable.
+- **Coverage, and any gap:** Items 1 to 7 all answered: concrete constructions (1, 3, 5), no unconditional tautology found (2), language escape hatches assessed (4), sound mechanisms named (6), and the framing judged appropriate with runtime attacks and assertion mutations kept distinct, naming omitted code it could not assess (7).
+- **Citations:** line numbers refer to positions in the bundle's new side, not the repository; treated as hints and located by construct.
+
+---
+
 BASE: 49ae3fe  
 HEAD: 31da607  
 tsconfig.build.json  

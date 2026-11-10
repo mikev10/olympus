@@ -1,3 +1,20 @@
+# External review of R35, gemini, 2026-11-10
+
+The review of R35, the runnable release and first-run docs, by the gemini family. Triage: `2026-11-10-R35-runnable-release-triage.md`.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini.
+  A direct `generateContent` API call to `gemini-3.1-pro-preview` (the manifest's `invocation.modelRequested`), offering no tools. `cleanRoom` is `null` because an API call loads no local configuration.
+- **Cross-family agreement:** gemini-1, gemini-2, gemini-3, and gemini-4 were raised by codex too (codex-4, codex-8, codex-7, codex-2). gemini-5 was raised by gemini alone.
+- **Date:** 2026-11-10
+- **Bundle:** `2026-11-10-R35-runnable-release-review-bundle.txt`, SHA-256 `403fcc2bec86d0b5a3f6152f69901b57e6a9d2cf882d85f3a176d973f30a55a7`, base `49ae3fe` (`reviewed/R16`), head `31da607` (the R35 unit branch as shipped in PR #130). Every new file in full and every modified file as a function-context diff; `docs/decisions.md`, `docs/reviews/`, `docs/plan/`, and `pnpm-lock.yaml` excluded. Prompt: `2026-11-10-R35-runnable-release-review-prompt.txt`.
+- **Prior context and lookups:** Says it had no prior context and performed no lookups. A self-report, not independently verifiable.
+- **Coverage, and any gap:** Items 1, 2, 3, 4, and 6 answered (findings, plus readHostConfig and probeSymlinks named sound). Item 5 has no finding of its own. Item 7, whether the framing was right, is not answered.
+- **Citations:** line numbers refer to positions in the bundle's new side, not the repository; treated as hints and located by construct.
+
+---
+
 BASE: 49ae3fe
 HEAD: 31da607
 tsconfig.build.json
