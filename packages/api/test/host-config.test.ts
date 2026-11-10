@@ -95,7 +95,7 @@ describe('start-up refusal (I5)', () => {
     const result = readHostConfig({ FACTORY_API_TOKEN: 'secret-token-value' });
     expect(result.ok).toBe(false);
     const text = refusalText(result.ok ? [] : result.problems);
-    expect(text).toMatch(/^factory-host: not started; \d+ configuration problems:/u);
+    expect(text).toMatch(/^not started; \d+ configuration problems:/u);
     expect(text).toContain('.env.example');
     expect(text).not.toContain('secret-token-value');
   });

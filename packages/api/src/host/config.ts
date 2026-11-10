@@ -150,8 +150,22 @@ export function readHostConfig(env: Readonly<Record<string, string | undefined>>
 /** The refusal start-up prints: every problem, then where the docs are. No stack trace. */
 export function refusalText(problems: readonly string[]): string {
   return [
-    `factory-host: not started; ${String(problems.length)} configuration problem${problems.length === 1 ? '' : 's'}:`,
+    `not started; ${String(problems.length)} configuration problem${problems.length === 1 ? '' : 's'}:`,
     ...problems.map((p) => `  - ${p}`),
     `every variable is described in ${CONFIG_DOCS}`,
   ].join('\n');
 }
+
+/**
+ * What start-up throws when it refuses. The runtime touches no terminal, so it
+ * writes nothing itself (I9): Node reports the uncaught refusal and exits 1.
+ * Its stack is replaced by its text, so what is printed is the list and no
+ * frame (D-R35-08).
+ */
+export class HostRefusal extends Error {
+  constructor(problems: readonly string[]) {
+    super(refusalText(problems));
+    this.stack = `${this.name}: ${this.message}`;
+  }
+}
+HostRefusal.prototype.name = 'factory-host';

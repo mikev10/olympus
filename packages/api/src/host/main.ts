@@ -14,13 +14,13 @@ import { readFile } from 'node:fs/promises';
 import { GitHubCheckReader } from '../checks.js';
 import { createApiServer } from '../http/server.js';
 import { GitHubBranchProtection, readinessScanner } from '../readiness-scan.js';
-import { readHostConfig, refusalText } from './config.js';
+import { HostRefusal, readHostConfig } from './config.js';
 import { composeHost, parseEndpointFile } from './compose.js';
 import { probeSymlinks } from './symlinks.js';
 
+/** Thrown, never printed here: Node prints the list and exits 1, and the runtime touches no terminal (I9, D-R35-08). */
 function refuse(problems: readonly string[]): never {
-  process.stderr.write(`${refusalText(problems)}\n`);
-  process.exit(1);
+  throw new HostRefusal(problems);
 }
 
 function message(error: unknown): string {

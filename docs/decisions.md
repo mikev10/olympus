@@ -9327,3 +9327,23 @@ Started on `v2` at 6086f8f, after the amendment (#128). Issues #54, #55, #28,
   the entry calls read-only.
 - **Reverse:** answer JSON and give the CLI a dispatcher with no header
   timeout.
+
+### D-R35-08: the start-up refusal is thrown, and Node prints it
+
+- **Found:** `I9.api-never-touches-a-terminal` scans all of `api`, the host's
+  entry point included, and refuses `process.stderr`, `process.exit`,
+  `process.exitCode`, and `console`
+  (`packages/conformance/src/registry/i9.ts:21`). So the host cannot print
+  its own refusal or choose its exit code; that is why it always threw.
+- **Chosen:** start-up collects every problem and throws one `HostRefusal`
+  whose stack is its own text. Node reports it and exits 1: two lines of
+  Node's header, then the list and the pointer to the docs, and no frame.
+  The packaged-run assertion checks the printed form: every required
+  variable named, no `at ` frame, a non-zero exit.
+- **Rejected:** writing to fd 2 through `node:fs`, or a shim outside the
+  scanned program, both of which route around the scan rather than satisfy
+  it; changing the scan, a gate change the entry does not declare and a
+  check made weaker.
+- **Reverse:** an amendment that lets the host's entry file, and only it,
+  write to stderr and set its exit code, as the CLI's `main.ts` does; then
+  print the list without Node's header.
