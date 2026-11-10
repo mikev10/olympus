@@ -18,3 +18,7 @@ finding.
    before the change, `passes` only where it already holds.
 6. No test passes whatever the code does: no assertion that cannot fail, no
    test that only checks a mock.
+7. Where the spec carries a defect part, the check declaring `reproduces`
+   follows its steps as written and fails because of what the defect part
+   says happens; a check that fails on the base for any other reason does not
+   reproduce the defect.

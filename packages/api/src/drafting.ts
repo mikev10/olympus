@@ -50,6 +50,7 @@ import type {
   ModelIdentity,
   RetryPart,
   RunState,
+  RunTemplateId,
   StationRefusal,
   VaultRef,
 } from '@olympus-ai/core';
@@ -83,8 +84,8 @@ import {
 } from './line.js';
 import { denialRefusal, parseSecurityPart, type SecurityPart } from './security.js';
 import { parsePlan, planDraftPath } from './observation-plan.js';
-import { DRAFT_DIR, parseQuestions, parseRunRequirements, type RunRequirements } from './spec-parts.js';
-import { mergedCheckProblems, parseManifest } from './validate.js';
+import { DRAFT_DIR, defectBytes, parseQuestions, parseReproduction, parseRunRequirements, type DefectPart, type RunRequirements } from './spec-parts.js';
+import { mergedCheckProblems, parseManifest, reproductionProblems } from './validate.js';
 import { suiteBindingProblems, taskResultProblems, writesOutsideGrant } from './verification.js';
 import { basePath, copyOnly, copyTree, draftBaseRunPath, draftPaths, existsIn, ownDiff, scratchPath, treeDigest, writeFiles } from './workspace.js';
 
@@ -100,15 +101,35 @@ export interface DraftingDrivers {
 export interface DraftingContext {
   readonly drafted: Readonly<Record<DraftStation, boolean>>;
   readonly intent: string | null;
+  /** The run's template (A-R16-02); null for a run with none. */
+  readonly template: RunTemplateId | null;
+  /** A bug fix's three parts, from its intent record, that the runtime writes `defect.json` from; null for any other run (A-R16-03). */
+  readonly defect: DefectPart | null;
   readonly rubrics: Readonly<Partial<Record<DraftStation, { readonly text: string; readonly sha256: string }>>>;
 }
 
-export const NOT_DRAFTING: DraftingContext = Object.freeze({ drafted: Object.freeze({ spec: false, 'test-design': false }), intent: null, rubrics: Object.freeze({}) });
+export const NOT_DRAFTING: DraftingContext = Object.freeze({ drafted: Object.freeze({ spec: false, 'test-design': false }), intent: null, template: null, defect: null, rubrics: Object.freeze({}) });
 
-/** Where a drafted spec's files are written, in the drafter's tree and in the artifact root alike. */
-export function specDraftPaths(runId: string): { readonly spec: string; readonly security: string; readonly runRequirements: string; readonly questions: string } {
+/**
+ * Where a drafted spec's files are written, in the drafter's tree and in the
+ * artifact root alike. `defect` and `reproduction` are a bug-fix spec's alone
+ * (A-R16-03).
+ */
+export function specDraftPaths(runId: string): {
+  readonly spec: string; readonly security: string; readonly runRequirements: string; readonly questions: string; readonly defect: string; readonly reproduction: string;
+} {
   const dir = `${DRAFT_DIR}/${runId}`;
-  return { spec: `${dir}/spec.md`, security: `${dir}/security.json`, runRequirements: `${dir}/run-requirements.json`, questions: `${dir}/questions.json` };
+  return {
+    spec: `${dir}/spec.md`, security: `${dir}/security.json`, runRequirements: `${dir}/run-requirements.json`, questions: `${dir}/questions.json`,
+    defect: `${dir}/defect.json`, reproduction: `${dir}/reproduction.json`,
+  };
+}
+
+/** The files a spec draft holds: four, and a bug fix's two more (A-R16-03). */
+function specDraftFiles(ctx: Pick<LineContext, 'run' | 'drafting'>): string[] {
+  const paths = specDraftPaths(ctx.run.id);
+  const all = [paths.spec, paths.security, paths.runRequirements, paths.questions];
+  return ctx.drafting.defect === null ? all : [...all, paths.defect, paths.reproduction];
 }
 
 /** Where a drafted acceptance manifest is written. */
@@ -396,6 +417,11 @@ async function draft(ctx: LineContext, station: DraftStation, current: DraftAtte
   else await copyOnly(base, start, specArtifacts(ctx).map((a) => a.path));
   // What the drafter is not given is left out of the tree it is handed (D-A-TR-04).
   await omitWithheld(ctx, DRAFT_ROLES[station].drafter, start);
+  // A bug fix's defect part is the runtime's, written from the intent record before the drafter runs; the
+  // draft must hold these bytes, so the steps the test drafter follows are the person's (A-R16-03, I3).
+  if (station === 'spec' && ctx.drafting.defect !== null) {
+    await writeFiles(start, [{ path: specDraftPaths(ctx.run.id).defect, bytes: defectBytes(ctx.drafting.defect) }]);
+  }
   await copyTree(start, work);
   // The run's drafts directory, so where a drafter writes its draft is in the tree it is handed.
   await mkdir(join(work, DRAFT_DIR, ctx.run.id), { recursive: true });
@@ -458,10 +484,10 @@ async function discardedOf(start: string, work: string, kept: (path: string) => 
   return (await ownDiff(start, work)).map((entry) => entry.path).filter((path) => !kept(path)).sort();
 }
 
-/** A spec draft's four files, each read and parsed from the bytes read; anything wrong is a problem, by path and code. */
+/** A spec draft's files, each read and parsed from the bytes read; anything wrong is a problem, by path and code. */
 async function readSpecDraft(ctx: LineContext, start: string, work: string): Promise<ReadDraft> {
   const paths = specDraftPaths(ctx.run.id);
-  const all = [paths.spec, paths.security, paths.runRequirements, paths.questions];
+  const all = specDraftFiles(ctx);
   const files: DraftFile[] = [];
   const problems: Array<{ path: string; code: string }> = [];
   for (const path of all) {
@@ -493,6 +519,12 @@ async function readSpecDraft(ctx: LineContext, start: string, work: string): Pro
   parse(paths.security, (v) => parseSecurityPart(v));
   parse(paths.runRequirements, (v) => parseRunRequirements(v, 'runRequirements'));
   parse(paths.questions, (v) => parseQuestions(v, 'questions'));
+  if (ctx.drafting.defect !== null) {
+    // The defect part is held to the runtime's bytes, never parsed for meaning: a reworded part is not the person's (A-R16-03).
+    const defect = files.find((f) => f.path === paths.defect);
+    if (defect !== undefined && defect.sha256 !== sha256(defectBytes(ctx.drafting.defect))) problems.push({ path: paths.defect, code: 'not-the-intent' });
+    parse(paths.reproduction, (v) => parseReproduction(v, 'reproduction'));
+  }
   return { files, discarded: await discardedOf(start, work, (p) => all.includes(p)), problems };
 }
 
@@ -564,6 +596,8 @@ async function readTestDraft(ctx: LineContext, start: string, work: string): Pro
     for (const p of mergedCheckProblems(ctx.checks, checks)) problems.push({ path: `${manifestPath}#${p.path}`, code: p.code });
     const undenied = denialRefusal(ctx.securityPart, [...ctx.checks, ...checks]);
     if (undenied?.reason === 'denial-check-missing') for (const rule of undenied.rules) problems.push({ path: `${manifestPath}#deniesRule:${rule}`, code: 'denial-check-missing' });
+    // A bug fix's draft needs a required check declaring that it reproduces the defect; no other run's may declare one (A-R16-04).
+    for (const p of reproductionProblems(checks, ctx.drafting.template === 'bug-fix', manifestPath, false)) problems.push({ path: p.path, code: p.code });
     if (problems.length === 0) {
       // Each acceptance check's tests bound to the base's framework, over the base with the draft written in (D-R15-04).
       const tree = await draftTree(ctx, files);
@@ -767,7 +801,10 @@ export function lockedArtifacts(artifacts: LineArtifacts, runId: string, station
     return {
       ...artifacts,
       spec: spec === null ? [] : [spec],
-      specParts: { security: at(paths.security), runRequirements: at(paths.runRequirements), questions: at(paths.questions) },
+      specParts: {
+        security: at(paths.security), runRequirements: at(paths.runRequirements), questions: at(paths.questions),
+        defect: at(paths.defect), reproduction: at(paths.reproduction),
+      },
     };
   }
   const manifest = manifestDraftPath(runId);

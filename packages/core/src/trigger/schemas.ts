@@ -29,10 +29,26 @@ import type { AuthorTrust, TriggerKind } from '../run/types.js';
  * branch for reverts and closes observation windows (R8a). A job template is
  * valid only on `scheduled`. `observe-signal` records a push or a failed
  * check against the change whose commit it names, and is valid only on
- * `post-merge` and `ci-failure` (D-A-OB-02). No template starts a build
- * (D-A-TF-01).
+ * `post-merge` and `ci-failure` (D-A-OB-02). `bug-fix` records an issue as a
+ * candidate exactly as `intake-candidate` does, and a run admitted from it is
+ * a bug-fix run; it is valid only on `issue` (A-R16-01). No template starts a
+ * build (D-A-TF-01).
  */
-export type TemplateId = 'intake-candidate' | SignalTemplateId | JobTemplateId;
+export type TemplateId = 'intake-candidate' | RunTemplateId | SignalTemplateId | JobTemplateId;
+
+/**
+ * The templates a run itself can take: a person's own run, where the policy's
+ * `runTemplates` lists it, or a run admitted from a candidate recorded under
+ * it (A-R16-01, A-R16-02).
+ */
+export type RunTemplateId = 'bug-fix';
+
+/** The kinds `bug-fix` is valid on: a tracker's issue, the one kind that is a report (A-R16-01). */
+export const BUG_FIX_KINDS: readonly TriggerKind[] = Object.freeze(['issue']);
+
+export function isRunTemplate(value: unknown): value is RunTemplateId {
+  return value === 'bug-fix';
+}
 
 /** The template that records a delivery as an observation in place of a candidate (R8a, D-A-OB-02). */
 export type SignalTemplateId = 'observe-signal';
@@ -52,7 +68,7 @@ export type ObserveTemplateId = SignalTemplateId | 'observe-history';
 const JOB_TEMPLATE_SET: Readonly<Record<JobTemplateId, true>> = {
   'nightly-integrity': true, 'nightly-security': true, 'observe-history': true, 'nightly-findings-review': true, 'nightly-tree-review': true,
 };
-const TEMPLATE_SET: Readonly<Record<TemplateId, true>> = { 'intake-candidate': true, 'observe-signal': true, ...JOB_TEMPLATE_SET };
+const TEMPLATE_SET: Readonly<Record<TemplateId, true>> = { 'intake-candidate': true, 'bug-fix': true, 'observe-signal': true, ...JOB_TEMPLATE_SET };
 
 export function isSignalTemplate(value: unknown): value is SignalTemplateId {
   return value === 'observe-signal';

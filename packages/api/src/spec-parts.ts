@@ -114,3 +114,64 @@ export function parseQuestions(value: unknown, at: string): { ok: true; part: Qu
     },
   };
 }
+
+/** The three parts of a bug-fix intent, as a person wrote them from the report they read (A-R16-02). */
+export interface DefectPart {
+  readonly steps: string;
+  readonly actual: string;
+  readonly expected: string;
+}
+
+/**
+ * The bytes of `defect.json`: the intent's three parts, as the runtime read
+ * them from the intent record, in a fixed order (A-R16-03). The runtime
+ * writes them and the draft must hold exactly these, so the steps a check
+ * follows are the person's, never a drafter's rewording of them (I3).
+ */
+export function defectBytes(part: DefectPart): Uint8Array {
+  return new TextEncoder().encode(`${JSON.stringify({ steps: part.steps, actual: part.actual, expected: part.expected }, null, 2)}\n`);
+}
+
+/**
+ * Where in the product the defect shows, and what a check needs to run it,
+ * written by the spec drafter (A-R16-03). Each list empty means none.
+ */
+export interface Reproduction {
+  readonly where: string;
+  readonly needs: { readonly data: readonly string[]; readonly accounts: readonly string[]; readonly services: readonly string[] };
+}
+
+export function parseReproduction(value: unknown, at: string): { ok: true; part: Reproduction } | { ok: false; problems: RequestProblem[] } {
+  const problems: RequestProblem[] = [];
+  const report = (path: string, message: string): void => {
+    problems.push({ path, code: 'not-a-spec-part', message });
+  };
+  if (!isRecord(value)) {
+    report(at, 'the reproduction part is an object with where and needs');
+    return { ok: false, problems };
+  }
+  for (const key of extraKeys(value, ['where', 'needs'])) report(`${at}.${key}`, `'${key}' is not a field of the reproduction part`);
+  if (!isText(value.where)) report(`${at}.where`, 'where says where in the product the defect shows');
+  const needs = value.needs;
+  if (!isRecord(needs)) report(`${at}.needs`, 'needs is an object of data, accounts, and services, each a list; an empty list says none');
+  else {
+    for (const key of extraKeys(needs, ['data', 'accounts', 'services'])) report(`${at}.needs.${key}`, `'${key}' is not a field of needs`);
+    for (const key of ['data', 'accounts', 'services'] as const) {
+      const list = needs[key];
+      if (!Array.isArray(list) || !list.every(isText)) report(`${at}.needs.${key}`, `needs.${key} is a list of what the check needs; an empty list says none`);
+    }
+  }
+  if (problems.length > 0 || !isRecord(needs)) return { ok: false, problems };
+  return {
+    ok: true,
+    part: {
+      where: value.where as string,
+      needs: { data: [...(needs.data as string[])], accounts: [...(needs.accounts as string[])], services: [...(needs.services as string[])] },
+    },
+  };
+}
+
+/** A bug fix's three parts as the text the spec drafter and its critic are granted as the intent (A-R16-03). */
+export function defectIntentText(part: DefectPart): string {
+  return `Steps that show the defect:\n${part.steps}\n\nWhat happens:\n${part.actual}\n\nWhat should happen:\n${part.expected}\n`;
+}

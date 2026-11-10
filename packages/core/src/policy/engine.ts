@@ -128,6 +128,7 @@ function cloneTriggers(triggers: TriggerPolicy): TriggerPolicy {
     schedules: frozenCopy((triggers.schedules ?? []).map((s) => frozen({ ...s }))),
     ...(triggers.maxDeliveryAgeMs === undefined ? {} : { maxDeliveryAgeMs: triggers.maxDeliveryAgeMs }),
     ...(triggers.candidateExpiryMs === undefined ? {} : { candidateExpiryMs: triggers.candidateExpiryMs }),
+    ...(triggers.runTemplates === undefined ? {} : { runTemplates: frozenCopy(triggers.runTemplates) }),
     // The nightly sweep's selection is carried whole, or the job it governs would be refused for a block the document held (A-R13a-06).
     ...(triggers.nightly === undefined
       ? {}

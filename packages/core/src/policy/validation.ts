@@ -34,8 +34,8 @@ import type {
   NarrowedScope, SensitiveClass,
 } from './types.js';
 import {
-  CHAR_CLASSES, LABEL_CLASS, SIGNAL_KINDS, TEMPLATE_IDS, hasFieldSchema, isJobTemplate, isObserveTemplate, isSignalTemplate, isTemplateId,
-  type TemplateId,
+  BUG_FIX_KINDS, CHAR_CLASSES, LABEL_CLASS, SIGNAL_KINDS, TEMPLATE_IDS, hasFieldSchema, isJobTemplate, isObserveTemplate, isRunTemplate, isSignalTemplate, isTemplateId,
+  type RunTemplateId, type TemplateId,
 } from '../trigger/schemas.js';
 
 /** One thing wrong, at the path it is wrong at. */
@@ -95,7 +95,10 @@ const TRIGGER_KEYS: Readonly<Record<keyof TriggerPolicy, true>> = {
   enabled: true, entryStation: true, taskTemplate: true, maxAutonomy: true,
   minAuthorTrust: true, narrowBelow: true, maxTriggerDepth: true, budgetPerWindow: true,
   subscriptions: true, schedules: true, maxDeliveryAgeMs: true, candidateExpiryMs: true, nightly: true, observe: true,
+  runTemplates: true,
 };
+
+const RUN_TEMPLATE_IDS: readonly RunTemplateId[] = ['bug-fix'];
 
 const OBSERVE_KEYS: Readonly<Record<keyof ObservePolicy, true>> = { windowMs: true };
 
@@ -540,15 +543,24 @@ function validateTriggers(value: unknown, path: string, defects: PolicyDefect[])
   const candidateExpiryMs = optionalBounded(record, 'candidateExpiryMs', path, CANDIDATE_EXPIRY_CAP_MS, '30 days', defects);
   const nightly = Object.hasOwn(record, 'nightly') ? validateNightly(record.nightly, child(path, 'nightly'), defects) ?? null : undefined;
   const observe = Object.hasOwn(record, 'observe') ? validateObserve(record.observe, child(path, 'observe'), defects) ?? null : undefined;
+  // Absent from a document written before R16: a person's run names no template (A-R16-01).
+  const runTemplates = Object.hasOwn(record, 'runTemplates')
+    ? readArray<RunTemplateId>(record, 'runTemplates', path, `a run template (${RUN_TEMPLATE_IDS.join(', ')})`, isRunTemplate, defects)
+    : undefined;
+  if (runTemplates !== undefined && new Set(runTemplates).size !== runTemplates.length) {
+    defects.push({ path: child(path, 'runTemplates'), problem: 'a template is listed more than once' });
+  }
   if (
     enabled === undefined || entryStation === undefined || taskTemplate === undefined
     || maxAutonomy === undefined || minAuthorTrust === undefined || narrowBelow === undefined || maxTriggerDepth === undefined
     || runs === undefined || windowMs === undefined || subscriptions === undefined || schedules === undefined
     || maxDeliveryAgeMs === null || candidateExpiryMs === null || nightly === null || observe === null
+    || (Object.hasOwn(record, 'runTemplates') && runTemplates === undefined)
   ) return undefined;
   const triggers: TriggerPolicy = {
     enabled, entryStation, taskTemplate, maxAutonomy, minAuthorTrust, narrowBelow,
     maxTriggerDepth, budgetPerWindow: { runs, windowMs }, subscriptions, schedules,
+    ...(runTemplates === undefined ? {} : { runTemplates }),
     ...(maxDeliveryAgeMs === undefined ? {} : { maxDeliveryAgeMs }),
     ...(candidateExpiryMs === undefined ? {} : { candidateExpiryMs }),
     ...(nightly === undefined ? {} : { nightly }),
@@ -741,6 +753,10 @@ function routeDefects(triggers: TriggerPolicy, path: string, defects: PolicyDefe
     if (isSignalTemplate(template) && !SIGNAL_KINDS.some((k) => k === kind)) {
       defects.push({ path: child(child(path, 'taskTemplate'), kind), problem: `'${template}' is valid only on ${SIGNAL_KINDS.map((k) => `'${k}'`).join(' and ')}` });
     }
+    // A bug fix is drafted from a report a person read, and only a tracker's issue is one (A-R16-01).
+    if (isRunTemplate(template) && !BUG_FIX_KINDS.some((k) => k === kind)) {
+      defects.push({ path: child(child(path, 'taskTemplate'), kind), problem: `'${template}' is valid only on ${BUG_FIX_KINDS.map((k) => `'${k}'`).join(' and ')}` });
+    }
   }
   // An observe template with no window would never close one, or close it at once; neither is implied (I5, D-R8a-05).
   const observing = Object.values(triggers.taskTemplate).some(isObserveTemplate) || schedules.some((s) => isObserveTemplate(s.template));
@@ -762,6 +778,9 @@ function routeDefects(triggers: TriggerPolicy, path: string, defects: PolicyDefe
   schedules.forEach((s, i) => {
     if (isSignalTemplate(s.template)) {
       defects.push({ path: `${child(path, 'schedules')}[${String(i)}].template`, problem: `'${s.template}' records a delivery that names a commit; a schedule's firing names none` });
+    }
+    if (isRunTemplate(s.template)) {
+      defects.push({ path: `${child(path, 'schedules')}[${String(i)}].template`, problem: `'${s.template}' records an issue someone reported; a schedule's firing is none` });
     }
     if (s.template === 'nightly-security' && triggers.nightly === undefined) {
       defects.push({ path: `${child(path, 'schedules')}[${String(i)}].template`, problem: `'nightly-security' needs a nightly block naming its scanners and advisory host` });

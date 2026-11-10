@@ -74,6 +74,7 @@ export function around(inner: Vault, hooks: { beforeLock?: (by: string) => Promi
     readCandidate: (id) => inner.readCandidate(id),
     markCandidateAdmitted: (id, runId) => inner.markCandidateAdmitted(id, runId),
     markCandidateExpired: (id, at) => inner.markCandidateExpired(id, at),
+    dismissCandidate: (id, cause, at) => inner.dismissCandidate(id, cause, at),
     countRefusedDelivery: (bucket, hour, cause) => inner.countRefusedDelivery(bucket, hour, cause),
     readRefusedDeliveryCounts: () => inner.readRefusedDeliveryCounts(),
     recordNightly: (r) => inner.recordNightly(r),

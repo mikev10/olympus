@@ -15,8 +15,9 @@ import { intakeId, intakeProblem } from '../intake.js';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
 import type {
   AdmissionRecord, BaseRunRecord, CandidateRecord, CountedRefusalCause, CriticRecord, DraftLockRecord, DraftRecord, EnforcementDecision, EvidenceBundle, IntakeEntry, IntegrationRecord, IntentRecord, NightlyEntry, NightlyRecord, RefusedDeliveryCount, StoredObject, TriggerDecision,
-  LockEntry, LockManifest, LockVerdict, NoRunState, ObservationEntry, ObservationRecord, RubricRecord, UsageRecord, Vault,
+  LockEntry, LockManifest, LockVerdict, NoRunState, ObservationEntry, ObservationRecord, RubricRecord, UsageRecord, Vault, DismissalCause,
 } from '../types.js';
+import { DISMISSAL_CAUSES } from '../types.js';
 
 /** Reported as `actual` for a locked path that no longer exists: a deleted artifact is a mismatch, not an empty file. */
 const MISSING = 'missing';
@@ -207,6 +208,7 @@ export class StubVault implements Vault {
 
   recordIntent(r: IntentRecord): Promise<VaultRef> {
     if ((r.from as string) !== 'principal' || (r.collectedBy as string) !== 'runtime') return Promise.reject(new Error("StubVault: an intent comes from the principal's channel, collected by the runtime"));
+    if ('template' in r && ![r.steps, r.actual, r.expected].every((p) => typeof p === 'string' && p.trim() !== '')) return Promise.reject(new Error('StubVault: a bug-fix intent carries all three parts'));
     return Promise.resolve(this.store(r.runId, 'intent', r));
   }
 
@@ -248,7 +250,7 @@ export class StubVault implements Vault {
     const id = intakeId(d.source, d.key);
     if (this.intake.has(id)) return Promise.resolve(false);
     const bytes = new TextEncoder().encode(JSON.stringify({ decision: d, candidate }));
-    this.intake.set(id, { decision: structuredClone(d), candidate: structuredClone(candidate), sha256: sha256(bytes), admittedAs: null, expiredAt: null });
+    this.intake.set(id, { decision: structuredClone(d), candidate: structuredClone(candidate), sha256: sha256(bytes), admittedAs: null, expiredAt: null, dismissed: null });
     return Promise.resolve(true);
   }
 
@@ -272,8 +274,17 @@ export class StubVault implements Vault {
   markCandidateAdmitted(id: CandidateId, runId: RunId): Promise<boolean> {
     const entry = this.intake.get(id);
     if (entry?.candidate == null) return Promise.reject(new Error(`StubVault: no candidate ${id}`));
-    if (entry.admittedAs !== null) return Promise.resolve(false);
+    if (entry.admittedAs !== null || entry.dismissed !== null) return Promise.resolve(false);
     this.intake.set(id, { ...entry, admittedAs: runId });
+    return Promise.resolve(true);
+  }
+
+  dismissCandidate(id: CandidateId, cause: DismissalCause, at: string): Promise<boolean> {
+    const entry = this.intake.get(id);
+    if (entry?.candidate == null) return Promise.reject(new Error(`StubVault: no candidate ${id}`));
+    if (!DISMISSAL_CAUSES.includes(cause)) return Promise.reject(new Error(`StubVault: '${cause}' is not a dismissal cause`));
+    if (entry.admittedAs !== null || entry.dismissed !== null) return Promise.resolve(false);
+    this.intake.set(id, { ...entry, dismissed: { cause, at } });
     return Promise.resolve(true);
   }
 

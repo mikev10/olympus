@@ -20,6 +20,7 @@ import { R13B_I4 } from './nightly-review.js';
 import { R22_I4 } from './triggers.js';
 import { R10_I4 } from './ratchet.js';
 import { R19_ASSERTIONS } from './drafting.js';
+import { R16_ASSERTIONS } from './bug-fix.js';
 import { LOCAL_TOKEN_REACHES_NO_SANDBOX, SECURITY_SEAT_READS_ONLY_ITS_GRANTS } from './separation.js';
 import { R24_I4 } from './repo-instructions.js';
 
@@ -32,6 +33,7 @@ export const I4: InvariantEntry = {
     // R20: the role compiler.
     // R19: drafting at spec and test-design.
     ...R19_ASSERTIONS.I4,
+    ...R16_ASSERTIONS.I4,
     ...R20_I4,
     // R22: the trigger framework.
     ...R22_I4,

@@ -7,8 +7,8 @@
  * what the runtime derived and recorded (I2); nothing a model wrote is
  * presented as status, and nothing here is ever placed in a prompt (I7).
  */
-import type { ApprovalKey, AutonomyLevel, CandidateId, RejectionReason, RunId, RunState } from '@olympus-ai/core';
-import type { CandidateRecord } from '@olympus-ai/vault';
+import type { ApprovalKey, AutonomyLevel, CandidateId, RejectionReason, RunId, RunState, RunTemplateId } from '@olympus-ai/core';
+import type { CandidateDismissal, CandidateRecord, DismissalCause } from '@olympus-ai/vault';
 import type { DeliveryOutcome } from '../intake.js';
 import type { WorstCaseCost } from '../cost.js';
 import type { RequestedArtifacts, RunOutcome, RunStanding } from '../run.js';
@@ -27,9 +27,23 @@ export interface CreateRunBody {
    * route is the human principal's channel, the only one an intent comes
    * through (I7).
    */
-  readonly intent?: string;
+  readonly intent?: string | BugFixIntentBody;
   /** The intake candidate the run is admitted from (R22): the person writes the intent, and the candidate supplies the trigger. */
   readonly candidate?: CandidateId;
+  /** The run's template (A-R16-02): with `bug-fix`, `intent` is the three parts a person wrote from the report. */
+  readonly template?: RunTemplateId;
+}
+
+/** A bug fix's intent on the wire: the three parts, each the person's text (A-R16-02). */
+export interface BugFixIntentBody {
+  readonly steps: string;
+  readonly actual: string;
+  readonly expected: string;
+}
+
+/** `POST /intake/:id/dismiss`: why a person did not work the candidate, from a closed set and with no text (A-R16-05). */
+export interface DismissBody {
+  readonly cause: DismissalCause;
 }
 
 /** `POST /runs/:id/approve`. Who approved is the token's principal, never a field (D-P9-06). */
@@ -116,6 +130,8 @@ export interface CandidateSummary {
   readonly recordedAt: string;
   readonly admittedAs: RunId | null;
   readonly expiredAt: string | null;
+  /** A person's dismissal, with its cause and no text; null if it has not been dismissed (A-R16-05). */
+  readonly dismissed: CandidateDismissal | null;
 }
 
 /** `GET /intake/:id`: the candidate, its raw body for the principal to read, and the hash of the decision that recorded it. */

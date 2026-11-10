@@ -170,6 +170,9 @@ export interface LineArtifacts {
     readonly security: AdmittedArtifact | null;
     readonly runRequirements: AdmittedArtifact | null;
     readonly questions: AdmittedArtifact | null;
+    /** A bug-fix spec's two parts, locked with its draft; absent or null on any other (A-R16-03). */
+    readonly defect?: AdmittedArtifact | null;
+    readonly reproduction?: AdmittedArtifact | null;
   };
 }
 
@@ -442,7 +445,7 @@ async function work(ctx: LineContext, station: StationId): Promise<StationRefusa
     case 'test-design': {
       // A drafted spec's security part is the one its lock wrote, so the refusal R17 makes at `spec` of
       // a supplied spec is made here of a drafted one approved without one (R19).
-      const missing = specPartRefusal(ctx.securityPart);
+      const missing = specPartRefusal(ctx.securityPart) ?? bugFixPartRefusal(ctx);
       if (missing !== undefined) return missing;
       // Drafted tests are drafted here; their draft is locked at the exit, once approved (R19).
       if (isDrafted(ctx, 'test-design')) return draftStation(ctx, 'test-design');
@@ -1145,9 +1148,23 @@ function admittedArtifacts(ctx: LineContext): AdmittedArtifact[] {
 }
 
 /** The spec's files and each part it carries: what `spec` locks, and what a `locked-spec` grant reads (R17). */
+/**
+ * The refusal of a bug-fix run whose locked spec lacks the defect or the
+ * reproduction part, naming it (A-R16-03). A draft without either is never
+ * approved, so this re-reads what the lock wrote, as the security part is
+ * re-read for a drafted spec (D-R16-04).
+ */
+export function bugFixPartRefusal(ctx: Pick<LineContext, 'artifacts' | 'drafting'>): StationRefusal | undefined {
+  if (ctx.drafting.template !== 'bug-fix') return undefined;
+  const { defect = null, reproduction = null } = ctx.artifacts.specParts;
+  if (defect === null) return { ok: false, reason: 'spec-part-missing', part: 'defect', message: "a bug-fix spec carries the defect part: the intent's steps, what happens, and what should happen, as the runtime wrote them" };
+  if (reproduction === null) return { ok: false, reason: 'spec-part-missing', part: 'reproduction', message: 'a bug-fix spec carries the reproduction part: where the defect shows, and what a check needs to run it' };
+  return undefined;
+}
+
 export function specArtifacts(ctx: Pick<LineContext, 'artifacts'>): AdmittedArtifact[] {
-  const { security, runRequirements, questions } = ctx.artifacts.specParts;
-  return [...ctx.artifacts.spec, ...[security, runRequirements, questions].filter((part): part is AdmittedArtifact => part !== null)];
+  const { security, runRequirements, questions, defect = null, reproduction = null } = ctx.artifacts.specParts;
+  return [...ctx.artifacts.spec, ...[security, runRequirements, questions, defect, reproduction].filter((part): part is AdmittedArtifact => part !== null)];
 }
 
 /**

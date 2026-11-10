@@ -9,13 +9,15 @@ import { CODEX_EXECUTES_INSIDE_THE_SANDBOX } from './codex.js';
 import { OPENAI_COMPATIBLE_EXECUTES_INSIDE_THE_SANDBOX } from './openai-compatible.js';
 import { R20_I1 } from './roles.js';
 
-/** The thirty-seven named, audited operations the Vault contract declares (the eight intake operations are R22's, A-R22-04; `recordUsage` is P13's, A-P13-03; `recordDecision` and `readDecisions` are P14's, A-P14-01; `readUsage` is I1a's, A-I1a-05; `recordIntegration` and `readIntegration` are I1b's, A-I1b-01; `listRuns` is R2's, A-R2-02; `recordBaseRun` and `readBaseRun` are R15's, D-A-BF-01; `recordIntent`, `recordRubric`, `recordDraft`, `recordCriticResult`, `recordDraftLock`, and `readLocks` are R19's, A-R19-07; `recordNightly`, `readNightly`, and `listObjects` are R13a's, A-R13a-02 and A-R13a-05; `recordObservation` and `readObservations` are R8a's, D-R8a-03). Nothing else may be reachable on an instance. */
+/** The thirty-eight named, audited operations the Vault contract declares (the eight intake operations are R22's, A-R22-04; `recordUsage` is P13's, A-P13-03; `recordDecision` and `readDecisions` are P14's, A-P14-01; `readUsage` is I1a's, A-I1a-05; `recordIntegration` and `readIntegration` are I1b's, A-I1b-01; `listRuns` is R2's, A-R2-02; `recordBaseRun` and `readBaseRun` are R15's, D-A-BF-01; `recordIntent`, `recordRubric`, `recordDraft`, `recordCriticResult`, `recordDraftLock`, and `readLocks` are R19's, A-R19-07; `recordNightly`, `readNightly`, and `listObjects` are R13a's, A-R13a-02 and A-R13a-05; `recordObservation` and `readObservations` are R8a's, D-R8a-03; `dismissCandidate` is R16's, A-R16-05). Nothing else may be reachable on an instance. */
 const NAMED_OPERATIONS: readonly string[] = [
   'read', 'lock', 'verifyLocks', 'writeEvidence', 'recordViolation', 'recordAdmission', 'recordTaskResult', 'recordUsage',
   'recordDecision', 'readDecisions', 'readUsage', 'recordIntegration', 'readIntegration', 'recordBaseRun', 'readBaseRun', 'listRuns', 'readRunState', 'commitRunState',
   'recordIntent', 'recordRubric', 'recordDraft', 'recordCriticResult', 'recordDraftLock', 'readLocks',
   'recordTriggerDecision', 'readTriggerDecisions', 'hasTriggerDecision', 'readCandidate', 'markCandidateAdmitted', 'markCandidateExpired',
   'countRefusedDelivery', 'readRefusedDeliveryCounts',
+  // R16: a person's dismissal of a candidate, which spends it as an admission does (A-R16-05).
+  'dismissCandidate',
   // R13a: the nightly record, written once and read; and the store's own listing of what it holds (A-R13a-02, A-R13a-05).
   'recordNightly', 'readNightly', 'listObjects',
   // R8a: an observation, written once under its run or beside the runs, and read (D-R8a-03).

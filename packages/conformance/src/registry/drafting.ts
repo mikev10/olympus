@@ -85,7 +85,7 @@ export function artifactsFor(spec: boolean, tests: boolean, parts?: NonNullable<
 }
 
 /** The spec a stub drafter writes for the hello fixture: its text and its three parts. */
-function helloSpec(runId: string, overrides: Record<string, string> = {}): Record<string, string> {
+export function helloSpec(runId: string, overrides: Record<string, string> = {}): Record<string, string> {
   const dir = `.drafts/${runId}`;
   return {
     [`${dir}/spec.md`]: '# Hello\n\nThe repository root holds hello.txt, whose content is the word hello.\n',
@@ -106,7 +106,7 @@ function helloTests(runId: string, script = HELLO_CHECK): Record<string, string>
   };
 }
 
-const HELLO_CHECK = "const fs = require('node:fs');\nprocess.exit(fs.existsSync('hello.txt') && fs.readFileSync('hello.txt', 'utf8').trim() === 'hello' ? 0 : 1);\n";
+export const HELLO_CHECK = "const fs = require('node:fs');\nprocess.exit(fs.existsSync('hello.txt') && fs.readFileSync('hello.txt', 'utf8').trim() === 'hello' ? 0 : 1);\n";
 
 /** Writes `files` into the task's sandbox, as an agent does, through the provider that runs it. */
 async function writeIn(sandbox: SandboxProvider, req: TaskRequest, files: Record<string, string>): Promise<void> {
@@ -196,6 +196,9 @@ interface Seats {
   readonly critic?: (station: DraftStation, attempt: number) => string;
   /** The provider every seat runs on and writes through; a fresh stub where none is given. */
   readonly sandbox?: SandboxProvider;
+  /** The build and review drivers, where the assertion reads their requests; the rig's own stub where none is given (R16). */
+  readonly builder?: Driver;
+  readonly reviewer?: Driver;
 }
 
 export interface DraftingRig {
@@ -256,7 +259,9 @@ export async function drafting(rig: LineRig, seats: Seats = {}): Promise<Draftin
     }),
     testCritic: await seat({ ...criticSeat, act: critic('test-design') }),
   };
-  const components = async (): Promise<BuiltGraph> => rig.components({ sandbox, drafting: drivers });
+  const components = async (): Promise<BuiltGraph> => rig.components({
+    sandbox, drafting: drivers, ...(seats.builder === undefined ? {} : { driver: seats.builder }), ...(seats.reviewer === undefined ? {} : { reviewer: seats.reviewer }),
+  });
   const request = async (overrides: Partial<RunRequest> = {}): Promise<RunRequest> => {
     const policy = overrides.policy ?? (await draftingPolicy());
     const artifacts = overrides.artifacts ?? artifactsFor(true, false);

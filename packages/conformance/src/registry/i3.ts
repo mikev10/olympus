@@ -20,6 +20,7 @@ import { DEPENDENCY_TREES_ARE_THE_BASES, PASSING_ON_THE_BASE_REFUSES } from './b
 import { R20_I3 } from './roles.js';
 import { R23_I3 } from './workspace-instructions.js';
 import { R19_ASSERTIONS } from './drafting.js';
+import { R16_ASSERTIONS } from './bug-fix.js';
 import { R8B_I3 } from './observe-plan.js';
 import { R24_I3 } from './repo-instructions.js';
 
@@ -52,6 +53,7 @@ export const I3: InvariantEntry = {
     // R20: the role compiler.
     // R19: drafting at spec and test-design.
     ...R19_ASSERTIONS.I3,
+    ...R16_ASSERTIONS.I3,
     ...R8B_I3,
     ...R20_I3,
     // R23: workspace instructions, per driver.

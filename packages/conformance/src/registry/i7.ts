@@ -10,6 +10,7 @@ import { R8A_REVIEW_I7 } from './observe-review.js';
 import { R13B_I7 } from './nightly-review.js';
 import { R22_I7 } from './triggers.js';
 import { R19_ASSERTIONS } from './drafting.js';
+import { R16_ASSERTIONS } from './bug-fix.js';
 import { TELEMETRY_EXPORTS_NO_TEXT } from './telemetry.js';
 import { R24_I7 } from './repo-instructions.js';
 
@@ -53,6 +54,7 @@ export const I7: InvariantEntry = {
     // R20: the role compiler.
     // R19: drafting at spec and test-design.
     ...R19_ASSERTIONS.I7,
+    ...R16_ASSERTIONS.I7,
     ...R20_I7,
     // R12: only allowlisted typed fields leave in telemetry, and nothing reads it back.
     TELEMETRY_EXPORTS_NO_TEXT,

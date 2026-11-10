@@ -187,9 +187,12 @@ export interface BaseMismatch {
  * A part of a spec, each a JSON file locked with it. The runtime requires the
  * security part of every spec (R17). A drafted spec carries all three: what
  * the acceptance checks need to run, and its assumptions and open questions
- * (R19); a supplied spec may.
+ * (R19); a supplied spec may. A bug-fix run's spec carries two more:
+ * `defect`, the intent's three parts as the runtime wrote them, and
+ * `reproduction`, where the defect shows and what a check needs to run it,
+ * as the drafter wrote it (A-R16-03).
  */
-export type SpecPart = 'security' | 'run-requirements' | 'questions';
+export type SpecPart = 'security' | 'run-requirements' | 'questions' | 'defect' | 'reproduction';
 
 /** A locked artifact whose bytes no longer match the lock manifest (I3). */
 export interface TamperedPath { path: string; expected: string; actual: string; }

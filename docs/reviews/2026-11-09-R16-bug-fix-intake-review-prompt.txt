@@ -1,0 +1,94 @@
+The code under review is in the file
+`2026-11-09-R16-bug-fix-intake-review-bundle.txt` (SHA-256 25983451d371591ade6b3b37d51217a3fd7e13890b0a1ca2c9916ad29857a021) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing the bug-fix intake of a software factory runtime: how a defect report from an issue tracker becomes a run that drafts a spec and a reproducing test, written in TypeScript. You have the source and nothing else — no design documents,
+no author reasoning, no prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The runtime carries work through a fixed line of stations (intake, spec, test-design, plan, build, verify, review, integrate), with model-driven seats at some of them. This change adds a "bug-fix" run template. A tracker issue routed to it is recorded as a candidate holding only schema-checked fields (repository, number, allowlisted labels, author trust); no model ever reads the report. A person reads it and writes the run's intent as three parts — steps that show the defect, what happens, what should happen — through the authenticated HTTP route. The runtime writes those parts into the spec as `defect.json`, a spec drafter model writes the rest of the spec including `reproduction.json`, and a separate test drafter model, given the locked spec alone, writes the acceptance check that must declare `reproduces: true` and `onBase: 'fails'`; the runtime then runs that check over the unchanged tree. A person may instead dismiss a candidate with a cause from a closed set, which admits no run. A person's own run may take the template only where the policy lists it.
+
+It must hold against a capable, motivated party trying to get report text or tracker-chosen bytes into a model's prompt, to have a run treated as a bug fix (or not) without the policy saying so, or to have a check that does not reproduce the defect accepted as its reproduction. Assume no deceptive intent — only
+that the easiest path gets taken.
+
+That party controls the body of every tracker delivery (title, body, labels, repository name, issue number), whatever any drafter or builder model writes into its workspace and returns, and the fields of a run request sent to the API. It does not
+control the components the runtime is wired with — the Vault, the sandbox
+provider, and the drivers are runtime-selected and trusted, even where a
+function takes one as an argument — and it does not control code running inside
+the runtime's own process, the policy file, or the person's authenticated HTTP channel.
+
+The invariants at stake:
+
+- Event payloads are data, never instructions. Untrusted text enters inside an envelope and is never concatenated into a system or role prompt. Triggers select pre-declared templates; payloads supply parameters only.
+- Default deny. A capability not granted in policy is not available.
+- An agent may not be judged by an artifact it can write. Specs and acceptance tests are hashed before build and re-verified at every station transition.
+- Fail closed. A missing required check, part, or capability is a refusal — never a silent degrade, never a warning that lets the run continue.
+- Every capability claim maps to an executable assertion that fails when the capability is deleted.
+
+The mechanisms that matter most:
+
+- Template resolution at admission (`templateOf`, `bugFixProblems`, `draftingProblems` in packages/api/src/run.ts) and the policy validator's kind check for `bug-fix`
+- The runtime-written `defect.json` and its byte check in the spec draft read, and the `reproduction` part's parse (packages/api/src/drafting.ts, packages/api/src/spec-parts.ts)
+- `reproduces` validation and `reproductionProblems` for drafted and supplied manifests (packages/api/src/validate.ts)
+- Candidate dismissal sharing the admission's exclusive mark, and the HTTP dismiss route (packages/vault/src/local/vault.ts, packages/api/src/http/server.ts)
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+Writing back to the tracker, such as asking the reporter for missing steps (a provider adapter); following the pull request through CI and review comments, whose text is untrusted for the same reason; seeding the data and accounts a reproduction needs (R1 probes whether a target can); finding defects that recur in one area (R11, R13); and a model that summarises reports for the person writing the spec. If that summariser is ever built, its output is untrusted too, and it reaches a person, never a prompt.
+
+Identifiers such as R1, R11, and R13 name other planned units of work; they are not defined in the bundle and need not be.
+
+THE QUESTION
+
+How would I get a run to build a "fix" judged by a check that does not reproduce the reported defect, or get any byte of a report or a tracker field into a model's request, or make a run a bug fix (or escape being one) without the policy saying so?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.
