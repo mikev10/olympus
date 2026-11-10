@@ -629,6 +629,7 @@ order between them is settled before any of them is picked up.
 | R32 | Policy-granted preview of a running sandbox ([#114](https://github.com/mikev10/olympus/issues/114)) | M3 | P2, P9, P10, P11, P14 | — |
 | R33 | Chat as a trigger source ([#110](https://github.com/mikev10/olympus/issues/110)) | M3 | R22 | — |
 | R34 | Dependencies installed by the runtime from the lockfile ([#40](https://github.com/mikev10/olympus/issues/40)) | M2 | P3, P6, P10, P14, R1, R15 | — |
+| R35 | Runnable release and first-run docs ([#54](https://github.com/mikev10/olympus/issues/54), [#55](https://github.com/mikev10/olympus/issues/55), [#28](https://github.com/mikev10/olympus/issues/28), [#121](https://github.com/mikev10/olympus/issues/121), [#123](https://github.com/mikev10/olympus/issues/123) to [#127](https://github.com/mikev10/olympus/issues/127)) | M2 | P3, P9, R1, R19, R20 | — |
 
 ### R1 — Readiness
 
@@ -2524,6 +2525,71 @@ thread and is retyped into an issue before the line can see it.
 
 **Out of scope:** conversational steering of a running run; approvals stay on
 the API's approve path.
+
+### R35 — Runnable release and first-run docs
+
+Issues [#54](https://github.com/mikev10/olympus/issues/54),
+[#55](https://github.com/mikev10/olympus/issues/55),
+[#28](https://github.com/mikev10/olympus/issues/28),
+[#121](https://github.com/mikev10/olympus/issues/121), and
+[#123](https://github.com/mikev10/olympus/issues/123) to
+[#127](https://github.com/mikev10/olympus/issues/127). The first real use,
+from public docs only, stopped at policy. Nothing starts `factory-host` or
+`olympus-ai` from a checkout: both `bin` entries point at `.ts` source and
+`tsconfig.base.json` sets `noEmit`. The CLI still carries v1's published
+npm version (`olympus-ai@4.5.16`). The host's variables are listed only in a
+source header and refused one at a time with a stack trace. Policy, roles,
+and `create`'s input files have no documentation or example. Readiness (R1)
+has no user path: no host route or CLI command calls its scan. And on
+native Windows without Developer Mode, admission fails mid-run with
+`EPERM ... symlink`, because the base is copied with `verbatimSymlinks`.
+
+- **One supported way to run, tested as a user runs it** (#55). A build
+  step emits JavaScript to `dist/`, and every `bin` and `main` points at it.
+  A loader shipped as a runtime dependency is rejected, since a release
+  would have to redo it. A test packs the packages, installs the tarballs
+  into an empty directory, starts `factory-host` from its `bin`, and drives
+  it with `olympus-ai`. It fails when that path breaks (I8, I9).
+- **The CLI's version** (#54). v2 releases as `olympus-ai@5.0.0`, keeping
+  the name users know and the I10 scan's exemption for the executable name.
+  Until then `package.json` marks 4.5.16 as v1's. Publishing to npm is the
+  maintainer's, with merge and tag.
+- **The host's configuration is declared once** (#121, #127). One table in
+  code names every variable the host reads: purpose, required or optional,
+  and secret or not. The host reads only through it. A shipped
+  `.env.example` and the README are checked against it by a test that fails
+  when the host reads a variable the docs do not list. Start-up collects
+  every missing or invalid variable and refuses with one list, no stack
+  trace, a non-zero exit, and a pointer to the docs, before it listens (I5).
+- **Symlinks checked at start-up** (#28, #123). Before it listens, the host
+  creates and removes a file symlink under `FACTORY_TREES` and refuses to
+  start if that fails, naming WSL2 and Developer Mode. It runs on every
+  platform, so the refusal follows the capability, not an OS guess (I5).
+  The README's prerequisites gain "Supported hosts": WSL2 recommended on
+  Windows, Developer Mode as the native fallback. Emulating links is
+  rejected, as #28 records: junctions are directory-only, and a link stored
+  as a file changes its content hash.
+- **Examples a test admits a run under** (#124, #126). A shipped
+  `examples/` holds a commented minimal `policy.yaml` for an L1 run, a
+  roles directory, rubrics, and the spec, tests, manifest, and graph files
+  `create` reads. A test admits a run under them, so they cannot rot. The
+  README gains "Configure policy" and "First run" sections: the smallest
+  `create --draft-spec --intent` at L1, which files it still needs, how
+  `--workspace` relates to `FACTORY_REPOSITORY`, and what `--approve-cost`
+  approves and in what unit.
+- **Per-command help** (#126). `olympus-ai <command> --help` prints one
+  line per flag, generated from the same table the parser reads.
+- **Readiness reachable** (#125). A read-only API operation and a
+  `readiness` CLI command return the ceiling R1's scan derives for a
+  commit, with each probe's outcome. The README says where a user sees it.
+
+**Out of scope:** publishing to npm, and any release automation; enforcing
+the readiness ceiling at admission, which changes what admission refuses and
+needs its own decision; installers or packages for any OS; making native
+Windows work without Developer Mode.
+
+**Why M2:** every M2 unit is proved by people running the line, and today no
+one can start it from the docs.
 
 ---
 
