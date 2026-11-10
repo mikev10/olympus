@@ -129,7 +129,7 @@ export async function assertPackagedHostRuns(): Promise<void> {
     let hostErr = '';
     const started = spawn(process.execPath, [hostBin], { cwd: dir, env, stdio: ['ignore', 'ignore', 'pipe'] });
     host = started;
-    started.stderr?.on('data', (chunk: Buffer) => { hostErr += chunk.toString('utf8'); });
+    started.stderr.on('data', (chunk: Buffer) => { hostErr += chunk.toString('utf8'); });
     const url = `http://127.0.0.1:${String(port)}`;
     const cli = (...args: string[]): Promise<Ran> => run(process.execPath, [cliBin, ...args, '--url', url, '--token', token], { cwd: dir, env: baseEnv(), timeoutMs: 60_000 });
     const deadline = Date.now() + LISTEN_MS;
@@ -148,7 +148,7 @@ export async function assertPackagedHostRuns(): Promise<void> {
     const help = await run(process.execPath, [cliBin, 'create', '--help'], { cwd: dir, env: baseEnv(), timeoutMs: 60_000 });
     if (help.code !== 0 || !help.stdout.includes('--workspace')) throw new Error(`I9: the installed CLI's create --help failed\n${help.stderr}`);
   } finally {
-    if (host !== undefined && host.exitCode === null) {
+    if (host?.exitCode === null) {
       const exited = new Promise((r) => host?.once('exit', r));
       host.kill();
       await exited;
