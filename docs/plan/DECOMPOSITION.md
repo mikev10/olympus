@@ -623,11 +623,12 @@ order between them is settled before any of them is picked up.
 | R25 | Property checks | M3 | P6, P8, R7, R15, R19 | — |
 | R26 | Driver: Codex | M2 | P5, P10, P12, P13, R23 | — |
 | R28 | Finding outcomes, derived by the runtime ([#109](https://github.com/mikev10/olympus/issues/109)) | M2 | P14, R2, R9, R13b, R19 | — |
-| R29 | Adapter sets beyond TypeScript, Python first ([#113](https://github.com/mikev10/olympus/issues/113)) | M2 | P8, R1, R18 | — |
+| R29 | Adapter sets beyond TypeScript, Python first ([#113](https://github.com/mikev10/olympus/issues/113)) | M2 | P8, R1, R18, R34 | — |
 | R30 | Hosting-platform integration ([#111](https://github.com/mikev10/olympus/issues/111)) | M3 | R8a, R8b, R22, P10, P11 | — |
 | R31 | Multi-seat review panel ([#112](https://github.com/mikev10/olympus/issues/112)) | M3 | R9, R14, R20 | — |
 | R32 | Policy-granted preview of a running sandbox ([#114](https://github.com/mikev10/olympus/issues/114)) | M3 | P2, P9, P10, P11, P14 | — |
 | R33 | Chat as a trigger source ([#110](https://github.com/mikev10/olympus/issues/110)) | M3 | R22 | — |
+| R34 | Dependencies installed by the runtime from the lockfile ([#40](https://github.com/mikev10/olympus/issues/40)) | M2 | P3, P6, P10, P14, R1, R15 | — |
 
 ### R1 — Readiness
 
@@ -2342,16 +2343,118 @@ TypeScript adapters only, and readiness correctly derives `L0` for any stack
 without an `AdapterSet.test` (`I5.unsupported-stack-refuses`), so no other
 stack can use the line.
 
-- One unit per stack, each a full `AdapterSet`: test enumeration and run,
-  coverage, tamper-analysis inputs (P7), and lockfile install (#40). A stack
-  is supported exactly when it passes the same conformance kit the TypeScript
-  set passes. R29 is Python; later stacks take their own ids.
+- One unit per stack, each a full `AdapterSet`. A stack is supported exactly
+  when it passes the same conformance kit the TypeScript set passes. R29 is
+  Python; later stacks take their own ids.
 - The stack is recorded per run (R18), so outcomes compare across stacks.
+
+**Amendment:** D-A-PY-01 to D-A-PY-05. Python's dependencies cannot come from
+the base the way Node's do: a virtualenv is bound to the interpreter that
+made it, so one made on the host does not run in a check's container. R29
+therefore depends on R34, which installs from the lockfile, and it declares
+R34's installer for Python rather than building an install of its own.
+
+Deliverables:
+
+- **Test adapter: pytest only** (D-A-PY-03), selected when the project
+  declares it in `pyproject.toml` or in a requirements file. Suites
+  enumerated by pytest's own collection rules (`testpaths`, `python_files`,
+  `python_classes`, `python_functions`, `norecursedirs`) read statically from
+  `pytest.ini`, `pyproject.toml`, `tox.ini`, or `setup.cfg`, in pytest's own
+  precedence. Assertions (`assert`, `self.assert*`, `pytest.raises`,
+  `pytest.approx` with its tolerance), skip markers (`skip`, `skipif`,
+  `xfail`, `pytest.skip()`, `unittest.skip*`), and cases (module functions
+  and `Test*` class methods, parametrised ids included where literal) read
+  from a parse on the host, with nothing run (`I1.adapters-execute-nothing-on-the-host`).
+  A setting, a conftest hook, or a plugin that changes collection and cannot
+  be read statically is refused, naming it, as P8 refuses a computed config
+  (D-P8-04). A repository with no pytest declared gets `test: null` with the
+  reason, never the unittest runner.
+- **Coverage adapter:** changed-line coverage from coverage.py's JSON report,
+  with executable lines taken from the parse as well as from the report, so
+  the report can add obligations and never remove one (as D-P8-09 does for
+  istanbul).
+- **Manifest adapter:** Python's config files (`pyproject.toml`,
+  `setup.cfg`, `setup.py`, `tox.ini`, `pytest.ini`, `conftest.py`,
+  `.coveragerc`, the lockfiles, requirements files), so a change to one is a
+  protected path touched, as a Node config file is today.
+- **Dependency trees:** the set names its own (`.venv`, `site-packages`,
+  `__pycache__` included), and D-R15-05's rule applies to them as to
+  `node_modules`: written, recorded, never carried.
+- **Runner:** a suite check starts the interpreter R34's install provides,
+  as `python -m pytest`, from a check image that carries Python, pinned by
+  digest. `runnerMissing` names a missing interpreter or pytest rather than
+  reading a failed start as a failure.
+- **Static analysis:** the existing Semgrep scanner, which reads Python; the
+  manifest pins the rules, as for Node.
+- **Readiness:** the install, suite, coverage, and tamper probes answer for a
+  Python repository, so readiness can clear it past `L0`.
+
+**Acceptance:** `pnpm typecheck`, `pnpm lint`, `pnpm test`, and
+`pnpm conformance` pass. The adapter conformance kit runs over both sets: the
+same assertions, parameterised by stack, each failing when the Python
+adapter's part is deleted. `I5.unsupported-stack-refuses` still holds for a
+repository declaring neither stack. A real-line run on a Python fixture
+reaches `integrate` with its stack recorded as `pytest@<major>`.
+
+**Gate paths:** `packages/adapters/src/types.ts`, `packages/adapters/package.json`
+(a parser and a TOML reader, pinned), and `packages/conformance/`.
 
 **Out of scope:** partial support. A stack with tests and no tamper analysis
 gets the readiness level R1 already derives, never presented as full support.
+A dependency audit for Python (R13a audits npm and pnpm only), which is filed
+as its own issue. The unittest runner, nose, and any pytest plugin that
+changes collection.
 
 **Why M2:** without it the line serves one stack.
+
+### R34 — Dependencies installed by the runtime from the lockfile
+
+Issue [#40](https://github.com/mikev10/olympus/issues/40). Since D-R15-05,
+every check runs over the base's dependency trees, so a change that needs a
+dependency the base did not install fails `verify` honestly and cannot pass.
+And a stack whose installed tree is bound to the machine that made it, as
+Python's is, cannot use the line at all (D-A-PY-01).
+
+- **The runtime installs; no seat does.** Before any check of a task runs,
+  the runtime installs from the head's lockfile in a sandbox of its own,
+  into a directory it owns outside the tree. Every check then runs with no
+  egress over the tree with that directory mounted read-only. No agent runs
+  the install or writes its output (I1, I3).
+- **Granted in policy** (A-R34-01). The registries an install may reach are
+  a policy field, empty by default, so no install runs unless granted (I4).
+  That egress is the install sandbox's alone.
+- **No lifecycle scripts,** and every package verified against the hash its
+  lockfile records. A lockfile without hashes is refused, naming it.
+- **Declared per stack,** as the dependency auditor is (R13a): the lockfile
+  it reads, the image pinned by digest, the argument vector. npm
+  (`npm ci --ignore-scripts`) and pnpm (`pnpm install --frozen-lockfile
+  --ignore-scripts`) ship here. Python's installer is declared with them
+  (D-A-PY-04): `uv sync --frozen` for `uv.lock`, and `pip install
+  --require-hashes --no-deps` for a hashed `requirements.txt`. Any other
+  lockfile, several lockfiles, or none is refused, naming what was found.
+- **Evidence:** the lockfile's diff against the base and a hash of the
+  installed tree, in the task's evidence bundle. A lockfile change remains a
+  config change, so it touches a protected path as it does today.
+- **What the base installed stops mattering.** The base is installed the same
+  way for R15's base run, so both sides of a comparison run over an install
+  the runtime made.
+
+**Acceptance:** a change adding a dependency the base lacks passes `verify`.
+An install with no registry granted, one whose lockfile has no hashes, and one
+whose package fails its hash are each refused, naming the cause. A
+lifecycle script in a dependency does not run. A check sandbox has no
+egress. Each assertion fails when its check is deleted.
+
+**Gate paths:** `packages/core/src/policy/types.ts` (A-R34-01),
+`packages/adapters/src/types.ts` (the installer declaration),
+`packages/vault/src/types.ts` (the evidence fields), and
+`packages/conformance/`.
+
+**Out of scope:** the Python adapters (R29's); private registry credentials;
+caching installs across runs; a dependency audit beyond R13a's.
+
+**Why M2:** R29 depends on it, and without it no change can add a dependency.
 
 ### R30 — Hosting-platform integration
 
