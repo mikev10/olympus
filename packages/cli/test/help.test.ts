@@ -5,6 +5,9 @@
 import { describe, expect, test } from 'vitest';
 import { COMMANDS, GLOBAL_FLAGS, runCli, type CliIo } from '../src/cli.js';
 
+/** The executable's name, spelled once and exactly: the I10 scan exempts it and nothing that embeds it. */
+const CLI = 'olympus-ai';
+
 function io(): CliIo & { readonly lines: string[]; readonly errors: string[]; readonly calls: string[] } {
   const lines: string[] = [];
   const errors: string[] = [];
@@ -23,7 +26,7 @@ describe('<command> --help', () => {
       const out = io();
       expect(await runCli([command.name, '--help'], out)).toBe(0);
       expect(out.calls).toEqual([]);
-      expect(out.lines[0]).toMatch(new RegExp(`^usage: olympus-ai ${command.name}\\b`, 'u'));
+      expect(out.lines[0]).toMatch(new RegExp(`^usage: ${CLI} ${command.name}\\b`, 'u'));
       for (const [name, flag] of Object.entries({ ...command.flags, ...GLOBAL_FLAGS })) {
         const matching = out.lines.filter((l) => new RegExp(`^  --${name}\\b`, 'u').test(l));
         expect(matching, `--${name}`).toHaveLength(1);

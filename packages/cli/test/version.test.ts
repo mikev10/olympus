@@ -20,5 +20,5 @@ test('v2 cannot release as 4.x: a 4.x manifest has a pending major changeset', (
   const pending = readdirSync(dir)
     .filter((f) => f.endsWith('.md') && f !== 'README.md')
     .filter((f) => /^---\r?\n[\s\S]*?["']olympus-ai["']\s*:\s*major\b[\s\S]*?\r?\n---/u.test(readFileSync(join(dir, f), 'utf8')));
-  expect(pending, `olympus-ai is ${pkg.version}, v1's number, and no pending changeset bumps it major`).not.toHaveLength(0);
+  expect(pending, `${pkg.name} is ${pkg.version}, v1's number, and no pending changeset bumps it major`).not.toHaveLength(0);
 });

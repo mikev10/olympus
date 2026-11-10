@@ -77,7 +77,7 @@ export const I9: InvariantEntry = {
     }),
     runtime({
       id: 'I9.packaged-host-runs',
-      title: 'the packed packages install into an empty directory; factory-host, started from its installed bin, refuses an empty environment with every required variable in one list and no stack frame, and configured from the shipped examples listens headless; olympus-ai, from its own installed bin, reaches it over HTTP (R35)',
+      title: 'the packed packages install into an empty directory; factory-host, started from its installed bin, refuses an empty environment with every required variable in one list and no stack frame, and configured from the shipped examples listens headless; the CLI, from its own installed bin, reaches it over HTTP (R35)',
       run: assertPackagedHostRuns,
       // Builds, packs, installs, and composes the host, which builds the driver image on a cold Docker cache.
       timeoutMs: 1_200_000,
