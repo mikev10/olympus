@@ -314,9 +314,13 @@ function one(positionals: string[], names: readonly string[]): string[] {
   return positionals;
 }
 
-/** Reads the server-sent stream and prints one line per event: its name, then its JSON data. */
-async function events(io: CliIo, t: Target, runId: string): Promise<ExitCode> {
-  const res = await io.fetch(endpoint(t, runPath(runId, 'events')), { headers: { authorization: `Bearer ${t.token}`, accept: 'text/event-stream' } });
+/**
+ * Reads a server-sent stream, calling `onEvent` with each event's name and
+ * data; a block that is only a comment, a keep-alive, is skipped. A response
+ * that is not a stream is reported as any other and its exit code returned.
+ */
+async function stream(io: CliIo, t: Target, path: string, onEvent: (name: string, data: string) => void): Promise<ExitCode | null> {
+  const res = await io.fetch(endpoint(t, path), { headers: { authorization: `Bearer ${t.token}`, accept: 'text/event-stream' } });
   if (res.status !== 200 || res.body === null) return report(io, { status: res.status, body: await res.text().then((text) => { try { return JSON.parse(text) as unknown; } catch { return text; } }) });
   const decoder = new TextDecoder();
   let buffered = '';
@@ -327,16 +331,49 @@ async function events(io: CliIo, t: Target, runId: string): Promise<ExitCode> {
     for (let end = buffered.indexOf('\n\n'); end !== -1; end = buffered.indexOf('\n\n')) {
       const block = buffered.slice(0, end);
       buffered = buffered.slice(end + 2);
-      let name = 'message';
+      let name: string | null = null;
       const data: string[] = [];
       for (const line of block.split('\n')) {
         if (line.startsWith('event: ')) name = line.slice('event: '.length);
         else if (line.startsWith('data: ')) data.push(line.slice('data: '.length));
       }
-      io.out(`${name} ${data.join('\n')}`);
+      if (name !== null || data.length > 0) onEvent(name ?? 'message', data.join('\n'));
     }
-    if (done) return 0;
+    if (done) return null;
   }
+}
+
+/** Prints one line per event: its name, then its JSON data. */
+async function events(io: CliIo, t: Target, runId: string): Promise<ExitCode> {
+  return (await stream(io, t, runPath(runId, 'events'), (name, data) => { io.out(`${name} ${data}`); })) ?? 0;
+}
+
+/**
+ * The readiness report for one revision of the host's repository: the commit
+ * is said on stderr as the scan starts, and the report printed on stdout when
+ * it ends. A scan that failed, or a stream that ended without a report, exits 1.
+ */
+async function readiness(io: CliIo, t: Target, revision: string | undefined): Promise<ExitCode> {
+  // Set from inside the stream callback, so an object: a let narrowed at its declaration would read as never changed.
+  const seen = { report: false, failed: false };
+  const path = revision === undefined ? 'readiness' : `readiness?${new URLSearchParams({ revision }).toString()}`;
+  const refused = await stream(io, t, path, (name, data) => {
+    if (name === 'started') {
+      const { commit } = JSON.parse(data) as { commit?: unknown };
+      io.err(`scanning ${typeof commit === 'string' ? commit : 'the commit'}; this runs the repository's install and checks in sandboxes, and takes minutes`);
+    } else if (name === 'report') {
+      io.out(json(JSON.parse(data) as unknown));
+      seen.report = true;
+    } else if (name === 'failed') {
+      seen.failed = true;
+      const { message } = JSON.parse(data) as { message?: unknown };
+      io.err(`the scan failed: ${typeof message === 'string' ? message : data}`);
+    }
+  });
+  if (refused !== null) return refused;
+  if (seen.report) return 0;
+  if (!seen.failed) io.err('the scan ended without a report');
+  return 1;
 }
 
 /** Outcomes over every run the Vault holds, optionally those admitted in a window; the service refuses a time it cannot read. */
@@ -499,8 +536,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<ExitCo
       case 'readiness': {
         const { values: flags, positionals: named } = parseOwn(command, own);
         if (named.length > 0) throw new UsageError(`readiness takes no positional arguments: ${named.join(' ')}`);
-        const revision = str(flags, 'revision');
-        return report(io, await call(io, t, 'GET', revision === undefined ? 'readiness' : `readiness?${new URLSearchParams({ revision }).toString()}`));
+        return await readiness(io, t, str(flags, 'revision'));
       }
       default:
         throw new UsageError(`'${command}' is in the command table but has no handler`);

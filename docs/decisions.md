@@ -9307,3 +9307,20 @@ Started on `v2` at 6086f8f, after the amendment (#128). Issues #54, #55, #28,
   indeterminate probe allows for a question the host can answer; storing
   the report, which nothing reads yet.
 - **Reverse:** pass `null`, or add a store.
+
+### D-R35-07: readiness answers as a stream, in the check image
+
+- **Chosen:** `GET /readiness` resolves the revision first (a bad one is a
+  400 before anything runs), then answers `text/event-stream`: `started`
+  with the commit, a comment every 15 s, and one `report` or `failed`. A
+  scan runs the install and the suite in sandboxes under timeouts that sum
+  past five minutes, and Node's `fetch` gives up waiting for response
+  headers after five; a stream sends them at once. The scan runs in the
+  host's check image (pinned Node), the image the line runs the stack's
+  tools in, with R1's own fixture timeouts (install 300 s, probe 180 s, cold
+  provision 60 s).
+- **Rejected:** a plain JSON response, which a long scan would lose to the
+  client's timeout; `POST` to start and `GET` to read, which writes state
+  the entry calls read-only.
+- **Reverse:** answer JSON and give the CLI a dispatcher with no header
+  timeout.

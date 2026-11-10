@@ -54,9 +54,28 @@ describe('<command> --help', () => {
     }
   });
 
-  test('readiness asks the API for the revision it is given', async () => {
+  test('readiness asks the API for the revision it is given, and prints the report the stream ends with', async () => {
     const out = io();
-    expect(await runCli(['readiness', '--revision', 'main', '--url', 'http://127.0.0.1:1', '--token', 't'], out)).toBe(0);
-    expect(out.calls).toEqual(['http://127.0.0.1:1/readiness?revision=main']);
+    const report = { commit: 'c', ceiling: { kind: 'scanned' } };
+    const sse = [
+      'event: started', 'data: {"revision":"main","commit":"c"}', '',
+      ': scanning', '',
+      'event: report', `data: ${JSON.stringify(report)}`, '', '',
+    ].join('\n');
+    const calls: string[] = [];
+    const streaming = { ...out, fetch: ((u: URL | string) => { calls.push(String(u)); return Promise.resolve(new Response(sse, { status: 200 })); }) as typeof fetch };
+    expect(await runCli(['readiness', '--revision', 'main', '--url', 'http://127.0.0.1:1', '--token', 't'], streaming)).toBe(0);
+    expect(calls).toEqual(['http://127.0.0.1:1/readiness?revision=main']);
+    expect(JSON.parse(out.lines.join('\n'))).toEqual(report);
+    expect(out.errors[0]).toMatch(/^scanning c/u);
+  });
+
+  test('a scan that fails exits 1, saying why', async () => {
+    const out = io();
+    const sse = ['event: started', 'data: {"commit":"c"}', '', 'event: failed', 'data: {"message":"no policy"}', '', ''].join('\n');
+    const streaming = { ...out, fetch: (() => Promise.resolve(new Response(sse, { status: 200 }))) as typeof fetch };
+    expect(await runCli(['readiness', '--url', 'http://127.0.0.1:1', '--token', 't'], streaming)).toBe(1);
+    expect(out.errors).toContain('the scan failed: no policy');
+    expect(out.lines).toEqual([]);
   });
 });

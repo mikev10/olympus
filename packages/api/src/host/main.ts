@@ -13,6 +13,7 @@
 import { readFile } from 'node:fs/promises';
 import { GitHubCheckReader } from '../checks.js';
 import { createApiServer } from '../http/server.js';
+import { GitHubBranchProtection, readinessScanner } from '../readiness-scan.js';
 import { readHostConfig, refusalText } from './config.js';
 import { composeHost, parseEndpointFile } from './compose.js';
 import { probeSymlinks } from './symlinks.js';
@@ -68,6 +69,11 @@ try {
       checks: config.checksToken === null ? null : new GitHubCheckReader({ repository: config.git.repository, token: config.checksToken }),
     },
     rubricsDirectory: config.rubricsDirectory,
+    // R1's scan over the working copy runs are admitted from, read-only (R35, D-R35-06).
+    readiness: readinessScanner({
+      components, repository: config.repository, policyFile: config.policyFile,
+      branchProtection: new GitHubBranchProtection({ repository: config.git.repository, branch: config.git.baseBranch, token: config.git.token }),
+    }),
   });
 } catch (error) {
   refuse([message(error)]);
