@@ -68,7 +68,8 @@ export interface ApiServer {
 }
 
 const MAX_BODY_BYTES = 64 * 1024;
-const MIN_TOKEN_LENGTH = 32;
+/** The shortest local token the server accepts; start-up checks it too, beside every other problem. */
+export const MIN_TOKEN_LENGTH = 32;
 
 interface Tracked {
   drive: Promise<void> | null;

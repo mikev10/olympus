@@ -10,7 +10,10 @@
  * would make a user fix them one start at a time.
  */
 import { WEBHOOK_SECRET_PREFIX } from '@olympus-ai/core';
-import { containerUser, parseCodexSeats, type HostCodex } from './compose.js';
+import { readFile } from 'node:fs/promises';
+import { MIN_TOKEN_LENGTH } from '../http/server.js';
+import { containerUser, parseCodexSeats, parseEndpointFile, type HostCodex, type HostEndpoint } from './compose.js';
+import { probeSymlinks, type MakeLink } from './symlinks.js';
 import type { ContainerUser } from '../workspace.js';
 
 export interface HostVariable {
@@ -75,7 +78,13 @@ export interface HostSettings {
   readonly webhookSecret: (name: string) => string | undefined;
 }
 
-export type HostConfigResult = { readonly ok: true; readonly settings: HostSettings } | { readonly ok: false; readonly problems: readonly string[] };
+/**
+ * A refusal still carries the two inputs whose own checks can run without the
+ * rest, so start-up reports their problems in the same list (review: codex-5).
+ */
+export type HostConfigResult =
+  | { readonly ok: true; readonly settings: HostSettings }
+  | { readonly ok: false; readonly problems: readonly string[]; readonly trees: string; readonly endpoint: HostSettings['endpoint'] };
 
 function declared(name: string): HostVariable | undefined {
   return HOST_VARIABLES.find((v) => (v.prefix === true ? name.startsWith(v.name) && name.length > v.name.length : v.name === name));
@@ -112,6 +121,7 @@ export function readHostConfig(env: Readonly<Record<string, string | undefined>>
   };
 
   const token = required('FACTORY_API_TOKEN');
+  if (token !== '' && token.length < MIN_TOKEN_LENGTH) problems.push(`FACTORY_API_TOKEN is shorter than ${String(MIN_TOKEN_LENGTH)} characters`);
   const portText = required('FACTORY_LISTEN_PORT');
   const port = Number(portText);
   if (portText !== '' && (!/^\d+$/u.test(portText) || port > 65535)) problems.push(`FACTORY_LISTEN_PORT is not a port: ${portText}`);
@@ -133,7 +143,7 @@ export function readHostConfig(env: Readonly<Record<string, string | undefined>>
   const rubricsDirectory = optional('FACTORY_RUBRICS_DIR');
   const checksToken = optional('FACTORY_CHECKS_TOKEN');
 
-  if (problems.length > 0) return { ok: false, problems };
+  if (problems.length > 0) return { ok: false, problems, trees, endpoint: endpointFile === '' ? null : { file: endpointFile, key: endpointKey } };
   return {
     ok: true,
     settings: {
@@ -169,3 +179,35 @@ export class HostRefusal extends Error {
   }
 }
 HostRefusal.prototype.name = 'factory-host';
+
+/** What start-up composes from: the checked settings and the endpoint file, read and parsed. */
+export type StartupResult =
+  | { readonly ok: true; readonly settings: HostSettings; readonly endpoint: HostEndpoint | null }
+  | { readonly ok: false; readonly problems: readonly string[] };
+
+/**
+ * Every check start-up makes before it composes, all of them, into one list:
+ * the environment, the endpoint file named, and whether the trees directory
+ * can hold a symbolic link. A check whose input is unset is skipped, since the
+ * missing variable is already listed (I5, review: codex-5).
+ */
+export async function checkStartup(env: Readonly<Record<string, string | undefined>>, makeLink?: MakeLink): Promise<StartupResult> {
+  const read = readHostConfig(env);
+  const problems = read.ok ? [] : [...read.problems];
+  const source = read.ok ? read.settings.endpoint : read.endpoint;
+  let endpoint: HostEndpoint | null = null;
+  if (source !== null) {
+    try {
+      endpoint = parseEndpointFile(await readFile(source.file, 'utf8'), source.key);
+    } catch (error) {
+      problems.push(`FACTORY_ENDPOINT_CONFIG (${source.file}): ${(error instanceof Error ? error.message : String(error)).replace(/^factory-host: /u, '')}`);
+    }
+  }
+  const trees = read.ok ? read.settings.trees : read.trees;
+  if (trees !== '') {
+    const links = await probeSymlinks(trees, makeLink);
+    if (links !== null) problems.push(links);
+  }
+  if (!read.ok || problems.length > 0) return { ok: false, problems };
+  return { ok: true, settings: read.settings, endpoint };
+}

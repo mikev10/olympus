@@ -4,12 +4,12 @@
  * docs list every entry, and start-up refuses with every problem at once.
  * And the start-up symlink probe (#28, #123).
  */
-import { mkdtemp, readdir, readFile, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
-import { HOST_VARIABLES, readHostConfig, refusalText } from '../src/host/config.js';
+import { checkStartup, HOST_VARIABLES, readHostConfig, refusalText } from '../src/host/config.js';
 import { probeSymlinks } from '../src/host/symlinks.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -59,7 +59,7 @@ describe('the configuration table and the docs', () => {
   test('main.ts touches the environment once, handing it to readHostConfig', async () => {
     const source = await readFile(MAIN, 'utf8');
     expect(source.match(/process\.env/gu)).toHaveLength(1);
-    expect(source).toContain('readHostConfig(process.env)');
+    expect(source).toContain('checkStartup(process.env)');
   });
 
   test('a webhook secret is read only under the webhook prefix', () => {
@@ -126,6 +126,42 @@ describe('the symlink probe (#28, #123)', () => {
       expect(refusal).toMatch(/WSL2/u);
       expect(refusal).toMatch(/Developer Mode/u);
       expect(await readdir(dir)).toEqual([]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('every start-up problem in one list (review: codex-5)', () => {
+  test('a missing variable, a short token, an unreadable endpoint file, and trees that cannot hold a link are listed together', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'r35-startup-'));
+    try {
+      const blocker = join(dir, 'a-file');
+      await writeFile(blocker, 'not a directory');
+      const { FACTORY_GIT_TOKEN: _token, ...rest } = FULL;
+      const result = await checkStartup({
+        ...rest, FACTORY_API_TOKEN: 'short', FACTORY_TREES: join(blocker, 'trees'),
+        FACTORY_ENDPOINT_CONFIG: join(dir, 'no-such-endpoint.json'), FACTORY_ENDPOINT_KEY: 'k',
+      });
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      const text = result.problems.join('\n');
+      expect(text).toMatch(/FACTORY_GIT_TOKEN is not set/u);
+      expect(text).toMatch(/FACTORY_API_TOKEN is shorter than 32 characters/u);
+      expect(text).toMatch(/FACTORY_ENDPOINT_CONFIG \(.*no-such-endpoint\.json\)/u);
+      expect(text).toMatch(/cannot hold a symbolic link/u);
+      expect(result.problems).toHaveLength(4);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a configuration with every check passing is returned with its settings', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'r35-startup-'));
+    try {
+      const result = await checkStartup({ ...FULL, FACTORY_TREES: join(dir, 'trees') });
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.settings.trees).toBe(join(dir, 'trees'));
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

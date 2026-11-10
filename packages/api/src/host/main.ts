@@ -5,18 +5,17 @@
  * no terminal (I9); a client finds it at the address it was told to listen on.
  *
  * Every variable it reads is declared in `HOST_VARIABLES` (`config.ts`), and
- * this file reads the environment only through `readHostConfig`. Every
+ * this file reads the environment only through `checkStartup`, which reads it
+ * only through `readHostConfig`. Every
  * missing or invalid variable, an unreadable endpoint file, and a trees
  * directory that cannot hold a symbolic link stop the host before it listens,
  * with one list and no stack trace (I5).
  */
-import { readFile } from 'node:fs/promises';
 import { GitHubCheckReader } from '../checks.js';
 import { createApiServer } from '../http/server.js';
 import { GitHubBranchProtection, readinessScanner } from '../readiness-scan.js';
-import { HostRefusal, readHostConfig } from './config.js';
-import { composeHost, parseEndpointFile } from './compose.js';
-import { probeSymlinks } from './symlinks.js';
+import { checkStartup, HostRefusal } from './config.js';
+import { composeHost } from './compose.js';
 
 /** Thrown, never printed here: Node prints the list and exits 1, and the runtime touches no terminal (I9, D-R35-08). */
 function refuse(problems: readonly string[]): never {
@@ -27,22 +26,11 @@ function message(error: unknown): string {
   return (error instanceof Error ? error.message : String(error)).replace(/^factory-host: /u, '');
 }
 
-const read = readHostConfig(process.env);
-if (!read.ok) refuse(read.problems);
-const config = read.settings;
-
-const problems: string[] = [];
-let endpoint = null;
-if (config.endpoint !== null) {
-  try {
-    endpoint = parseEndpointFile(await readFile(config.endpoint.file, 'utf8'), config.endpoint.key);
-  } catch (error) {
-    problems.push(`FACTORY_ENDPOINT_CONFIG (${config.endpoint.file}): ${message(error)}`);
-  }
-}
-const links = await probeSymlinks(config.trees);
-if (links !== null) problems.push(links);
-if (problems.length > 0) refuse(problems);
+// The environment, the endpoint file, and the symlink probe, all into one list before anything is composed.
+const startup = await checkStartup(process.env);
+if (!startup.ok) refuse(startup.problems);
+const config = startup.settings;
+const { endpoint } = startup;
 
 let server;
 try {
