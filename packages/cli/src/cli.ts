@@ -22,28 +22,134 @@ export type ExitCode = 0 | 1 | 2;
 /** The executable's name: the package name, which the I10 scan exempts exactly and nowhere else. */
 const COMMAND = 'olympus-ai';
 
+/** One flag: how the parser reads it and the line `--help` prints for it. */
+export interface Flag {
+  readonly type: 'string' | 'boolean';
+  readonly multiple?: true;
+  /** The value's placeholder in help, for a string flag. */
+  readonly value?: string;
+  readonly help: string;
+}
+
+export interface Command {
+  readonly name: string;
+  /** The positional arguments, as help writes them. */
+  readonly args: string;
+  readonly summary: string;
+  readonly flags: Readonly<Record<string, Flag>>;
+}
+
+/**
+ * Every command and its flags (R35, #126): the parser's options are built
+ * from this table and `<command> --help` prints it, so a flag cannot be
+ * accepted without being documented, or documented without being accepted.
+ */
+export const COMMANDS: readonly Command[] = [
+  {
+    name: 'create', args: '', summary: 'admit a run; a refusal names what to fix',
+    flags: {
+      workspace: { type: 'string', value: '<abs path>', help: 'required: the host\'s FACTORY_REPOSITORY, as an absolute path' },
+      'base-commit': { type: 'string', value: '<sha>', help: 'required: the commit the run starts from, as a full sha' },
+      level: { type: 'string', value: '<0-3>', help: 'required: the autonomy level asked for; more than policy allows is refused' },
+      spec: { type: 'string', multiple: true, value: '<path>', help: 'a spec file, relative to the workspace; repeatable; or --draft-spec' },
+      tests: { type: 'string', multiple: true, value: '<path>', help: 'an acceptance-test file, relative to the workspace; repeatable; or --draft-tests' },
+      manifest: { type: 'string', value: '<path>', help: 'required: the verification manifest, the checks the runtime runs' },
+      graph: { type: 'string', value: '<path>', help: 'required: the task graph' },
+      'security-part': { type: 'string', value: '<path>', help: 'the spec\'s security part; without it the run is refused at the spec exit' },
+      'run-requirements': { type: 'string', value: '<path>', help: 'the spec\'s run-requirements part' },
+      questions: { type: 'string', value: '<path>', help: 'the spec\'s questions part' },
+      'acceptance-manifest': { type: 'string', value: '<path>', help: 'the acceptance checks\' manifest, run on the base before build' },
+      'approve-cost': { type: 'string', value: '<usd>', help: 'approves the worst-case cost in US dollars, the figure a refused create prints' },
+      'draft-spec': { type: 'boolean', help: 'draft the spec on the line from --intent instead of naming it; needs FACTORY_RUBRICS_DIR' },
+      'draft-tests': { type: 'boolean', help: 'draft the acceptance tests on the line instead of naming them' },
+      intent: { type: 'string', value: '<text>', help: 'what the run is for, the text a drafted spec is written from' },
+    },
+  },
+  { name: 'status', args: '<run id>', summary: 'the run\'s station, tasks, and gates', flags: {} },
+  {
+    name: 'approve', args: '<run id> <station:level>', summary: 'pass a gate the policy holds for a person',
+    flags: { draft: { type: 'string', value: '<hash>', help: 'the draft approved, as status names it, at a drafting station' } },
+  },
+  {
+    name: 'reject', args: '<run id> <station:level>', summary: 'send a draft back',
+    flags: {
+      draft: { type: 'string', value: '<hash>', help: 'required: the draft rejected' },
+      notes: { type: 'string', value: '<text>', help: 'at spec: what to change' },
+      reason: { type: 'string', value: '<reason>', help: 'at test-design: not-black-box, does-not-follow-spec, not-runnable, or misses-spec-cases' },
+    },
+  },
+  { name: 'cancel', args: '<run id>', summary: 'stop a run', flags: {} },
+  { name: 'events', args: '<run id>', summary: 'stream the run\'s events, one line each', flags: {} },
+  { name: 'report', args: '<run id>', summary: 'cost, cache-hit rate, gates, iterations, mismatches, refusals, and the merge, from the Vault', flags: {} },
+  {
+    name: 'outcomes', args: '', summary: 'safety and throughput rates over every run, each with its sample and bound',
+    flags: {
+      from: { type: 'string', value: '<time>', help: 'only runs admitted at or after this ISO time' },
+      to: { type: 'string', value: '<time>', help: 'only runs admitted before this ISO time' },
+    },
+  },
+  {
+    name: 'telemetry', args: '<run id>...', summary: 'a finished run as OTLP/JSON traces and metrics, printed or sent to a collector',
+    flags: {
+      endpoint: { type: 'string', value: '<otlp url>', help: 'send to <url>/v1/traces and /v1/metrics (or OTEL_EXPORTER_OTLP_ENDPOINT)' },
+      header: { type: 'string', multiple: true, value: '<name=value>', help: 'a collector header; repeatable (or OTEL_EXPORTER_OTLP_HEADERS)' },
+    },
+  },
+  {
+    name: 'readiness', args: '', summary: 'the autonomy ceiling the host\'s repository supports at a commit, with every probe\'s outcome',
+    flags: { revision: { type: 'string', value: '<rev>', help: 'the revision scanned; default HEAD of the host\'s FACTORY_REPOSITORY' } },
+  },
+];
+
+/** The flags every command takes, read before the command's own. */
+export const GLOBAL_FLAGS: Readonly<Record<string, Flag>> = {
+  url: { type: 'string', value: '<api url>', help: 'the API\'s address (or FACTORY_API_URL)' },
+  token: { type: 'string', value: '<token>', help: 'the API\'s token (or FACTORY_API_TOKEN)' },
+  help: { type: 'boolean', help: 'print this help' },
+};
+
+function flagLines(flags: Readonly<Record<string, Flag>>): string[] {
+  const left = Object.entries(flags).map(([name, f]) => `--${name}${f.value === undefined ? '' : ` ${f.value}`}${f.multiple === true ? '...' : ''}`);
+  const width = Math.max(0, ...left.map((l) => l.length));
+  return Object.values(flags).map((f, i) => `  ${(left[i] ?? '').padEnd(width)}  ${f.help}`);
+}
+
+/** One command's help: its usage, then one line per flag, then the global flags. */
+export function commandHelp(command: Command): string {
+  const own = Object.keys(command.flags).length === 0 ? [] : ['', 'options:', ...flagLines(command.flags)];
+  return [`usage: ${COMMAND} ${command.name}${command.args === '' ? '' : ` ${command.args}`}${Object.keys(command.flags).length === 0 ? '' : ' [options]'}`, '', command.summary, ...own, '', 'global options:', ...flagLines(GLOBAL_FLAGS)].join('\n');
+}
+
+const width = Math.max(...COMMANDS.map((c) => c.name.length));
 const USAGE = [
   `usage: ${COMMAND} <command> [options]`,
   '',
   'commands:',
-  '  create   --workspace <abs path> --base-commit <sha> --level <0-3> --spec <path>... --tests <path>...',
-  '           --manifest <path> --graph <path> [--security-part <path>] [--approve-cost <usd>]',
-  '           [--draft-spec --intent <text>] [--draft-tests] [--acceptance-manifest <path>]',
-  '           [--run-requirements <path>] [--questions <path>]',
-  '  status   <run id>',
-  '  approve  <run id> <station:level> [--draft <hash>]',
-  '  reject   <run id> <station:level> --draft <hash> [--notes <text>] [--reason <reason>]',
-  '           notes at spec; at test-design a reason: not-black-box, does-not-follow-spec, not-runnable, misses-spec-cases',
-  '  cancel   <run id>',
-  '  events   <run id>',
-  '  report   <run id>      cost, cache-hit rate, gates, iterations, mismatches, refusals, and the merge, from the Vault',
-  '  outcomes [--from <time>] [--to <time>]   safety and throughput rates over every run, each with its sample and bound',
-  '  telemetry <run id>... [--endpoint <otlp url>] [--header <name=value>]...',
-  '           a finished run as OTLP/JSON traces and metrics: printed one run per line, or sent to <endpoint>/v1/traces',
-  '           and /v1/metrics (or OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_EXPORTER_OTLP_HEADERS)',
+  ...COMMANDS.map((c) => `  ${c.name.padEnd(width)}  ${c.summary}`),
   '',
+  `${COMMAND} <command> --help prints one line per flag`,
   'every command needs --url <api url> (or FACTORY_API_URL) and --token <token> (or FACTORY_API_TOKEN)',
 ].join('\n');
+
+/** The parser's options for one command, from the table. */
+function optionsOf(name: string): Record<string, { type: 'string' | 'boolean'; multiple?: boolean }> {
+  const command = COMMANDS.find((c) => c.name === name);
+  if (command === undefined) throw new UsageError(`unknown command '${name}'`);
+  return Object.fromEntries(Object.entries(command.flags).map(([flag, f]) => [flag, f.multiple === true ? { type: f.type, multiple: true } : { type: f.type }]));
+}
+
+/** A command's own arguments, parsed strictly against its row of the table. */
+function parseOwn(name: string, args: string[]): { values: Record<string, string | boolean | (string | boolean)[] | undefined>; positionals: string[] } {
+  return parseArgs({ args, strict: true, allowPositionals: true, options: optionsOf(name) });
+}
+
+type Parsed = ReturnType<typeof parseOwn>['values'];
+const str = (values: Parsed, flag: string): string | undefined => (typeof values[flag] === 'string' ? values[flag] : undefined);
+const strs = (values: Parsed, flag: string): string[] | undefined => {
+  const value = values[flag];
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : undefined;
+};
+const bool = (values: Parsed, flag: string): boolean => values[flag] === true;
 
 class UsageError extends Error {}
 
@@ -155,52 +261,38 @@ function cost(text: string | undefined): number | null {
 }
 
 async function create(io: CliIo, t: Target, args: string[]): Promise<ExitCode> {
-  const { values, positionals } = parseArgs({
-    args,
-    strict: true,
-    allowPositionals: true,
-    options: {
-      workspace: { type: 'string' },
-      'base-commit': { type: 'string' },
-      level: { type: 'string' },
-      spec: { type: 'string', multiple: true },
-      tests: { type: 'string', multiple: true },
-      manifest: { type: 'string' },
-      graph: { type: 'string' },
-      'security-part': { type: 'string' },
-      'run-requirements': { type: 'string' },
-      questions: { type: 'string' },
-      'acceptance-manifest': { type: 'string' },
-      'approve-cost': { type: 'string' },
-      'draft-spec': { type: 'boolean' },
-      'draft-tests': { type: 'boolean' },
-      intent: { type: 'string' },
-    },
-  });
+  const { values, positionals } = parseOwn('create', args);
   if (positionals.length > 0) throw new UsageError(`create takes no positional arguments: ${positionals.join(' ')}`);
+  const spec = strs(values, 'spec');
+  const tests = strs(values, 'tests');
   // A drafted artifact is drafted on the line instead of named here (R19); naming both is a contradiction.
-  if (values['draft-spec'] === true && values.spec !== undefined) throw new UsageError('--draft-spec and --spec name the spec twice');
-  if (values['draft-tests'] === true && values.tests !== undefined) throw new UsageError('--draft-tests and --tests name the acceptance tests twice');
+  if (bool(values, 'draft-spec') && spec !== undefined) throw new UsageError('--draft-spec and --spec name the spec twice');
+  if (bool(values, 'draft-tests') && tests !== undefined) throw new UsageError('--draft-tests and --tests name the acceptance tests twice');
+  const security = str(values, 'security-part');
+  const runRequirements = str(values, 'run-requirements');
+  const questions = str(values, 'questions');
   const parts = {
-    ...(values['security-part'] === undefined ? {} : { security: values['security-part'] }),
-    ...(values['run-requirements'] === undefined ? {} : { runRequirements: values['run-requirements'] }),
-    ...(values.questions === undefined ? {} : { questions: values.questions }),
+    ...(security === undefined ? {} : { security }),
+    ...(runRequirements === undefined ? {} : { runRequirements }),
+    ...(questions === undefined ? {} : { questions }),
   };
+  const acceptanceManifest = str(values, 'acceptance-manifest');
+  const intent = str(values, 'intent');
   const body: CreateRunBody = {
-    workspace: required(values.workspace, '--workspace'),
-    baseCommit: required(values['base-commit'], '--base-commit'),
-    requestedLevel: level(values.level),
+    workspace: required(str(values, 'workspace'), '--workspace'),
+    baseCommit: required(str(values, 'base-commit'), '--base-commit'),
+    requestedLevel: level(str(values, 'level')),
     artifacts: {
-      spec: values['draft-spec'] === true ? 'draft' : (values.spec ?? []),
-      acceptanceTests: values['draft-tests'] === true ? 'draft' : (values.tests ?? []),
-      verificationManifest: required(values.manifest, '--manifest'),
-      taskGraph: required(values.graph, '--graph'),
-      ...(values['acceptance-manifest'] === undefined ? {} : { acceptanceManifest: values['acceptance-manifest'] }),
+      spec: bool(values, 'draft-spec') ? 'draft' : (spec ?? []),
+      acceptanceTests: bool(values, 'draft-tests') ? 'draft' : (tests ?? []),
+      verificationManifest: required(str(values, 'manifest'), '--manifest'),
+      taskGraph: required(str(values, 'graph'), '--graph'),
+      ...(acceptanceManifest === undefined ? {} : { acceptanceManifest }),
       // Optional on the wire: a spec created without its security part is refused at the spec exit, naming the part (R17).
       ...(Object.keys(parts).length === 0 ? {} : { specParts: parts }),
     },
-    approvedCostUsd: cost(values['approve-cost']),
-    ...(values.intent === undefined ? {} : { intent: values.intent }),
+    approvedCostUsd: cost(str(values, 'approve-cost')),
+    ...(intent === undefined ? {} : { intent }),
   };
   const res = await call(io, t, 'POST', 'runs', body);
   const unapproved = costRefusal(res.body);
@@ -249,11 +341,13 @@ async function events(io: CliIo, t: Target, runId: string): Promise<ExitCode> {
 
 /** Outcomes over every run the Vault holds, optionally those admitted in a window; the service refuses a time it cannot read. */
 async function outcomes(io: CliIo, t: Target, args: string[]): Promise<ExitCode> {
-  const { values, positionals } = parseArgs({ args, strict: true, allowPositionals: true, options: { from: { type: 'string' }, to: { type: 'string' } } });
+  const { values, positionals } = parseOwn('outcomes', args);
   if (positionals.length > 0) throw new UsageError(`outcomes takes no positional arguments: ${positionals.join(' ')}`);
   const query = new URLSearchParams();
-  if (values.from !== undefined) query.set('from', values.from);
-  if (values.to !== undefined) query.set('to', values.to);
+  const from = str(values, 'from');
+  const to = str(values, 'to');
+  if (from !== undefined) query.set('from', from);
+  if (to !== undefined) query.set('to', to);
   const search = query.toString();
   return report(io, await call(io, t, 'GET', search === '' ? 'outcomes' : `outcomes?${search}`));
 }
@@ -286,12 +380,9 @@ function otlpHeaders(flags: readonly string[], env: string | undefined): Record<
  * A header's value is never printed: it may be the collector's credential.
  */
 async function telemetry(io: CliIo, t: Target, args: string[]): Promise<ExitCode> {
-  const { values, positionals } = parseArgs({
-    args, strict: true, allowPositionals: true,
-    options: { endpoint: { type: 'string' }, header: { type: 'string', multiple: true } },
-  });
+  const { values, positionals } = parseOwn('telemetry', args);
   if (positionals.length === 0) throw new UsageError('telemetry needs at least one <run id>');
-  const raw = values.endpoint ?? io.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+  const raw = str(values, 'endpoint') ?? io.env.OTEL_EXPORTER_OTLP_ENDPOINT;
   let collector: URL | null = null;
   if (raw !== undefined && raw !== '') {
     // Each refusal is a fixed message: the value may carry a credential, and nothing here prints it (codex-2).
@@ -303,7 +394,7 @@ async function telemetry(io: CliIo, t: Target, args: string[]): Promise<ExitCode
     if (collector.protocol !== 'http:' && collector.protocol !== 'https:') throw new UsageError('the collector endpoint is not an http or https URL');
     if (collector.username !== '' || collector.password !== '') throw new UsageError('the collector endpoint carries user information; pass a credential with --header');
   }
-  const headers = collector === null ? {} : otlpHeaders(values.header ?? [], io.env.OTEL_EXPORTER_OTLP_HEADERS);
+  const headers = collector === null ? {} : otlpHeaders(strs(values, 'header') ?? [], io.env.OTEL_EXPORTER_OTLP_HEADERS);
   let code: ExitCode = 0;
   for (const runId of positionals) {
     const res = await call(io, t, 'GET', runPath(runId, 'telemetry'));
@@ -347,10 +438,17 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<ExitCo
       allowPositionals: true,
       options: { url: { type: 'string' }, token: { type: 'string' }, help: { type: 'boolean' } },
     });
-    const [command, ...rest] = positionals;
-    if (values.help === true || command === undefined) {
+    const [command] = positionals;
+    if (command === undefined) {
       io.out(USAGE);
-      return command === undefined && values.help !== true ? 2 : 0;
+      return values.help === true ? 0 : 2;
+    }
+    const row = COMMANDS.find((c) => c.name === command);
+    if (row === undefined) throw new UsageError(`unknown command '${command}'`);
+    // Help needs no server: it is printed from the table before a URL or token is asked for.
+    if (values.help === true) {
+      io.out(commandHelp(row));
+      return 0;
     }
     const t = target({ url: typeof values.url === 'string' ? values.url : undefined, token: typeof values.token === 'string' ? values.token : undefined }, io.env);
     // What remains once the global options are taken out: the command's own arguments.
@@ -359,49 +457,53 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<ExitCo
       case 'create':
         return await create(io, t, own);
       case 'status': {
-        const [runId = ''] = one(rest, ['<run id>']);
+        const [runId = ''] = one(parseOwn(command, own).positionals, ['<run id>']);
         return report(io, await call(io, t, 'GET', runPath(runId)));
       }
       case 'approve': {
-        const { values: flags, positionals: named } = parseArgs({ args: own, strict: true, allowPositionals: true, options: { draft: { type: 'string' } } });
+        const { values: flags, positionals: named } = parseOwn(command, own);
         const [runId = '', key = ''] = one(named, ['<run id>', '<station:level>']);
-        const body: ApproveBody = { key: key as ApproveBody['key'], ...(flags.draft === undefined ? {} : { draft: flags.draft }) };
+        const draft = str(flags, 'draft');
+        const body: ApproveBody = { key: key as ApproveBody['key'], ...(draft === undefined ? {} : { draft }) };
         return report(io, await call(io, t, 'POST', runPath(runId, 'approve'), body));
       }
       case 'reject': {
-        const { values: flags, positionals: named } = parseArgs({
-          args: own,
-          strict: true,
-          allowPositionals: true,
-          options: { draft: { type: 'string' }, notes: { type: 'string' }, reason: { type: 'string' } },
-        });
+        const { values: flags, positionals: named } = parseOwn(command, own);
         const [runId = '', key = ''] = one(named, ['<run id>', '<station:level>']);
+        const notes = str(flags, 'notes');
+        const reason = str(flags, 'reason');
         const body: RejectBody = {
           key: key as RejectBody['key'],
-          draft: required(flags.draft, '--draft'),
-          ...(flags.notes === undefined ? {} : { notes: flags.notes }),
-          ...(flags.reason === undefined ? {} : { reason: flags.reason as NonNullable<RejectBody['reason']> }),
+          draft: required(str(flags, 'draft'), '--draft'),
+          ...(notes === undefined ? {} : { notes }),
+          ...(reason === undefined ? {} : { reason: reason as NonNullable<RejectBody['reason']> }),
         };
         return report(io, await call(io, t, 'POST', runPath(runId, 'reject'), body));
       }
       case 'cancel': {
-        const [runId = ''] = one(rest, ['<run id>']);
+        const [runId = ''] = one(parseOwn(command, own).positionals, ['<run id>']);
         return report(io, await call(io, t, 'POST', runPath(runId, 'cancel')));
       }
       case 'events': {
-        const [runId = ''] = one(rest, ['<run id>']);
+        const [runId = ''] = one(parseOwn(command, own).positionals, ['<run id>']);
         return await events(io, t, runId);
       }
       case 'report': {
-        const [runId = ''] = one(rest, ['<run id>']);
+        const [runId = ''] = one(parseOwn(command, own).positionals, ['<run id>']);
         return report(io, await call(io, t, 'GET', runPath(runId, 'report')));
       }
       case 'outcomes':
         return await outcomes(io, t, own);
       case 'telemetry':
         return await telemetry(io, t, own);
+      case 'readiness': {
+        const { values: flags, positionals: named } = parseOwn(command, own);
+        if (named.length > 0) throw new UsageError(`readiness takes no positional arguments: ${named.join(' ')}`);
+        const revision = str(flags, 'revision');
+        return report(io, await call(io, t, 'GET', revision === undefined ? 'readiness' : `readiness?${new URLSearchParams({ revision }).toString()}`));
+      }
       default:
-        throw new UsageError(`unknown command '${command}'`);
+        throw new UsageError(`'${command}' is in the command table but has no handler`);
     }
   } catch (error) {
     if (error instanceof UsageError || (error instanceof TypeError && 'code' in error && String(error.code).startsWith('ERR_PARSE_ARGS'))) {
