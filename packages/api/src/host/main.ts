@@ -4,99 +4,75 @@
  * composition. Configured from its environment and nothing else, it touches
  * no terminal (I9); a client finds it at the address it was told to listen on.
  *
- * - `FACTORY_API_TOKEN`: the local token every request must bear
- * - `FACTORY_POLICY_FILE`: the `policy.yaml` every run is admitted under
- * - `FACTORY_ROLES_DIR`: the roles directory every run's seats are compiled
- *   from, outside the repository and the trees (D-A-RC-01)
- * - `FACTORY_RUBRICS_DIR` (optional): the rubrics directory a drafting run's
- *   critics are given, outside the repository and the trees (R19). Unset, a
- *   run that drafts is refused at admission
- * - `FACTORY_VAULT_STORE`: what the Vault owns
- * - `FACTORY_REPOSITORY`: the working copy runs are admitted from
- * - `FACTORY_TREES`: where the runtime keeps each run's trees
- * - `FACTORY_LISTEN_PORT`, and `FACTORY_LISTEN_HOST` (default `127.0.0.1`)
- * - `ANTHROPIC_API_KEY`: held by the sandbox provider for its relays, given to no sandbox
- * - `FACTORY_PRINCIPAL` (default `local`): who a request bearing the token is
- * - `FACTORY_GIT_REPOSITORY` (`owner/name`), `FACTORY_GIT_BASE_BRANCH`, and
- *   `FACTORY_GIT_TOKEN`: the remote a passed run merges into, and the token
- *   that merges it, held by the host and given to no sandbox (D-I1b-06)
- * - `FACTORY_CONTAINER_UID` and `FACTORY_CONTAINER_GID`, both or neither: who
- *   sandboxes run as, required on a host with no uids (D-I1b-10)
- * - `FACTORY_ENDPOINT_CONFIG` and `FACTORY_ENDPOINT_KEY`, both or neither: a
- *   JSON file outside the repository naming an OpenAI-compatible endpoint and
- *   the seats it fills, and that endpoint's credential, held by the sandbox
- *   provider for its relays and given to no sandbox (R6, D-R6-07). A file
- *   declaring scheme `'none'`, for a local endpoint on the Docker host, comes
- *   without the key, and one given with it stops the host (R21, A-R21-04)
- *
- * - `FACTORY_CODEX_SEATS` and `FACTORY_CODEX_KEY`, both or neither: the seats
- *   the Codex driver fills, comma-separated, and the OpenAI key its relay is
- *   given (R9). A seat the endpoint file also names stops the host.
- * - `FACTORY_WEBHOOK_*`: each subscription's secret, named by the policy and
- *   read here on the host, never by a sandbox (D-A-TF-05). A subscription
- *   whose variable is unset verifies no delivery (I5)
- * - `FACTORY_CHECKS_TOKEN`, optional: a token that reads the check runs of
- *   `FACTORY_GIT_REPOSITORY`, never the merge token (R8b, D-A-OB-14). Unset,
- *   a run with an observation plan is refused at its window's close, and the
- *   window stays open until a host that can read its checks closes it
- *
- * A missing variable stops the host before it listens (I5).
+ * Every variable it reads is declared in `HOST_VARIABLES` (`config.ts`), and
+ * this file reads the environment only through `readHostConfig`. Every
+ * missing or invalid variable, an unreadable endpoint file, and a trees
+ * directory that cannot hold a symbolic link stop the host before it listens,
+ * with one list and no stack trace (I5).
  */
-
+import { readFile } from 'node:fs/promises';
 import { GitHubCheckReader } from '../checks.js';
 import { createApiServer } from '../http/server.js';
-import { readFile } from 'node:fs/promises';
-import { composeHost, containerUser, parseCodexSeats, parseEndpointFile, webhookSecrets } from './compose.js';
+import { readHostConfig, refusalText } from './config.js';
+import { composeHost, parseEndpointFile } from './compose.js';
+import { probeSymlinks } from './symlinks.js';
 
-function required(name: string): string {
-  const value = process.env[name];
-  if (value === undefined || value === '') throw new Error(`factory-host: ${name} is not set`);
-  return value;
+function refuse(problems: readonly string[]): never {
+  process.stderr.write(`${refusalText(problems)}\n`);
+  process.exit(1);
 }
 
-const port = Number(required('FACTORY_LISTEN_PORT'));
-if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('factory-host: FACTORY_LISTEN_PORT is not a port');
-
-const user = containerUser(process.env);
-const endpointFile = process.env.FACTORY_ENDPOINT_CONFIG ?? '';
-const endpointKey = process.env.FACTORY_ENDPOINT_KEY ?? '';
-// A key with no file is half a configuration. A file with no key is the file's to allow: only one declaring scheme 'none' does.
-if (endpointFile === '' && endpointKey !== '') {
-  throw new Error('factory-host: FACTORY_ENDPOINT_KEY is set without FACTORY_ENDPOINT_CONFIG');
+function message(error: unknown): string {
+  return (error instanceof Error ? error.message : String(error)).replace(/^factory-host: /u, '');
 }
-const endpoint = endpointFile === '' ? null : parseEndpointFile(await readFile(endpointFile, 'utf8'), endpointKey);
-const codex = parseCodexSeats(process.env.FACTORY_CODEX_SEATS ?? '', process.env.FACTORY_CODEX_KEY ?? '');
-const components = await composeHost({
-  ...(user === undefined ? {} : { containerUser: user }),
-  endpoint,
-  codex,
-  store: required('FACTORY_VAULT_STORE'),
-  repository: required('FACTORY_REPOSITORY'),
-  trees: required('FACTORY_TREES'),
-  modelKey: required('ANTHROPIC_API_KEY'),
-  git: {
-    repository: required('FACTORY_GIT_REPOSITORY'),
-    baseBranch: required('FACTORY_GIT_BASE_BRANCH'),
-    token: required('FACTORY_GIT_TOKEN'),
-  },
-});
-const checksToken = process.env.FACTORY_CHECKS_TOKEN ?? '';
-const server = createApiServer({
-  components,
-  token: required('FACTORY_API_TOKEN'),
-  principal: process.env.FACTORY_PRINCIPAL ?? 'local',
-  policyFile: required('FACTORY_POLICY_FILE'),
-  rolesDirectory: required('FACTORY_ROLES_DIR'),
-  // Only a name with the webhook prefix is ever read here, so a policy cannot name another host secret as one.
-  secrets: webhookSecrets(process.env),
-  // The nightly sweep scans the branch runs merge into, as the working copy holds it (D-R13a-04).
-  nightlyTarget: {
-    checkout: required('FACTORY_REPOSITORY'), branch: required('FACTORY_GIT_BASE_BRANCH'),
-    checks: checksToken === '' ? null : new GitHubCheckReader({ repository: required('FACTORY_GIT_REPOSITORY'), token: checksToken }),
-  },
-  rubricsDirectory: process.env.FACTORY_RUBRICS_DIR === undefined || process.env.FACTORY_RUBRICS_DIR === '' ? null : process.env.FACTORY_RUBRICS_DIR,
-});
-await server.listen(port, process.env.FACTORY_LISTEN_HOST ?? '127.0.0.1');
+
+const read = readHostConfig(process.env);
+if (!read.ok) refuse(read.problems);
+const config = read.settings;
+
+const problems: string[] = [];
+let endpoint = null;
+if (config.endpoint !== null) {
+  try {
+    endpoint = parseEndpointFile(await readFile(config.endpoint.file, 'utf8'), config.endpoint.key);
+  } catch (error) {
+    problems.push(`FACTORY_ENDPOINT_CONFIG (${config.endpoint.file}): ${message(error)}`);
+  }
+}
+const links = await probeSymlinks(config.trees);
+if (links !== null) problems.push(links);
+if (problems.length > 0) refuse(problems);
+
+let server;
+try {
+  const components = await composeHost({
+    ...(config.containerUser === undefined ? {} : { containerUser: config.containerUser }),
+    endpoint,
+    codex: config.codex,
+    store: config.store,
+    repository: config.repository,
+    trees: config.trees,
+    modelKey: config.modelKey,
+    git: config.git,
+  });
+  server = createApiServer({
+    components,
+    token: config.token,
+    principal: config.principal,
+    policyFile: config.policyFile,
+    rolesDirectory: config.rolesDirectory,
+    secrets: config.webhookSecret,
+    // The nightly sweep scans the branch runs merge into, as the working copy holds it (D-R13a-04).
+    nightlyTarget: {
+      checkout: config.repository, branch: config.git.baseBranch,
+      checks: config.checksToken === null ? null : new GitHubCheckReader({ repository: config.git.repository, token: config.checksToken }),
+    },
+    rubricsDirectory: config.rubricsDirectory,
+  });
+} catch (error) {
+  refuse([message(error)]);
+}
+await server.listen(config.port, config.listenHost);
 
 process.on('SIGTERM', () => {
   void server.close();

@@ -153,13 +153,72 @@ that call a paid model run only once a maintainer applies the `run-driver`
 label, and the registry fails until they have run for that tree. A push
 reuses the report of an earlier run of the same tree.
 
-The runtime runs as a service. The `factory-host` executable
-(`packages/api/src/host/main.ts`) serves the HTTP API and is configured only
-from its environment; its header lists every variable, and a missing one
-stops it before it listens. The `olympus-ai` command line talks to it with
-`create`, `status`, `approve`, `cancel`, `events`, `report`, and `outcomes`,
-given `--url` and `--token` (or `FACTORY_API_URL` and `FACTORY_API_TOKEN`).
-Neither is published as a package yet.
+## Run Olympus
+
+The runtime runs as a service. The `factory-host` executable serves the HTTP
+API and is configured only from its environment. The `olympus-ai` command
+line is a client of that API and nothing more.
+
+### Supported hosts
+
+- **Linux or macOS**, with Node 22 or later, git, and a Docker daemon.
+- **Windows: WSL2 (recommended).** Run the host inside a WSL2 distribution,
+  with Docker reachable from it.
+- **Windows, native: Developer Mode required.** A run's base is copied with
+  its symbolic links kept as links, and native Windows lets a process create
+  one only with Developer Mode on (Settings, System, For developers). The
+  host checks this before it listens: it creates and removes one link under
+  `FACTORY_TREES`, and refuses to start if that fails. Links are never
+  emulated; a junction links only directories, and a link stored as a file
+  would change the hash the locks are taken over.
+
+### Install
+
+Neither package is published to npm yet. From a checkout, build, pack, and
+install both executables into an empty directory:
+
+```
+pnpm install
+node scripts/local-release.ts ~/olympus
+export PATH="$HOME/olympus/node_modules/.bin:$PATH"
+```
+
+This is the path CI tests: it installs the same tarballs npm would publish,
+then starts `factory-host` and drives it with `olympus-ai`.
+
+### Configure the host
+
+`factory-host` reads these variables and no others. [.env.example](.env.example)
+lists them with comments. A missing or invalid one stops the host before it
+listens, and the host prints every problem in one list.
+
+| Variable | Required | Secret | Purpose |
+|---|---|---|---|
+| `FACTORY_API_TOKEN` | yes | yes | The local token every request must bear, at least 32 characters. |
+| `FACTORY_LISTEN_PORT` | yes | no | The port the API listens on. |
+| `FACTORY_LISTEN_HOST` | no | no | The address the API listens on. Default `127.0.0.1`. |
+| `FACTORY_POLICY_FILE` | yes | no | The `policy.yaml` every run is admitted under. |
+| `FACTORY_ROLES_DIR` | yes | no | The roles directory seats are compiled from, outside the repository and the trees. |
+| `FACTORY_RUBRICS_DIR` | no | no | The rubrics a drafting run's critics are given. Unset, a run that drafts is refused at admission. |
+| `FACTORY_VAULT_STORE` | yes | no | The directory the Vault owns. |
+| `FACTORY_REPOSITORY` | yes | no | The git working copy runs are admitted from. `create --workspace` names this path. |
+| `FACTORY_TREES` | yes | no | Where each run's trees are kept. It must allow symbolic links. |
+| `ANTHROPIC_API_KEY` | yes | yes | The model key, held by the host's relays and given to no sandbox. |
+| `FACTORY_PRINCIPAL` | no | no | Who a request bearing the token is, as approvals record it. Default `local`. |
+| `FACTORY_GIT_REPOSITORY` | yes | no | The GitHub repository a passed run merges into, as `owner/name`. |
+| `FACTORY_GIT_BASE_BRANCH` | yes | no | The branch a passed run merges into. |
+| `FACTORY_GIT_TOKEN` | yes | yes | The token that merges, held by the host and given to no sandbox. |
+| `FACTORY_CONTAINER_UID` | no | no | The uid sandboxes run as. Both or neither with the gid; required on a host with no uids, such as native Windows. |
+| `FACTORY_CONTAINER_GID` | no | no | The gid sandboxes run as. |
+| `FACTORY_ENDPOINT_CONFIG` | no | no | A JSON file naming an OpenAI-compatible endpoint and the seats it fills. |
+| `FACTORY_ENDPOINT_KEY` | no | yes | That endpoint's credential. Not set for an endpoint declaring scheme `none`. |
+| `FACTORY_CODEX_SEATS` | no | no | The seats the Codex driver fills, comma-separated. Both or neither with its key. |
+| `FACTORY_CODEX_KEY` | no | yes | The OpenAI key the Codex relay is given. |
+| `FACTORY_CHECKS_TOKEN` | no | yes | Reads check runs, for runs with an observation window. Unset, such a run is refused when its window closes. |
+| `FACTORY_WEBHOOK_*` | no | yes | Each webhook subscription's secret, by the full name the policy gives it. Unset, that subscription verifies no delivery. |
+
+The command line needs only the API's address and token: `--url` and
+`--token`, or `FACTORY_API_URL` and `FACTORY_API_TOKEN`.
 
 ## Contributing
 
