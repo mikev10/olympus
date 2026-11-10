@@ -16,7 +16,7 @@
  * not ship, an install that reaches back into the checkout, or a refusal that
  * prints a stack fails here.
  */
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -45,14 +45,42 @@ function baseEnv(): Record<string, string> {
   return env;
 }
 
-function run(command: string, args: readonly string[], options: { cwd?: string; env?: Record<string, string>; timeoutMs: number }): Promise<Ran> {
+/**
+ * The command npm linked for an installed `bin`, as a user's shell runs it
+ * from `node_modules/.bin` (review: codex-2, gemini-4): on Windows its `.cmd`
+ * shim, which only a shell starts; elsewhere the link itself, which runs
+ * through its shebang and its executable bit.
+ */
+interface Linked { readonly path: string; readonly shell: boolean }
+
+function linkedBin(install: string, name: string): Linked {
+  const windows = process.platform === 'win32';
+  const path = join(install, 'node_modules', '.bin', windows ? `${name}.cmd` : name);
+  if (!existsSync(path)) throw new Error(`I9: npm linked no ${name} into node_modules/.bin, so the README's PATH has no such command`);
+  return { path, shell: windows };
+}
+
+/** Runs a linked command with these arguments. Under a shell every argument is quoted; none here carries a shell character. */
+function invoke(linked: Linked, args: readonly string[]): { command: string; args: string[]; shell: boolean } {
+  return linked.shell
+    ? { command: [linked.path, ...args].map((a) => `"${a}"`).join(' '), args: [], shell: true }
+    : { command: linked.path, args: [...args], shell: false };
+}
+
+/** Stops a child and its children: on Windows a shim runs under cmd.exe, and killing that alone leaves the host running. */
+function stop(child: ChildProcess): void {
+  if (process.platform === 'win32' && child.pid !== undefined) spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F']);
+  else child.kill();
+}
+
+function run(command: string, args: readonly string[], options: { cwd?: string; env?: Record<string, string>; timeoutMs: number; shell?: boolean }): Promise<Ran> {
   return new Promise((resolveRan, reject) => {
-    const child = spawn(command, [...args], { cwd: options.cwd, env: options.env ?? baseEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(command, [...args], { cwd: options.cwd, env: options.env ?? baseEnv(), stdio: ['ignore', 'pipe', 'pipe'], shell: options.shell ?? false });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf8'); });
     child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8'); });
-    const timer = setTimeout(() => { child.kill(); reject(new Error(`I9: ${command} ${args.join(' ')} did not finish in ${String(options.timeoutMs)} ms`)); }, options.timeoutMs);
+    const timer = setTimeout(() => { stop(child); reject(new Error(`I9: ${command} ${args.join(' ')} did not finish in ${String(options.timeoutMs)} ms`)); }, options.timeoutMs);
     child.on('error', reject);
     child.on('close', (code) => { clearTimeout(timer); resolveRan({ code, stdout, stderr }); });
   });
@@ -99,9 +127,16 @@ export async function assertPackagedHostRuns(): Promise<void> {
     const hostBin = installedBin(install, '@olympus-ai/api', 'factory-host');
     const cliBin = installedBin(install, 'olympus-ai', 'olympus-ai');
     if (hostBin.startsWith(root) || cliBin.startsWith(root)) throw new Error('I9: an installed bin resolves into the checkout');
+    // Each command is then run as the README says to, from node_modules/.bin, never as node <file> (review: codex-2, gemini-4).
+    const hostCmd = linkedBin(install, 'factory-host');
+    const cliCmd = linkedBin(install, 'olympus-ai');
+    const runLinked = (linked: Linked, args: readonly string[], env: Record<string, string>): Promise<Ran> => {
+      const call = invoke(linked, args);
+      return run(call.command, call.args, { cwd: dir, env, timeoutMs: 60_000, shell: call.shell });
+    };
 
     // Nothing set: one refusal naming every required variable, no frame, a non-zero exit.
-    const refused = await run(process.execPath, [hostBin], { cwd: dir, timeoutMs: 60_000 });
+    const refused = await runLinked(hostCmd, [], baseEnv());
     if (refused.code === 0) throw new Error('I9: factory-host started with nothing set');
     const missing = REQUIRED.filter((name) => !refused.stderr.includes(`${name} is not set`));
     if (missing.length > 0) throw new Error(`I9: the refusal does not name ${missing.join(', ')}\n${refused.stderr}`);
@@ -127,11 +162,20 @@ export async function assertPackagedHostRuns(): Promise<void> {
       ...(process.getuid === undefined ? { FACTORY_CONTAINER_UID: '1000', FACTORY_CONTAINER_GID: '1000' } : {}),
     };
     let hostErr = '';
-    const started = spawn(process.execPath, [hostBin], { cwd: dir, env, stdio: ['ignore', 'ignore', 'pipe'] });
+    // Trees under a regular file cannot hold a link: start-up must refuse there, with everything else valid, so a
+    // host whose start-up skipped the probe fails here (review: codex-3).
+    const blocker = join(dir, 'a-file');
+    await writeFile(blocker, 'not a directory');
+    const unlinkable = await runLinked(hostCmd, [], { ...env, FACTORY_TREES: join(blocker, 'trees') });
+    if (unlinkable.code === 0 || !unlinkable.stderr.includes('cannot hold a symbolic link')) {
+      throw new Error(`I9: factory-host did not refuse trees that cannot hold a symbolic link\n${unlinkable.stderr}`);
+    }
+    const launch = invoke(hostCmd, []);
+    const started = spawn(launch.command, launch.args, { cwd: dir, env, stdio: ['ignore', 'ignore', 'pipe'], shell: launch.shell });
     host = started;
     started.stderr.on('data', (chunk: Buffer) => { hostErr += chunk.toString('utf8'); });
     const url = `http://127.0.0.1:${String(port)}`;
-    const cli = (...args: string[]): Promise<Ran> => run(process.execPath, [cliBin, ...args, '--url', url, '--token', token], { cwd: dir, env: baseEnv(), timeoutMs: 60_000 });
+    const cli = (...args: string[]): Promise<Ran> => runLinked(cliCmd, [...args, '--url', url, '--token', token], baseEnv());
     const deadline = Date.now() + LISTEN_MS;
     for (;;) {
       if (started.exitCode !== null) throw new Error(`I9: the configured factory-host exited ${String(started.exitCode)}\n${hostErr}`);
@@ -145,12 +189,13 @@ export async function assertPackagedHostRuns(): Promise<void> {
     }
     const unknown = await cli('status', 'no-such-run');
     if (unknown.code !== 1 || !unknown.stderr.includes('error 404')) throw new Error(`I9: the CLI did not report the host's 404 for an unknown run\n${unknown.stderr}`);
-    const help = await run(process.execPath, [cliBin, 'create', '--help'], { cwd: dir, env: baseEnv(), timeoutMs: 60_000 });
+    const help = await runLinked(cliCmd, ['create', '--help'], baseEnv());
     if (help.code !== 0 || !help.stdout.includes('--workspace')) throw new Error(`I9: the installed CLI's create --help failed\n${help.stderr}`);
   } finally {
     if (host?.exitCode === null) {
       const exited = new Promise((r) => host?.once('exit', r));
-      host.kill();
+      // Under a shell (Windows), the child is cmd.exe; the host is its child, so the whole tree is stopped.
+      stop(host);
       await exited;
     }
     await rm(dir, { recursive: true, force: true });
