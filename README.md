@@ -220,6 +220,67 @@ listens, and the host prints every problem in one list.
 The command line needs only the API's address and token: `--url` and
 `--token`, or `FACTORY_API_URL` and `FACTORY_API_TOKEN`.
 
+### Configure policy
+
+Policy decides what a run may do; anything it does not grant is unavailable.
+[examples/](examples) holds a working set, and a test admits runs under it,
+so it stays current:
+
+- [examples/policy.yaml](examples/policy.yaml): a commented policy for a
+  supervised (L1) run. It caps every run at L1; a person approves the spec,
+  the acceptance tests, and the merge; the stations between run on their
+  evidence. It declares the build and review roles, and the four drafting
+  roles a run that drafts its spec or tests needs.
+- [examples/roles/](examples/roles): the instructions for each seat. A role
+  named in the policy must have a file here. Point `FACTORY_ROLES_DIR` at a
+  copy you own, outside the repository.
+- [examples/rubrics/](examples/rubrics): what the critics of a drafting run
+  check a draft against. Point `FACTORY_RUBRICS_DIR` at a copy.
+- [examples/run/](examples/run): the files `create` reads for one small
+  change: a spec, the acceptance tests, the verification manifest
+  (`verify.json`, the checks the runtime runs, one of which must fail on the
+  base commit), the spec's security part, and the task graph.
+
+### First run
+
+The host admits runs from the working copy `FACTORY_REPOSITORY` names.
+`create --workspace` must name that same path, as an absolute path: the Vault
+locks every artifact against it, and the paths `create` is given are
+relative to it. Copy [examples/run/](examples/run) into the working copy
+(here under `run/`), and start the host with the variables above.
+
+The smallest run drafts its spec from an intent, at L1. It still needs the
+acceptance tests, the manifest, and the graph; a drafted spec has no security
+part to supply:
+
+```
+olympus-ai create --workspace /abs/path/to/repo --base-commit $(git -C /abs/path/to/repo rev-parse HEAD) \
+  --level 1 --draft-spec --intent "Add hello.txt at the repository root, saying hello." \
+  --tests run/acceptance.md --manifest run/verify.json --graph run/graph.json
+```
+
+The first `create` starts nothing. It prints the run's worst-case cost: the
+most it could spend, in US dollars, if every task used every call and every
+retry its role's `budget` allows. Approve that exact figure by running the
+same command again with `--approve-cost <usd>`. With the spec supplied
+instead, replace `--draft-spec --intent ...` with `--spec run/spec.md
+--security-part run/security.json`.
+
+Then follow it with `olympus-ai status <run id>` or `events <run id>`, and
+pass each gate the policy holds for a person with
+`olympus-ai approve <run id> <station>:1`. `olympus-ai report <run id>`
+prints what it cost and what was decided. Every command prints its flags with
+`olympus-ai <command> --help`.
+
+### Readiness
+
+`olympus-ai readiness [--revision <rev>]` asks the host to scan
+`FACTORY_REPOSITORY` at a revision (default `HEAD`) and prints the highest
+autonomy level the repository can support, with every probe's outcome and
+the probe that holds the ceiling. The scan installs and runs the repository's
+checks in sandboxes and takes minutes. It writes nothing, and admission does
+not read it yet: a run is still admitted at the level policy allows.
+
 ## Contributing
 
 Work is cut into units that a contributor can finish and verify alone, without
