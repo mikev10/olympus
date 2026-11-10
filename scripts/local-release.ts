@@ -38,10 +38,21 @@ export function releasedPackages(root: string = ROOT): ReleasedPackage[] {
   return out;
 }
 
-function run(command: string, args: readonly string[], cwd: string): string {
-  // One command line, each argument quoted: on Windows pnpm and npm are .cmd shims that only a shell starts.
-  const line = [command, ...args.map((a) => JSON.stringify(a))].join(' ');
-  const result = spawnSync(line, { cwd, shell: true, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+/** Characters cmd.exe gives a meaning inside or around a double-quoted argument. */
+const CMD_META = /["%^&|<>!\r\n]/u;
+
+export function run(command: string, args: readonly string[], cwd: string): string {
+  let result;
+  if (process.platform === 'win32') {
+    // pnpm and npm are .cmd shims on Windows, which only a shell starts. An argument cmd.exe would
+    // interpret is refused rather than escaped: there is no quoting it honours in every position.
+    const bad = [cwd, ...args].find((a) => CMD_META.test(a));
+    if (bad !== undefined) throw new Error(`local-release: ${JSON.stringify(bad)} holds a character the Windows shell interprets; use a path without ${CMD_META.source}`);
+    result = spawnSync([command, ...args.map((a) => `"${a}"`)].join(' '), { cwd, shell: true, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  } else {
+    // No shell anywhere else: each argument reaches the program as given, so nothing in a path is expanded.
+    result = spawnSync(command, [...args], { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  }
   if (result.status !== 0) {
     throw new Error(`local-release: ${command} ${args.join(' ')} exited ${String(result.status)} in ${cwd}\n${result.stdout}${result.stderr}`);
   }
@@ -72,7 +83,7 @@ export function localRelease(target: string, root: string = ROOT): void {
     if (made.length !== 1 || made[0] === undefined) throw new Error(`local-release: packing ${pkg.name} made ${String(made.length)} tarballs`);
     deps[pkg.name] = `file:./tarballs/${made[0]}`;
   }
-  writeFileSync(join(dest, 'package.json'), `${JSON.stringify({ name: 'olympus-local-release', private: true, dependencies: deps, overrides: deps }, null, 2)}\n`);
+  writeFileSync(join(dest, 'package.json'), `${JSON.stringify({ name: 'factory-local-release', private: true, dependencies: deps, overrides: deps }, null, 2)}\n`);
   run('npm', ['install', '--no-audit', '--no-fund', '--loglevel=error'], dest);
 }
 
