@@ -1,3 +1,19 @@
+# External review of R34, codex, 2026-11-11
+
+The Codex family's review of R34, dependencies installed by the runtime from the lockfile. The triage of this review and its Gemini companion is `2026-11-11-R34-runtime-install-triage.md`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex. A headless `codex exec` run under a read-only sandbox, with recorded approval policy `never`, in an empty scratch working directory and a scratch config home holding only `auth.json`, with an environment of `CODEX_HOME` alone. The pre-run listing of both is the manifest's `cleanRoom`. Outcome `counted`: 79,655 input tokens against a floor of 51,815; all four bundle markers echoed.
+- **Cross-family agreement:** codex-1 (a workspace or local link installs the runner into tree code) was raised by Gemini too, as gemini-2. codex-2 (pnpm patches) and codex-3 (the assertions exercise wiring, not real hash enforcement) were raised by Codex alone.
+- **Date:** 2026-11-11
+- **Bundle:** `2026-11-11-R34-runtime-install-review-bundle.txt`, SHA-256 `d27e7723aa62fef9f41dff7ae33645e96c973b8519513c13692ff418c022df01`, base `15fddaf` (`reviewed/R35`), head `40692f0` (the unit branch after its acceptance fixes, before review). Every new file in full and every modified file as a function-context diff; `docs/decisions.md`, `docs/reviews/`, `docs/plan/`, and `pnpm-lock.yaml` excluded. Prompt: `2026-11-11-R34-runtime-install-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer said it had no prior project context and that it consulted official pnpm documentation, without searching for the project. Local execution was blocked, so it ran nothing. A self-report, not independently verifiable.
+- **Coverage, and any gap:** items 1 (two bypasses), 2 and 3 (codex-3; uncaught exceptions judged not to be passes), 4 (casts and literals judged not exploitable), 6, and 7 (framing judged right, sharpened to "who controls the bytes and references the judge executes") were answered. Item 5 was not answered separately.
+- **Citations:** line numbers are positions in the bundle's new side, not the repository, and are hints.
+
+---
+
 BASE: 15fddaf  
 HEAD: 40692f0  
 packages/vault/test/stub.test.ts  

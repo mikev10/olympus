@@ -1,3 +1,19 @@
+# External review of R34, gemini, 2026-11-11
+
+The Gemini family's review of R34, dependencies installed by the runtime from the lockfile. The triage of this review and its Codex companion is `2026-11-11-R34-runtime-install-triage.md`.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini. A direct `generateContent` API call to `gemini-3.1-pro-preview`, offering no tools; `cleanRoom` is `null` because an API call loads no local configuration. Outcome `counted`: 73,659 input tokens against a floor of 51,815; all four bundle markers echoed.
+- **Cross-family agreement:** gemini-2 (npm `link: true` entries install the runner into tree code) was raised by Codex too, as codex-1; gemini-3 (the runner presence check follows links) is a consequence of the same mechanism. gemini-1 (a symlinked `node_modules` survives the wipe) was raised by Gemini alone.
+- **Date:** 2026-11-11
+- **Bundle:** `2026-11-11-R34-runtime-install-review-bundle.txt`, SHA-256 `d27e7723aa62fef9f41dff7ae33645e96c973b8519513c13692ff418c022df01`, base `15fddaf` (`reviewed/R35`), head `40692f0` (the unit branch after its acceptance fixes, before review). Every new file in full and every modified file as a function-context diff; `docs/decisions.md`, `docs/reviews/`, `docs/plan/`, and `pnpm-lock.yaml` excluded. Prompt: `2026-11-11-R34-runtime-install-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer said it had no prior context and performed no lookups. A self-report, not independently verifiable.
+- **Coverage, and any gap:** items 1 (gemini-1, gemini-2), 6 (an assessment of mechanisms), and in passing 3 (failure handling judged fail-closed) were answered. Items 2, 4, 5, and 7 came back empty: the reviewer did not say whether any check is tautological, did not address language escape hatches or configuration, and did not say whether the framing was right.
+- **Citations:** line numbers are positions in the bundle's new side, not the repository, and are hints.
+
+---
+
 BASE: 15fddaf
 HEAD: 40692f0
 packages/vault/test/stub.test.ts
