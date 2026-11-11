@@ -141,6 +141,10 @@ export async function assertPackagedHostRuns(): Promise<void> {
     const missing = REQUIRED.filter((name) => !refused.stderr.includes(`${name} is not set`));
     if (missing.length > 0) throw new Error(`I9: the refusal does not name ${missing.join(', ')}\n${refused.stderr}`);
     if (/^\s+at /mu.test(refused.stderr)) throw new Error(`I9: the refusal prints a stack trace\n${refused.stderr}`);
+    // The executable prints the list itself (A-HS-01): its first line is the refusal, not Node's report of an uncaught throw.
+    if (!refused.stderr.startsWith('factory-host: not started;') || refused.stderr.includes('node:internal')) {
+      throw new Error(`I9: the refusal is not printed by the executable as one list\n${refused.stderr}`);
+    }
     if (!refused.stderr.includes('.env.example')) throw new Error(`I9: the refusal does not say where the variables are described\n${refused.stderr}`);
 
     // Configured from the shipped examples: the host listens and the CLI reaches it.

@@ -128,7 +128,7 @@ describe('findLeakedSecrets', () => {
 
   it('never reports a RECORDABLE_ENV name, whose value the manifest records by design', () => {
     const env: Record<string, string> = {};
-    for (const name of RECORDABLE_ENV) env[name] = `/scratch/olympus-codex-scratch-${name}/config`;
+    for (const name of RECORDABLE_ENV) env[name] = `/scratch/factory-codex-scratch-${name}/config`;
 
     expect(findLeakedSecrets([JSON.stringify(env), Object.values(env).join('\n')], env)).toEqual([]);
   });
@@ -147,7 +147,7 @@ describe('findLeakedSecrets', () => {
       USERPROFILE: 'C:\\Users\\Mike',
       GEMINI_API_KEY: FAKE_KEY,
     };
-    const reply = 'The scratch dir C:\\Users\\Mike\\AppData\\Local\\Temp\\olympus-codex-scratch-x is never removed.';
+    const reply = 'The scratch dir C:\\Users\\Mike\\AppData\\Local\\Temp\\factory-codex-scratch-x is never removed.';
 
     expect(findLeakedSecrets([reply], env)).toEqual([]);
   });
@@ -184,7 +184,7 @@ describe('findLeakedSecrets', () => {
   it('skips a secret-named variable whose value is the path of an existing file: it names a credential, it is not one', () => {
     // A manifest records paths beside it, so matching the path would withhold
     // every run's evidence after the bundle was sent.
-    const dir = mkdtempSync(join(tmpdir(), 'olympus-credentials-file-'));
+    const dir = mkdtempSync(join(tmpdir(), 'factory-credentials-file-'));
     try {
       const credentialsFile = join(dir, 'key.json');
       writeFileSync(credentialsFile, '{}');
@@ -203,7 +203,7 @@ describe('findLeakedSecrets', () => {
   });
 
   it('never skips GEMINI_API_KEY or OPENAI_API_KEY, even when the value is the path of an existing file', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'olympus-canary-path-'));
+    const dir = mkdtempSync(join(tmpdir(), 'factory-canary-path-'));
     try {
       const existing = join(dir, 'file');
       writeFileSync(existing, '');
@@ -291,7 +291,7 @@ describe('authRefreshed', () => {
 
 describe('reconcileAuthAfterRun', () => {
   const REAL = '/home/maintainer/.codex/auth.json';
-  const SCRATCH = '/tmp/olympus-codex-scratch-x/config/auth.json';
+  const SCRATCH = '/tmp/factory-codex-scratch-x/config/auth.json';
   // It shares no 20-character tail with REFRESH_TOKEN, so a hit on it can
   // only come from the post-run file.
   const ROTATED = ROTATED_TOKEN;
@@ -701,7 +701,7 @@ describe('archiveEarlierAttempt', () => {
   let dir: string;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'olympus-archive-test-'));
+    dir = mkdtempSync(join(tmpdir(), 'factory-archive-test-'));
   });
 
   afterEach(() => {
@@ -785,7 +785,7 @@ describe('archiveEarlierAttempt', () => {
 });
 
 describe('guardScratch', () => {
-  const scratch = { root: '/tmp/olympus-codex-scratch-abc', configHome: '/tmp/olympus-codex-scratch-abc/config', workDir: '/tmp/olympus-codex-scratch-abc/work' };
+  const scratch = { root: '/tmp/factory-codex-scratch-abc', configHome: '/tmp/factory-codex-scratch-abc/config', workDir: '/tmp/factory-codex-scratch-abc/work' };
 
   function fakeHost(): { host: SignalHost; fire: (event: string) => void; exits: number[]; listening: () => number } {
     const listeners = new Map<string, Array<() => void>>();
@@ -955,7 +955,7 @@ describe('main: egress order', () => {
   });
 
   function harness(options: Options = {}): Harness {
-    const root = mkdtempSync(join(tmpdir(), 'olympus-main-test-'));
+    const root = mkdtempSync(join(tmpdir(), 'factory-main-test-'));
     temps.push(root);
     const reviews = join(root, 'docs', 'reviews');
     mkdirSync(reviews, { recursive: true });

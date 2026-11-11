@@ -338,7 +338,7 @@ export function reconcileAuthAfterRun(
     return result('read-failed', refreshedSecrets);
   }
 
-  const temp = `${realAuthPath}.olympus-${String(process.pid)}.tmp`;
+  const temp = `${realAuthPath}.factory-${String(process.pid)}.tmp`;
   try {
     fs.writeFile(temp, after);
     fs.rename(temp, realAuthPath);

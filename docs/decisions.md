@@ -9347,3 +9347,43 @@ Started on `v2` at 6086f8f, after the amendment (#128). Issues #54, #55, #28,
 - **Reverse:** an amendment that lets the host's entry file, and only it,
   write to stderr and set its exit code, as the CLI's `main.ts` does; then
   print the list without Node's header.
+
+## Amendment: the host prints its own refusal, and the name scan reads scripts
+
+After R35 merged (#130). Two of its open items, each the recommended answer,
+confirmed by the maintainer on 2026-11-11: D-R35-08's compromise, and #131.
+
+### A-HS-01: one exempt entry in the api terminal scan
+
+- **Was:** `I9.api-never-touches-a-terminal` refused every stream write and
+  exit in `api`, the host's entry included, so start-up threw its refusal and
+  Node printed it, with two lines of its own header (D-R35-08).
+- **Now:** `packages/api/src/host/main.ts` catches the refusal once and writes
+  `factory-host: <the list>` to stderr and sets `process.exitCode = 1`, as the
+  CLI's own entry does. The scan exempts exactly that file and exactly
+  `process.stderr.write` and `process.exitCode` (by spelling and by binding).
+  stdin, stdout, argv, `process.exit`, isTTY, `console`, and every terminal
+  module stay refused there. The file must export nothing, so no module can
+  call through it, and the scan fails if the file leaves the program, so the
+  exemption cannot name nothing. Any other error keeps its stack.
+- **Asserted:** `I9.packaged-host-runs` now also requires the refusal's first
+  line to be `factory-host: not started;` and no `node:internal` header. It
+  fails against the merged R35 entry (run). A `console.log` added to the entry
+  fails the scan (run).
+- **Reverse:** drop `HOST_ENTRY` and rethrow, as R35 merged.
+
+### A-HS-02: the I10 scan reads scripts/ and the root config (#131)
+
+- **Was:** the scan read each workspace package's source, `package.json`, and
+  `tsconfig.json`. `scripts/` and the root configuration were unread.
+- **Now:** every `.ts` file under `scripts/` (identifiers, strings, paths)
+  and the root `package.json`, `tsconfig.base.json`, `tsconfig.build.json`,
+  `tsconfig.tooling.json`, and `scripts/tsconfig.json`, with the same two
+  exemptions. A root file the list names and the workspace lacks fails the
+  scan, as does an empty `scripts/`.
+- **Found by it:** 23 existing hits, all temp-file and temp-directory prefixes
+  in the review runner and its tests (`olympus-codex-scratch-` and the like)
+  and the release script's success line. Renamed to `factory-`; none is
+  matched by anything else. The success line builds the CLI's name from its
+  exact string.
+- **Reverse:** drop the scripts and root loop from the assertion.

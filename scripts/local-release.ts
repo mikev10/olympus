@@ -95,7 +95,9 @@ if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(
   } else {
     try {
       localRelease(target);
-      process.stdout.write(`installed into ${resolve(target)}: node_modules/.bin/factory-host and node_modules/.bin/olympus-ai\n`);
+      // The CLI's executable name, spelled exactly once: the one form the I10 scan exempts.
+      const cli = 'olympus-ai';
+      process.stdout.write(`installed into ${resolve(target)}: node_modules/.bin/factory-host and node_modules/.bin/${cli}\n`);
     } catch (error) {
       process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
       process.exitCode = 1;
