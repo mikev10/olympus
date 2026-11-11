@@ -71,7 +71,7 @@ describe('planInstall (D-R34-04)', () => {
 });
 
 describe('the installers read their lockfiles (D-R34-06)', () => {
-  test('npm: a file or git dependency cannot be verified; a workspace link and a bundled package are not downloads', () => {
+  test('npm: a file or git dependency cannot be verified; a workspace link is refused (codex-1); a bundled package arrives inside its parent, whose tarball is hashed', () => {
     const read = lockedPackages(NPM_INSTALLER, JSON.stringify({
       lockfileVersion: 3,
       packages: {
@@ -89,6 +89,7 @@ describe('the installers read their lockfiles (D-R34-06)', () => {
         { key: 'node_modules/a', integrity: HASH, unverifiable: null },
         { key: 'node_modules/git', integrity: null, unverifiable: 'it records no integrity hash' },
         { key: 'node_modules/local', integrity: HASH, unverifiable: 'it resolves from file:local-1.0.0.tgz, not from a registry' },
+        { key: 'node_modules/ws', integrity: null, unverifiable: 'it links to packages/ws in the tree, not a registry download' },
       ],
     });
   });
@@ -137,5 +138,31 @@ describe('the installers read their lockfiles (D-R34-06)', () => {
     expect([...NPM_INSTALLER.files, ...PNPM_INSTALLER.files]).not.toEqual(expect.arrayContaining(['.pnpmfile.cjs']));
     expect(NPM_INSTALLER.failure('npm error code EINTEGRITY')).toMatch(/integrity hash/);
     expect(PNPM_INSTALLER.failure('ERR_PNPM_TARBALL_INTEGRITY')).toMatch(/integrity hash/);
+  });
+});
+
+describe('no code from the tree is installed (external review, codex-1, codex-2, gemini-2)', () => {
+  test('npm: a link entry, and a tree directory\'s entry, are refused whatever hash they carry', () => {
+    const read = lockedPackages(NPM_INSTALLER, JSON.stringify({
+      lockfileVersion: 3,
+      packages: { '': { name: 'x' }, 'node_modules/vitest': { resolved: 'judge', link: true }, judge: { name: 'vitest', version: '9.9.9', integrity: HASH } },
+    }));
+    expect(read).toEqual({
+      ok: true,
+      packages: [
+        { key: 'judge', integrity: HASH, unverifiable: 'it is a directory of the tree, not a registry download' },
+        { key: 'node_modules/vitest', integrity: null, unverifiable: 'it links to judge in the tree, not a registry download' },
+      ],
+    });
+  });
+
+  test('pnpm: an importer dependency on link: or file: is refused, naming it', () => {
+    const read = lockedPackages(PNPM_INSTALLER, "lockfileVersion: '9.0'\nimporters:\n  .:\n    devDependencies:\n      vitest:\n        specifier: workspace:*\n        version: link:judge\n      a:\n        specifier: 1.0.0\n        version: 1.0.0\n");
+    expect(read).toEqual({ ok: true, packages: [{ key: '. > vitest', integrity: null, unverifiable: 'it is link:judge, a directory of the tree, not a registry download' }] });
+  });
+
+  test('pnpm: a lockfile that patches a package is refused, naming it', () => {
+    const read = lockedPackages(PNPM_INSTALLER, `lockfileVersion: '9.0'\npatchedDependencies:\n  is-number@7.0.0:\n    hash: ${'a'.repeat(64)}\n    path: patches/package.json\n`);
+    expect(read).toMatchObject({ ok: false, reason: expect.stringMatching(/patchedDependencies \(is-number@7\.0\.0\)/) as unknown });
   });
 });

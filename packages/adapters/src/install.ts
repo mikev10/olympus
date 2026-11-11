@@ -57,10 +57,16 @@ function npmPackages(document: unknown): ReturnType<DependencyInstaller['package
   for (const [key, entry] of Object.entries(document.packages)) {
     if (key === '') continue;
     if (!isRecord(entry)) return { ok: false, reason: `package-lock.json's entry ${key} is not an object` };
-    if (entry.link === true || entry.inBundle === true) continue;
+    if (entry.inBundle === true) continue;
     const integrity = integrityOf(entry.integrity);
-    const resolved = typeof entry.resolved === 'string' ? notRegistry(entry.resolved) : null;
-    packages.push({ key, integrity, unverifiable: integrity === null ? 'it records no integrity hash' : resolved });
+    // A link installs a symlink into the tree, and an entry outside node_modules is a directory of the tree: either puts
+    // code the change can write where a check loads a dependency, whatever hash it carries (external review, codex-1, gemini-2).
+    let unverifiable: string | null;
+    if (entry.link === true) unverifiable = `it links to ${typeof entry.resolved === 'string' ? entry.resolved : 'a directory'} in the tree, not a registry download`;
+    else if (!key.startsWith('node_modules/') && !key.includes('/node_modules/')) unverifiable = 'it is a directory of the tree, not a registry download';
+    else if (integrity === null) unverifiable = 'it records no integrity hash';
+    else unverifiable = typeof entry.resolved === 'string' ? notRegistry(entry.resolved) : null;
+    packages.push({ key, integrity, unverifiable });
   }
   return { ok: true, packages: packages.sort((a, b) => a.key.localeCompare(b.key)) };
 }
@@ -74,9 +80,33 @@ function npmPackages(document: unknown): ReturnType<DependencyInstaller['package
 function pnpmPackages(document: unknown): ReturnType<DependencyInstaller['packages']> {
   if (!isRecord(document)) return { ok: false, reason: 'pnpm-lock.yaml is not a mapping' };
   if (document.lockfileVersion !== '9.0') return { ok: false, reason: `pnpm-lock.yaml is lockfile version ${JSON.stringify(document.lockfileVersion)}; only 9.0 is read` };
-  if (document.packages === undefined || document.packages === null) return { ok: true, packages: [] };
-  if (!isRecord(document.packages)) return { ok: false, reason: "pnpm-lock.yaml's packages is not a mapping" };
+  // A patch changes a package after its tarball's hash is verified, from a file the change can write (external review, codex-2).
+  if (document.patchedDependencies !== undefined && document.patchedDependencies !== null) {
+    const patched = isRecord(document.patchedDependencies) ? Object.keys(document.patchedDependencies).join(', ') : 'an unreadable set';
+    return { ok: false, reason: `pnpm-lock.yaml declares patchedDependencies (${patched}), which change a package's code after its hash is verified` };
+  }
   const packages: LockedPackage[] = [];
+  // An importer's dependency on link: or file: is a directory of the tree, installed as a symlink into it (external review, codex-1).
+  if (document.importers !== undefined && document.importers !== null) {
+    if (!isRecord(document.importers)) return { ok: false, reason: "pnpm-lock.yaml's importers is not a mapping" };
+    for (const [importer, deps] of Object.entries(document.importers)) {
+      if (!isRecord(deps)) return { ok: false, reason: `pnpm-lock.yaml's importer ${importer} is not a mapping` };
+      for (const field of ['dependencies', 'devDependencies', 'optionalDependencies']) {
+        const listed = deps[field];
+        if (listed === undefined || listed === null) continue;
+        if (!isRecord(listed)) return { ok: false, reason: `pnpm-lock.yaml's importer ${importer} ${field} is not a mapping` };
+        for (const [name, dep] of Object.entries(listed)) {
+          const version = isRecord(dep) ? dep.version : undefined;
+          if (typeof version !== 'string') return { ok: false, reason: `pnpm-lock.yaml's importer ${importer} names ${name} with no version` };
+          if (version.startsWith('link:') || version.startsWith('file:')) {
+            packages.push({ key: `${importer} > ${name}`, integrity: null, unverifiable: `it is ${version}, a directory of the tree, not a registry download` });
+          }
+        }
+      }
+    }
+  }
+  if (document.packages === undefined || document.packages === null) return { ok: true, packages: packages.sort((a, b) => a.key.localeCompare(b.key)) };
+  if (!isRecord(document.packages)) return { ok: false, reason: "pnpm-lock.yaml's packages is not a mapping" };
   for (const [key, entry] of Object.entries(document.packages)) {
     if (!isRecord(entry) || !isRecord(entry.resolution)) return { ok: false, reason: `pnpm-lock.yaml's entry ${key} has no resolution` };
     const resolution = entry.resolution;
