@@ -9565,3 +9565,31 @@ and R15 are each merged and tagged `reviewed/*`.
   keeps its id, and its title now names the install.
 - D-R15-08's pending entry stays with M3: the runner is now the
   runtime's, but a `globalSetup` file it loads is still the change's.
+
+### D-R34-11: no install puts code from the tree where a check loads a dependency (external review)
+
+- **Found (codex-1, gemini-2, run):** the npm reader skipped `link: true`
+  entries and the pnpm reader never read `importers`. A lockfile linking
+  `vitest` to a directory of the tree, with an invented hash on the target's
+  entry, was accepted, and `npm ci` in the pinned image installed
+  `node_modules/vitest -> ../judge`: the runner was the change's own code.
+- **Found (codex-2, run):** pnpm applied a patch named by the lockfile's
+  `patchedDependencies`, stored as `patches/package.json` and so copied in
+  as a manifest, during a frozen install with every flag R34 passes.
+- **Chosen:** the npm reader refuses a link entry and any entry outside
+  `node_modules`; the pnpm reader refuses an importer dependency on `link:`
+  or `file:` and any `patchedDependencies`; and the install itself is
+  refused when it writes a link whose target leaves its own dependency
+  trees, so a link a reader misses is still caught. A `node_modules` the
+  tree holds as a link is removed with the rest (gemini-1; a task cannot
+  write one, since it is not carried, but the base's would have survived).
+- **Known limit:** npm and pnpm workspace repositories are refused. Owned
+  by issue #138. pnpm's real behaviour is verified by hand, not by an
+  assertion, because the pinned image fetches pnpm through corepack.
+- **Rejected:** allowing links except for the test runner's dependency
+  closure. A pinned command's binary judges too, so any package can be the
+  judge; only refusing every link closes it.
+- **Reverse:** drop the link and patch refusals in
+  `packages/adapters/src/install.ts` and `linkOut` in
+  `packages/api/src/install.ts`. `I3.install-installs-no-code-from-the-tree`
+  then fails.
