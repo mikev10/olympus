@@ -24,7 +24,7 @@ export interface CodexScratch {
  * conversations, so the scratch config home is built to hold nothing else.
  */
 export function buildCodexScratch(authJsonSource: string): CodexScratch {
-  const root = mkdtempSync(join(tmpdir(), 'olympus-codex-scratch-'));
+  const root = mkdtempSync(join(tmpdir(), 'factory-codex-scratch-'));
   const configHome = join(root, 'config');
   const workDir = join(root, 'work');
   try {

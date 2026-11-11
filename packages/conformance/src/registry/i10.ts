@@ -1,10 +1,10 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import ts from 'typescript';
 import { runtime } from '../kit/assert.js';
 import { GREEK_NAMES, packageProgram, splitWords, words } from '../kit/scan.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
-import { workspacePackages, workspaceRelative } from '../kit/workspace.js';
+import { workspacePackages, workspaceRelative, workspaceRoot } from '../kit/workspace.js';
 
 /**
  * The one exemption: the npm scope every package publishes under, and the
@@ -26,6 +26,21 @@ const WORD_LIST_FILES: ReadonlySet<string> = new Set([
   'packages/conformance/src/kit/scan.ts',
   'packages/conformance/test/kit/scan.test.ts',
 ]);
+
+/** The root's own config files, read as the packages' are (A-HS-02). */
+const ROOT_CONFIG_FILES = ['package.json', 'tsconfig.base.json', 'tsconfig.build.json', 'tsconfig.tooling.json', 'scripts/tsconfig.json'];
+
+/** Every `.ts` file under `dir`, recursively, skipping installed dependencies. */
+function scriptFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === 'node_modules') continue;
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...scriptFiles(path));
+    else if (entry.name.endsWith('.ts')) out.push(path);
+  }
+  return out;
+}
 
 /** Config files whose keys and values are code-adjacent: package names, script names, path maps. */
 const CONFIG_FILES = ['package.json', 'tsconfig.json'];
@@ -56,7 +71,7 @@ export const I10: InvariantEntry = {
   assertions: [
     runtime({
       id: 'I10.no-greek-names-in-code',
-      title: 'no identifier, string literal, file path, or config key in any package contains a Greek name; the npm scope is the one exemption',
+      title: 'no identifier, string literal, file path, or config key in any package, in the repository\'s scripts, or in its root config contains a Greek name; the npm scope and the CLI\'s exact name are the exemptions',
       run: () => {
         const greek = new Set(GREEK_NAMES);
         const hits: string[] = [];
@@ -83,6 +98,32 @@ export const I10: InvariantEntry = {
               for (const word of splitWords(stripScope(text))) {
                 if (greek.has(word)) hits.push(`${pkg.relativeDir}/${name}: ${path} contains '${word}'`);
               }
+            }
+          }
+        }
+        // The repository's own tooling and root configuration are code too (A-HS-02, #131): a script's
+        // identifiers, strings, and paths, and the root manifests' keys and values.
+        const root = workspaceRoot();
+        const scripts = scriptFiles(join(root, 'scripts'));
+        if (scripts.length === 0) throw new Error('I10: no files under scripts/, so the tooling scan read nothing');
+        for (const path of scripts) {
+          const file = workspaceRelative(path);
+          for (const word of splitWords(file)) {
+            if (greek.has(word)) hits.push(`${file}: path contains '${word}'`);
+          }
+          const sf = ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, true);
+          for (const site of words(sf, stripScope)) {
+            if (greek.has(site.word)) hits.push(`${site.file}:${String(site.line)}: ${site.source} '${site.text}' contains '${site.word}'`);
+          }
+        }
+        for (const name of ROOT_CONFIG_FILES) {
+          const file = join(root, name);
+          if (!existsSync(file)) throw new Error(`I10: ${name} is not at the workspace root, so the root scan names a file that is not there`);
+          const strings: Array<{ path: string; text: string }> = [];
+          jsonStrings(ts.readConfigFile(file, (p) => ts.sys.readFile(p)).config, '', strings);
+          for (const { path, text } of strings) {
+            for (const word of splitWords(stripScope(text))) {
+              if (greek.has(word)) hits.push(`${name}: ${path} contains '${word}'`);
             }
           }
         }
