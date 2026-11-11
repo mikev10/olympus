@@ -1,0 +1,134 @@
+The code under review is in the file
+`2026-11-11-R34-runtime-install-review-bundle.txt` (SHA-256 d27e7723aa62fef9f41dff7ae33645e96c973b8519513c13692ff418c022df01) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing the dependency install that a software-delivery runtime
+performs before it runs verification checks, in a TypeScript project. You have
+the source and nothing else — no design documents, no author reasoning, no
+prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The runtime runs an AI agent that changes a repository, then judges the change
+by running checks (test suites, pinned commands) over a tree the runtime builds,
+in a container mounted read-only with no network. Until this change, those
+checks ran over whatever `node_modules` the base snapshot held, so a change
+needing a new dependency could not pass. Now, before the base is judged and
+before each task's checks, the runtime installs the tree's lockfile
+(`package-lock.json` or `pnpm-lock.yaml`) in a separate container whose network
+reaches only the registries a policy file grants, with lifecycle scripts
+disabled and every package required to carry an integrity hash, and copies the
+result into the read-only tree the checks run over, replacing every
+`node_modules` the tree held. The evidence record carries the lockfile's diff
+against the base and a digest of the installed tree.
+
+It must hold against a capable, motivated party trying to make a change pass
+its checks without the change being good: by getting code it wrote to run, or
+to be loaded as a dependency or a test runner, in a place the runtime trusts;
+by getting the install to reach the network beyond what policy grants; or by
+getting checks to run over dependencies other than an install of the lockfile
+that the runtime verified. Assume no deceptive intent — only that the easiest
+path gets taken.
+
+That party controls every file in the working tree it hands back, the lockfile,
+`package.json` files, `.npmrc`, `.pnpmfile.cjs`, and anything under
+`node_modules` included, and controls which of them exist. It does not control
+the policy file, the installer declarations in code, the images they are pinned
+to, or the components the runtime is wired with — the Vault, the sandbox
+provider, and the drivers are runtime-selected and trusted, even where a
+function takes one as an argument — and it does not control code running inside
+the runtime's own process. The registries policy grants are trusted to serve
+what they serve; the lockfile's hashes are what binds what is installed.
+
+The invariants at stake:
+
+- No agent writes to the Vault, the runtime's evidence store, at any level, in
+  any repository, in any role.
+- An agent may not be judged by an artifact it can write: what judges a change
+  (its tests, the runner that executes them, the record of what ran) must be
+  out of the changing agent's reach.
+- Default deny: a capability not granted in policy is unavailable. Network
+  access for an install exists only for registries the policy lists.
+- Fail closed: a missing check, an unsupported stack, an unreadable lockfile,
+  or an install that did not complete is a refusal, never a silent degrade or a
+  warning that lets the run continue.
+- Every capability claim maps to an executable assertion that fails when the
+  capability is deleted.
+
+The mechanisms that matter most:
+
+- The install plan (`planInstall`) and the per-installer lockfile readers that
+  decide what is installed, what is refused, and which packages count as
+  verifiable by hash.
+- `installInto`: which files enter the install's container, how the install is
+  keyed and reused within a run, and how the result replaces the dependency
+  trees in the tree the checks mount.
+- Where the install is wired: admission, the base run, and `verify`, and what
+  each does when the install is refused, fails, or cannot be provisioned.
+- The conformance assertions and the stand-in installer the tests use.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+The Python adapters (R29's); private registry credentials; caching installs
+across runs; a dependency audit beyond R13a's.
+
+Identifiers such as R29 and R13a name other units of work in this project;
+they mean only that the listed work belongs elsewhere. Absent work listed here
+is not a defect.
+
+THE QUESTION
+
+How would a change get its checks to pass over dependencies, or a test runner,
+that it supplied or influenced rather than ones the runtime installed and
+verified from the lockfile — or get the install to run its code or reach a host
+policy did not grant?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.
