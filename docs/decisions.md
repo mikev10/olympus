@@ -9593,3 +9593,15 @@ and R15 are each merged and tagged `reviewed/*`.
   `packages/adapters/src/install.ts` and `linkOut` in
   `packages/api/src/install.ts`. `I3.install-installs-no-code-from-the-tree`
   then fails.
+
+### D-R34-12: the benchmark's bench grants the npm registry (found by CI on #137)
+
+- **Found:** the false-done benchmark's deterministic tier, which CI runs as
+  its own job and `pnpm test` does not, admits its corpus repositories under
+  a policy granting no registry. Each holds a `package-lock.json`, so R34
+  refused every run as `not-installable`.
+- **Chosen:** `benchPolicyDocument` grants `registry.npmjs.org`; the runtime
+  installs each corpus repository through the real Docker provider and its
+  egress proxy. Run locally with `FACTORY_CONTAINER_UID=1000
+  FACTORY_CONTAINER_GID=1000`, the tier reproduced the committed result.
+- **Reverse:** remove the grant; the tier then refuses every item.

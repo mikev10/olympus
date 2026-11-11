@@ -189,6 +189,8 @@ export function benchPolicyDocument(repo: RepoPolicy): PolicyDocument {
       budgetPerWindow: { runs: 1000, windowMs: 3_600_000 },
     },
     concurrency: { maxParallelTasks: 1, maxConflictRetries: 0 },
+    // Every corpus repository declares its dependencies, which the runtime installs from its lockfile before any check (R34).
+    installRegistries: ['registry.npmjs.org'],
   };
 }
 
