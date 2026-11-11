@@ -82,6 +82,9 @@ export async function withSuite(rig: LineRig): Promise<void> {
   await writeFile(join(root, 'package.json'), JSON.stringify({ name: 'hello', private: true, devDependencies: { vitest: '4.1.11' } }));
   await mkdir(join(root, 'node_modules', 'vitest'), { recursive: true });
   await writeFile(join(root, 'node_modules', 'vitest', 'vitest.mjs'), RUNNER);
+  // The runner is the runtime's install of this lockfile, which the rig's stand-in makes from the fixture's tree (R34).
+  const { hashedLockfile } = await import('@olympus-ai/adapters');
+  await writeFile(join(root, 'package-lock.json'), hashedLockfile('hello', ['node_modules/vitest']));
   await writeFile(join(root, HELLO_TEST), "import { existsSync } from 'node:fs';\nif (!existsSync(['hello', 'txt'].join('.'))) throw new Error('hello.txt is not written');\n");
   await writeFile(join(root, PASSING_TEST), '');
   await writeFile(join(root, FAILING_TEST), "throw new Error('fails on every tree');\n");
@@ -420,7 +423,7 @@ async function writingDependency(path: string, text: string, sandbox: SandboxPro
 export const DEPENDENCY_TREES_ARE_THE_BASES: LocalAssertion = runtime({
   id: 'I3.dependency-trees-are-the-bases',
   title:
-    "every check runs over the base's dependency trees, so the change cannot replace the runner that judges it: what a task writes under node_modules is never carried into the tree the checks run over, is recorded in its evidence by package, and escalates the integrate exit; a builder that rewrites the test runner an acceptance check starts, and does nothing else, is judged by the base's runner and parks (D-R15-05)",
+    "every check runs over dependency trees no task wrote, the runtime's install of the tree's lockfile since R34, so the change cannot replace the runner that judges it: what a task writes under node_modules is never carried into the tree the checks run over, is recorded in its evidence by package, and escalates the integrate exit; a builder that rewrites the test runner an acceptance check starts, and does nothing else, is judged by the installed runner and parks (D-R15-05, R34)",
   run: async () => {
     await withLine('r15-i3-judge-', async (rig) => {
       const { startRun } = await api();

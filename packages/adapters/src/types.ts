@@ -121,3 +121,52 @@ export interface DependencyAuditor {
    */
   parse(stdout: string, exitCode: number, lockfileText: string): { readonly ok: true; readonly findings: AuditFinding[] } | { readonly ok: false; readonly unreachable: boolean };
 }
+
+/** A stack the runtime installs from its lockfile (A-R34-02). R29 adds Python's. */
+export type InstallStack = 'npm' | 'pnpm';
+
+/**
+ * One package a lockfile pins: its key in the lockfile, the integrity hash
+ * the lockfile records for it, and why an install could not verify it
+ * against that hash, or null when it can (D-R34-06).
+ */
+export interface LockedPackage {
+  readonly key: string;
+  readonly integrity: string | null;
+  readonly unverifiable: string | null;
+}
+
+/**
+ * The runtime's dependency install for one stack (A-R34-02), declared once
+ * beside the dependency audit (R13a). The runtime runs it, never a seat: in
+ * a sandbox of its own whose egress is the registries policy grants, over a
+ * copy of `files` and nothing else of the tree, with no lifecycle script.
+ * What it writes under `trees` is what every check runs over (I3).
+ */
+export interface DependencyInstaller {
+  readonly stack: InstallStack;
+  /** The lockfile, by its name at the tree's root. */
+  readonly lockfile: string;
+  /** How the runtime parses the lockfile before `packages` reads it (D-R34-07). */
+  readonly format: 'json' | 'yaml';
+  /** The root manifest that declares this stack's dependencies; a tree holding it and no lockfile is refused. */
+  readonly manifest: string;
+  /** The root files copied into the install's sandbox, the lockfile among them. */
+  readonly files: readonly string[];
+  /** A file name copied from every directory below the root outside a dependency tree (workspace manifests), or null. */
+  readonly nested: string | null;
+  /** The dependency trees the install writes, by directory name, found at any depth. */
+  readonly trees: readonly string[];
+  /** `name@sha256:<digest>`. */
+  readonly image: string;
+  readonly invocation: readonly [string, ...string[]];
+  readonly env: Readonly<Record<string, string>>;
+  /**
+   * Every package the parsed lockfile pins, or why the document is not a
+   * lockfile this installer reads. Never an empty list for a document it
+   * could not read (I5).
+   */
+  packages(document: unknown): { readonly ok: true; readonly packages: readonly LockedPackage[] } | { readonly ok: false; readonly reason: string };
+  /** The cause a failed install's output names, where it names one the runtime knows; null otherwise. */
+  failure(output: string): string | null;
+}

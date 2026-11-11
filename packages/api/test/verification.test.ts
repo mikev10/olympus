@@ -266,17 +266,20 @@ describe('a suite check runs the base framework, over what it names (D-R15-04)',
       'src/notes.md': '',
     });
     const admitted = ['src/a.test.ts', 'other/src/a.test.ts', 'src/b.test.ts', 'src/notes.md'];
-    expect(await suiteBindingProblems([lint, acceptance(['src/b.test.ts']), unit], root, admitted)).toEqual([]);
+    expect(await suiteBindingProblems([lint, acceptance(['src/b.test.ts']), unit], root, admitted, false)).toEqual([]);
     const messages = async (checks: CheckSpec[], tests = admitted): Promise<string> =>
-      (await suiteBindingProblems(checks, root, tests)).map((p) => `${p.code} ${p.message}`).join('\n');
+      (await suiteBindingProblems(checks, root, tests, false)).map((p) => `${p.code} ${p.message}`).join('\n');
     expect(await messages([acceptance(['src/a.test.ts'])])).toMatch(/unbound .*would also run other\/src\/a\.test\.ts/);
     expect(await messages([acceptance(['src/notes.md'])])).toMatch(/unbound .*does not run src\/notes\.md as a suite/);
     expect(await messages([acceptance(['src/b.test.ts'])], ['src/a.test.ts'])).toMatch(/unbound .*not an admitted acceptance test/);
     const bare = await tree('bare', { 'readme.md': '' });
-    expect((await suiteBindingProblems([unit], bare, [])).map((p) => p.code)).toEqual(['unbound']);
+    expect((await suiteBindingProblems([unit], bare, [], false)).map((p) => p.code)).toEqual(['unbound']);
     const uninstalled = await tree('uninstalled-base', { 'package.json': VITEST, 'src/a.test.ts': '' });
-    expect((await suiteBindingProblems([acceptance(['src/a.test.ts'])], uninstalled, ['src/a.test.ts'])).map((p) => p.message).join()).toMatch(/not installed/);
-    expect(await suiteBindingProblems([lint], bare, [])).toEqual([]);
+    expect((await suiteBindingProblems([acceptance(['src/a.test.ts'])], uninstalled, ['src/a.test.ts'], false)).map((p) => p.message).join()).toMatch(/not installed/);
+    // With an install declared, the runner is the install's, judged by the base run; the snapshot's trees are not consulted (R34).
+    expect(await suiteBindingProblems([acceptance(['src/a.test.ts'])], uninstalled, ['src/a.test.ts'], true)).toEqual([]);
+    expect((await suiteBindingProblems([unit], bare, [], true)).map((p) => p.code)).toEqual(['unbound']);
+    expect(await suiteBindingProblems([lint], bare, [], false)).toEqual([]);
   });
 
   test('a suite check requires every test it names; any other check, the count it pins', () => {

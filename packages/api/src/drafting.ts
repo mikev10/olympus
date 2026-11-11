@@ -87,6 +87,7 @@ import { parsePlan, planDraftPath } from './observation-plan.js';
 import { DRAFT_DIR, defectBytes, parseQuestions, parseReproduction, parseRunRequirements, type DefectPart, type RunRequirements } from './spec-parts.js';
 import { mergedCheckProblems, parseManifest, reproductionProblems } from './validate.js';
 import { suiteBindingProblems, taskResultProblems, writesOutsideGrant } from './verification.js';
+import { planInstall } from './install.js';
 import { basePath, copyOnly, copyTree, draftBaseRunPath, draftPaths, existsIn, ownDiff, scratchPath, treeDigest, writeFiles } from './workspace.js';
 
 /** The drivers that seat each drafter and each critic (R19). A run that drafts is refused without them. */
@@ -601,7 +602,8 @@ async function readTestDraft(ctx: LineContext, start: string, work: string): Pro
     if (problems.length === 0) {
       // Each acceptance check's tests bound to the base's framework, over the base with the draft written in (D-R15-04).
       const tree = await draftTree(ctx, files);
-      for (const p of await suiteBindingProblems(checks, tree, tests)) problems.push({ path: `${manifestPath}#${p.path}`, code: p.code });
+      const installs = (await planInstall(tree, ctx.components.installers, ctx.policy.installRegistries)).kind === 'install';
+      for (const p of await suiteBindingProblems(checks, tree, tests, installs)) problems.push({ path: `${manifestPath}#${p.path}`, code: p.code });
     }
   }
   return { files, discarded: await discardedOf(start, work, (p) => drafted(p)), problems };

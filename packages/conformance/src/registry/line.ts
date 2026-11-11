@@ -9,7 +9,7 @@
  * assertions reach theirs, so the conformance package keeps no `package.json`
  * dependency on any of them (D-F3-04).
  */
-import { cp, readFile, writeFile } from 'node:fs/promises';
+import { cp, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { BuiltGraph, GraphParts, RunOutcome, RunRequest, WorkspaceStore } from '@olympus-ai/api';
 import type {
@@ -102,6 +102,8 @@ export async function linePolicy(cells: Partial<Record<ApprovalKey, ApprovalOutc
       budgetPerWindow: { runs: 20, windowMs: 3_600_000 },
     },
     concurrency: { maxParallelTasks: 1, maxConflictRetries: 0 },
+    // A fixture that declares dependencies installs them with the stand-in from its own tree; one that declares none is unaffected (R34).
+    installRegistries: ['registry.npmjs.org'],
     ...overrides,
   });
 }
@@ -222,6 +224,27 @@ async function approvedFigure(req: RunRequest): Promise<number | null> {
   }
 }
 
+/**
+ * A fixture that declares a manifest for its stack and pins no lockfile gets
+ * one, pinning each package its `node_modules` holds, so the rig's stand-in
+ * installs what the fixture laid out (R34). A fixture that wrote its own
+ * lockfile, or has no manifest, is left as it is.
+ */
+async function lockedFixture(root: string): Promise<void> {
+  const has = async (name: string): Promise<boolean> => (await stat(join(root, name)).catch(() => null)) !== null;
+  if (!(await has('package.json')) || (await has('package-lock.json')) || (await has('pnpm-lock.yaml'))) return;
+  const packages: string[] = [];
+  if (await has('node_modules')) {
+    for (const name of await readdir(join(root, 'node_modules'))) {
+      if (name.startsWith('.')) continue;
+      if (name.startsWith('@')) for (const inner of await readdir(join(root, 'node_modules', name))) packages.push(`node_modules/${name}/${inner}`);
+      else packages.push(`node_modules/${name}`);
+    }
+  }
+  const { hashedLockfile } = await import('@olympus-ai/adapters');
+  await writeFile(join(root, 'package-lock.json'), hashedLockfile('fixture', packages.sort()));
+}
+
 /** The hello fixture in a fresh artifact root, a fresh store beside it, and a way to open both again. */
 export async function withLine<T>(prefix: string, body: (rig: LineRig) => Promise<T>): Promise<T> {
   return withVaultDirs(prefix, async (dirs, base) => {
@@ -248,11 +271,14 @@ export async function withLine<T>(prefix: string, body: (rig: LineRig) => Promis
         const driver = options.work === false ? given : doingTheWork(given, sandbox);
         // One stub in both seats, as before the builder did the work: a reviewer it never writes as.
         const reviewer = overrides.driver === undefined ? driver : stub;
-        return built({ vault: await open(), sandbox, reviewer, workspaces, ...(await scannersFor(sandbox)), ...overrides, driver });
+        // The stand-in installs what a fixture's lockfile pins from the fixture's own tree, offline (R34).
+        const { standInNpmInstaller } = await import('@olympus-ai/adapters');
+        return built({ vault: await open(), sandbox, reviewer, workspaces, ...(await scannersFor(sandbox)), installers: [standInNpmInstaller(dirs.artifacts)], ...overrides, driver });
       },
       request: async (parts, overrides = {}) => {
         const components = await built(parts);
         await scanned(dirs, components);
+        await lockedFixture(dirs.artifacts);
         const req: RunRequest = {
           runId,
           baseCommit: '0'.repeat(40),

@@ -230,7 +230,16 @@ so it stays current:
   supervised (L1) run. It caps every run at L1; a person approves the spec,
   the acceptance tests, and the merge; the stations between run on their
   evidence. It declares the build and review roles, and the four drafting
-  roles a run that drafts its spec or tests needs.
+  roles a run that drafts its spec or tests needs. Its `installRegistries`
+  lets the runtime install a repository's dependencies: before any check
+  runs, it installs the lockfile (`package-lock.json` or `pnpm-lock.yaml`,
+  every package pinned by hash) in a sandbox of its own with no lifecycle
+  scripts, and the checks run over that install with no network. A
+  repository that declares dependencies under a policy granting no registry,
+  or with a lockfile that is missing or unhashed, is refused, and so is one
+  whose lockfile links a package to a directory of the repository (an npm or
+  pnpm workspace, a `file:` directory) or patches one: either would put code
+  the change can write where a check loads a dependency.
 - [examples/roles/](examples/roles): the instructions for each seat. A role
   named in the policy must have a file here. Point `FACTORY_ROLES_DIR` at a
   copy you own, outside the repository.

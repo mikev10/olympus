@@ -9347,3 +9347,261 @@ Started on `v2` at 6086f8f, after the amendment (#128). Issues #54, #55, #28,
 - **Reverse:** an amendment that lets the host's entry file, and only it,
   write to stderr and set its exit code, as the CLI's `main.ts` does; then
   print the list without Node's header.
+
+## R34: Dependencies installed by the runtime from the lockfile
+
+Started on `v2` at 15fddaf. Issue #40. Dependencies P3, P6, P10, P14, R1,
+and R15 are each merged and tagged `reviewed/*`.
+
+### D-R34-01: boundary, verified
+
+- **Deliverables:**
+  - A-R34-01: `installRegistries`, the hosts an install may reach, in
+    `PolicyDocument` (optional) and `Policy` (resolved, empty by default),
+    validated as one host per entry, as an egress entry is.
+  - A-R34-02: `DependencyInstaller` in `packages/adapters/src/types.ts`,
+    beside `DependencyAuditor`: the lockfile, the files an install reads,
+    the image by digest, the argument vector, the dependency trees it
+    writes, and how a lockfile lists its packages and their hashes. npm
+    (`npm ci --ignore-scripts`) and pnpm (`pnpm install --frozen-lockfile
+    --ignore-scripts --ignore-pnpmfile`) ship (D-R34-06).
+  - A-R34-02: `InstallRecord` in `packages/vault/src/types.ts`: the stack,
+    the lockfile's hash on the base and the head, the packages the head's
+    lockfile adds, removes, or changes against the base's, and the hash of
+    the installed trees. Carried as `EvidenceBundle.install` and
+    `BaseRunRecord.install`, null where the tree declares nothing to install.
+  - The install (`packages/api/src/install.ts`): before any check of a task
+    and before the base run, the runtime installs from the tree's lockfile
+    in a sandbox of its own, with egress to the granted registries alone,
+    into a directory of the run's it owns, and the checks run over the tree
+    with its dependency trees replaced by that install (D-R34-03).
+  - Refusals, each naming its cause: no registry granted, a lockfile
+    without hashes, several lockfiles, an unsupported one, a manifest with
+    none, and an install that fails, a package failing its hash among them.
+  - Conformance assertions for each acceptance criterion.
+- **Out of scope (verbatim):** the Python adapters (R29's); private
+  registry credentials; caching installs across runs; a dependency audit
+  beyond R13a's.
+- **Acceptance, as commands:** `pnpm typecheck`, `pnpm lint`, `pnpm test`,
+  `pnpm conformance`, with these assertions among them: a change adding a
+  dependency the base lacks passes `verify`; an install with no registry
+  granted, one whose lockfile has no hashes, and one whose package fails its
+  hash are each refused, naming the cause; the installer's argument vector
+  runs no lifecycle script; a check sandbox has no egress. Each fails when
+  its check is deleted.
+- **Invariants:** I1 (the install's output is written by the runtime's
+  sandbox into a directory no agent mounts; checks see it read-only); I3
+  (the runner a suite check starts is the runtime's install, never what a
+  task wrote); I4 (no install runs without a registry granted); I5 (every
+  lockfile problem refuses, naming it; nothing falls back to the base's
+  trees); I8 (an assertion per criterion).
+- **Pending registry entries owed:** none name R34.
+  `I3.runner-process-loads-only-base-code` (M3) is not paid: the runner is
+  now the runtime's, but the inputs its process loads from the tree
+  (a `globalSetup` file) are still the change's (D-R15-08).
+- **Gate paths touched, as declared:** `packages/core/src/policy/types.ts`,
+  `packages/adapters/src/types.ts`, `packages/vault/src/types.ts`,
+  `packages/conformance/`. The PR needs the `gate-change` label and the
+  squash body `Gate-Change: acknowledged`. No package manifest changes: the
+  pnpm lockfile is read with the `yaml` the api already pins (D-R34-07).
+
+### D-R34-02: assumptions, each verified
+
+- **Every check sandbox is `deny-all`:** `checkSandbox`,
+  `packages/api/src/line.ts:812-814`. The install's egress is a sandbox of
+  its own and changes no check's.
+- **Checks run over the base's dependency trees today:** `materialize`
+  copies the whole base, `node_modules` included
+  (`packages/api/src/workspace.ts:312`), and `ownDiff`'s writes under
+  `node_modules` are dropped (`line.ts:1520`).
+- **The sandbox refuses a mount nested in another**
+  (`packages/sandbox/src/local/mounts.ts:89-99`), so a directory mounted
+  read-only at `/workspace/node_modules` over the read-only tree is refused
+  by the provider as written (D-R34-03).
+- **The test framework comes from the manifest, not from `node_modules`:**
+  `detect.ts:99-100` reads the vitest or jest major from `package.json`'s
+  range (`discovery.ts:210`), so `suiteRunner(base)` holds on a base with no
+  install.
+- **One base-run path:** `runOnBase` (`line.ts:528`) serves `test-design`
+  and R19's drafted test run (`drafting.ts:652`); `verify` runs checks at
+  `line.ts:1561-1611`. The install goes at those two places.
+- **Admission refuses a suite check whose runner the snapshot lacks:**
+  `suiteBindingProblems` → `runnerMissing` (`verification.ts:133`), called
+  at `run.ts:1128` and `drafting.ts:604`.
+- **npm and pnpm behave as declared,** run on the pinned image
+  `node@sha256:83f4…a7e5` (npm 10.9.8, pnpm 10.18.3 by corepack): `npm ci
+  --ignore-scripts` left a dependency's `postinstall` unrun, and without the
+  flag it ran; a changed `integrity` failed `npm ci` with `EINTEGRITY`;
+  `pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile` ran no
+  script and no `.pnpmfile.cjs`, but **without `--ignore-pnpmfile` pnpm
+  executed the tree's `.pnpmfile.cjs` despite `--ignore-scripts`**; a
+  changed pnpm integrity failed with `ERR_PNPM_TARBALL_INTEGRITY` (and
+  retried, so the invocation sets no retries); `npm ci` with no lockfile
+  exits `EUSAGE`.
+- **Lockfiles record a hash per package:** npm v3's
+  `packages["node_modules/x"].integrity`; pnpm 9's
+  `packages["x@1.0.0"].resolution.integrity`. A `file:` tarball carries one
+  in both; a git or directory dependency carries none.
+- **No package has a YAML reader but the api**
+  (`packages/api/package.json:41`, `yaml@2.9.1`).
+- **The hello fixture has no `package.json`**
+  (`packages/api/test/fixtures/hello`): most line rigs declare nothing to
+  install (D-R34-04).
+
+### D-R34-03: the install reaches the checks inside the tree, not as a second mount
+
+- **Ambiguous:** the entry says the install directory is "mounted read-only"
+  over the tree. The sandbox refuses a mount nested in another, a rule that
+  exists so no mount hides part of another.
+- **Chosen:** the runtime installs into `installs/<key>` in the run's
+  workspace store, which no sandbox but the install's ever mounts, and
+  before checks run it removes every dependency tree from the tree it built
+  and copies the install's in. That tree is mounted read-only as today, so
+  the checks get the install read-only and nothing a task wrote under a
+  dependency tree.
+- **Rejected:** *a nested ro mount,* a change to
+  `packages/sandbox/src/local/mounts.ts`, which the entry does not declare
+  and which loosens a refusal; *a second mount at another path,* which
+  Node's module resolution does not search.
+- **Reverse:** permit one ro mount nested at a dependency tree in
+  `mountTable`, and mount `installs/<key>` there instead of copying.
+
+### D-R34-04: when an install runs
+
+- **Ambiguous:** "any other lockfile, several lockfiles, or none is
+  refused" read alone refuses every tree with no lockfile, the hello
+  fixture's and any repository with no dependencies included.
+- **Chosen:** an install runs when the tree's root holds a lockfile any
+  installer or `UNSUPPORTED_LOCKFILES` names, or a manifest a declared stack
+  reads (`package.json`). With neither, there is nothing to install: the
+  checks run over the tree with every dependency tree removed, and
+  `install` is null. A manifest with no lockfile is refused as "none".
+- **Why:** the refusal is about what the tree declares and cannot install;
+  a tree that declares no dependencies is not an unsupported stack. The
+  base's own trees are removed in both cases, so what the base installed
+  never decides a check.
+- **Reverse:** refuse when `install` would be null.
+
+### D-R34-05: where each refusal is made
+
+- **Admission** refuses what it can read from the base alone: a manifest or
+  lockfile with no registry granted, several lockfiles, an unsupported or
+  missing one, or one without hashes. Its suite checks' runner is no longer
+  looked for in the snapshot when the base declares an install; the base
+  run looks for it in the install and leaves the check unstarted, which
+  refuses the `test-design` exit.
+- **At the base run and at `verify`,** the same rules run over the tree
+  installed, since a task can change the lockfile. An install that does not
+  produce a tree leaves every check it would judge unstarted with the
+  install's reason (security checks run, as they need none), so the gate
+  fails naming it and the builder has its iterations to fix the lockfile.
+  An install sandbox that cannot be provisioned at `verify` spends a retry,
+  as a check's does.
+- **Reverse:** refuse at admission only, or park the task on any install
+  failure.
+
+### D-R34-06: the installers
+
+- npm: `package-lock.json` (lockfile v2 or v3), reads `package.json`,
+  `package-lock.json`, and every `package.json` below the root outside a
+  dependency tree (workspaces); `npm ci --ignore-scripts --no-audit
+  --no-fund --fetch-retries=0`, with `npm_config_ignore_scripts=true` in
+  its environment.
+- pnpm: `pnpm-lock.yaml` (v9), reads those plus `pnpm-workspace.yaml`;
+  `corepack pnpm@10.18.3 install --frozen-lockfile --ignore-scripts
+  --ignore-pnpmfile --config.fetch-retries=0`.
+- Both use the audit's image and write `node_modules`. No `.npmrc`,
+  `.pnpmfile.cjs`, or source file is copied in: the install sees the files
+  it reads and nothing a task could use to steer it.
+- **Hashes:** every package entry must carry an integrity hash and resolve
+  from a registry; a `file:`, git, or directory dependency is refused
+  naming it. Workspace links are not packages and are skipped.
+- **Python:** R29 declares `uv` and `pip` in the same table
+  (`DECOMPOSITION.md`, R29: "it declares R34's installer for Python"); the
+  check image has no Python to prove them with here.
+- **Reverse:** edit `INSTALLERS` in `packages/adapters/src/install.ts`.
+
+### D-R34-07: the lockfile is parsed by the runtime, the packages read by the declaration
+
+- **Chosen:** the declaration names its lockfile's format (`json` or
+  `yaml`); the runtime parses it, and the declaration's `packages(document)`
+  lists each package with its hash or says the document is not one it
+  reads. The hash rule and the evidence's package diff both use that list.
+- **Rejected:** a YAML reader in `adapters`, a manifest change the entry
+  does not declare.
+- **Reverse:** move the parse into the declaration once adapters has a
+  reader (R29 adds a TOML one).
+
+### D-R34-08: the install is keyed within a run
+
+- **Chosen:** the install's key is a digest of the installer and the files
+  it reads; a later tree in the same run with the same key reuses it. Across
+  runs is out of scope.
+- **Reverse:** drop the reuse in `install.ts`; every tree installs anew.
+
+### D-R34-09: test rigs install with a stand-in, declared unsafe
+
+- **Chosen:** `standInNpmInstaller(registry)` in `packages/adapters/src/stand-in.ts`,
+  beside the stand-in scanners: npm's declaration with its invocation
+  replaced by a `node` script that copies each package the lockfile pins
+  from a fixture directory, offline. The graph builder declares any
+  installer other than `INSTALLERS` unsafe ("unattested installers"), so no
+  run on one goes above L1, as with the scanners (R17). The conformance
+  line rig grants `registry.npmjs.org` and installs with the stand-in by
+  default; a fixture with no manifest is unaffected (D-R34-04).
+- **Why:** the stub sandbox runs commands on the host, so the declared
+  `npm ci` would reach the network from every test. What npm itself does is
+  proved once, in its pinned image with no network
+  (`I3.install-runs-no-lifecycle-script`).
+- **Reverse:** drop the default from the rig; each suite assertion then
+  passes its own installer.
+
+### D-R34-10: D-R15-05's known limit is closed
+
+- A change that needs a dependency the base did not install now passes
+  `verify` when its lockfile pins it (`I3.install-adds-a-dependency-the-base-lacks`).
+  `notCarried` stays: what a task writes under `node_modules` is still
+  recorded, escalated, and never carried. `I3.dependency-trees-are-the-bases`
+  keeps its id, and its title now names the install.
+- D-R15-08's pending entry stays with M3: the runner is now the
+  runtime's, but a `globalSetup` file it loads is still the change's.
+
+### D-R34-11: no install puts code from the tree where a check loads a dependency (external review)
+
+- **Found (codex-1, gemini-2, run):** the npm reader skipped `link: true`
+  entries and the pnpm reader never read `importers`. A lockfile linking
+  `vitest` to a directory of the tree, with an invented hash on the target's
+  entry, was accepted, and `npm ci` in the pinned image installed
+  `node_modules/vitest -> ../judge`: the runner was the change's own code.
+- **Found (codex-2, run):** pnpm applied a patch named by the lockfile's
+  `patchedDependencies`, stored as `patches/package.json` and so copied in
+  as a manifest, during a frozen install with every flag R34 passes.
+- **Chosen:** the npm reader refuses a link entry and any entry outside
+  `node_modules`; the pnpm reader refuses an importer dependency on `link:`
+  or `file:` and any `patchedDependencies`; and the install itself is
+  refused when it writes a link whose target leaves its own dependency
+  trees, so a link a reader misses is still caught. A `node_modules` the
+  tree holds as a link is removed with the rest (gemini-1; a task cannot
+  write one, since it is not carried, but the base's would have survived).
+- **Known limit:** npm and pnpm workspace repositories are refused. Owned
+  by issue #138. pnpm's real behaviour is verified by hand, not by an
+  assertion, because the pinned image fetches pnpm through corepack.
+- **Rejected:** allowing links except for the test runner's dependency
+  closure. A pinned command's binary judges too, so any package can be the
+  judge; only refusing every link closes it.
+- **Reverse:** drop the link and patch refusals in
+  `packages/adapters/src/install.ts` and `linkOut` in
+  `packages/api/src/install.ts`. `I3.install-installs-no-code-from-the-tree`
+  then fails.
+
+### D-R34-12: the benchmark's bench grants the npm registry (found by CI on #137)
+
+- **Found:** the false-done benchmark's deterministic tier, which CI runs as
+  its own job and `pnpm test` does not, admits its corpus repositories under
+  a policy granting no registry. Each holds a `package-lock.json`, so R34
+  refused every run as `not-installable`.
+- **Chosen:** `benchPolicyDocument` grants `registry.npmjs.org`; the runtime
+  installs each corpus repository through the real Docker provider and its
+  egress proxy. Run locally with `FACTORY_CONTAINER_UID=1000
+  FACTORY_CONTAINER_GID=1000`, the tier reproduced the committed result.
+- **Reverse:** remove the grant; the tier then refuses every item.

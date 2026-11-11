@@ -130,6 +130,7 @@ import type { AdmissionRecord, AdmittedArtifact, BaseRunRecord, RepoInstructionF
 import { draftFloorOf, draftStation, isDrafted, lockApproved, testDraftOf, type DraftingContext } from './drafting.js';
 import type { RunRequirements } from './spec-parts.js';
 import { imageFor, type BuiltGraph } from './graph.js';
+import { installInto } from './install.js';
 import type { RunOutcome } from './run.js';
 import { acceptedEscalations, analyzeTamper, notCarriedFindings, tamperFindings } from './tamper.js';
 import { claimEvidenceDiff, commandOf, runnerMissing, suiteRunner, suitesRun, taskResultProblems, writesOutsideGrant } from './verification.js';
@@ -535,10 +536,16 @@ export async function runOnBase(
   const before = await tamperedIn(ctx, tree);
   if (before.length > 0) return recordTamper(ctx, 'test-design', null, before, { phase: 'base' });
   const runner = await suiteRunner(basePath(workspaces, ctx.run.id));
+  // The base is installed as every verified tree is, so both sides of the comparison run over an install the runtime made (R34).
+  const installed = await installInto(ctx, tree, basePath(workspaces, ctx.run.id), null, 'test-design');
 
   const checks: CheckResult[] = [];
   const unstarted: UnstartedCheck[] = [];
   for (const check of declaredChecks(on.checks)) {
+    if (!installed.ok && !isSecurityCheck(check)) {
+      unstarted.push({ checkId: check.id, reason: installed.reason });
+      continue;
+    }
     const missing = await runnerMissing(check, runner, tree);
     if (missing !== undefined) {
       unstarted.push({ checkId: check.id, reason: missing });
@@ -587,7 +594,7 @@ export async function runOnBase(
   // Results collected over a changed artifact are not results, whatever the provider claims about ro.
   const after = [...(await tamperedPaths(ctx)), ...(await tamperedIn(ctx, tree))];
   if (after.length > 0) return recordTamper(ctx, 'test-design', null, after, { phase: 'after-base', checks });
-  return vault.recordBaseRun({ runId: ctx.run.id, draft: on.draft, baseTreeSha256: ctx.baseTreeSha256, checks, unstarted, collectedBy: 'runtime' });
+  return vault.recordBaseRun({ runId: ctx.run.id, draft: on.draft, baseTreeSha256: ctx.baseTreeSha256, checks, unstarted, install: installed.ok ? installed.install : null, collectedBy: 'runtime' });
 }
 
 /**
@@ -1516,7 +1523,7 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
   const sensitive = withheldOf(withheldGlobs(ctx, task.role), written.map((entry) => entry.path));
   if (sensitive.length > 0) return recordEscape(ctx, task, sensitive);
   // D-R15-05: what the task wrote under node_modules is recorded and escalated, never carried. Every
-  // check, and the runner a suite check starts, runs over the base's dependency trees.
+  // check, and the runner a suite check starts, runs over the runtime's install of the tree's lockfile (R34).
   const own = written.filter((entry) => !inDependencyTree(entry.path));
   const notCarried = [...new Set(written.filter((entry) => inDependencyTree(entry.path)).map((entry) => dependencyEntry(entry.path)))].sort();
 
@@ -1544,6 +1551,10 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
   await materialize(workspaces, ctx.run.id, tree, diff, (path) => (fromTask.has(path) ? work : prior.tree));
   const built = await tamperedIn(ctx, tree);
   if (built.length > 0) return recordTamper(ctx, 'verify', task, built, { phase: 'tree' });
+  // R34: the tree's lockfile, the change's included, is installed by the runtime, and every
+  // dependency tree base or task left is replaced by that install before any check runs.
+  const installed = await installInto(ctx, tree, basePath(workspaces, ctx.run.id), task.id, ctx.state.station);
+  if (!installed.ok && installed.at === 'provision') return spendRetry(ctx, task);
   const runner = await suiteRunner(basePath(workspaces, ctx.run.id));
   const security = ctx.checks.filter(isSecurityCheck);
   const tamper = await analyzeTamper(prior.tree, tree, {
@@ -1571,6 +1582,12 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
         results.push(undefined);
         unstarted.push({ checkId: check.id, reason: scanned.reason });
       }
+      continue;
+    }
+    // With the install refused or failed, the tree holds no dependency tree at all, so no check runs over it as if it did (I5).
+    if (!installed.ok) {
+      results.push(undefined);
+      unstarted.push({ checkId: check.id, reason: installed.reason });
       continue;
     }
     const missing = await runnerMissing(check, runner, tree);
@@ -1660,6 +1677,7 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
     claimEvidenceDiff: differences,
     tamper,
     notCarried,
+    install: installed.ok ? installed.install : null,
     collectedBy: 'runtime',
     driverProvenanceId: driver.provenanceId(),
     contractVersion: driver.contractVersion,

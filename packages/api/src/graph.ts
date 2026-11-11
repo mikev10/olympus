@@ -17,6 +17,7 @@
  * whether or not it was built before the graph was. A `Proxy` around a real
  * component is still that component, and passes.
  */
+import { INSTALLERS, type DependencyInstaller } from '@olympus-ai/adapters';
 import { ClaudeCodeDriver } from '@olympus-ai/driver-claude-code';
 import { OpenAICompatibleDriver } from '@olympus-ai/driver-openai-compatible';
 import { LocalDockerProvider } from '@olympus-ai/sandbox';
@@ -57,6 +58,8 @@ export function imageFor(profile: SandboxProfile, driver: { provenanceId(): stri
 export interface GraphParts extends ComponentGraph {
   /** Required with `LocalDockerProvider`, which refuses a sandbox with no image or limits. */
   readonly profile?: SandboxProfile | null;
+  /** The dependency installs the runtime runs (R34); `INSTALLERS` when omitted. Any other is a stand-in, and no run on it goes above L1. */
+  readonly installers?: readonly DependencyInstaller[];
   /** The scanners security checks run; `SCANNERS` when omitted. Any other is a stand-in, and no run on it goes above L1. */
   readonly scanners?: SecurityScanners;
 }
@@ -68,6 +71,7 @@ export type BuiltGraph = ComponentGraph & {
   readonly profile: SandboxProfile | null;
   readonly integrator: Integrator | null;
   readonly scanners: SecurityScanners;
+  readonly installers: readonly DependencyInstaller[];
   readonly [BUILT]: true;
 };
 
@@ -150,12 +154,26 @@ function unattestedScanners(scanners: SecurityScanners): UnsafeDeclaration | und
 }
 
 /**
+ * Installers other than the declared ones (R34): what a run's checks run
+ * over is then what the stand-in wrote, not what the pinned image installs
+ * from the lockfile. A test rig uses one on a sandbox that runs no images.
+ */
+function unattestedInstallers(installers: readonly DependencyInstaller[]): UnsafeDeclaration | undefined {
+  const stand = installers.filter((i) => !INSTALLERS.includes(i)).map((i) => i.lockfile);
+  if (stand.length === 0 && installers.length === INSTALLERS.length) return undefined;
+  return {
+    component: 'unattested installers',
+    cannotEnforce: [`the dependency installers are not the ones the runtime declares${stand.length === 0 ? '' : ` (${stand.join(', ')})`}, so what the checks ran over is not the pinned install of the lockfile (R34)`],
+  };
+}
+
+/**
  * Builds the graph, reading every component's provenance as it does. Order of
  * the declarations: vault, sandbox, driver, reviewer. A reviewer that is the
  * driver itself is read once.
  */
 export function buildGraph(parts: GraphParts): BuiltGraph {
-  const { profile, scanners, ...components } = parts;
+  const { profile, scanners, installers, ...components } = parts;
   if ((profile ?? null) === null && components.sandbox instanceof LocalDockerProvider) {
     throw new Error('buildGraph: a LocalDockerProvider needs a sandbox profile; it refuses a sandbox with no image or limits (D-I1a-01)');
   }
@@ -192,7 +210,9 @@ export function buildGraph(parts: GraphParts): BuiltGraph {
   if (merger !== undefined) declarations.push(merger);
   const scanning = unattestedScanners(scanners ?? SCANNERS);
   if (scanning !== undefined) declarations.push(scanning);
-  const graph = Object.freeze({ ...components, drafting: drafting === null ? null : Object.freeze({ ...drafting }), integrator: components.integrator ?? null, profile: profile ?? null, scanners: scanners ?? SCANNERS }) as BuiltGraph;
+  const installing = unattestedInstallers(installers ?? INSTALLERS);
+  if (installing !== undefined) declarations.push(installing);
+  const graph = Object.freeze({ ...components, drafting: drafting === null ? null : Object.freeze({ ...drafting }), integrator: components.integrator ?? null, profile: profile ?? null, scanners: scanners ?? SCANNERS, installers: Object.freeze([...(installers ?? INSTALLERS)]) }) as BuiltGraph;
   provenance.set(graph, Object.freeze(declarations));
   return graph;
 }

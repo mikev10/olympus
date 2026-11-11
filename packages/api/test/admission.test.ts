@@ -9,6 +9,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { hashedLockfile } from '@olympus-ai/adapters';
 import type { RunId, TaskId } from '@olympus-ai/core';
 import type { EvidenceBundle, Vault } from '@olympus-ai/vault';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
@@ -158,16 +159,18 @@ describe('S1 finding 3: the verification manifest', () => {
     await writeFile(join(workspace, 'package.json'), JSON.stringify({ name: 'r15', devDependencies: { vitest: '4.1.11' } }));
     await mkdir(join(workspace, 'node_modules', 'vitest'), { recursive: true });
     await writeFile(join(workspace, 'node_modules', 'vitest', 'vitest.mjs'), 'process.exit(1)\n');
+    await writeFile(join(workspace, 'package-lock.json'), hashedLockfile('r15', ['node_modules/vitest']));
+    const granted = { policy: policy({ installRegistries: ['registry.npmjs.org'] }) };
     await mkdir(join(workspace, 'sub'), { recursive: true });
     await writeFile(join(workspace, 'a.test.ts'), '');
     await writeFile(join(workspace, 'sub', 'a.test.ts'), '');
     const acceptance = { id: 'a', kind: 'acceptance', onBase: 'fails', required: true, timeoutMs: 10_000 };
     // Not admitted as an acceptance test: nothing locks it.
     await writeChecks(workspace, [{ ...acceptance, tests: ['sub/a.test.ts'] }]);
-    await expectInvalid(await start(), 'manifest.checks[0].tests[0]', 'unbound');
+    await expectInvalid(await start(granted), 'manifest.checks[0].tests[0]', 'unbound');
     // Admitted, but `a.test.ts` is a filter to vitest that selects sub/a.test.ts as well.
     await writeChecks(workspace, [{ ...acceptance, tests: ['a.test.ts'] }]);
-    await expectInvalid(await start({ artifacts: { ...ARTIFACTS, acceptanceTests: [...ARTIFACTS.acceptanceTests, 'a.test.ts'] } }), 'manifest.checks[0].tests', 'unbound');
+    await expectInvalid(await start({ ...granted, artifacts: { ...ARTIFACTS, acceptanceTests: [...ARTIFACTS.acceptanceTests, 'a.test.ts'] } }), 'manifest.checks[0].tests', 'unbound');
   });
 
   test('a manifest or a graph that is not JSON is refused', async () => {
