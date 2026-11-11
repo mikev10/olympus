@@ -6,11 +6,21 @@
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
-  "sideEffects": false,
+  "files": [
+    "dist",
+    "rubrics"
+  ],
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "bin": {
+      "factory-host": "./dist/host/main.js"
+    }
   },
+  "sideEffects": false,
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
     "test": "vitest run"

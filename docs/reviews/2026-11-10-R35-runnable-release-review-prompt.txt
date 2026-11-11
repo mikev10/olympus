@@ -1,0 +1,147 @@
+The code under review is in the file
+`2026-11-10-R35-runnable-release-review-bundle.txt` (SHA-256 403fcc2bec86d0b5a3f6152f69901b57e6a9d2cf882d85f3a176d973f30a55a7) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing the release path, start-up configuration, and first-run
+surface of a TypeScript project: a software-factory runtime served over HTTP by
+an executable named `factory-host`, and its command-line client `olympus-ai`.
+You have the source and nothing else — no design documents, no author
+reasoning, no prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The change makes the runtime installable and startable the way a user would:
+each package builds to JavaScript under `dist/`, the packed manifests point
+`main`, `types`, and `bin` there, and a script packs every package and installs
+the tarballs into an empty directory. A conformance assertion runs that script
+and starts both executables from the install. The host now reads its
+environment through one declared table and refuses to start, listing every
+problem at once, before it listens; it also refuses when its trees directory
+cannot hold a symbolic link. Shipped examples (a policy file, role and rubric
+files, and the input files a run is created from) are checked by a test that
+admits runs under them. The CLI gains per-command help generated from the
+table its parser is built from, and a new read-only HTTP route and CLI command
+expose a repository-readiness scan that already existed as a library.
+
+It must hold against a capable, motivated party trying to get the host to run
+in a state its checks should have refused — started with a configuration it
+did not validate, serving with a variable it never declared, or reading a
+secret through a name it should not honour — or to make the release
+assertions, the docs checks, or the examples test pass while the property each
+one protects is false. Assume no deceptive intent — only that the easiest path
+gets taken.
+
+That party controls the host's environment variables, the contents of the
+files those variables name (the policy file, the endpoint file, the roles and
+rubrics directories), the repository the host admits runs from and that the
+readiness route scans, the query string and body of every HTTP request that
+bears the token, and the command line passed to the CLI. It does not control
+the components the runtime is wired with — the Vault, the sandbox provider, and
+the drivers are runtime-selected and trusted, even where a function takes one
+as an argument — and it does not control code running inside the runtime's own
+process, the Node runtime, npm, or GitHub's API.
+
+The invariants at stake:
+
+- Fail closed. A missing required check, an absent capability, an unsupported
+  stack, or a shrunken suite is a refusal — never a silent degrade, never a
+  warning that lets the run continue.
+- Default deny. A capability not granted in policy is not available. A derived
+  number such as a readiness ceiling may lower an autonomy level or do nothing;
+  it may never raise one or grant anything.
+- The runtime is a service; the command line is a client. Nothing in the
+  runtime may assume a terminal, a TTY, or a foreground process, and the CLI
+  reaches the runtime only over HTTP: it imports types from the runtime's
+  packages and no code.
+- Every capability claim maps to an executable assertion that fails when the
+  capability is deleted. Documentation asserting a subsystem is wired is not
+  evidence that it is.
+- No agent writes to the Vault, and an agent may not be judged by an artifact
+  it can write: specs and acceptance tests are hashed before build.
+- A fixed list of mythological names never appears in code, paths, config
+  keys, or policy fields; the npm scope and the CLI's exact executable name are
+  the only exemptions.
+
+The mechanisms that matter most:
+
+- `readHostConfig` and `HOST_VARIABLES` (`packages/api/src/host/config.ts`),
+  the only way `main.ts` reads the environment, including how a webhook secret
+  name is resolved; and the thrown `HostRefusal` that stands in for printing.
+- `probeSymlinks` (`packages/api/src/host/symlinks.ts`) and where start-up
+  calls it relative to composing and listening.
+- `GET /readiness` (`packages/api/src/http/server.ts`) and `readinessScanner`
+  (`packages/api/src/readiness-scan.ts`): revision handling, what a failure
+  does to the stream, and that nothing is written.
+- The release path: `tsconfig.build.json`, each manifest's `publishConfig` and
+  `files`, `scripts/local-release.ts`, and the assertion in
+  `packages/conformance/src/registry/release.ts` that is meant to fail when
+  that path breaks.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+Publishing to npm, and any release automation; enforcing the readiness ceiling
+at admission, which changes what admission refuses and needs its own decision;
+installers or packages for any OS; making native Windows work without
+Developer Mode.
+
+Short identifiers in the code and comments (such as R1, R35, D-R35-08, or
+A-P12-01) refer to the project's work items and decision records, which you do
+not have; treat them as labels, not as evidence of anything.
+
+THE QUESTION
+
+How would you get `factory-host` to listen while one of its start-up checks
+should have refused, or get it to read or reveal something through its
+configuration or the readiness route that the table and policy do not allow —
+and how would you make the release, docs, examples, help, or version checks
+pass while the thing each one claims is false?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.

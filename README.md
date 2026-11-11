@@ -153,13 +153,133 @@ that call a paid model run only once a maintainer applies the `run-driver`
 label, and the registry fails until they have run for that tree. A push
 reuses the report of an earlier run of the same tree.
 
-The runtime runs as a service. The `factory-host` executable
-(`packages/api/src/host/main.ts`) serves the HTTP API and is configured only
-from its environment; its header lists every variable, and a missing one
-stops it before it listens. The `olympus-ai` command line talks to it with
-`create`, `status`, `approve`, `cancel`, `events`, `report`, and `outcomes`,
-given `--url` and `--token` (or `FACTORY_API_URL` and `FACTORY_API_TOKEN`).
-Neither is published as a package yet.
+## Run Olympus
+
+The runtime runs as a service. The `factory-host` executable serves the HTTP
+API and is configured only from its environment. The `olympus-ai` command
+line is a client of that API and nothing more.
+
+### Supported hosts
+
+- **Linux or macOS**, with Node 22 or later, git, and a Docker daemon.
+- **Windows: WSL2 (recommended).** Run the host inside a WSL2 distribution,
+  with Docker reachable from it.
+- **Windows, native: Developer Mode required.** A run's base is copied with
+  its symbolic links kept as links, and native Windows lets a process create
+  one only with Developer Mode on (Settings, System, For developers). The
+  host checks this before it listens: it creates and removes one link under
+  `FACTORY_TREES`, and refuses to start if that fails. Links are never
+  emulated; a junction links only directories, and a link stored as a file
+  would change the hash the locks are taken over.
+
+### Install
+
+Neither package is published to npm yet. From a checkout, build, pack, and
+install both executables into an empty directory:
+
+```
+pnpm install
+node scripts/local-release.ts ~/olympus
+export PATH="$HOME/olympus/node_modules/.bin:$PATH"
+```
+
+This is the path CI tests: it installs the same tarballs npm would publish,
+then starts `factory-host` and drives it with `olympus-ai`.
+
+### Configure the host
+
+`factory-host` reads these variables and no others. [.env.example](.env.example)
+lists them with comments. A missing or invalid one stops the host before it
+listens, and the host prints every problem in one list.
+
+| Variable | Required | Secret | Purpose |
+|---|---|---|---|
+| `FACTORY_API_TOKEN` | yes | yes | The local token every request must bear, at least 32 characters. |
+| `FACTORY_LISTEN_PORT` | yes | no | The port the API listens on. |
+| `FACTORY_LISTEN_HOST` | no | no | The address the API listens on. Default `127.0.0.1`. |
+| `FACTORY_POLICY_FILE` | yes | no | The `policy.yaml` every run is admitted under. |
+| `FACTORY_ROLES_DIR` | yes | no | The roles directory seats are compiled from, outside the repository and the trees. |
+| `FACTORY_RUBRICS_DIR` | no | no | The rubrics a drafting run's critics are given. Unset, a run that drafts is refused at admission. |
+| `FACTORY_VAULT_STORE` | yes | no | The directory the Vault owns. |
+| `FACTORY_REPOSITORY` | yes | no | The git working copy runs are admitted from. `create --workspace` names this path. |
+| `FACTORY_TREES` | yes | no | Where each run's trees are kept. It must allow symbolic links. |
+| `ANTHROPIC_API_KEY` | yes | yes | The model key, held by the host's relays and given to no sandbox. |
+| `FACTORY_PRINCIPAL` | no | no | Who a request bearing the token is, as approvals record it. Default `local`. |
+| `FACTORY_GIT_REPOSITORY` | yes | no | The GitHub repository a passed run merges into, as `owner/name`. |
+| `FACTORY_GIT_BASE_BRANCH` | yes | no | The branch a passed run merges into. |
+| `FACTORY_GIT_TOKEN` | yes | yes | The token that merges, held by the host and given to no sandbox. |
+| `FACTORY_CONTAINER_UID` | no | no | The uid sandboxes run as. Both or neither with the gid; required on a host with no uids, such as native Windows. |
+| `FACTORY_CONTAINER_GID` | no | no | The gid sandboxes run as. |
+| `FACTORY_ENDPOINT_CONFIG` | no | no | A JSON file naming an OpenAI-compatible endpoint and the seats it fills. |
+| `FACTORY_ENDPOINT_KEY` | no | yes | That endpoint's credential. Not set for an endpoint declaring scheme `none`. |
+| `FACTORY_CODEX_SEATS` | no | no | The seats the Codex driver fills, comma-separated. Both or neither with its key. |
+| `FACTORY_CODEX_KEY` | no | yes | The OpenAI key the Codex relay is given. |
+| `FACTORY_CHECKS_TOKEN` | no | yes | Reads check runs, for runs with an observation window. Unset, such a run is refused when its window closes. |
+| `FACTORY_WEBHOOK_*` | no | yes | Each webhook subscription's secret, by the full name the policy gives it. Unset, that subscription verifies no delivery. |
+
+The command line needs only the API's address and token: `--url` and
+`--token`, or `FACTORY_API_URL` and `FACTORY_API_TOKEN`.
+
+### Configure policy
+
+Policy decides what a run may do; anything it does not grant is unavailable.
+[examples/](examples) holds a working set, and a test admits runs under it,
+so it stays current:
+
+- [examples/policy.yaml](examples/policy.yaml): a commented policy for a
+  supervised (L1) run. It caps every run at L1; a person approves the spec,
+  the acceptance tests, and the merge; the stations between run on their
+  evidence. It declares the build and review roles, and the four drafting
+  roles a run that drafts its spec or tests needs.
+- [examples/roles/](examples/roles): the instructions for each seat. A role
+  named in the policy must have a file here. Point `FACTORY_ROLES_DIR` at a
+  copy you own, outside the repository.
+- [examples/rubrics/](examples/rubrics): what the critics of a drafting run
+  check a draft against. Point `FACTORY_RUBRICS_DIR` at a copy.
+- [examples/run/](examples/run): the files `create` reads for one small
+  change: a spec, the acceptance tests, the verification manifest
+  (`verify.json`, the checks the runtime runs, one of which must fail on the
+  base commit), the spec's security part, and the task graph.
+
+### First run
+
+The host admits runs from the working copy `FACTORY_REPOSITORY` names.
+`create --workspace` must name that same path, as an absolute path: the Vault
+locks every artifact against it, and the paths `create` is given are
+relative to it. Copy [examples/run/](examples/run) into the working copy
+(here under `run/`), and start the host with the variables above.
+
+The smallest run drafts its spec from an intent, at L1. It still needs the
+acceptance tests, the manifest, and the graph; a drafted spec has no security
+part to supply:
+
+```
+olympus-ai create --workspace /abs/path/to/repo --base-commit $(git -C /abs/path/to/repo rev-parse HEAD) \
+  --level 1 --draft-spec --intent "Add hello.txt at the repository root, saying hello." \
+  --tests run/acceptance.md --manifest run/verify.json --graph run/graph.json
+```
+
+The first `create` starts nothing. It prints the run's worst-case cost: the
+most it could spend, in US dollars, if every task used every call and every
+retry its role's `budget` allows. Approve that exact figure by running the
+same command again with `--approve-cost <usd>`. With the spec supplied
+instead, replace `--draft-spec --intent ...` with `--spec run/spec.md
+--security-part run/security.json`.
+
+Then follow it with `olympus-ai status <run id>` or `events <run id>`, and
+pass each gate the policy holds for a person with
+`olympus-ai approve <run id> <station>:1`. `olympus-ai report <run id>`
+prints what it cost and what was decided. Every command prints its flags with
+`olympus-ai <command> --help`.
+
+### Readiness
+
+`olympus-ai readiness [--revision <rev>]` asks the host to scan
+`FACTORY_REPOSITORY` at a revision (default `HEAD`) and prints the highest
+autonomy level the repository can support, with every probe's outcome and
+the probe that holds the ceiling. The scan installs and runs the repository's
+checks in sandboxes and takes minutes. It writes nothing, and admission does
+not read it yet: a run is still admitted at the level policy allows.
 
 ## Contributing
 

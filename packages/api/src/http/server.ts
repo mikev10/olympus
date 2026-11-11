@@ -22,6 +22,7 @@ import { startSchedules, type Scheduler } from '../schedule.js';
 import { NightlyJobs, type NightlyTarget } from '../nightly.js';
 
 import { loadPolicyFile } from '../policy-file.js';
+import type { ReadinessScanner } from '../readiness-scan.js';
 import { admitRun, approveStation, cancelRun, rejectDraft, resumeRun, runStanding, type DriveHooks, type RunOutcome } from '../run.js';
 import { imageFor, type BuiltGraph } from '../graph.js';
 import { runReport, type RunReport } from '../report.js';
@@ -52,6 +53,11 @@ export interface ApiServerOptions {
    * `no-target`, never run over something else.
    */
   readonly nightlyTarget?: NightlyTarget | null;
+  /**
+   * The readiness scan `GET /readiness` runs (R35, #125). Absent or null, the
+   * route is refused: a server over stub components has no repository to scan.
+   */
+  readonly readiness?: ReadinessScanner | null;
 }
 
 export interface ApiServer {
@@ -62,7 +68,8 @@ export interface ApiServer {
 }
 
 const MAX_BODY_BYTES = 64 * 1024;
-const MIN_TOKEN_LENGTH = 32;
+/** The shortest local token the server accepts; start-up checks it too, beside every other problem. */
+export const MIN_TOKEN_LENGTH = 32;
 
 interface Tracked {
   drive: Promise<void> | null;
@@ -578,6 +585,38 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
     return summary({ ...after, candidate: after.candidate });
   };
 
+  /**
+   * `GET /readiness`: the scan's report for one revision, as a stream. A bad
+   * revision is refused before the stream opens; then `started` names the
+   * commit, a comment every 15 s keeps a client waiting through a scan that
+   * outlasts its header timeout, and one `report` or `failed` event ends it.
+   * Read-only: nothing is written, and admission does not read the ceiling.
+   */
+  const readiness = async (revision: string, res: ServerResponse): Promise<void> => {
+    const scanner = options.readiness ?? null;
+    if (scanner === null) throw new HttpError(409, 'refused', 'this server scans no repository; readiness is served by factory-host over its FACTORY_REPOSITORY');
+    let commit: string;
+    try {
+      commit = await scanner.resolve(revision);
+    } catch (error) {
+      throw new HttpError(400, 'bad-request', error instanceof Error ? error.message : String(error));
+    }
+    res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store', connection: 'keep-alive' });
+    open.add(res);
+    res.write(`event: started\ndata: ${JSON.stringify({ revision, commit })}\n\n`);
+    const beat = setInterval(() => { res.write(': scanning\n\n'); }, 15_000);
+    try {
+      const report = await scanner.scan(commit);
+      res.write(`event: report\ndata: ${JSON.stringify(report)}\n\n`);
+    } catch (error) {
+      res.write(`event: failed\ndata: ${JSON.stringify({ message: error instanceof Error ? error.message : String(error) })}\n\n`);
+    } finally {
+      clearInterval(beat);
+      open.delete(res);
+      res.end();
+    }
+  };
+
   const route = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const url = new URL(req.url ?? '/', 'http://server.invalid');
     const parts = url.pathname.split('/').filter((p) => p !== '');
@@ -607,6 +646,11 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
     if (parts[0] === 'outcomes' && parts.length === 1) {
       if (method !== 'GET') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
       send(res, 200, await outcomes(components.vault, outcomeWindow(url.searchParams)));
+      return;
+    }
+    if (parts[0] === 'readiness' && parts.length === 1) {
+      if (method !== 'GET') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
+      await readiness(url.searchParams.get('revision') ?? 'HEAD', res);
       return;
     }
     if (parts[0] !== 'runs' || parts.length > 3) throw new HttpError(404, 'not-found', `no route ${url.pathname}`);

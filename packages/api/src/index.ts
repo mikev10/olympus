@@ -63,6 +63,7 @@ export {
   type CheckReader, type CheckRun, type Judged, type JudgedCheck, type ParsedPlan, type PlanProblem, type Verdict,
 } from './observation-plan.js';
 export { GitHubCheckReader, type GitHubCheckReaderOptions } from './checks.js';
+export { GitHubBranchProtection, readinessScanner, type ReadinessScanner, type ReadinessScannerOptions } from './readiness-scan.js';
 export { classifyReversal, type ChangeInverse, type CommitDiff, type Reversal } from './history.js';
 export {
   FINDINGS_REVIEWER_ROLE, JUDGING_ROLES, authorsOf as nightlyAuthorsOf, dayItems, readReviewResult, reviewedDay, seatLevel, type NightlySeatOptions,

@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /**
  * The `olympus-ai` executable: the terminal half of the CLI. Everything it does
  * is `runCli` over the process's argv, environment, and streams; the runtime

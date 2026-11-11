@@ -1,19 +1,28 @@
 {
   "name": "olympus-ai",
   "version": "4.5.16",
-  "description": "The command line: a client of the runtime's HTTP API, and nothing more",
+  "description": "The command line: a client of the runtime's HTTP API, and nothing more. Version 4.5.16 is v1's last release; v2 releases as 5.0.0 (a pending major changeset), so nothing here is 4.x",
   "license": "MIT",
   "type": "module",
   "main": "./src/cli.ts",
   "types": "./src/cli.ts",
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "main": "./dist/cli.js",
+    "types": "./dist/cli.d.ts",
+    "bin": {
+      "olympus-ai": "./dist/main.js"
+    }
+  },
   "bin": {
     "olympus-ai": "./src/main.ts"
   },
   "sideEffects": false,
-  "publishConfig": {
-    "access": "public"
-  },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
     "test": "vitest run"
