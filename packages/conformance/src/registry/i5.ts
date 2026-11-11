@@ -36,6 +36,7 @@ import { ADAPTER_REFUSAL_ENFORCED_AT_ADMISSION, CHECK_COMMAND_HAS_A_GRAMMAR, MIS
 import { INDETERMINATE_PROBE_LOWERS, UNSUPPORTED_STACK_REFUSES, REFUSAL_NAMES_THE_BOUNDING_TERM } from './readiness.js';
 import { R20_I5 } from './roles.js';
 import { R13A_I5 } from './nightly.js';
+import { R34_I5 } from './install.js';
 import { R8A_I5 } from './observe.js';
 import { R8B_I5 } from './observe-plan.js';
 import { R8A_REVIEW_I5 } from './observe-review.js';
@@ -69,6 +70,8 @@ export const I5: InvariantEntry = {
     ...R10_I5,
     // R13a: the nightly checks that call no model.
     ...R13A_I5,
+    // R34: a lockfile an install cannot verify, or an install that fails a hash, starts no check.
+    ...R34_I5,
     ...R8A_I5,
     ...R8B_I5,
     ...R8A_REVIEW_I5,

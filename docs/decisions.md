@@ -9538,3 +9538,30 @@ and R15 are each merged and tagged `reviewed/*`.
   it reads; a later tree in the same run with the same key reuses it. Across
   runs is out of scope.
 - **Reverse:** drop the reuse in `install.ts`; every tree installs anew.
+
+### D-R34-09: test rigs install with a stand-in, declared unsafe
+
+- **Chosen:** `standInNpmInstaller(registry)` in `packages/adapters/src/stand-in.ts`,
+  beside the stand-in scanners: npm's declaration with its invocation
+  replaced by a `node` script that copies each package the lockfile pins
+  from a fixture directory, offline. The graph builder declares any
+  installer other than `INSTALLERS` unsafe ("unattested installers"), so no
+  run on one goes above L1, as with the scanners (R17). The conformance
+  line rig grants `registry.npmjs.org` and installs with the stand-in by
+  default; a fixture with no manifest is unaffected (D-R34-04).
+- **Why:** the stub sandbox runs commands on the host, so the declared
+  `npm ci` would reach the network from every test. What npm itself does is
+  proved once, in its pinned image with no network
+  (`I3.install-runs-no-lifecycle-script`).
+- **Reverse:** drop the default from the rig; each suite assertion then
+  passes its own installer.
+
+### D-R34-10: D-R15-05's known limit is closed
+
+- A change that needs a dependency the base did not install now passes
+  `verify` when its lockfile pins it (`I3.install-adds-a-dependency-the-base-lacks`).
+  `notCarried` stays: what a task writes under `node_modules` is still
+  recorded, escalated, and never carried. `I3.dependency-trees-are-the-bases`
+  keeps its id, and its title now names the install.
+- D-R15-08's pending entry stays with M3: the runner is now the
+  runtime's, but a `globalSetup` file it loads is still the change's.

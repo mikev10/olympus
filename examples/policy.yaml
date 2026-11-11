@@ -141,3 +141,10 @@ triggers:
   budgetPerWindow: { runs: 20, windowMs: 3600000 }
 
 concurrency: { maxParallelTasks: 1, maxConflictRetries: 0 }
+
+# The registries the runtime's dependency install may reach (R34). Before any
+# check runs, the runtime installs the target's lockfile (package-lock.json or
+# pnpm-lock.yaml, every package pinned by hash) in a sandbox of its own, with
+# no lifecycle scripts, and the checks run over that install with no network.
+# Absent or empty: a repository that declares dependencies is refused.
+installRegistries: [registry.npmjs.org]

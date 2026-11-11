@@ -63,7 +63,7 @@ export type DocumentValidation =
  */
 const DOCUMENT_KEYS: Readonly<Record<keyof PolicyDocument, true>> = {
   globalCap: true, stationCaps: true, approvals: true, roles: true,
-  protectedPaths: true, sensitivePaths: true, triggers: true, concurrency: true,
+  protectedPaths: true, sensitivePaths: true, triggers: true, concurrency: true, installRegistries: true,
 };
 
 const SCOPE_KEYS: Readonly<Record<keyof CapabilityScope, true>> = {
@@ -834,6 +834,10 @@ export function validatePolicyDocument(input: unknown): DocumentValidation {
   const protectedPaths = readArray<string>(record, 'protectedPaths', '', 'a non-empty path or glob', isNonEmptyString, defects);
   // Absent from a document written before R10: no path is sensitive (A-R10-01).
   const sensitivePaths = Object.hasOwn(record, 'sensitivePaths') ? validateSensitivePaths(record.sensitivePaths, defects) : {};
+  // Absent from a document written before R34: no install may reach anything (A-R34-01, I4). Each entry is one host, as an egress entry is.
+  const installRegistries = Object.hasOwn(record, 'installRegistries')
+    ? readArray<string>(record, 'installRegistries', '', 'one host: no wildcard, path, or whitespace', (v): v is string => isNonEmptyString(v) && isHostLiteral(v), defects)
+    : [];
   const roles = Object.hasOwn(record, 'roles')
     ? validateRoles(record.roles, 'roles', defects)
     : undefined;
@@ -861,7 +865,7 @@ export function validatePolicyDocument(input: unknown): DocumentValidation {
 
   if (
     globalCap === undefined || stationCaps === undefined || approvals === undefined
-    || protectedPaths === undefined || sensitivePaths === undefined || roles === undefined || triggers === undefined
+    || protectedPaths === undefined || sensitivePaths === undefined || installRegistries === undefined || roles === undefined || triggers === undefined
     || maxParallelTasks === undefined || maxConflictRetries === undefined
     || defects.length > 0
   ) {
@@ -883,6 +887,7 @@ export function validatePolicyDocument(input: unknown): DocumentValidation {
     document: {
       globalCap, stationCaps, approvals, roles, protectedPaths, sensitivePaths, triggers,
       concurrency: { maxParallelTasks, maxConflictRetries },
+      installRegistries,
     },
   };
 }

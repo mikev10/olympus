@@ -119,9 +119,11 @@ export async function runnerMissing(check: CheckSpec, runner: TestFrameworkAdapt
  * is not an admitted acceptance test, so nothing locks it; or a set of named
  * tests the runner would not run exactly, because one is not a suite it
  * loads or because its selection rule takes in a suite nobody named. Read
- * from the snapshot, which is the tree every check runs over.
+ * from the snapshot. Where the base declares an install, the runner is the
+ * runtime's install of its lockfile, not anything the snapshot holds, so its
+ * presence is judged by the base run over that install instead (R34).
  */
-export async function suiteBindingProblems(checks: readonly CheckSpec[], base: string, admittedTests: readonly string[]): Promise<RequestProblem[]> {
+export async function suiteBindingProblems(checks: readonly CheckSpec[], base: string, admittedTests: readonly string[], installed: boolean): Promise<RequestProblem[]> {
   const problems: RequestProblem[] = [];
   const suiteChecks = checks.filter((c) => c.kind === 'acceptance' || c.kind === 'unit');
   if (suiteChecks.length === 0) return problems;
@@ -130,7 +132,7 @@ export async function suiteBindingProblems(checks: readonly CheckSpec[], base: s
   for (const [i, check] of checks.entries()) {
     if (check.kind !== 'acceptance' && check.kind !== 'unit') continue;
     const at = `manifest.checks[${String(i)}]`;
-    const missing = await runnerMissing(check, runner, base);
+    const missing = installed && runner !== null ? undefined : await runnerMissing(check, runner, base);
     if (missing !== undefined) {
       problems.push({ path: at, code: 'unbound', message: `${at}: ${missing}; a suite check runs the base's own test framework or nothing` });
       continue;

@@ -231,6 +231,7 @@ export class StrictPolicyEngine implements PolicyEngine {
       sensitivePaths: frozen(Object.assign(Object.create(null) as Record<string, string[]>, Object.fromEntries(Object.entries(valid.sensitivePaths).map(([c, globs]) => [c, frozenCopy(globs)])))),
       triggers: cloneTriggers(valid.triggers),
       concurrency: frozen({ ...valid.concurrency }),
+      installRegistries: frozenCopy(valid.installRegistries ?? []),
     });
   }
 

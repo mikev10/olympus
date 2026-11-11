@@ -53,6 +53,28 @@ export interface DiffEntry {
 }
 
 /**
+ * The runtime's dependency install a set of checks ran over (A-R34-02): made
+ * from the tree's lockfile in a sandbox of the runtime's, never a seat's, and
+ * copied into the tree the checks ran over in place of every dependency tree
+ * it held (D-R34-03). I2: every field is the runtime's.
+ */
+export interface InstallRecord {
+  readonly stack: string;
+  readonly lockfile: string;
+  /** The installer's image, `name@sha256:<digest>`, and its argument vector. */
+  readonly image: string;
+  readonly invocation: readonly string[];
+  /** The lockfile installed, and the base's at the same path, or null where the base holds none. */
+  readonly lockfileSha256: string;
+  readonly baseLockfileSha256: string | null;
+  /** The lockfile's diff against the base's, by package key: what the change adds, removes, or re-pins. */
+  readonly lockfileDiff: { readonly added: readonly string[]; readonly removed: readonly string[]; readonly changed: readonly string[] };
+  /** The digest of every dependency tree the install wrote. */
+  readonly installedTreeSha256: string;
+  readonly collectedBy: 'runtime';
+}
+
+/**
  * The declared checks (D-R15-02) as the runtime ran them over the base, at the
  * `test-design` exit and before any driver was invoked (D-A-BF-01). Written
  * once per run and draft: a resume reads this rather than running them again,
@@ -73,6 +95,13 @@ export interface BaseRunRecord {
   readonly checks: readonly CheckResult[];
   /** Every declared check that produced no result, and why; never counted as a failure. */
   readonly unstarted: readonly UnstartedCheck[];
+  /**
+   * The install the checks ran over, or null where none was made: the base
+   * declares no dependencies (D-R34-04), or its install was refused or failed,
+   * which each unstarted check names. A record written before R34 carries none,
+   * and is read as null.
+   */
+  readonly install: InstallRecord | null;
   readonly collectedBy: 'runtime';
 }
 
@@ -105,6 +134,13 @@ export interface EvidenceBundle {
    * (D-R15-05). Every entry escalates the `integrate` exit.
    */
   notCarried: readonly string[];
+  /**
+   * The runtime's install of the verified tree's lockfile, which the checks
+   * ran over in place of every dependency tree base or task left, or null
+   * where none was made: the tree declares no dependencies (D-R34-04), or its
+   * install was refused or failed, which each unstarted check names (R34).
+   */
+  install: InstallRecord | null;
   collectedBy: 'runtime';             // literal type: no other value is representable
   driverProvenanceId: string;
   contractVersion: string;

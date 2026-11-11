@@ -121,6 +121,15 @@ export function draftPaths(store: WorkspaceStore, runId: RunId, station: DraftSt
 }
 
 /** Where a test draft's checks run over the base: a copy of it with the draft's files written in (R19). */
+/**
+ * Where the runtime's install of one set of lockfile inputs lives, keyed by
+ * their digest (R34, D-R34-08). Mounted by the install's own sandbox alone,
+ * and copied from into a tree the checks run over, never mounted by one.
+ */
+export function installPath(store: WorkspaceStore, runId: RunId, key: string): string {
+  return join(runDir(store, runId), 'installs', key);
+}
+
 export function draftBaseRunPath(store: WorkspaceStore, runId: RunId, draft: string): string {
   return join(runDir(store, runId), 'base-runs', draft);
 }
@@ -230,8 +239,8 @@ export async function discardRun(store: WorkspaceStore, runId: RunId): Promise<v
 
 /**
  * Whether a path lies in a dependency tree: under a `node_modules` directory
- * at any depth. Every check runs over the base's dependency trees, so the
- * runner a suite check starts is the one the base installed; a task's
+ * at any depth. Every check runs over the runtime's install of the tree's
+ * lockfile (R34), so the runner a suite check starts is no task's; a task's
  * writes there are recorded and escalated, and never carried into the tree
  * the checks judge, or the change could replace its own judge (D-R15-05).
  * Matched in any case: on a case-insensitive filesystem `Node_Modules`

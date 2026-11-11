@@ -6,6 +6,7 @@
  */
 import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { hashedLockfile, standInNpmInstaller } from '@olympus-ai/adapters';
 import { STATION_CONTRACTS, type RoleId, type RunId, type RunState, type TaskId, type TaskRequest, type TaskResult, type VaultRef } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
 import { StubSandboxProvider, type ExecResult, type RelaySpec, type SandboxHandle, type SandboxSpec, type Teardown } from '@olympus-ai/sandbox';
@@ -307,13 +308,18 @@ describe('the verdict follows the checks and nothing else (I2)', () => {
     await writeFile(join(workspace, 'a.test.ts'), "test('a', () => {})\n");
     await mkdir(join(workspace, 'node_modules', 'vitest'), { recursive: true });
     await writeFile(join(workspace, 'node_modules', 'vitest', 'vitest.mjs'), 'process.exit(0)\n');
+    await writeFile(join(workspace, 'package-lock.json'), hashedLockfile('p6', ['node_modules/vitest']));
     // A package.json gives the stack its static-analysis slot, so the manifest pins its check (R17).
     await writeChecks(workspace, [UNIT_CHECK, STATIC_ANALYSIS_CHECK]);
-    const state = refusedState(await startRun(runRequest(runId, workspace, components)));
+    // The runner is the runtime's install of the lockfile, which the stand-in makes from the fixture's tree (R34).
+    const installing = { ...components, installers: [standInNpmInstaller(workspace)] };
+    const state = refusedState(await startRun(runRequest(runId, workspace, installing, { policy: policy({ installRegistries: ['registry.npmjs.org'] }) })));
     expect(state.tasks[hello]).toBe('passed');
     const [ref] = state.evidenceRefs;
     if (ref === undefined) return;
-    expect((await read<EvidenceBundle>(components.vault, ref)).checks[0]?.suiteCount).toBe(1);
+    const bundle = await read<EvidenceBundle>(components.vault, ref);
+    expect(bundle.checks[0]?.suiteCount).toBe(1);
+    expect(bundle.install).toMatchObject({ stack: 'npm', lockfile: 'package-lock.json', baseLockfileSha256: bundle.install?.lockfileSha256, lockfileDiff: { added: [], removed: [], changed: [] } });
   });
 
   // D-P7-05: a check over a read-only tree has nowhere to write a report the host can read.

@@ -377,6 +377,7 @@ describe('the base record (D-A-BF-01)', () => {
     unstarted: [],
     collectedBy: 'runtime' as const,
     draft: null,
+    install: null,
   };
 
   test('is absent until written, then read back by the reference it was written under', async () => {
@@ -395,6 +396,20 @@ describe('the base record (D-A-BF-01)', () => {
   test('refuses a record the runtime did not collect, and stores nothing', async () => {
     await expect(vault.recordBaseRun({ ...record, collectedBy: 'agent' } as never)).rejects.toThrow(/collectedBy/);
     expect(await vault.readBaseRun(runId, null)).toBeNull();
+  });
+
+  test('R34: stores a whole install, and refuses one that is not the runtime\'s or names no tree digest', async () => {
+    const install = {
+      stack: 'npm', lockfile: 'package-lock.json', image: `node@sha256:${'d'.repeat(64)}`, invocation: ['npm', 'ci', '--ignore-scripts'],
+      lockfileSha256: 'e'.repeat(64), baseLockfileSha256: null, lockfileDiff: { added: ['node_modules/a'], removed: [], changed: [] },
+      installedTreeSha256: 'f'.repeat(64), collectedBy: 'runtime' as const,
+    };
+    await expect(vault.recordBaseRun({ ...record, install: { ...install, collectedBy: 'agent' } } as never)).rejects.toThrow(/install/);
+    await expect(vault.recordBaseRun({ ...record, install: { ...install, installedTreeSha256: 'x' } })).rejects.toThrow(/install/);
+    await expect(vault.recordBaseRun({ ...record, install: undefined } as never)).rejects.toThrow(/install/);
+    expect(await vault.readBaseRun(runId, null)).toBeNull();
+    const ref = await vault.recordBaseRun({ ...record, install });
+    expect(ref.kind).toBe('base-run');
   });
 
   test('refuses a result whose suite count is absent, since the suite-count rule would read it as met (codex-obs), and stores nothing', async () => {

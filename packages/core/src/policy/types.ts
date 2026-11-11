@@ -193,6 +193,13 @@ export interface PolicyDocument {
   sensitivePaths: Record<SensitiveClass, string[]>;
   triggers: TriggerPolicy;
   concurrency: { maxParallelTasks: number; maxConflictRetries: number };
+  /**
+   * The registries the runtime's dependency install may reach (A-R34-01),
+   * each one host. The install's sandbox alone has this egress; no check's
+   * or role's does. Absent or empty, no install runs, and a tree that
+   * declares dependencies is refused (I4).
+   */
+  installRegistries?: string[];
 }
 
 /**
@@ -214,6 +221,8 @@ export interface Policy {
   sensitivePaths: Record<SensitiveClass, string[]>;
   triggers: TriggerPolicy;
   concurrency: { maxParallelTasks: number; maxConflictRetries: number };
+  /** The registries the runtime's dependency install may reach; empty unless granted (A-R34-01, I4). */
+  installRegistries: string[];
 }
 
 export interface PolicyRefusal {

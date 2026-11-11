@@ -56,6 +56,8 @@ export type RequestProblemCode =
   | 'not-runnable'
   /** A named test the base's test framework does not run as one exact suite, or a suite check over a base with no test framework (D-R15-04). */
   | 'unbound'
+  /** The base declares dependencies the runtime cannot install: no registry granted, or a lockfile that is missing, unhashed, unsupported, or one of several (R34). */
+  | 'not-installable'
   /** `requestedLevel` is not one of 0, 1, 2, 3. */
   | 'not-a-level'
   /** `approvedCostUsd` is neither a finite number nor null. */

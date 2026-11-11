@@ -550,7 +550,22 @@ function baseRunProblem(r: unknown): string | undefined {
   if (!Array.isArray(r.unstarted) || !r.unstarted.every((u) => isRecord(u) && hasString(u, 'checkId') && hasString(u, 'reason'))) {
     return 'its unstarted checks do not each say why';
   }
+  if (!(r.install === null || isInstallRecord(r.install))) return 'it names neither an install the runtime made nor null (R34)';
   return undefined;
+}
+
+function isStrings(value: unknown): boolean {
+  return Array.isArray(value) && value.every((v) => typeof v === 'string');
+}
+
+/** A-R34-02: the runtime's install, whole: the lockfile's hashes, its diff by package, and the installed trees' digest. */
+function isInstallRecord(i: unknown): boolean {
+  return isRecord(i) && i.collectedBy === 'runtime' && hasString(i, 'stack') && hasString(i, 'lockfile') && hasString(i, 'image') &&
+    isStrings(i.invocation) && (i.invocation as unknown[]).length > 0 &&
+    typeof i.lockfileSha256 === 'string' && SHA256_HEX.test(i.lockfileSha256) &&
+    (i.baseLockfileSha256 === null || (typeof i.baseLockfileSha256 === 'string' && SHA256_HEX.test(i.baseLockfileSha256))) &&
+    isRecord(i.lockfileDiff) && isStrings(i.lockfileDiff.added) && isStrings(i.lockfileDiff.removed) && isStrings(i.lockfileDiff.changed) &&
+    typeof i.installedTreeSha256 === 'string' && SHA256_HEX.test(i.installedTreeSha256);
 }
 
 function isModel(m: unknown): boolean {

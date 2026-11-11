@@ -9,6 +9,8 @@
  * reports.
  */
 import { parseGitleaksReport, parseSemgrepReport, SECRET_SCANNER, type SecurityScanner } from './security.js';
+import { NPM_INSTALLER } from './install.js';
+import type { DependencyInstaller } from './types.js';
 
 /** A secret no real rule set matches and a seeded fixture can spell: `SEEDED-SECRET-` and twenty capitals or digits. */
 export const SEEDED_SECRET = /SEEDED-SECRET-[A-Z0-9]{20}/;
@@ -76,3 +78,45 @@ export const STAND_IN_STATIC_ANALYSIS_SCANNER: SecurityScanner = {
   completed: [0],
   parse: parseSemgrepReport,
 };
+
+/**
+ * A stand-in for npm's install over a sandbox that runs no image (R34): a
+ * `node` script that reads `package-lock.json` in the install's working
+ * directory and copies each package it pins, by install path, from
+ * `registry`, a directory on the host laid out as an installed tree. A
+ * package the registry does not hold fails the install. It is selected by
+ * the lockfile npm's is, so the runtime plans, refuses, and records it as
+ * it does npm's; the graph builder declares it unsafe, so no run on it goes
+ * above L1. It fetches nothing and verifies no hash.
+ */
+export function standInNpmInstaller(registry: string): DependencyInstaller {
+  const script = [
+    "const fs = require('node:fs'); const path = require('node:path');",
+    `const registry = ${JSON.stringify(registry)};`,
+    "const lock = JSON.parse(fs.readFileSync('package-lock.json', 'utf8'));",
+    "for (const key of Object.keys(lock.packages).filter((k) => k !== '')) {",
+    '  const from = path.join(registry, ...key.split("/"));',
+    "  if (!fs.existsSync(from)) { console.error(`stand-in registry holds no ${key}`); process.exit(1); }",
+    '  fs.cpSync(from, key, { recursive: true, verbatimSymlinks: true });',
+    '}',
+  ].join('\n');
+  return Object.freeze({ ...NPM_INSTALLER, image: STAND_IN_INSTALL_IMAGE, invocation: Object.freeze(['node', '-e', script] as const) });
+}
+
+/** Not an image, as the stand-in scanners' are not. */
+export const STAND_IN_INSTALL_IMAGE = `stand-in/install@sha256:${'0'.repeat(64)}`;
+
+/**
+ * A `package-lock.json` (lockfile version 3) pinning `packages`, each by
+ * install path, from the npm registry and under a well-formed hash: a
+ * lockfile the runtime's hash rule accepts, for a fixture that installs with
+ * the stand-in.
+ */
+export function hashedLockfile(name: string, packages: readonly string[]): string {
+  const entries: Record<string, unknown> = { '': { name } };
+  for (const key of packages) {
+    const pkg = key.slice(key.lastIndexOf('node_modules/') + 'node_modules/'.length);
+    entries[key] = { version: '1.0.0', resolved: `https://registry.npmjs.org/${pkg}/-/${pkg.split('/').at(-1) ?? pkg}-1.0.0.tgz`, integrity: `sha512-${'A'.repeat(86)}==` };
+  }
+  return `${JSON.stringify({ name, lockfileVersion: 3, requires: true, packages: entries }, null, 2)}\n`;
+}

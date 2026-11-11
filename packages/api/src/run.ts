@@ -73,7 +73,7 @@ import type {
   VaultRef,
 } from '@olympus-ai/core';
 import { isRunTemplate } from '@olympus-ai/core';
-import { adapterAdmission, buildAdapterSet, missingControls, type AdapterSet } from '@olympus-ai/adapters';
+import { adapterAdmission, buildAdapterSet, missingControls, type AdapterSet, type DependencyInstaller } from '@olympus-ai/adapters';
 import { compileRoles, readRepoInstructions, type RepoInstructionRefusal, type RoleFileRefusal } from '@olympus-ai/compiler';
 import type { CheckSpec } from '@olympus-ai/integrity';
 import type { SandboxProvider } from '@olympus-ai/sandbox';
@@ -93,6 +93,7 @@ import { unsafeComponents, type UnsafeDeclaration } from './safety.js';
 import { parseSecurityPart, type SecurityPart, type SecurityScanners } from './security.js';
 import { mergedCheckProblems, parseGraph, parseManifest, reproductionProblems, requestProblems, securityProblems, type RequestProblem } from './validate.js';
 import { suiteBindingProblems } from './verification.js';
+import { planInstall } from './install.js';
 import { basePath, discardRun, existsIn, snapshotBase, treeDigest, within, type WorkspaceStore } from './workspace.js';
 
 export interface ComponentGraph {
@@ -120,6 +121,8 @@ export interface ComponentGraph {
   readonly integrator?: Integrator | null;
   /** The scanners security checks run (R17); the graph builder supplies the declared ones when omitted. */
   readonly scanners?: SecurityScanners;
+  /** The dependency installs the line runs before any check (R34); the graph builder supplies the declared ones when omitted. */
+  readonly installers?: readonly DependencyInstaller[];
   /**
    * The drivers that seat each drafter and each critic (R19). Required of a
    * run that drafts anything, and never inferred from `driver` or `reviewer`:
@@ -1125,7 +1128,14 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
   const baseTreeSha256 = await snapshotBase(workspaces, req.runId, req.workspace);
   // Drafted tests are bound at `test-design`, over the base with the draft in it (R19).
   const supplied = req.artifacts.acceptanceTests === 'draft' ? [] : req.artifacts.acceptanceTests;
-  const unbound = await suiteBindingProblems(admitted.admitted.checks, basePath(workspaces, req.runId), supplied);
+  // What the base declares to install is read from its root before anything runs: a lockfile the runtime
+  // cannot install, or none granted a registry, is refused here rather than at the base run (R34, D-R34-05).
+  const installable = await planInstall(basePath(workspaces, req.runId), req.components.installers, policy.policy.installRegistries);
+  if (installable.kind === 'refused') {
+    await discardRun(workspaces, req.runId);
+    return { ok: false, reason: 'invalid-request', problems: [{ path: 'workspace', code: 'not-installable', message: `workspace: ${installable.reason}` }] };
+  }
+  const unbound = await suiteBindingProblems(admitted.admitted.checks, basePath(workspaces, req.runId), supplied, installable.kind === 'install');
   if (unbound.length > 0) {
     await discardRun(workspaces, req.runId);
     return { ok: false, reason: 'invalid-request', problems: unbound };
