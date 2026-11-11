@@ -15,8 +15,8 @@
  * read-only, since the sandbox refuses a mount nested in another (D-R34-03).
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { copyFile, cp, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { copyFile, cp, mkdir, readdir, readFile, readlink, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { UNSUPPORTED_LOCKFILES, VCS_DIRECTORIES, type DependencyInstaller, type LockedPackage } from '@olympus-ai/adapters';
 import type { StationId, TaskId } from '@olympus-ai/core';
 import type { SandboxHandle, SandboxSpec } from '@olympus-ai/sandbox';
@@ -100,16 +100,53 @@ function treeNamer(installers: readonly DependencyInstaller[]): (name: string) =
   return (name) => names.has(name.toLowerCase());
 }
 
-/** Every dependency tree under `root`, by its path relative to it, outside VCS directories. Not entered. */
+/**
+ * Every dependency tree under `root`, by its path relative to it, outside VCS
+ * directories. Not entered. A link named as a tree is one too: Node resolves
+ * through it as through a directory, so it is removed with the rest
+ * (external review, gemini-1).
+ */
 async function dependencyTrees(root: string, isTree: (name: string) => boolean, at = ''): Promise<string[]> {
   const out: string[] = [];
   for (const entry of await readdir(join(root, ...at.split('/').filter(Boolean)), { withFileTypes: true })) {
-    if (!entry.isDirectory() || VCS_DIRECTORIES.has(entry.name)) continue;
+    if (VCS_DIRECTORIES.has(entry.name)) continue;
     const path = at === '' ? entry.name : `${at}/${entry.name}`;
-    if (isTree(entry.name)) out.push(path);
-    else out.push(...(await dependencyTrees(root, isTree, path)));
+    if (isTree(entry.name) && (entry.isDirectory() || entry.isSymbolicLink())) out.push(path);
+    else if (entry.isDirectory()) out.push(...(await dependencyTrees(root, isTree, path)));
   }
   return out;
+}
+
+/**
+ * The first link under the install's trees whose target leaves them, as
+ * `path -> target`, or null. A link out of the install resolves, in the tree
+ * the checks run over, to code the change can write, which no lockfile hash
+ * covers (external review, codex-1, gemini-2, gemini-3).
+ */
+async function linkOut(root: string, trees: readonly string[]): Promise<string | null> {
+  const inside = (absolute: string): boolean => trees.some((t) => {
+    const base = resolve(root, ...t.split('/'));
+    return absolute === base || absolute.startsWith(`${base}${sep}`);
+  });
+  const walk = async (at: string): Promise<string | null> => {
+    for (const entry of await readdir(join(root, ...at.split('/')), { withFileTypes: true })) {
+      const path = `${at}/${entry.name}`;
+      const absolute = join(root, ...path.split('/'));
+      if (entry.isSymbolicLink()) {
+        const target = await readlink(absolute);
+        if (isAbsolute(target) || !inside(resolve(dirname(absolute), target))) return `${path} -> ${target}`;
+      } else if (entry.isDirectory()) {
+        const found = await walk(path);
+        if (found !== null) return found;
+      }
+    }
+    return null;
+  };
+  for (const tree of trees) {
+    const found = await walk(tree);
+    if (found !== null) return found;
+  }
+  return null;
 }
 
 /** Every file the installer reads that `tree` holds: its root files, and its nested manifest in every directory outside a dependency tree. */
@@ -242,6 +279,11 @@ async function install(
   }
 
   const trees = await dependencyTrees(work, treeNamer([installer]));
+  const escaped = await linkOut(work, trees);
+  if (escaped !== null) {
+    await rm(building, { recursive: true, force: true });
+    return { ok: false, at: 'install', reason: `the install from ${installer.lockfile} wrote ${escaped}, a link out of its dependency trees, so a check would load code the lockfile's hashes do not cover` };
+  }
   const baseText = (await isFile(join(base, installer.lockfile))) ? await readFile(join(base, installer.lockfile), 'utf8') : null;
   const baseRead = baseText === null ? null : lockedPackages(installer, baseText);
   const record: InstallRecord = {
