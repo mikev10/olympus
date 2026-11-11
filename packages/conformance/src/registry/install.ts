@@ -10,7 +10,7 @@
  * network, against a dependency whose `postinstall` would leave a mark.
  */
 import { execFile } from 'node:child_process';
-import { mkdir, readdir, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readdir, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type { ExecOptions, ExecResult, SandboxCapabilities, SandboxHandle, SandboxProvider, SandboxSpec, Teardown } from '@olympus-ai/sandbox';
@@ -219,9 +219,87 @@ export const INSTALL_NEEDS_HASHES: LocalAssertion = runtime({
   },
 });
 
+
+/** A package-lock.json that links `vitest` to a directory in the tree, as npm writes one for a `file:` directory, with an invented hash on the target's entry, which npm installs. */
+const LINKED_RUNNER = JSON.stringify({
+  name: 'hello', lockfileVersion: 3, requires: true,
+  packages: { '': { name: 'hello', devDependencies: { vitest: 'file:./judge' } }, 'node_modules/vitest': { resolved: 'judge', link: true }, judge: { name: 'vitest', version: '9.9.9', integrity: `sha512-${'A'.repeat(86)}==` } },
+});
+
+/** A pnpm-lock.yaml whose importer links `vitest` to a workspace directory, and one that patches a registry package. */
+const PNPM_LINKED = "lockfileVersion: '9.0'\nimporters:\n  .:\n    devDependencies:\n      vitest:\n        specifier: workspace:*\n        version: link:judge\n";
+const PNPM_PATCHED = `lockfileVersion: '9.0'\npatchedDependencies:\n  is-number@7.0.0:\n    hash: ${'a'.repeat(64)}\n    path: patches/package.json\nimporters:\n  .:\n    dependencies:\n      is-number:\n        specifier: 7.0.0\n        version: 7.0.0(patch_hash=${'a'.repeat(64)})\npackages:\n  is-number@7.0.0:\n    resolution: {integrity: sha512-${'A'.repeat(86)}==}\n`;
+
+/** The refusal admission gives `files` written into the rig's base, under `installers`. */
+async function admissionOf(rig: LineRig, files: Readonly<Record<string, string>>, installers?: readonly unknown[]): Promise<string> {
+  const { startRun } = await api();
+  const root = rig.dirs.artifacts;
+  await writeFile(join(root, 'package.json'), JSON.stringify({ name: 'hello', private: true }));
+  for (const [name, text] of Object.entries(files)) {
+    await mkdir(join(root, ...name.split('/').slice(0, -1)), { recursive: true });
+    await writeFile(join(root, ...name.split('/')), text);
+  }
+  await writeManifest(rig.dirs, [NEEDS_EXTRA]);
+  const components = await rig.components(installers === undefined ? {} : { installers: installers as never });
+  const outcome = await startRun(await rig.request(components));
+  const problems = !outcome.ok && outcome.reason === 'invalid-request' ? outcome.problems : [];
+  return problems.filter((p) => p.code === 'not-installable').map((p) => p.message).join('\n');
+}
+
+export const INSTALL_REFUSES_TREE_CODE: LocalAssertion = runtime({
+  id: 'I3.install-installs-no-code-from-the-tree',
+  title:
+    "an install never puts code the change can write where a check loads a dependency: a lockfile that links a package to a directory in the tree (npm's link entry, pnpm's link: importer), or patches a registry package (pnpm's patchedDependencies), is refused naming it; an install that writes a link resolving outside its own dependency trees is refused; and a node_modules the base holds as a link is removed like any other (R34, external review codex-1, codex-2, gemini-1, gemini-2)",
+  run: async () => {
+    const { PNPM_INSTALLER } = await adapters();
+    await withLine('r34-npmlink-', async (rig) => {
+      const refused = await admissionOf(rig, { 'package-lock.json': LINKED_RUNNER, 'judge/package.json': '{"name":"vitest","version":"9.9.9"}' });
+      if (!refused.includes('node_modules/vitest')) throw new Error(`R34: a lockfile linking the runner into the tree was admitted: '${refused}'`);
+    });
+    await withLine('r34-pnpmlink-', async (rig) => {
+      const refused = await admissionOf(rig, { 'pnpm-lock.yaml': PNPM_LINKED }, [PNPM_INSTALLER]);
+      if (!refused.includes('link:judge')) throw new Error(`R34: a pnpm importer linking the runner into the tree was admitted: '${refused}'`);
+    });
+    await withLine('r34-patched-', async (rig) => {
+      const refused = await admissionOf(rig, { 'pnpm-lock.yaml': PNPM_PATCHED }, [PNPM_INSTALLER]);
+      if (!refused.includes('patchedDependencies')) throw new Error(`R34: a pnpm lockfile that patches a package was admitted: '${refused}'`);
+    });
+    // An installer that writes a link out of its trees, as a link entry a reader missed would: the install is refused at the base run.
+    await withLine('r34-escape-', async (rig) => {
+      const { startRun } = await api();
+      const { hashedLockfile, standInNpmInstaller } = await adapters();
+      await withDependencies(rig, hashedLockfile('hello', [EXTRA]));
+      await writeManifest(rig.dirs, [NEEDS_EXTRA]);
+      const linking = standInNpmInstaller(rig.dirs.artifacts);
+      const script = `${linking.invocation.at(-1) ?? ''}\nrequire('node:fs').symlinkSync('../judge', 'node_modules/escape', 'dir');`;
+      const components = await rig.components({ installers: [{ ...linking, invocation: ['node', '-e', script] }] });
+      refusalOf(await startRun(await rig.request(components)), 'R34 escape');
+      const baseRun = await components.vault.readBaseRun(rig.runId, null);
+      const record = baseRun === null ? null : await readRecord<BaseRunRecord>(components.vault, baseRun);
+      const reason = record?.unstarted.find((u) => u.checkId === NEEDS_EXTRA.id)?.reason ?? '';
+      if (!reason.includes('node_modules/escape')) throw new Error(`R34: an install that linked out of its trees was ${JSON.stringify(record)}`);
+    });
+    // A base that holds node_modules as a link: it is removed from the tree the checks run over, as a directory is.
+    await withLine('r34-baselink-', async (rig) => {
+      const { startRun } = await api();
+      const { hashedLockfile } = await adapters();
+      await withDependencies(rig, hashedLockfile('hello', []));
+      await mkdir(join(rig.dirs.artifacts, 'vendor', 'extra'), { recursive: true });
+      await writeFile(join(rig.dirs.artifacts, 'vendor', 'extra', 'index.js'), "module.exports = 'vendored';\n");
+      await mkdir(join(rig.dirs.artifacts, 'sub'), { recursive: true });
+      await symlink(join('..', 'vendor'), join(rig.dirs.artifacts, 'sub', 'node_modules'), 'dir');
+      await writeManifest(rig.dirs, [NEEDS_EXTRA]);
+      await startRun(await rig.request(await rig.components()));
+      const ranOver = join(rig.workspaces.root, rig.runId, 'base-run');
+      if ((await lstat(join(ranOver, 'package.json')).catch(() => null)) === null) throw new Error(`R34: the base run left no tree at ${ranOver}, so the case shows nothing`);
+      if ((await lstat(join(ranOver, 'sub', 'node_modules')).catch(() => null)) !== null) throw new Error("R34: the base's linked node_modules survived into the tree the checks ran over");
+    });
+  },
+});
+
 export const INSTALL_FAILING_A_HASH_REFUSES: LocalAssertion = runtime({
   id: 'I5.install-refuses-a-package-failing-its-hash',
-  title: "an install whose package fails the hash its lockfile records starts no check: npm's declared install, failing as npm fails one, leaves each check unstarted naming the failed hash, and the test-design exit is refused before any driver runs (R34)",
+  title: "an install whose package fails the hash its lockfile records starts no check: npm's declared install, run in its pinned image with no network, refuses a tarball whose bytes are not its lockfile's hash and installs the same lockfile with the true one, and its failure is named as the failed hash; an install failing that way leaves each check unstarted naming it, and the test-design exit is refused before any driver runs (R34, external review codex-3)",
   run: async () => {
     await withLine('r34-hashfail-', async (rig) => {
       const { startRun } = await api();
@@ -240,6 +318,15 @@ export const INSTALL_FAILING_A_HASH_REFUSES: LocalAssertion = runtime({
       if (!reason.includes('a package failed the integrity hash its lockfile records')) throw new Error(`R34: the check over a failed install was ${JSON.stringify(record)}`);
       if (record?.checks.some((c) => c.checkId === NEEDS_EXTRA.id) === true) throw new Error('R34: a check ran over a tree whose install failed');
     });
+    // npm itself, in its pinned image with no network, refuses a package whose bytes are not its lockfile's hash,
+    // and the declaration names that cause; the same lockfile with the true hash installs (external review, codex-3).
+    const { NPM_INSTALLER: npm } = await adapters();
+    const intact = await integrityProbe(npm.image, npm.invocation, npm.env, false);
+    if (intact.exit !== 0) throw new Error(`R34: npm's declared install failed over an intact lockfile: ${intact.output}`);
+    const tampered = await integrityProbe(npm.image, npm.invocation, npm.env, true);
+    if (tampered.exit === 0 || npm.failure(tampered.output) !== 'a package failed the integrity hash its lockfile records') {
+      throw new Error(`R34: npm's declared install over a tampered hash exited ${String(tampered.exit)}: ${tampered.output}`);
+    }
   },
 });
 
@@ -267,6 +354,29 @@ async function postinstallRan(image: string, argv: readonly string[], env: Reado
   return said === 'ran';
 }
 
+
+/**
+ * Runs `argv` with `env` in `image`, with no network, over a lockfile pinning
+ * one local tarball by its true hash, or by one changed character; returns
+ * the install's exit and output. Nothing on the host is mounted.
+ */
+async function integrityProbe(image: string, argv: readonly string[], env: Readonly<Record<string, string>>, tamper: boolean): Promise<{ exit: number; output: string }> {
+  const setup = [
+    'set -e',
+    'mkdir -p /tmp/dep /tmp/p && cd /tmp/dep',
+    `echo '{"name":"dep","version":"1.0.0"}' > package.json`,
+    'npm pack --silent >/dev/null && mv dep-1.0.0.tgz /tmp/p/ && cd /tmp/p',
+    `echo '{"name":"p","version":"1.0.0","dependencies":{"dep":"file:dep-1.0.0.tgz"}}' > package.json`,
+    'npm install --package-lock-only --ignore-scripts --offline --silent >/dev/null',
+    ...(tamper ? [`node -e "const f='package-lock.json';const l=JSON.parse(require('fs').readFileSync(f));const p=l.packages['node_modules/dep'];const c=p.integrity.charAt(10);p.integrity=p.integrity.slice(0,10)+(c==='A'?'B':'A')+p.integrity.slice(11);require('fs').writeFileSync(f,JSON.stringify(l))"`] : []),
+    'set +e; "$@" > /tmp/out 2>&1; code=$?; cat /tmp/out; echo "exit=$code"',
+  ].join('\n');
+  const envArgs = Object.entries(env).flatMap(([k, v]) => ['-e', `${k}=${v}`]);
+  const { stdout } = await docker('docker', ['run', '--rm', '--network', 'none', ...envArgs, image, 'sh', '-c', setup, 'sh', ...argv]);
+  const match = /exit=(\d+)\s*$/u.exec(stdout);
+  if (match?.[1] === undefined) throw new Error(`R34: the integrity probe printed no exit: ${stdout}`);
+  return { exit: Number(match[1]), output: stdout };
+}
 export const INSTALL_RUNS_NO_SCRIPT: LocalAssertion = runtime({
   id: 'I3.install-runs-no-lifecycle-script',
   title:
@@ -289,7 +399,7 @@ export const INSTALL_RUNS_NO_SCRIPT: LocalAssertion = runtime({
 });
 
 /** R34's assertions, by the invariant each holds. */
-export const R34_I3: readonly LocalAssertion[] = [INSTALL_ADDS_A_DEPENDENCY, INSTALL_RUNS_NO_SCRIPT];
+export const R34_I3: readonly LocalAssertion[] = [INSTALL_ADDS_A_DEPENDENCY, INSTALL_RUNS_NO_SCRIPT, INSTALL_REFUSES_TREE_CODE];
 export const R34_I4: readonly LocalAssertion[] = [INSTALL_NEEDS_A_GRANT, INSTALL_SANDBOX_IS_ITS_OWN];
 export const R34_I5: readonly LocalAssertion[] = [INSTALL_NEEDS_HASHES, INSTALL_FAILING_A_HASH_REFUSES];
 
