@@ -9660,3 +9660,298 @@ maintainer chose the recommended answer on 2026-11-12.
   (`packages/adapters/src/types.ts`), and the install record's `invocation`
   by `steps` (`packages/vault/src/types.ts`); the api's install runs each
   in turn. Both files are R29's declared gate paths after this amendment.
+
+## R29: Adapter sets beyond TypeScript, Python first
+
+Started on `v2` at 5148416, after the amendment (#146). Issue #113.
+Dependencies P8, R1, R18, and R34 are each merged and tagged `reviewed/*`.
+
+### D-R29-01: boundary, verified
+
+- **Deliverables:**
+  - `PytestAdapter`, a `TestFrameworkAdapter` for pytest 8 and 9, selected
+    when `pyproject.toml` or a requirements file declares pytest, its major
+    read from the lockfile's pin. Suites by pytest's own collection rules
+    read statically from `pytest.toml`, `.pytest.toml` (9 only),
+    `pytest.ini`, `.pytest.ini`, `pyproject.toml`, `tox.ini`, and
+    `setup.cfg`, in pytest's order; assertions, skip markers, and cases
+    from a parse on the host. A setting, conftest hook, or plugin that
+    changes collection and cannot be read statically is refused, naming it.
+  - `CoveragePyAdapter`: changed-line coverage from coverage.py's JSON
+    report, executable lines taken from the parse and the report.
+  - Python's config files in the manifest adapter's list.
+  - A-R29-01: `AdapterSet.dependencyTrees` and `AdapterSet.checkImage`; the
+    runtime's carry rule and tamper walk skip every supported set's trees.
+  - A-R29-02: `DependencyInstaller.steps` replaces `invocation`;
+    `InstallRecord.steps` replaces `invocation`; the api runs each step in
+    turn. `UV_INSTALLER` and `PIP_INSTALLER` ship.
+  - The runner: a suite check runs `.venv/bin/python -m pytest` in the
+    Python image the install ran in; a missing interpreter or pytest is
+    named rather than run.
+  - Static analysis: the Semgrep scanner fills the Python set's slot.
+  - Readiness: `build.pinned-manifest`, `build.install`, `build.clean`,
+    `testing.green-at-base`, and `testing.coverage` answer for a Python
+    repository, so it can clear past `L0` (D-R29-09).
+  - Conformance: the adapter kit parameterised by stack, and a real-line
+    run on a Python fixture that reaches `integrate`.
+- **Out of scope (verbatim):** partial support. A stack with tests and no
+  tamper analysis gets the readiness level R1 already derives, never
+  presented as full support. A dependency audit for Python (R13a audits npm
+  and pnpm only), which is filed as its own issue. The unittest runner,
+  nose, and any pytest plugin that changes collection.
+- **Acceptance, as commands:** `pnpm typecheck`, `pnpm lint`, `pnpm test`,
+  `pnpm conformance`, with these among them: the adapter kit's assertions
+  run over the vitest set and the pytest set, each failing when the Python
+  adapter's part is deleted; `I5.unsupported-stack-refuses` over a
+  repository declaring neither stack; a real-line run on a Python fixture
+  reaching `integrate` with its admission recording `pytest@<major>`.
+- **Invariants:** I1 (the parse runs nothing on the host:
+  `I1.adapters-execute-nothing-on-the-host` keeps holding over the new
+  files, so TOML, INI, and Python are parsed in TypeScript); I3 (the
+  interpreter and pytest a check starts are the runtime's install, and a
+  task's writes to `.venv`, `site-packages`, or `__pycache__` are not
+  carried); I5 (every unreadable config, unpinned pytest, or unsupported
+  major refuses, naming it); I8 (an assertion per criterion).
+- **Pending registry entries owed:** none name R29.
+- **Gate paths touched, as declared:** `packages/adapters/src/types.ts`,
+  `packages/adapters/package.json` (`smol-toml` 1.9.1 and `@lezer/python`
+  1.1.19, pinned), `packages/vault/src/types.ts`, `packages/conformance/`.
+  The PR needs the `gate-change` label and the squash body
+  `Gate-Change: acknowledged`.
+
+### D-R29-02: assumptions, each verified
+
+- **The amendment's installs work as written, with copies.** In
+  `ghcr.io/astral-sh/uv:0.9.13-python3.13-bookworm-slim` at
+  `sha256:c5db46150ecdfa1dcb35f2c666cb027624ebaad1781d0d7740ccccbdb53b2460`,
+  run as uid 1000, `python -m venv --copies .venv` then `uv sync --frozen`
+  over a `uv.lock` pinning pytest 8.4.2 left one link, `.venv/lib64 -> lib`;
+  `.venv/bin/python -m pytest` then passed over a read-only mount with no
+  network. The same first step then `.venv/bin/python -m pip install
+  --require-hashes --no-deps -r requirements.txt` over `uv export`'s hashed
+  output installed the same set.
+- **Both installs verify hashes.** A `uv.lock` with one wheel hash altered
+  failed `uv sync --frozen` with `Hash mismatch for`; a requirements file
+  with pytest's hashes altered failed pip with `THESE PACKAGES DO NOT MATCH
+  THE HASHES`. Both exit non-zero.
+- **pytest's collection rules, from its source.** Read from the 8.4.2 and
+  9.2.0 wheels: `python_files` `test_*.py *_test.py`, `python_classes`
+  `Test`, `python_functions` `test`, `norecursedirs` `*.egg .* _darcs build
+  CVS dist node_modules venv {arch}` (`_pytest/main.py`, `_pytest/python.py`,
+  identical in both); `__pycache__` and any directory holding `pyvenv.cfg`
+  or `conda-meta/history` are never entered (`pytest_ignore_collect`);
+  `testpaths` is globbed only when no path is given and the invocation
+  directory is the rootdir (`Config._decide_args`, identical in both);
+  config is found by walking up from each argument (`locate_config`), so a
+  config file below the root can change what a named file selects; pytest
+  9 adds `pytest.toml`, `.pytest.toml`, and a native `[tool.pytest]` table
+  (`findpaths.CONFIG_LOADERS_BY_NAME`). An explicitly named `.py` file is
+  collected whatever `python_files` says (`pytest_collect_file`,
+  `isinitpath`).
+- **`--disable-plugin-autoload` exists in both majors' 8.4+ and 9 source**
+  (`_pytest/config/__init__.py`), so the runner can load no plugin the
+  repository installed.
+- **coverage.py's statement lines,** measured on a sample with coverage
+  7.10.7: each statement's first line, decorators and the `def` both,
+  `try`, `except`, `case`, module and class docstrings counted; `global`,
+  `nonlocal`, a function's docstring, `else:`, and `finally:` not.
+- **The check image is one per host profile** (`profile.checkImage`,
+  `packages/api/src/line.ts:810`), a Node image
+  (`packages/api/src/host/compose.ts:245`); a Python check needs the image
+  its install ran in.
+- **The carry rule and the tamper walk know `node_modules` only**
+  (`packages/api/src/workspace.ts:254`, `packages/api/src/tamper.ts:37`,
+  `packages/adapters/src/manifest.ts`, `coverage.ts`).
+- **The runner check is Node's:** `runnerMissing` stats `runner.runner`
+  (`packages/api/src/verification.ts:111`); a Python interpreter present
+  with no pytest would start and exit non-zero, read as a failure.
+- **The rig adds a static-analysis check only over a `package.json`**
+  (`packages/conformance/src/registry/line.ts`, `scanned`).
+- **The Docker provider pulls a missing image on `run`** (`docker run
+  --detach`, `packages/sandbox/src/local/provider.ts:346`), and CI has a
+  daemon and the network (`.github/workflows/ci.yml:80`), so the real-line
+  assertion needs no change to CI's pulls.
+
+### D-R29-03: where the code differs from the entry
+
+- The entry's runner is "the interpreter R34's install provides, as
+  `python -m pytest`": the interpreter is `.venv/bin/python`, a copy, and
+  its standard library is the image's, so the check image must be the
+  install image (D-A-PY-07). Nothing selects a check image per stack today;
+  `AdapterSet.checkImage` does (A-R29-01 names the set's trees and
+  installer; the image is the installer's).
+- The entry says `uv sync --frozen`. As written, uv also builds and
+  installs the project itself when it declares a build backend, and builds
+  any package with no wheel, both of which run code from the lockfile's
+  packages or the tree. R34 forbids a lifecycle script; D-R29-05 adds the
+  flags that keep that true.
+
+### D-R29-04: which pytest, and from where
+
+- **Chosen:** pytest is selected when `pyproject.toml` declares it
+  (`[project] dependencies`, `[project.optional-dependencies]`,
+  `[dependency-groups]`, or `[tool.uv] dev-dependencies`) or a root
+  `requirements*.txt` names it. Its version is the one the lockfile pins
+  (`uv.lock`'s `[[package]]`, or the requirements file's `==`), and the
+  stack is recorded as `pytest@<major>`. Majors 8 (8.4 or later) and 9 are
+  supported; anything else, or a declaration with no pin, gives `test:
+  null` naming why.
+- **Why:** Python declarations are ranges, often open (`pytest>=7`), and
+  the lockfile is what the install puts in front of the check. 8.4 is the
+  first release with `--disable-plugin-autoload`, which the runner needs
+  (D-R29-06); 8.3.5's config module has no such option.
+- **Rejected:** *the major from the declared range,* as P8 reads
+  `package.json`: a range rarely selects one major in Python, and the
+  install would decide it anyway.
+- **Reverse:** read the range with `majorOf` and refuse an open one.
+
+### D-R29-05: the installs run no package's code
+
+- **Chosen:** `UV_INSTALLER` runs `python -m venv --copies .venv`, then
+  `uv sync --frozen --no-install-project --no-build --all-extras
+  --all-groups`, with `UV_NO_CONFIG=1`, `UV_PYTHON_DOWNLOADS=never`,
+  `UV_LINK_MODE=copy`, and a cache under `/tmp`. `PIP_INSTALLER` runs the
+  same first step, then `.venv/bin/python -m pip install --require-hashes
+  --no-deps --only-binary :all: --no-input --disable-pip-version-check
+  --no-cache-dir -r requirements.txt`, with `PIP_CONFIG_FILE=/dev/null`.
+  A `uv.lock` package whose source is not a registry, with no wheel, or
+  with no hash is unverifiable, as is the root project when it is not
+  virtual; a requirements line that is an option (`-r`, `-c`, `-e`,
+  `--index-url`, `--find-links`), a URL, unpinned, or unhashed is too. Each
+  refuses the install, naming it. `poetry.lock`, `Pipfile.lock`, and
+  `pdm.lock` join the unsupported lockfiles.
+- **Why:** R34 runs no lifecycle script. Building a package from source
+  runs its `setup.py` or build backend, and installing the project runs the
+  tree's; `--no-build`, `--only-binary`, and `--no-install-project` refuse
+  both, so a package with no wheel fails rather than runs. `--all-groups`
+  and `--all-extras` install what a suite may import, since the test group
+  is not always `dev`.
+- **Rejected:** *`uv sync --frozen` alone,* which builds sdists and the
+  project; *refusing a lockfile with any sdist,* which most registry
+  packages carry beside their wheels.
+- **Reverse:** drop the flags from the declared steps.
+
+### D-R29-06: the runner loads only pytest
+
+- **Chosen:** `runner` is `.venv/bin/python`, and the invocation is
+  `.venv/bin/python -m pytest -p no:cacheprovider --disable-plugin-autoload`
+  followed by each named test as `./<path>`. `missingRunner` names a tree
+  with no interpreter there, or no `pytest` package in the venv's
+  `site-packages`. At discovery, a conftest that defines `pytest_plugins`,
+  `collect_ignore`, `collect_ignore_glob`, or any `pytest_collect*`,
+  `pytest_ignore_collect`, `pytest_pycollect_*`, `pytest_generate_tests`,
+  `pytest_collection*`, or `pytest_make_collect_report` hook is refused,
+  naming it and the file; so is an `addopts` holding anything but output
+  flags, a `required_plugins`, a `confcutdir`, `rootdir`, or `-p`, and a
+  value with an inline comment character, whose reading differs by
+  iniconfig version. A pytest config file below the root is refused
+  (pytest finds it by walking up from a named file).
+- **Why:** a plugin installed in the venv loads by entry point and can
+  change what is collected; `--disable-plugin-autoload` loads none, so the
+  enumeration on the host and the collection in the sandbox follow the same
+  rules. A repository that needs a plugin's collection is out of scope by
+  the entry. The cache plugin writes to a tree mounted read-only.
+- **Reverse:** drop the flag and enumerate per plugin.
+
+### D-R29-07: cases, parametrised
+
+- **Chosen:** a case is `Class > method` or `function`, nested classes
+  joined the same way, with `[id]` for each parametrised row where every
+  argvalue is a literal (string, number, `True`, `False`, `None`) or the
+  `ids=` list is, pytest's `_idval` rules for each and `-` between
+  stacked marks, nearest the `def` first. Where a row is not literal, the
+  case is the bare name: the parametrisation is a value the parse cannot
+  see, and its rows are counted where they are written. Fixtures, classes
+  with `__init__` or `__test__ = False`, and names not matching the
+  configured patterns are not cases; a `unittest.TestCase` subclass is,
+  under any name, with its `test*` methods.
+- **Why:** the entry includes ids "where literal", and refusing every
+  non-literal table would refuse most real suites.
+- **Reverse:** refuse a non-literal table, as the TypeScript adapter does.
+
+### D-R29-08: one config-file list for every stack
+
+- **Chosen:** Python's config files join `CONFIG_FILE_GLOBS`: `pyproject.toml`,
+  `setup.cfg`, `setup.py`, `tox.ini`, `pytest.ini`, `.pytest.ini`,
+  `pytest.toml`, `.pytest.toml`, `conftest.py`, `.coveragerc`, `uv.lock`,
+  `uv.toml`, `requirements*.txt`, `constraints*.txt`, `poetry.lock`,
+  `Pipfile`, `Pipfile.lock`, `pdm.lock`, `.python-version`,
+  `sitecustomize.py`, `usercustomize.py`, and `*.pth`.
+- **Why:** a file that changes what Python's checks mean in a Node
+  repository is as much a dispatch change as in a Python one, and one list
+  cannot drift between sets. A false touch escalates to a human; a missed
+  one passes.
+- **Reverse:** give `ConfigManifestAdapter` a per-set list.
+
+### D-R29-09: readiness for a Python repository
+
+- **Chosen:** for a tree whose set is Python's, `build.pinned-manifest`
+  reads `pyproject.toml` or `requirements.txt` with one supported Python
+  lockfile; `build.install` runs the declared installer's steps in its
+  image over the scan's copy, with PyPI's two hosts as the registries;
+  `build.clean` is `.venv/bin/python -m compileall -q -x '/\.venv/' .`,
+  every module compiled in a fresh container, since Python has no build
+  step a manifest names; the suite probes run pytest and `coverage run -m
+  pytest` then `coverage json`, judged from pytest's JUnit XML and the
+  JSON report as the Node probes judge theirs. A Python repository with no
+  `coverage` installed is `absent` on `testing.coverage`.
+- **Why:** the entry asks readiness to clear a Python repository past
+  `L0`, and `build.clean` is ceiling-bearing at `L0`.
+- **Reverse:** keep `build.clean` Node-only and hold Python at `L0`.
+
+### D-R29-10: dependency trees and the check image
+
+- **Chosen:** `AdapterSet.dependencyTrees` names a set's trees (`node_modules`;
+  `.venv`, `site-packages`, `__pycache__`), and `DEPENDENCY_TREES`, the
+  union over every supported set, is what the carry rule, the tamper walk,
+  the manifest adapter, and coverage skip, whatever the run's stack.
+  `AdapterSet.checkImage` is the image every check of the set runs in, or
+  null for the host's profile: Python's is its installers' image, so the
+  copied interpreter finds its standard library. The installers' `trees`
+  include the same names, so an install removes them from a tree first.
+- **Why:** a task's `__pycache__` file is bytecode Python loads in place of
+  the source when its header matches, and a task's `.venv` would be the
+  judge; neither is the change's to carry, in any repository. One union
+  cannot leave a stack's tree out.
+- **Rejected:** *the set's installer on the set,* as A-R29-01 words it: the
+  install is chosen by lockfile from the graph's installers (D-R34-06), and
+  a second choice on the set could disagree with it; what the set needs of
+  its installer is the image.
+- **Reverse:** key each rule off the base's set alone.
+
+### D-R29-11: proving it on a real line
+
+- **Chosen:** the real-line assertion runs the line over the Docker
+  provider with a stub driver, the real uv installer reaching `pypi.org`
+  and `files.pythonhosted.org`, and the real scanners, on a fixture whose
+  acceptance test fails at base and passes after the builder's change; it
+  parks at `integrate` and its admission records `pytest@8`.
+- **Why:** the stub sandbox runs commands on the host, which has no
+  Linux venv on Windows and no uv in CI; R1's own fixture installs from a
+  real registry the same way (`packages/readiness/test/scan.test.ts`).
+- **Rejected:** *a stand-in Python installer,* which would not prove the
+  declared installer runs.
+- **Reverse:** swap in a stand-in installer copying a pre-built venv.
+
+### D-R29-12: two parsers, pinned
+
+- **Chosen:** `smol-toml` 1.9.1 (no dependencies) for TOML, and
+  `@lezer/python` 1.1.19 for Python, pinned exactly in
+  `packages/adapters/package.json`. INI is read by a port of iniconfig's
+  line rules. A file with a lezer error node is refused as unparseable, as
+  a TypeScript file with a syntax error is.
+- **Why:** I1 forbids running Python on the host, so the parse is
+  TypeScript's. Lezer's grammar is complete for Python 3.12 syntax and
+  marks what it cannot read.
+- **Reverse:** replace either with a hand-written reader.
+
+### D-R29-13: two methods on `TestFrameworkAdapter`
+
+- **Chosen:** `missingRunner(tree)`, why a suite check cannot start in a
+  tree or null, moved from the api into each adapter; and `spell(a)`, an
+  assertion as a reader writes it, so a tamper finding reads as Python for
+  a Python file. Both on the declared gate path.
+- **Why:** the entry names a missing pytest, which only the adapter knows
+  how to find; the tamper report's `expect(...)` wording is JavaScript's.
+- **Reverse:** keep the stat in `verification.ts` and test Python's path
+  there.
