@@ -2355,7 +2355,7 @@ made it, so one made on the host does not run in a check's container. R29
 therefore depends on R34, which installs from the lockfile, and it declares
 R34's installer for Python rather than building an install of its own.
 
-**Amendment:** D-A-PY-06 to D-A-PY-08. A virtualenv `uv sync` makes links
+**Amendment:** D-A-PY-06 to D-A-PY-08. `uv sync` makes a virtualenv whose
 interpreter is a link out of the tree, which R34's install guard refuses, so an
 installer declares a list of steps (A-R29-02) and Python's first step makes
 the virtualenv with copies.
