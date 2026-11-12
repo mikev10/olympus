@@ -4,6 +4,8 @@
  * forms vitest adds are recorded as what they are, and each framework's own
  * markers are detected in either — so the two differ only in enumeration.
  */
+import { stat } from 'node:fs/promises';
+import { join } from 'node:path';
 import { compareAssertions, extractAssertions } from './assertions.js';
 import { jestSuites, treeRelative, vitestSelection, vitestSuites } from './discovery.js';
 import { readRegularFile, SOURCE_FILE_CAP } from './files.js';
@@ -53,6 +55,19 @@ abstract class ExpectFrameworkAdapter implements TestFrameworkAdapter {
 
   async enumerateCases(file: string): Promise<string[]> {
     return extractCases(await parseTestFile(file), file);
+  }
+
+  /** The runner is the install's copy of the framework; with none there, `node` exits 1 for a module it cannot find. */
+  async missingRunner(tree: string): Promise<string | null> {
+    const facts = await stat(join(tree, ...this.runner.split('/'))).catch(() => null);
+    return facts?.isFile() === true ? null : `${this.stack}'s runner is not installed at ${this.runner}, so the check cannot start`;
+  }
+
+  /** `line 3: expect(x).toBe(5)`. */
+  spell(a: Assertion): string {
+    const [subject = '', ...rest] = a.args;
+    const call = a.operator.endsWith('()') ? `${a.operator.slice(0, -2)}(${rest.join(', ')})` : `${a.operator} ${rest.join(', ')}`;
+    return `line ${String(a.line)}: expect(${subject}).${call}`;
   }
 }
 

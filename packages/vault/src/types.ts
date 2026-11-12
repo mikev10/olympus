@@ -61,9 +61,9 @@ export interface DiffEntry {
 export interface InstallRecord {
   readonly stack: string;
   readonly lockfile: string;
-  /** The installer's image, `name@sha256:<digest>`, and its argument vector. */
+  /** The installer's image, `name@sha256:<digest>`, and the argument vectors it ran, in order (A-R29-02). */
   readonly image: string;
-  readonly invocation: readonly string[];
+  readonly steps: readonly (readonly string[])[];
   /** The lockfile installed, and the base's at the same path, or null where the base holds none. */
   readonly lockfileSha256: string;
   readonly baseLockfileSha256: string | null;

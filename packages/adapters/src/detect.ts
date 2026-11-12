@@ -14,7 +14,13 @@ import { JestAdapter, VitestAdapter } from './framework.js';
 import { ConfigManifestAdapter } from './manifest.js';
 import { declaredRange, readPackageManifest, type PackageManifest } from './manifest-file.js';
 import { AdapterRefusal } from './refusal.js';
+import { declaresPytest, isPythonProject } from './python/config.js';
+import { CoveragePyAdapter } from './python/coverage.js';
+import { pytestDiscovery } from './python/discovery.js';
+import { PytestAdapter } from './python/framework.js';
+import { PYTHON_IMAGE } from './python/install.js';
 import { STATIC_ANALYSIS_SCANNER, type SecurityScanner } from './security.js';
+import { DEPENDENCY_TREES, NODE_DEPENDENCY_TREES, PYTHON_DEPENDENCY_TREES } from './trees.js';
 import type { AdapterSet, BehavioralAdapter, CoverageAdapter, ManifestAdapter, MutationAdapter, TestFrameworkAdapter } from './types.js';
 
 /** Every kind `BehavioralAdapter.kind` admits. A set missing one names it. */
@@ -27,7 +33,7 @@ export interface AdapterSetOptions {
   readonly provider: SandboxProvider | null;
   /** Where the coverage check's report is, or null when no coverage check has run. */
   readonly coverage: { readonly report: string; readonly sourceRoot: string } | null;
-  /** The static-analysis scanner a Node.js repository is given; `STATIC_ANALYSIS_SCANNER` when omitted. A test rig names a stand-in. */
+  /** The static-analysis scanner a Node.js or Python repository is given; `STATIC_ANALYSIS_SCANNER` when omitted. A test rig names a stand-in. */
   readonly staticAnalysis?: SecurityScanner;
 }
 
@@ -47,7 +53,8 @@ export function missingControls(set: AdapterSet): Control[] {
   return missing;
 }
 
-export class TypeScriptAdapterSet implements AdapterSet {
+/** One repository's set: Node.js's (vitest or jest) or Python's (pytest), or neither, each gap named (I5). */
+export class StackAdapterSet implements AdapterSet {
   readonly stack: string;
   readonly test: TestFrameworkAdapter | null;
   readonly coverage: CoverageAdapter | null;
@@ -56,6 +63,8 @@ export class TypeScriptAdapterSet implements AdapterSet {
   readonly behavioral: BehavioralAdapter[];
   readonly manifest: ManifestAdapter | null;
   readonly staticAnalysis: SecurityScanner | null;
+  readonly dependencyTrees: readonly string[];
+  readonly checkImage: string | null;
   /** Why each unavailable control is unavailable, in words a maintainer can act on. */
   readonly reasons: ReadonlyMap<Control, string>;
 
@@ -65,6 +74,8 @@ export class TypeScriptAdapterSet implements AdapterSet {
     behavioral: BehavioralAdapter[];
     manifest: ManifestAdapter | null;
     staticAnalysis: SecurityScanner | null;
+    dependencyTrees: readonly string[];
+    checkImage: string | null;
     reasons: ReadonlyMap<Control, string>;
   }) {
     this.staticAnalysis = parts.staticAnalysis;
@@ -73,6 +84,8 @@ export class TypeScriptAdapterSet implements AdapterSet {
     this.coverage = parts.coverage;
     this.behavioral = parts.behavioral;
     this.manifest = parts.manifest;
+    this.dependencyTrees = parts.dependencyTrees;
+    this.checkImage = parts.checkImage;
     this.reasons = parts.reasons;
   }
 
@@ -125,16 +138,54 @@ async function manifestOf(root: string, reasons: Map<Control, string>): Promise<
   return manifest;
 }
 
-export async function buildAdapterSet(root: string, options: AdapterSetOptions): Promise<TypeScriptAdapterSet> {
+/** pytest, or null with the reason recorded: not declared, not pinned, an unsupported major, or a config this package refuses (D-R29-04). */
+async function pythonTest(root: string, reasons: Map<Control, string>): Promise<TestFrameworkAdapter | null> {
+  try {
+    if (!(await declaresPytest(root))) {
+      reasons.set('test', 'pytest is not declared in pyproject.toml or a requirements file, and no other Python runner is supported');
+      return null;
+    }
+    return new PytestAdapter((await pytestDiscovery(root)).rules);
+  } catch (error) {
+    if (!(error instanceof AdapterRefusal)) throw error;
+    reasons.set('test', error.message);
+    return null;
+  }
+}
+
+export async function buildAdapterSet(root: string, options: AdapterSetOptions): Promise<StackAdapterSet> {
   const reasons = new Map<Control, string>();
-  const manifest = await manifestOf(root, reasons);
-  const test = manifest === null ? null : await testAdapter(root, manifest, reasons);
-  const hasManifest = manifest !== null;
+  const nodeReasons = new Map<Control, string>();
+  const pythonReasons = new Map<Control, string>();
+  const manifest = await manifestOf(root, nodeReasons);
+  const nodeTest = manifest === null ? null : await testAdapter(root, manifest, nodeReasons);
+  const python = await isPythonProject(root);
+  const pythonTestAdapter = python ? await pythonTest(root, pythonReasons) : null;
+  const hasManifest = manifest !== null || python;
+
+  let test: TestFrameworkAdapter | null = null;
+  let stack: 'node' | 'python' | null = null;
+  if (nodeTest !== null && pythonTestAdapter !== null) {
+    reasons.set('test', `both ${nodeTest.stack} and ${pythonTestAdapter.stack} are declared, and which suite is authoritative is not something to guess`);
+  } else if (pythonTestAdapter !== null) {
+    test = pythonTestAdapter;
+    stack = 'python';
+  } else if (nodeTest !== null) {
+    test = nodeTest;
+    stack = 'node';
+  } else if (python && manifest !== null) {
+    reasons.set('test', `${nodeReasons.get('test') ?? ''}; and ${pythonReasons.get('test') ?? ''}`);
+  } else if (python) {
+    reasons.set('test', pythonReasons.get('test') ?? 'no Python test framework is declared');
+  } else {
+    for (const [control, why] of nodeReasons) reasons.set(control, why);
+  }
+  if (hasManifest) reasons.delete('manifest');
 
   let coverage: CoverageAdapter | null = null;
   if (test === null) reasons.set('coverage', 'coverage is read against the test framework, and there is none for this stack');
   else if (options.coverage === null) reasons.set('coverage', 'no coverage report location was given');
-  else coverage = new IstanbulCoverageAdapter({ ...options.coverage, tests: test });
+  else coverage = stack === 'python' ? new CoveragePyAdapter({ ...options.coverage, tests: test }) : new IstanbulCoverageAdapter({ ...options.coverage, tests: test });
 
   reasons.set('mutation', 'mutation testing is M3');
   const behavioral: BehavioralAdapter[] = [];
@@ -145,15 +196,19 @@ export async function buildAdapterSet(root: string, options: AdapterSetOptions):
     reasons.set('behavioral:http', `sandbox provider ${options.provider.id} has no probe, so an HTTP client would run where the product can replace it`);
   } else behavioral.push(new HttpBehavioralAdapter(options.provider));
   reasons.set('behavioral:browser', 'browser scenarios are R3');
-  // The scanner's rules are TypeScript and JavaScript rules, and the repository is a Node.js one only with a package.json.
-  if (!hasManifest) reasons.set('static-analysis', 'the repository has no package.json, and the static-analysis scanner this package carries reads TypeScript and JavaScript');
+  // The scanner reads TypeScript, JavaScript, and Python, and a repository is one of those only with its manifest.
+  if (!hasManifest) {
+    reasons.set('static-analysis', 'the repository has neither a package.json nor a pyproject.toml or requirements file, and the static-analysis scanner this package carries reads TypeScript, JavaScript, and Python');
+  }
 
-  return new TypeScriptAdapterSet({
+  return new StackAdapterSet({
     test,
     coverage,
     behavioral,
     manifest: hasManifest ? new ConfigManifestAdapter() : null,
     staticAnalysis: hasManifest ? (options.staticAnalysis ?? STATIC_ANALYSIS_SCANNER) : null,
+    dependencyTrees: stack === 'python' ? PYTHON_DEPENDENCY_TREES : stack === 'node' ? NODE_DEPENDENCY_TREES : DEPENDENCY_TREES,
+    checkImage: stack === 'python' ? PYTHON_IMAGE : null,
     reasons,
   });
 }

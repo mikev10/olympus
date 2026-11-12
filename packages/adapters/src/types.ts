@@ -40,6 +40,15 @@ export interface TestFrameworkAdapter {
    * naming the file and line, rather than dropping the case (A-P7-01).
    */
   enumerateCases(file: string): Promise<string[]>;
+  /**
+   * Why a suite check cannot start in `tree`, the tree the check runs over
+   * with the runtime's install in it, or null when it can. A runner that is
+   * not there would exit non-zero for a reason that is not the test's, which
+   * a check expected to fail would read as a reproduction (I5, R29).
+   */
+  missingRunner(tree: string): Promise<string | null>;
+  /** An assertion as a reader of its language writes it, with its line, for a tamper finding. */
+  spell(assertion: Assertion): string;
 }
 
 export interface Assertion { file: string; line: number; operator: string; args: string[]; tolerance?: number; }
@@ -79,6 +88,19 @@ export interface AdapterSet {
    * (R17).
    */
   staticAnalysis: SecurityScanner | null;
+  /**
+   * The dependency trees this stack's install writes, by directory name,
+   * found at any depth (A-R29-01). What a task writes under one is never
+   * carried into the tree a check runs over (D-R15-05).
+   */
+  readonly dependencyTrees: readonly string[];
+  /**
+   * The image, `name@sha256:<digest>`, every check of this stack runs in, or
+   * null for the host profile's. Python's is its installers' own, since the
+   * interpreter an install copies reads the standard library of the image it
+   * was copied from (A-R29-01, D-A-PY-07).
+   */
+  readonly checkImage: string | null;
   unavailableControls(): string[];
 }
 
@@ -122,8 +144,11 @@ export interface DependencyAuditor {
   parse(stdout: string, exitCode: number, lockfileText: string): { readonly ok: true; readonly findings: AuditFinding[] } | { readonly ok: false; readonly unreachable: boolean };
 }
 
-/** A stack the runtime installs from its lockfile (A-R34-02). R29 adds Python's. */
-export type InstallStack = 'npm' | 'pnpm';
+/** A stack the runtime installs from its lockfile (A-R34-02, A-R29-02). */
+export type InstallStack = 'npm' | 'pnpm' | 'uv' | 'pip';
+
+/** One argument vector an install runs. */
+export type InstallStep = readonly [string, ...string[]];
 
 /**
  * One package a lockfile pins: its key in the lockfile, the integrity hash
@@ -147,8 +172,12 @@ export interface DependencyInstaller {
   readonly stack: InstallStack;
   /** The lockfile, by its name at the tree's root. */
   readonly lockfile: string;
-  /** How the runtime parses the lockfile before `packages` reads it (D-R34-07). */
-  readonly format: 'json' | 'yaml';
+  /**
+   * How the runtime parses the lockfile before `packages` reads it
+   * (D-R34-07); `text` hands `packages` the lockfile's text, for a format
+   * the installer reads itself (TOML, a requirements file).
+   */
+  readonly format: 'json' | 'yaml' | 'text';
   /** The root manifest that declares this stack's dependencies; a tree holding it and no lockfile is refused. */
   readonly manifest: string;
   /** The root files copied into the install's sandbox, the lockfile among them. */
@@ -159,7 +188,11 @@ export interface DependencyInstaller {
   readonly trees: readonly string[];
   /** `name@sha256:<digest>`. */
   readonly image: string;
-  readonly invocation: readonly [string, ...string[]];
+  /**
+   * The argument vectors the install runs, in order, in one sandbox,
+   * stopping at the first that exits non-zero (A-R29-02).
+   */
+  readonly steps: readonly [InstallStep, ...InstallStep[]];
   readonly env: Readonly<Record<string, string>>;
   /**
    * Every package the parsed lockfile pins, or why the document is not a

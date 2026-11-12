@@ -151,4 +151,4 @@ export const PNPM_AUDITOR: DependencyAuditor = Object.freeze({
 export const AUDITORS: readonly DependencyAuditor[] = Object.freeze([NPM_AUDITOR, PNPM_AUDITOR]);
 
 /** Lockfiles of stacks no auditor covers: a tree holding one is `unsupported-stack`, never "no lockfile" (D-R13a-06). */
-export const UNSUPPORTED_LOCKFILES: readonly string[] = Object.freeze(['yarn.lock', 'bun.lockb', 'bun.lock', 'npm-shrinkwrap.json']);
+export const UNSUPPORTED_LOCKFILES: readonly string[] = Object.freeze(['yarn.lock', 'bun.lockb', 'bun.lock', 'npm-shrinkwrap.json', 'poetry.lock', 'Pipfile.lock', 'pdm.lock']);
