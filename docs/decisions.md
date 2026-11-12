@@ -9808,21 +9808,23 @@ Dependencies P8, R1, R18, and R34 are each merged and tagged `reviewed/*`.
 ### D-R29-05: the installs run no package's code
 
 - **Chosen:** `UV_INSTALLER` runs `python -m venv --copies .venv`, then
-  `uv sync --frozen --no-install-project --no-build --all-extras
+  `uv sync --frozen --no-install-workspace --no-build --all-extras
   --all-groups`, with `UV_NO_CONFIG=1`, `UV_PYTHON_DOWNLOADS=never`,
   `UV_LINK_MODE=copy`, and a cache under `/tmp`. `PIP_INSTALLER` runs the
   same first step, then `.venv/bin/python -m pip install --require-hashes
   --no-deps --only-binary :all: --no-input --disable-pip-version-check
   --no-cache-dir -r requirements.txt`, with `PIP_CONFIG_FILE=/dev/null`.
   A `uv.lock` package whose source is not a registry, with no wheel, or
-  with no hash is unverifiable, as is the root project when it is not
-  virtual; a requirements line that is an option (`-r`, `-c`, `-e`,
+  with no hash is unverifiable; the project and its workspace members are
+  passed over, since neither is installed; a requirements line that is an option (`-r`, `-c`, `-e`,
   `--index-url`, `--find-links`), a URL, unpinned, or unhashed is too. Each
   refuses the install, naming it. `poetry.lock`, `Pipfile.lock`, and
-  `pdm.lock` join the unsupported lockfiles.
+  `pdm.lock` join the unsupported lockfiles. (Corrected while building:
+  `--no-install-workspace` replaces `--no-install-project`, which installs
+  a workspace member's code.)
 - **Why:** R34 runs no lifecycle script. Building a package from source
   runs its `setup.py` or build backend, and installing the project runs the
-  tree's; `--no-build`, `--only-binary`, and `--no-install-project` refuse
+  tree's; `--no-build`, `--only-binary`, and `--no-install-workspace` refuse
   both, so a package with no wheel fails rather than runs. `--all-groups`
   and `--all-extras` install what a suite may import, since the test group
   is not always `dev`.
@@ -9936,8 +9938,8 @@ Dependencies P8, R1, R18, and R34 are each merged and tagged `reviewed/*`.
 ### D-R29-12: two parsers, pinned
 
 - **Chosen:** `smol-toml` 1.9.1 (no dependencies) for TOML, and
-  `@lezer/python` 1.1.19 for Python, pinned exactly in
-  `packages/adapters/package.json`. INI is read by a port of iniconfig's
+  `@lezer/python` 1.1.19 for Python, with `@lezer/common` 1.5.5 for its
+  tree types, pinned exactly in `packages/adapters/package.json`. INI is read by a port of iniconfig's
   line rules. A file with a lezer error node is refused as unparseable, as
   a TypeScript file with a syntax error is.
 - **Why:** I1 forbids running Python on the host, so the parse is
@@ -9955,3 +9957,31 @@ Dependencies P8, R1, R18, and R34 are each merged and tagged `reviewed/*`.
   how to find; the tamper report's `expect(...)` wording is JavaScript's.
 - **Reverse:** keep the stat in `verification.ts` and test Python's path
   there.
+
+### D-R29-14: judgment calls made while building
+
+- **A name imported into a test module is not a case.** pytest collects a
+  test function or class wherever it is bound, imported ones included; the
+  parse sees where it is defined, and counts it there.
+- **A base class the parse cannot see is a case of its own**, `Class >
+  *Base`, so a change to what a class inherits changes its cases; a base
+  defined in the same module contributes its methods, as pytest collects
+  them.
+- **A symbolic link where pytest collects is refused**, naming it: pytest
+  follows it, and what it points at is outside what the parse read.
+- **A `testpaths` entry with braces, an absolute path, or `..`, and an `args`
+  value that quotes or escapes, are refused** as config not read statically:
+  Python's `glob` and `shlex` read them in ways the parse would have to model
+  exactly.
+- **A tree holding both `uv.lock` and `requirements.txt` is refused** as
+  holding two lockfiles, as R34 refuses any two; and a tree holding a
+  `pyproject.toml` with no lockfile is refused as a manifest with none, which
+  a repository using `pyproject.toml` only for tool settings now meets.
+  Reverse: name `requirements.txt` a lockfile only when it is hashed.
+- **The readiness scan's Python install reaches PyPI's two hosts**, a
+  constant beside `NPM_REGISTRY`, as the Node install reaches npm's; policy's
+  `installRegistries` governs the line's install, not the scan's, as before.
+- **The check image falls back to the profile's** where the base's set
+  cannot be built at all; a refusal inside the set is recorded and never
+  throws, so this is the case of an unreadable tree, whose checks then fail.
+
