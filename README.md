@@ -287,7 +287,11 @@ prints what it cost and what was decided. Every command prints its flags with
 `FACTORY_REPOSITORY` at a revision (default `HEAD`) and prints the highest
 autonomy level the repository can support, with every probe's outcome and
 the probe that holds the ceiling. The scan installs and runs the repository's
-checks in sandboxes and takes minutes. It writes nothing, and admission does
+checks in sandboxes and takes minutes. A scan calls no model and spends no
+API credit: every probe's outcome is computed from what the runtime observes.
+The sandboxes have no network except the install step, which may reach the
+package registries named for it — the public npm registry by default — and
+no other host. It writes nothing, and admission does
 not read it yet: a run is still admitted at the level policy allows.
 
 ## Contributing
