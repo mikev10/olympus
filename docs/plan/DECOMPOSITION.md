@@ -2355,6 +2355,11 @@ made it, so one made on the host does not run in a check's container. R29
 therefore depends on R34, which installs from the lockfile, and it declares
 R34's installer for Python rather than building an install of its own.
 
+**Amendment:** D-A-PY-06 to D-A-PY-08. A virtualenv `uv sync` makes links
+interpreter is a link out of the tree, which R34's install guard refuses, so an
+installer declares a list of steps (A-R29-02) and Python's first step makes
+the virtualenv with copies.
+
 Deliverables:
 
 - **Test adapter: pytest only** (D-A-PY-03), selected when the project
@@ -2384,10 +2389,17 @@ Deliverables:
   `node_modules`: written, recorded, never carried.
 - **Runner:** a suite check starts the interpreter R34's install provides,
   as `python -m pytest`, from a check image that carries Python, pinned by
-  digest. `runnerMissing` names a missing interpreter or pytest rather than
+  digest, the same image the install runs in (D-A-PY-07). `runnerMissing` names a missing interpreter or pytest rather than
   reading a failed start as a failure.
 - **Static analysis:** the existing Semgrep scanner, which reads Python; the
   manifest pins the rules, as for Node.
+- **Installer steps** (A-R29-02): `DependencyInstaller.invocation` becomes
+  `steps`, a list of argument vectors run in order; npm and pnpm declare one
+  step each, unchanged. Python's installs are `python -m venv --copies
+  .venv` then `uv sync --frozen` for `uv.lock`, and the same first step then
+  `.venv/bin/python -m pip install --require-hashes --no-deps -r
+  requirements.txt` for a hashed `requirements.txt`. R34's link guard is
+  unchanged.
 - **Readiness:** the install, suite, coverage, and tamper probes answer for a
   Python repository, so readiness can clear it past `L0`.
 
@@ -2399,7 +2411,8 @@ repository declaring neither stack. A real-line run on a Python fixture
 reaches `integrate` with its stack recorded as `pytest@<major>`.
 
 **Gate paths:** `packages/adapters/src/types.ts`, `packages/adapters/package.json`
-(a parser and a TOML reader, pinned), and `packages/conformance/`.
+(a parser and a TOML reader, pinned), `packages/vault/src/types.ts` (the
+install record's steps, A-R29-02), and `packages/conformance/`.
 
 **Out of scope:** partial support. A stack with tests and no tamper analysis
 gets the readiness level R1 already derives, never presented as full support.
