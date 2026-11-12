@@ -408,6 +408,10 @@ describe('the base record (D-A-BF-01)', () => {
     await expect(vault.recordBaseRun({ ...record, install: { ...install, collectedBy: 'agent' } } as never)).rejects.toThrow(/install/);
     await expect(vault.recordBaseRun({ ...record, install: { ...install, installedTreeSha256: 'x' } })).rejects.toThrow(/install/);
     await expect(vault.recordBaseRun({ ...record, install: undefined } as never)).rejects.toThrow(/install/);
+    // A-R29-02: the steps it ran, at least one and none empty.
+    await expect(vault.recordBaseRun({ ...record, install: { ...install, steps: [] } })).rejects.toThrow(/install/);
+    await expect(vault.recordBaseRun({ ...record, install: { ...install, steps: [['python', '-m', 'venv', '--copies', '.venv'], []] } })).rejects.toThrow(/install/);
+    await expect(vault.recordBaseRun({ ...record, install: { ...install, invocation: ['npm', 'ci'], steps: undefined } } as never)).rejects.toThrow(/install/);
     expect(await vault.readBaseRun(runId, null)).toBeNull();
     const ref = await vault.recordBaseRun({ ...record, install });
     expect(ref.kind).toBe('base-run');

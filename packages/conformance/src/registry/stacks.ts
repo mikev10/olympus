@@ -15,10 +15,11 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { Driver, RoleId, TaskRequest, TaskResult } from '@olympus-ai/core';
 import type { SandboxProvider } from '@olympus-ai/sandbox';
+import type { BaseRunRecord } from '@olympus-ai/vault';
 import { runtime } from '../kit/assert.js';
 import type { LocalAssertion } from '../kit/types.js';
 import { workspaceRoot } from '../kit/workspace.js';
-import { ARTIFACTS, linePolicy, refusalOf, stubDriver, withLine, writeManifest } from './line.js';
+import { ARTIFACTS, linePolicy, readRecord, refusalOf, stubDriver, withLine, writeManifest } from './line.js';
 
 const adapters = async () => import('@olympus-ai/adapters');
 const api = async () => import('@olympus-ai/api');
@@ -295,7 +296,7 @@ export const PYTHON_RUN_REACHES_INTEGRATE: LocalAssertion = runtime({
     "a run on a Python repository reaches integrate on the Docker provider: the runtime installs its uv.lock from PyPI in the Python image, the locked pytest acceptance test fails over the base and passes over the builder's change in that image with no egress, and the admission records the stack as pytest@8 (R29, needs Docker and the network)",
   timeoutMs: 1_200_000,
   run: async () => {
-    const [{ startRun, readRunRecords }, { INSTALLERS, PYPI_REGISTRIES, PYTHON_IMAGE }, { LocalDockerProvider }, { BASE_IMAGE }] = await Promise.all([
+    const [{ startRun, readRunRecords }, { INSTALLERS, PYPI_REGISTRIES, PYTHON_IMAGE, STATIC_ANALYSIS_IMAGE }, { LocalDockerProvider }, { BASE_IMAGE }] = await Promise.all([
       api(), adapters(), import('@olympus-ai/sandbox'), import('@olympus-ai/driver-claude-code'),
     ]);
     await withLine('r29-line-', async (rig) => {
@@ -305,7 +306,12 @@ export const PYTHON_RUN_REACHES_INTEGRATE: LocalAssertion = runtime({
         await writeFile(join(root, path), text);
       }
       const test = 'tests/test_hello.py';
-      await writeManifest(rig.dirs, [{ id: 'greets', kind: 'acceptance', onBase: 'fails', tests: [test], required: true, timeoutMs: 300_000 }]);
+      // Semgrep reads Python: the manifest pins a Python rule, as it pins TypeScript ones for a Node.js repository (R17).
+      const rules = 'rules:\n  - id: no-eval\n    languages: [python]\n    severity: ERROR\n    message: eval of a value\n    pattern: eval($X)\n';
+      await writeManifest(rig.dirs, [
+        { id: 'greets', kind: 'acceptance', onBase: 'fails', tests: [test], required: true, timeoutMs: 300_000 },
+        { id: 'static-analysis', kind: 'static-analysis', image: STATIC_ANALYSIS_IMAGE, config: rules, required: true, timeoutMs: 300_000 },
+      ]);
       const sandbox = await LocalDockerProvider.create({ vaultPaths: [rig.dirs.store, rig.dirs.artifacts] });
       const driver = await writingPython({ 'hello/__init__.py': 'def greet(name):\n    return "hello " + name\n' }, sandbox);
       const components = await rig.components({
@@ -317,7 +323,10 @@ export const PYTHON_RUN_REACHES_INTEGRATE: LocalAssertion = runtime({
       const request = await rig.request(components, { policy, artifacts: { ...ARTIFACTS, acceptanceTests: [...ARTIFACTS.acceptanceTests, test] } });
       const parked = refusalOf(await startRun(request), 'R29 python line');
       if (parked.at !== 'integrate' || parked.transition.reason !== 'approval-required') {
-        throw new Error(`R29: the Python run stopped at ${parked.at} as '${parked.transition.reason}', not at integrate awaiting approval`);
+        const baseRun = await components.vault.readBaseRun(rig.runId, null);
+        const record = baseRun === null ? null : await readRecord<BaseRunRecord>(components.vault, baseRun);
+        const seen = record === null ? 'no base record' : JSON.stringify({ checks: record.checks.map((c) => ({ id: c.checkId, exit: c.exitCode, out: `${c.stdout}${c.stderr}`.slice(-600) })), unstarted: record.unstarted });
+        throw new Error(`R29: the Python run stopped at ${parked.at} as '${parked.transition.reason}', not at integrate awaiting approval; base: ${seen}`);
       }
       const records = await readRunRecords(components.vault, rig.runId);
       if (records.stack !== 'pytest@8') throw new Error(`R29: the run recorded its stack as ${String(records.stack)}`);
