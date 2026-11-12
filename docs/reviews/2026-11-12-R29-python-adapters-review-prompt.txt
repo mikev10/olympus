@@ -1,5 +1,5 @@
 The code under review is in the file
-`2026-11-12-R29-python-adapters-review-bundle.txt` (SHA-256 6e1d8f0a6a4f9c50522273a80ea649e40a41c450dad17bc1faf1d7c8cbbd5868) — every new file in
+`2026-11-12-R29-python-adapters-review-bundle.txt` (SHA-256 a1bb1d2e086c7323a7f0337807fae863bb1cbff36890cee2d7fcabe271e4bc42) — every new file in
 full and every modified file as a unified diff that shows each changed function
 whole, with the commit range at its top. Cite line numbers from the new side of
 a diff, which its @@ headers give. It is provided with this
