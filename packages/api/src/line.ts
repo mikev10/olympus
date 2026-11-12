@@ -133,7 +133,7 @@ import { imageFor, type BuiltGraph } from './graph.js';
 import { installInto } from './install.js';
 import type { RunOutcome } from './run.js';
 import { acceptedEscalations, analyzeTamper, notCarriedFindings, tamperFindings } from './tamper.js';
-import { claimEvidenceDiff, commandOf, runnerMissing, suiteRunner, suitesRun, taskResultProblems, writesOutsideGrant } from './verification.js';
+import { checkImageOf, claimEvidenceDiff, commandOf, runnerMissing, suiteRunner, suitesRun, taskResultProblems, writesOutsideGrant } from './verification.js';
 import {
   attemptPaths,
   basePath,
@@ -536,6 +536,7 @@ export async function runOnBase(
   const before = await tamperedIn(ctx, tree);
   if (before.length > 0) return recordTamper(ctx, 'test-design', null, before, { phase: 'base' });
   const runner = await suiteRunner(basePath(workspaces, ctx.run.id));
+  const stackImage = await checkImageOf(basePath(workspaces, ctx.run.id));
   // The base is installed as every verified tree is, so both sides of the comparison run over an install the runtime made (R34).
   const installed = await installInto(ctx, tree, basePath(workspaces, ctx.run.id), null, 'test-design');
 
@@ -553,7 +554,7 @@ export async function runOnBase(
     }
     let handle: SandboxHandle;
     try {
-      handle = await sandbox.provision(checkSandbox(ctx, tree, check));
+      handle = await sandbox.provision(checkSandbox(ctx, tree, check, stackImage));
     } catch (error) {
       unstarted.push({ checkId: check.id, reason: `its sandbox could not be provisioned: ${describe(error)}` });
       continue;
@@ -804,10 +805,11 @@ export function egressFor(network: { egress: 'none' | string[] }): EgressPolicy 
  * (D-I1a-01); a graph built with none — the stub sandbox's — names no image,
  * and a provider that runs images refuses it.
  */
-function workspaceOnly(ctx: LineContext, source: string, mode: 'rw' | 'ro', egress: EgressPolicy, image: Driver | 'check', wallClockMs: number): SandboxSpec {
+function workspaceOnly(ctx: LineContext, source: string, mode: 'rw' | 'ro', egress: EgressPolicy, image: Driver | 'check', wallClockMs: number, stackImage: string | null = null): SandboxSpec {
   const { profile } = ctx.components;
   return {
-    image: profile === null ? 'none' : image === 'check' ? profile.checkImage : imageFor(profile, image),
+    // A stack whose install is bound to its image runs every check in that image, never the profile's (A-R29-01).
+    image: profile === null ? 'none' : image === 'check' ? (stackImage ?? profile.checkImage) : imageFor(profile, image),
     mounts: { workspace: { source, target: '/workspace', mode }, others: [] },
     egress,
     limits: profile === null ? { cpus: 0, memoryMb: 0, pids: 0, wallClockMs } : { ...profile.limits, wallClockMs },
@@ -816,8 +818,8 @@ function workspaceOnly(ctx: LineContext, source: string, mode: 'rw' | 'ro', egre
 }
 
 /** One check's sandbox: the verified tree read-only, no network, and the check's own timeout as its wall clock. */
-function checkSandbox(ctx: LineContext, tree: string, check: CheckSpec): SandboxSpec {
-  return workspaceOnly(ctx, tree, 'ro', { mode: 'deny-all', allow: [] }, 'check', check.timeoutMs);
+function checkSandbox(ctx: LineContext, tree: string, check: CheckSpec, stackImage: string | null): SandboxSpec {
+  return workspaceOnly(ctx, tree, 'ro', { mode: 'deny-all', allow: [] }, 'check', check.timeoutMs, stackImage);
 }
 
 /** The scope a role holds as admitted, before any narrowing; for what narrowing never touches, such as tiers (R14). */
@@ -1522,7 +1524,7 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
   // A path the role is not given, written or created, is refused: an omitted file is never replaced unseen (D-R10-05).
   const sensitive = withheldOf(withheldGlobs(ctx, task.role), written.map((entry) => entry.path));
   if (sensitive.length > 0) return recordEscape(ctx, task, sensitive);
-  // D-R15-05: what the task wrote under node_modules is recorded and escalated, never carried. Every
+  // D-R15-05: what the task wrote in a dependency tree is recorded and escalated, never carried. Every
   // check, and the runner a suite check starts, runs over the runtime's install of the tree's lockfile (R34).
   const own = written.filter((entry) => !inDependencyTree(entry.path));
   const notCarried = [...new Set(written.filter((entry) => inDependencyTree(entry.path)).map((entry) => dependencyEntry(entry.path)))].sort();
@@ -1556,6 +1558,7 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
   const installed = await installInto(ctx, tree, basePath(workspaces, ctx.run.id), task.id, ctx.state.station);
   if (!installed.ok && installed.at === 'provision') return spendRetry(ctx, task);
   const runner = await suiteRunner(basePath(workspaces, ctx.run.id));
+  const stackImage = await checkImageOf(basePath(workspaces, ctx.run.id));
   const security = ctx.checks.filter(isSecurityCheck);
   const tamper = await analyzeTamper(prior.tree, tree, {
     protectedPaths: ctx.policy.protectedPaths,
@@ -1598,7 +1601,7 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
     }
     let handle: SandboxHandle;
     try {
-      handle = await sandbox.provision(checkSandbox(ctx, tree, check));
+      handle = await sandbox.provision(checkSandbox(ctx, tree, check, stackImage));
     } catch {
       return spendRetry(ctx, task);
     }

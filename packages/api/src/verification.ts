@@ -4,8 +4,6 @@
  * returned. The line (`line.ts`) sequences them; nothing here reads a claim
  * as anything but a claim (I2).
  */
-import { stat } from 'node:fs/promises';
-import { join } from 'node:path';
 import picomatch from 'picomatch';
 import { buildAdapterSet, type TestFrameworkAdapter } from '@olympus-ai/adapters';
 import type { AgentClaim } from '@olympus-ai/core';
@@ -72,13 +70,27 @@ export async function countSuites(tree: string): Promise<number | null> {
 /**
  * The base's test framework: the one every suite check runs, from the
  * base's own install, at the base run and at `verify` alike. The change
- * cannot replace it, since nothing a task writes under `node_modules` is
+ * cannot replace it, since nothing a task writes in a dependency tree is
  * carried (D-R15-05). Null when the base declares no framework this runtime
  * supports, which admission refuses for any suite check (D-R15-04).
  */
 export async function suiteRunner(base: string): Promise<TestFrameworkAdapter | null> {
   try {
     return (await buildAdapterSet(base, { provider: null, coverage: null })).test;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The image every check over the base's stack runs in, or null for the host
+ * profile's: Python's checks run in the image its install ran in, since the
+ * copied interpreter reads that image's standard library (A-R29-01). Read
+ * from the base, which no task wrote.
+ */
+export async function checkImageOf(base: string): Promise<string | null> {
+  try {
+    return (await buildAdapterSet(base, { provider: null, coverage: null })).checkImage;
   } catch {
     return null;
   }
@@ -108,8 +120,8 @@ export function commandOf(check: CheckSpec, runner: TestFrameworkAdapter | null)
 export async function runnerMissing(check: CheckSpec, runner: TestFrameworkAdapter | null, tree: string): Promise<string | undefined> {
   if (check.kind !== 'acceptance' && check.kind !== 'unit') return undefined;
   if (runner === null) return `the base declares no supported test framework, so ${check.kind} check ${check.id} has no runner`;
-  const facts = await stat(join(tree, ...runner.runner.split('/'))).catch(() => null);
-  return facts?.isFile() === true ? undefined : `${runner.stack}'s runner is not installed at ${runner.runner}, so the check cannot start`;
+  // The adapter knows where its runner lives: a node launcher, or an interpreter with pytest beside it (R29).
+  return (await runner.missingRunner(tree)) ?? undefined;
 }
 
 /**

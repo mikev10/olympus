@@ -401,7 +401,7 @@ describe('the base record (D-A-BF-01)', () => {
 
   test('R34: stores a whole install, and refuses one that is not the runtime\'s or names no tree digest', async () => {
     const install = {
-      stack: 'npm', lockfile: 'package-lock.json', image: `node@sha256:${'d'.repeat(64)}`, invocation: ['npm', 'ci', '--ignore-scripts'],
+      stack: 'npm', lockfile: 'package-lock.json', image: `node@sha256:${'d'.repeat(64)}`, steps: [['npm', 'ci', '--ignore-scripts']],
       lockfileSha256: 'e'.repeat(64), baseLockfileSha256: null, lockfileDiff: { added: ['node_modules/a'], removed: [], changed: [] },
       installedTreeSha256: 'f'.repeat(64), collectedBy: 'runtime' as const,
     };

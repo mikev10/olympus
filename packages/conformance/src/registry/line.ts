@@ -429,8 +429,10 @@ async function scanned(dirs: VaultDirs, components: BuiltGraph): Promise<void> {
   const kinds = new Set(repinned.map((c) => (typeof c === 'object' && c !== null ? (c as { kind?: unknown }).kind : undefined)));
   const added: unknown[] = [];
   if (!kinds.has('secret-scan')) added.push({ ...(await secretScanCheck()), image: images['secret-scan'] });
-  const node = await readFile(join(dirs.artifacts, 'package.json')).then(() => true, () => false);
-  if (node && !kinds.has('static-analysis')) added.push({ ...(await staticAnalysisCheck()), image: images['static-analysis'] });
+  // A Node.js or a Python workspace has the static-analysis slot (R17, R29).
+  const has = async (name: string): Promise<boolean> => readFile(join(dirs.artifacts, name)).then(() => true, () => false);
+  const scannable = (await has('package.json')) || (await has('pyproject.toml')) || (await has('requirements.txt'));
+  if (scannable && !kinds.has('static-analysis')) added.push({ ...(await staticAnalysisCheck()), image: images['static-analysis'] });
   const checks = [...repinned, ...added];
   if (JSON.stringify(checks) !== JSON.stringify(manifest.checks)) await writeFile(file, JSON.stringify({ ...manifest, checks }));
 }

@@ -15,7 +15,7 @@
 import { lstat, readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import picomatch from 'picomatch';
-import { buildAdapterSet, diffTrees, markersIn, VCS_DIRECTORIES, type Assertion, type TestFrameworkAdapter } from '@olympus-ai/adapters';
+import { buildAdapterSet, diffTrees, isDependencyTree, markersIn, VCS_DIRECTORIES, type Assertion, type TestFrameworkAdapter } from '@olympus-ai/adapters';
 import type { RunState, TaskId, VaultRef } from '@olympus-ai/core';
 import type { SecurityCheckKind, TamperReport } from '@olympus-ai/integrity';
 import type { EvidenceBundle } from '@olympus-ai/vault';
@@ -33,15 +33,9 @@ export interface TamperOptions {
 
 const SNAPSHOT = /(?:^|\/)__snapshots__\/|\.snap$/;
 
+/** No dependency tree is walked, whatever the stack: what is in one is the install's, never the change's (D-R29-10). */
 function skipDirectory(name: string): boolean {
-  return name === 'node_modules' || VCS_DIRECTORIES.has(name);
-}
-
-/** An assertion as a reader would write it, with its line: `line 3: expect(x).toBe(5)`. */
-function spell(a: Assertion): string {
-  const [subject = '', ...rest] = a.args;
-  const call = a.operator.endsWith('()') ? `${a.operator.slice(0, -2)}(${rest.join(', ')})` : `${a.operator} ${rest.join(', ')}`;
-  return `line ${String(a.line)}: expect(${subject}).${call}`;
+  return isDependencyTree(name) || VCS_DIRECTORIES.has(name);
 }
 
 function key(a: Assertion): string {
@@ -117,11 +111,11 @@ async function testFindings(test: TestFrameworkAdapter, base: string, head: stri
   for (const a of now) take(unpaired, (b) => key(b) === key(a));
   const former = (a: Assertion): string => {
     const b = formerOf(a, unpaired);
-    return b === undefined ? '(no assertion on this subject before)' : spell(b);
+    return b === undefined ? '(no assertion on this subject before)' : test.spell(b);
   };
   const assertionsWeakened: TamperReport['assertionsWeakened'] = [
-    ...[...delta.weakened, ...delta.toleranceWidened].map((a) => ({ file: a.file, before: former(a), after: spell(a) })),
-    ...delta.removed.map((b) => ({ file: b.file, before: spell(b), after: '(removed)' })),
+    ...[...delta.weakened, ...delta.toleranceWidened].map((a) => ({ file: a.file, before: former(a), after: test.spell(a) })),
+    ...delta.removed.map((b) => ({ file: b.file, before: test.spell(b), after: '(removed)' })),
   ];
 
   // A marker pairs within its file, and across files only from a file that left the tests to one

@@ -14,7 +14,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { lstat, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildAdapterSet, JestAdapter, VitestAdapter, type AdapterSet } from '@olympus-ai/adapters';
+import { buildAdapterSet, JestAdapter, PIP_INSTALLER, PytestAdapter, PYTHON_IMAGE, UV_INSTALLER, VitestAdapter, type AdapterSet, type DependencyInstaller } from '@olympus-ai/adapters';
 import type { EgressPolicy, SandboxHandle, SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
 import picomatch from 'picomatch';
 import { deriveCeiling } from './derive.js';
@@ -27,6 +27,9 @@ export { SECRET_SCAN_IMAGE } from '@olympus-ai/adapters';
 
 /** The public npm registry, the one host an install reaches unless the caller names others. */
 export const NPM_REGISTRY: readonly string[] = ['registry.npmjs.org'];
+
+/** PyPI's index and the host its files are served from: where a Python repository's install reaches (R29). */
+export { PYPI_REGISTRIES } from '@olympus-ai/adapters';
 
 /** The readiness term for a repository no scan has run on: explicit, never `undefined` (I4). */
 export const NOT_SCANNED: ReadinessCeiling = { kind: 'not-scanned' };
@@ -69,8 +72,10 @@ export interface ScanOptions {
     /** How long a cold container may take to provision and answer before the dev-environment probe fails. */
     readonly coldProvisionMs: number;
   };
-  /** The hosts the install may reach. Every other host is refused by the sandbox's egress proxy. */
+  /** The hosts a Node.js install may reach. Every other host is refused by the sandbox's egress proxy. */
   readonly registries: readonly string[];
+  /** The hosts a Python install may reach, in the Python image (R29). */
+  readonly pythonRegistries: readonly string[];
   /** The policy's protected-path globs. */
   readonly protectedPaths: readonly string[];
   readonly branchProtection: BranchProtectionChecker | null;
@@ -125,8 +130,10 @@ export async function scan(options: ScanOptions): Promise<ReadinessReport> {
 
     // Static reads first, and the secret scan, while the copy is exactly the commit's tree.
     const manifest = await readManifest(tree, files);
-    const manager = record('build.pinned-manifest', pinnedManifest(manifest, files)).outcome === 'supported' ? managerOf(files) : null;
     const adapters = await adapterSet(tree);
+    const python = isPython(adapters, files);
+    const pinned = python ? await pythonPinned(tree, files) : { observation: pinnedManifest(manifest, files), installer: null };
+    const manager = record('build.pinned-manifest', pinned.observation).outcome === 'supported' ? managerOf(files) : null;
     record('testing.adapter', adapterProbe(adapters));
     record('testing.enumerate', await enumerate(adapters, tree));
     record('testing.tamper-analysis', tamperAnalysis(adapters));
@@ -138,12 +145,21 @@ export async function scan(options: ScanOptions): Promise<ReadinessReport> {
 
     // Then the executed probes over an installed tree, each in its own fresh container.
     record('dev.cold-provision', await coldProvision(ctx));
-    record('build.install', await install(ctx, manager));
-    const runner = manager === 'pnpm' ? ['corepack', 'pnpm'] : ['npm'];
-    record('build.clean', await build(ctx, manifest, runner));
     const framework = adapters.set?.test ?? null;
-    record('testing.green-at-base', await suite(ctx, framework, 'green'));
-    record('testing.coverage', await suite(ctx, framework, 'coverage'));
+    if (python) {
+      const installed = record('build.install', await pythonInstall(ctx, pinned.installer));
+      record('build.clean', installed.outcome === 'supported'
+        ? judged(await execute(ctx, inTree(['.venv/bin/python', '-m', 'compileall', '-q', '-x', '/\\.venv/', '.']), { image: PYTHON_IMAGE }), 'every module compiled in a fresh container')
+        : { outcome: 'absent', detail: 'nothing was installed, so no interpreter is there to compile with', evidence: { via: 'not-run', because: 'build.install' } });
+      record('testing.green-at-base', await pythonSuite(ctx, framework, 'green'));
+      record('testing.coverage', await pythonSuite(ctx, framework, 'coverage'));
+    } else {
+      record('build.install', await install(ctx, manager));
+      const runner = manager === 'pnpm' ? ['corepack', 'pnpm'] : ['npm'];
+      record('build.clean', await build(ctx, manifest, runner));
+      record('testing.green-at-base', await suite(ctx, framework, 'green'));
+      record('testing.coverage', await suite(ctx, framework, 'coverage'));
+    }
     record('style.lint', await tool(ctx, ['node_modules/.bin/eslint', '.'], 'a linter'));
     record('style.format', await tool(ctx, ['node_modules/.bin/prettier', '--check', '.'], 'a formatter'));
     record('style.typecheck', files.includes('tsconfig.json')
@@ -208,6 +224,42 @@ function pinnedManifest(manifest: Manifest, files: readonly string[]): Observati
 }
 
 type Adapters = { readonly set: AdapterSet; readonly reason: string | null } | { readonly set: null; readonly reason: string };
+
+/**
+ * Whether the tree is probed as a Python repository: its set is pytest's, or
+ * it has no package.json and holds a pyproject.toml or a requirements file
+ * (D-R29-09). Every other tree is probed as a Node.js one, as before R29.
+ */
+function isPython(adapters: Adapters, files: readonly string[]): boolean {
+  if (adapters.set?.test instanceof PytestAdapter) return true;
+  if (adapters.set?.test !== null && adapters.set?.test !== undefined) return false;
+  if (files.includes('package.json')) return false;
+  return files.some((f) => f === 'pyproject.toml' || /^requirements[\w.-]*\.txt$/u.test(f));
+}
+
+/** Python's lockfiles, the supported two and the ones refused, by name at the root. */
+const PYTHON_LOCKFILES = ['uv.lock', 'requirements.txt', 'poetry.lock', 'Pipfile.lock', 'pdm.lock'];
+
+/**
+ * One supported Python lockfile at the root, whose every package the
+ * installer can verify by hash, as the line's own install requires (R34,
+ * D-R29-05).
+ */
+async function pythonPinned(tree: string, files: readonly string[]): Promise<{ readonly observation: Observation; readonly installer: DependencyInstaller | null }> {
+  const evidence: ProbeEvidence = { via: 'static', read: 'the tree listing and the Python lockfile' };
+  const locks = PYTHON_LOCKFILES.filter((name) => files.includes(name));
+  if (locks.length === 0) return { observation: { outcome: 'absent', detail: 'no uv.lock or hashed requirements.txt is committed, so a clean install cannot reproduce the dependencies', evidence }, installer: null };
+  if (locks.length > 1) return { observation: { outcome: 'absent', detail: `several lockfiles are committed (${locks.join(', ')}), and which is authoritative is not something to guess`, evidence }, installer: null };
+  const installer = [UV_INSTALLER, PIP_INSTALLER].find((i) => i.lockfile === locks[0]);
+  if (installer === undefined) return { observation: { outcome: 'absent', detail: `${locks.join('')} is a lockfile no installer reads`, evidence }, installer: null };
+  const read = installer.packages(await readFile(join(tree, installer.lockfile), 'utf8'));
+  if (!read.ok) return { observation: { outcome: 'absent', detail: read.reason, evidence }, installer: null };
+  const unverifiable = read.packages.filter((p) => p.unverifiable !== null);
+  if (unverifiable.length > 0) {
+    return { observation: { outcome: 'absent', detail: `${installer.lockfile} does not pin every package by a hash an install can verify: ${unverifiable.slice(0, 3).map((p) => `${p.key} (${p.unverifiable ?? ''})`).join('; ')}`, evidence }, installer: null };
+  }
+  return { observation: { outcome: 'supported', detail: `dependencies are pinned by ${installer.lockfile}`, evidence }, installer };
+}
 
 async function adapterSet(tree: string): Promise<Adapters> {
   try {
@@ -310,7 +362,7 @@ interface Ran {
 
 /** One command in one fresh sandbox over the scan directory, destroyed after. */
 async function execute(
-  ctx: Context, argv: readonly string[], spec: { image?: string; mode?: 'rw' | 'ro'; egress?: EgressPolicy; wallClockMs?: number } = {},
+  ctx: Context, argv: readonly string[], spec: { image?: string; mode?: 'rw' | 'ro'; egress?: EgressPolicy; wallClockMs?: number; env?: Readonly<Record<string, string>> } = {},
 ): Promise<Ran> {
   const { options } = ctx;
   const image = spec.image ?? options.image;
@@ -330,7 +382,7 @@ async function execute(
     return { evidence: evidence({ kind: 'stopped', reason: `the sandbox could not be provisioned: ${message(error)}`, durationMs: elapsed(started) }), output: '' };
   }
   try {
-    const result = await options.provider.exec(handle, [...argv], { env: ENV });
+    const result = await options.provider.exec(handle, [...argv], { env: { ...ENV, ...spec.env } });
     const outputSha256 = createHash('sha256').update(result.stdout).update('\0').update(result.stderr).digest('hex');
     return {
       evidence: evidence({ kind: 'exited', exitCode: result.exitCode, durationMs: result.durationMs, outputSha256 }),
@@ -393,6 +445,86 @@ async function install(ctx: Context, manager: Manager | null): Promise<Observati
     wallClockMs: ctx.options.timeouts.installMs,
   });
   return judged(ran, `${manager} install from the lockfile`);
+}
+
+/** The declared installer's steps, each in turn over the scan's copy, in the installer's image, reaching PyPI alone (D-R29-09). */
+async function pythonInstall(ctx: Context, installer: DependencyInstaller | null): Promise<Observation> {
+  if (installer === null) {
+    return { outcome: 'absent', detail: 'there is no single pinned Python lockfile to install from', evidence: { via: 'not-run', because: 'build.pinned-manifest' } };
+  }
+  let last: Observation | undefined;
+  for (const step of installer.steps) {
+    // The installer's cache is under /tmp, which a fresh container holds empty; its HOME is the scan's.
+    const env = { ...installer.env, HOME: `${MOUNT}/home` };
+    last = judged(await execute(ctx, inTree(step), {
+      image: installer.image, env, egress: { mode: 'allowlist', allow: [...ctx.options.pythonRegistries] }, wallClockMs: ctx.options.timeouts.installMs,
+    }), `${installer.stack} install from ${installer.lockfile} (${step.slice(0, 3).join(' ')})`);
+    if (last.outcome !== 'supported') return last;
+  }
+  return last ?? { outcome: 'absent', detail: 'the installer declares no step', evidence: { via: 'static', read: installer.lockfile } };
+}
+
+/**
+ * pytest at the base, judged by the JUnit report it writes, or coverage.py
+ * over the same run, judged by its JSON report: an exit 0 says nothing failed,
+ * and the report says whether anything ran (I5).
+ */
+async function pythonSuite(ctx: Context, test: AdapterSet['test'], kind: 'green' | 'coverage'): Promise<Observation> {
+  if (!(test instanceof PytestAdapter)) return { outcome: 'indeterminate', detail: 'no pytest adapter, so no suite can run', evidence: { via: 'not-run', because: 'testing.adapter' } };
+  const name = `${kind}-${randomUUID()}`;
+  await mkdir(join(ctx.scanDir, 'out', name));
+  const out = `${MOUNT}/out/${name}`;
+  const pytest = test.invocation(null).slice(3);
+  const python = { image: PYTHON_IMAGE, env: { PYTHONDONTWRITEBYTECODE: '1' } };
+  if (kind === 'green') {
+    const what = 'the suite at base';
+    const ran = judged(await execute(ctx, inTree(['.venv/bin/python', '-m', 'pytest', ...pytest, `--junitxml=${out}/results.xml`]), python), what);
+    if (ran.outcome !== 'supported') return ran;
+    const counts = await junitCounts(join(ctx.scanDir, 'out', name, 'results.xml'));
+    if (counts === null) return { ...ran, outcome: 'absent', detail: `${what} exited 0 and wrote no readable report` };
+    if (counts.failed > 0) return { ...ran, outcome: 'absent', detail: `${what} exited 0 and its report counts ${String(counts.failed)} failed` };
+    if (counts.passed < 1) return { ...ran, outcome: 'absent', detail: `${what} exited 0 and no test passed: every test was skipped or deselected` };
+    return { ...ran, detail: `${what} exited 0 with ${String(counts.passed)} test(s) passed` };
+  }
+  const what = 'the suite under coverage.py, writing a JSON report';
+  const data = `--data-file=${out}/.coverage`;
+  const ran = judged(await execute(ctx, inTree(['.venv/bin/python', '-m', 'coverage', 'run', data, '-m', 'pytest', ...pytest]), python), what);
+  if (ran.outcome !== 'supported') return ran;
+  const wrote = judged(await execute(ctx, inTree(['.venv/bin/python', '-m', 'coverage', 'json', data, '-o', `${out}/coverage.json`]), python), 'the coverage.py JSON report');
+  if (wrote.outcome !== 'supported') return wrote;
+  const report = await readReport(join(ctx.scanDir, 'out', name, 'coverage.json'));
+  const files = report?.files;
+  const measured = typeof files === 'object' && files !== null ? Object.keys(files).length : 0;
+  if (measured === 0) return { ...ran, outcome: 'absent', detail: `${what} exited 0 and measured no file` };
+  return { ...ran, detail: `${what} exited 0 and measured ${String(measured)} file(s)` };
+}
+
+/** The counts on a JUnit report's `testsuite` elements, summed, or null for anything that is not one. */
+async function junitCounts(path: string): Promise<{ readonly passed: number; readonly failed: number } | null> {
+  let text: string;
+  try {
+    if (!(await lstat(path)).isFile()) return null;
+    text = await readFile(path, 'utf8');
+  } catch {
+    return null;
+  }
+  const suites = [...text.matchAll(/<testsuite\b([^>]*)>/gu)];
+  if (suites.length === 0) return null;
+  let tests = 0;
+  let failed = 0;
+  let skipped = 0;
+  for (const [, attributes = ''] of suites) {
+    const count = (name: string): number | null => {
+      const m = new RegExp(`\\b${name}="(\\d+)"`, 'u').exec(attributes);
+      return m?.[1] === undefined ? null : Number(m[1]);
+    };
+    const t = count('tests');
+    if (t === null) return null;
+    tests += t;
+    failed += (count('failures') ?? 0) + (count('errors') ?? 0);
+    skipped += count('skipped') ?? 0;
+  }
+  return { passed: tests - failed - skipped, failed };
 }
 
 async function build(ctx: Context, manifest: Manifest, runner: readonly string[]): Promise<Observation> {
