@@ -9605,3 +9605,58 @@ and R15 are each merged and tagged `reviewed/*`.
   egress proxy. Run locally with `FACTORY_CONTAINER_UID=1000
   FACTORY_CONTAINER_GID=1000`, the tier reproduced the committed result.
 - **Reverse:** remove the grant; the tier then refuses every item.
+
+## Amendment: Python installs as a list of steps (R29)
+
+R29 was started on `v2` at eab6a44 and stopped before any code: the
+installs D-A-PY-04 chose cannot pass the install guard R34 shipped. The
+maintainer chose the recommended answer on 2026-11-12.
+
+### D-A-PY-06: what R29 found
+
+- **`uv sync --frozen` writes a link out of its tree.** Run in
+  `ghcr.io/astral-sh/uv:0.9.13-python3.13-bookworm-slim` over a `uv.lock`,
+  it made `.venv/bin/python -> /usr/local/bin/python3`. R34 refuses an
+  install holding any absolute link or one whose target leaves its
+  dependency trees (`linkOut`, `packages/api/src/install.ts:136`), so every
+  `uv sync` install is refused as written.
+- **`pip install --require-hashes --no-deps` writes no tree.** With no
+  target it installs into the image's own interpreter, outside `/workspace`,
+  so a check gets nothing the install made.
+- **A copied virtualenv passes.** In the same image, `python -m venv
+  --copies .venv` then `uv sync --frozen` left one link, `.venv/lib64 ->
+  lib`, inside the tree; the venv still imported its package after being
+  copied away and back, as `installInto` copies it.
+- **The installer runs one argument vector.** `DependencyInstaller.invocation`
+  (`packages/adapters/src/types.ts:162`) is run once by `install`
+  (`packages/api/src/install.ts:264`); two steps need a contract change.
+
+### D-A-PY-07: an installer declares a list of steps
+
+- **Chosen:** `DependencyInstaller.invocation` becomes `steps`, a non-empty
+  list of argument vectors run in order in the install's sandbox, stopping
+  at the first that exits non-zero, whose output names the failure. npm and
+  pnpm each declare one step, unchanged. Python declares two:
+  - `uv.lock`: `python -m venv --copies .venv`, then `uv sync --frozen`
+    (uv installs into the existing `.venv`).
+  - hashed `requirements.txt`: `python -m venv --copies .venv`, then
+    `.venv/bin/python -m pip install --require-hashes --no-deps -r
+    requirements.txt`.
+  The install's key and record carry every step, as they carry the one
+  invocation today. R34's link guard is unchanged.
+- **The install image and the check image are one image,** pinned by
+  digest, carrying Python and uv: a copied interpreter reads the standard
+  library of the image it was copied from (`pyvenv.cfg`'s `home`).
+- **Rejected:** *permitting the interpreter's absolute link* in `linkOut`,
+  which loosens a guard an external review added (codex-1, gemini-2);
+  *installing with `--target` and `PYTHONPATH`*, which still needs a second
+  step for `uv.lock` and departs further from D-A-PY-04.
+- **Reverse:** restore the single `invocation`, and permit one absolute link
+  at `.venv/bin/python` into the image in `linkOut`.
+
+### D-A-PY-08: contract change R29 builds
+
+- **A-R29-02:** `DependencyInstaller.invocation` is replaced by `steps`
+  (`packages/adapters/src/types.ts`), and the install record's `invocation`
+  by `steps` (`packages/vault/src/types.ts`); the api's install runs each
+  in turn. Both files are R29's declared gate paths after this amendment.
