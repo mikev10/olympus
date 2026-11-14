@@ -630,6 +630,8 @@ order between them is settled before any of them is picked up.
 | R33 | Chat as a trigger source ([#110](https://github.com/mikev10/olympus/issues/110)) | M3 | R22 | — |
 | R34 | Dependencies installed by the runtime from the lockfile ([#40](https://github.com/mikev10/olympus/issues/40)) | M2 | P3, P6, P10, P14, R1, R15 | — |
 | R35 | Runnable release and first-run docs ([#54](https://github.com/mikev10/olympus/issues/54), [#55](https://github.com/mikev10/olympus/issues/55), [#28](https://github.com/mikev10/olympus/issues/28), [#121](https://github.com/mikev10/olympus/issues/121), [#123](https://github.com/mikev10/olympus/issues/123) to [#127](https://github.com/mikev10/olympus/issues/127)) | M2 | P3, P9, R1, R19, R20 | — |
+| R36a | The shipped example runs on the real driver ([#145](https://github.com/mikev10/olympus/issues/145), [#148](https://github.com/mikev10/olympus/issues/148) to [#152](https://github.com/mikev10/olympus/issues/152), [#154](https://github.com/mikev10/olympus/issues/154)) | M2 | P5, P6, P14, I1b, R17, R19, R34, R35 | — |
+| R36b | `init`, and a real feature from a fresh clone ([#134](https://github.com/mikev10/olympus/issues/134), [#136](https://github.com/mikev10/olympus/issues/136), [#139](https://github.com/mikev10/olympus/issues/139)) | M2 | R36a, R18, R19, R35 | — |
 
 ### R1 — Readiness
 
@@ -2603,6 +2605,180 @@ Windows work without Developer Mode.
 
 **Why M2:** every M2 unit is proved by people running the line, and today no
 one can start it from the docs.
+
+### R36 — First run works out of the box
+
+Order step 1 of `docs/plan/VISION-GAP.md`. The first real use (run
+`40609434`, 2026-11-12, on the maintainer's `my-recipes` repository) reached
+a merged PR for $0.09, but only after a guided session, six blocking bugs,
+and hand-written JSON. All six bugs passed every test, because the tests
+admit runs under a harness policy and stand-in drivers; nothing ran the
+shipped `examples/` against the real driver. R36 fixes the six, adds the
+case that would have caught them, and then removes the hand-written files.
+Two parts, in order: **R36a** makes the shipped example run on the real
+driver; **R36b** adds `init` and proves the whole path on a real feature.
+
+#### R36a — The shipped example runs on the real driver
+
+- **The base is the commit, not the working folder** (#148, #154). Today
+  `snapshotBase` (`packages/api/src/workspace.ts`) byte-copies the working
+  folder, so gitignored files (`.env`, `.env.local`, `.vercel/`) enter every
+  model's tree, and on a `core.autocrlf=true` checkout every text file
+  differs from the commit at `integrate` (`packages/api/src/integrate.ts`),
+  after all the paid work. The base becomes the tree of `--base-commit`,
+  read from git's object store, so it holds exactly the committed blobs.
+  One change closes both: nothing ignored or untracked can reach a model,
+  and the bytes `integrate` compares are the commit's own. A dirty working
+  folder no longer matters to a run, and the README says so. Normalising
+  line endings at `integrate` instead is rejected: it would weaken the
+  check that the merged base is the verified base, and leaves #148 open.
+  `sensitivePaths` stays the control for secrets that are committed.
+- **A failed attempt says why** (#149). The driver already builds a refusal
+  (exit code and the first 400 characters of stderr, `#refuseUnusableStream`);
+  nothing surfaces it. Each failed driver or sandbox attempt records its
+  cause and that trimmed text in run state and the Vault, `status` and
+  `events` show it, and the host logs it. The text is the model's or the
+  container's output, so it is stored and shown as untrusted data and never
+  enters a prompt (I7). A retry policy that parks on `retries-exhausted`
+  names the last attempt's cause.
+- **A tool name no wired driver declares is refused at admission** (#150).
+  `examples/policy.yaml` grants `read`, `write`; the Claude Code driver
+  declares `Read`, `Write`; every task is refused at drive time, and policy
+  validation accepts any string. The example takes the declared names, and
+  admission refuses a grant naming a tool the driver its role resolves to
+  does not declare, before the cost estimate (I4, I5). The harness's
+  lowercase names (`packages/api/test/harness.ts`) change with it.
+- **The drafter is told where to write** (#151). The runtime names
+  `.drafts/<run id>/` in the drafting task's message, so the model never
+  has to list a directory it cannot list. The example drafter's budget is
+  set from the measured first run, and the README states it. Resuming a
+  halted run is not added here.
+- **Every tier's model is callable by the pinned CLI** (#152). The pinned
+  Claude Code CLI (`2.1.277`) refuses `claude-opus-5-5`, so every `deep`
+  seat fails, including the example's reviewer. The pin moves to a version
+  that accepts every model in the tier map, and a paid assertion makes one
+  minimal call per tier through the driver's own image. It fails when a
+  tier's model is refused.
+- **The example's manifest passes the checks every run needs** (#145).
+  `examples/run/verify.json` pins only `secret-scan`, so it is refused on
+  any repository with a `package.json`. It gains the pinned `static-analysis`
+  check. The README documents that check without an internal plan id, and
+  admission's manifest refusals come before the cost estimate, not after
+  the user approves the spend.
+- **The class of break cannot recur.** Free assertions, run on every PR:
+  admission accepts a run under `examples/` exactly as shipped, on a fixture
+  with a `package.json`; every tool the example grants is declared by the
+  driver its role resolves to; a fixture checked out with
+  `core.autocrlf=true` (git converts on any OS) reaches `integrate` with a
+  matching base; a gitignored `.env` in the workspace is absent from every
+  tree. One paid assertion, under the existing `run-driver` label and cap
+  (D-A-CI-05): the shipped `examples/` (policy, roles, rubrics, run files),
+  unmodified, through the real Claude Code driver, with `--draft-spec`, to
+  a merged PR on the same integrate target the composed line's paid case
+  uses (D-I1a-07). Each assertion fails when its fix is reverted (I8).
+
+**Acceptance:** each fix's assertion above fails with the fix reverted and
+passes with it. The paid case reaches a merged PR from the shipped example
+with no file outside `examples/` edited. Its measured cost is recorded in
+the PR.
+
+**Gate paths:** `packages/api/src/workspace.ts` and
+`packages/api/src/integrate.ts` (the base `integrate` checks),
+`packages/core/src/policy/` (the tool-name refusal),
+`packages/drivers/claude-code/src/image.ts` (the CLI pin),
+`packages/vault/src/types.ts` (the attempt's recorded cause), and
+`packages/conformance/`.
+
+**Out of scope:** resuming a halted run; a free stand-in mode for users
+(#147); the remaining getting-started doc gaps (#133, #135, #140 to #142,
+#144), which stay open issues; enforcing the readiness ceiling (#129).
+
+#### R36b — `init`, and a real feature from a fresh clone
+
+- **`olympus-ai init` writes a working setup.** Run in a repository, it
+  writes, refusing to overwrite any file that exists:
+  - outside the repository, in a config directory it names (default
+    `~/.olympus/`): a policy at L1 with tool names the wired driver declares
+    and per-role budgets sized for a small change, the roles, the rubrics,
+    and the host's environment file;
+  - in the repository, under `.olympus/`: a verification manifest and a
+    one-task graph for the detected stack. Policy, roles, and rubrics stay
+    outside the tree a model can write (I1, I3).
+- **The stack comes from the one detector.** The manifest is generated from
+  the stack R18 records and the adapter set that stack resolves to (P8,
+  R29), with `secret-scan` and `static-analysis` pinned. An unsupported or
+  ambiguous stack is refused, naming what was found; `init` never writes a
+  manifest it cannot back (I5). TypeScript ships first; Python when R29 has
+  merged.
+- **The host starts from one documented command** (#134, #136, #139). The
+  host reads the environment file `init` wrote, through R35's declared
+  table. On native Windows `init` derives `FACTORY_CONTAINER_UID/GID`, and
+  the host refuses to start without them where they are required, rather
+  than failing mid-run. Once listening, the host prints one line: where it
+  listens and which repository it admits. The README gives the command for
+  bash and PowerShell.
+- **No hand-written file.** With `init`'s output, the first run is one
+  `create --draft-spec --draft-tests --intent "..."` naming `.olympus/`'s
+  manifest and graph. The README's "First run" becomes `init`, start the
+  host, that `create`, approve.
+- **Free assertions:** `init` on a TypeScript fixture writes files admission
+  accepts; it refuses an unsupported stack and an existing file; the host
+  refuses a missing UID/GID where required. Each fails when its check is
+  deleted (I8). The paid case of R36a is extended to start from `init`'s
+  output instead of `examples/`.
+- **A real feature on `my-recipes`, end to end.** The unit is not done until
+  this has happened and its record is committed. From a fresh clone of
+  Olympus at the unit branch's head, on the maintainer's Windows machine,
+  in the default `core.autocrlf=true` checkout of `my-recipes`:
+  `olympus-ai init`, start the host, one `create` at L1 with
+  `--draft-spec --draft-tests` and an intent for a real feature the
+  maintainer names, gates passed with `approve`, to a PR merged into
+  `my-recipes`. Allowed by hand: the API key, the git token, the cost
+  approval, and each gate approval. Not allowed: writing or editing any
+  file, setting any other variable, or changing Olympus mid-run. Every
+  command typed, the run id, the Vault record's hash, the cost, and the
+  merged PR are recorded in `docs/proof/r36/my-recipes.md`. A failure is
+  filed as an issue, fixed in this unit if it is in R36's scope, and the
+  run is repeated from a fresh clone; out of scope, it stops the unit for
+  the maintainer. This run is evidence beside the assertions, never in
+  place of them (VISION-GAP section 11).
+
+**Acceptance:** the free assertions above, the extended paid case, and the
+committed `my-recipes` record showing a merged PR with no hand-written file.
+
+**Gate paths:** `packages/conformance/`, and the host's start-up checks.
+
+**Out of scope:** stacks beyond those adapter sets already ship; idea
+intake, plan review, and briefings (order step 2); a hosted runtime; any
+change to what a drafted spec or test must satisfy.
+
+**Why M2:** every later step of the vision is proved by people running the
+line, and today a first run needs a guide.
+
+**Calls made in this amendment, for the maintainer to check:**
+
+- **Two parts, not one.** R36a is fixes plus the case that catches them;
+  R36b is new surface. Splitting lets the bug fixes merge and be reviewed
+  without waiting on `init`. Reversal: merge them as one unit.
+- **The base from the object store** closes #148 and #154 together and keeps
+  `integrate`'s comparison strict. Rejected: normalising line endings at
+  `integrate` (weakens a gate, leaves #148), and refusing `autocrlf=true`
+  at admission (fails closed, but refuses the default Windows checkout).
+- **Who runs the `my-recipes` run.** Recommended: the builder session types
+  the commands, taking each one only from the README as it stands on the
+  branch, while the maintainer approves the cost and every gate, including
+  the merge. Alternative: the maintainer runs it alone from the README,
+  a stronger test of the docs at more of the maintainer's time.
+- **The feature.** Recommended: one testable without the database, such as
+  scaling a recipe's ingredient amounts by a serving count, built on the
+  existing amount parser. The maintainer names the intent.
+- **Spend.** The paid case runs only under the `run-driver` label, as now.
+  The `my-recipes` run spends real API credit; its cost approval is the
+  maintainer's, at the figure `create` prints.
+- **#147 (a free dry run) is out of scope.** A stand-in driver users can
+  enable produces records that look like real work; it needs its own
+  decision about how such a run is marked. Recommended: a separate unit
+  after R36.
 
 ---
 
