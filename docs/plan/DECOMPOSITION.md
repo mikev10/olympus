@@ -2731,10 +2731,14 @@ the PR.
   Olympus at the unit branch's head, on the maintainer's Windows machine,
   in the default `core.autocrlf=true` checkout of `my-recipes`:
   `olympus-ai init`, start the host, one `create` at L1 with
-  `--draft-spec --draft-tests` and an intent for a real feature the
-  maintainer names, gates passed with `approve`, to a PR merged into
-  `my-recipes`. Allowed by hand: the API key, the git token, the cost
-  approval, and each gate approval. Not allowed: writing or editing any
+  `--draft-spec --draft-tests` and the intent *scale a recipe's ingredient
+  amounts by a chosen number of servings*, gates passed with `approve`, to
+  a PR merged into `my-recipes`' `olympus-trial` branch, never its default
+  branch. The builder session types every command, taking each one only
+  from the README as it stands on the unit branch; the maintainer approves
+  the cost and every gate, including the merge. Allowed by hand: the API
+  key, the git token, the cost approval, and each gate approval. Not
+  allowed: writing or editing any
   file, setting any other variable, or changing Olympus mid-run. Every
   command typed, the run id, the Vault record's hash, the cost, and the
   merged PR are recorded in `docs/proof/r36/my-recipes.md`. A failure is
@@ -2755,30 +2759,33 @@ change to what a drafted spec or test must satisfy.
 **Why M2:** every later step of the vision is proved by people running the
 line, and today a first run needs a guide.
 
-**Calls made in this amendment, for the maintainer to check:**
+**Decisions** (maintainer, 2026-11-13, each as recommended):
 
 - **Two parts, not one.** R36a is fixes plus the case that catches them;
   R36b is new surface. Splitting lets the bug fixes merge and be reviewed
   without waiting on `init`. Reversal: merge them as one unit.
+- **The `my-recipes` PR merges into `olympus-trial`,** as the first real
+  use's did, so the trial never touches the default branch. Reversal: name
+  another branch in the run's policy.
 - **The base from the object store** closes #148 and #154 together and keeps
   `integrate`'s comparison strict. Rejected: normalising line endings at
   `integrate` (weakens a gate, leaves #148), and refusing `autocrlf=true`
   at admission (fails closed, but refuses the default Windows checkout).
-- **Who runs the `my-recipes` run.** Recommended: the builder session types
-  the commands, taking each one only from the README as it stands on the
-  branch, while the maintainer approves the cost and every gate, including
-  the merge. Alternative: the maintainer runs it alone from the README,
-  a stronger test of the docs at more of the maintainer's time.
-- **The feature.** Recommended: one testable without the database, such as
-  scaling a recipe's ingredient amounts by a serving count, built on the
-  existing amount parser. The maintainer names the intent.
+- **The builder session runs the `my-recipes` run,** taking every command
+  only from the README, while the maintainer approves the cost and every
+  gate. Rejected: the maintainer running it alone, a stronger test of the
+  docs at more of the maintainer's time. Reversal: hand the run to the
+  maintainer; the record's rules are unchanged.
+- **The feature is serving-size scaling,** testable without the database
+  and built on the existing amount parser. Reversal: another intent that
+  needs no database, named before the run.
 - **Spend.** The paid case runs only under the `run-driver` label, as now.
   The `my-recipes` run spends real API credit; its cost approval is the
   maintainer's, at the figure `create` prints.
 - **#147 (a free dry run) is out of scope.** A stand-in driver users can
   enable produces records that look like real work; it needs its own
-  decision about how such a run is marked. Recommended: a separate unit
-  after R36.
+  decision about how such a run is marked. It becomes a separate unit after
+  R36.
 
 ---
 
