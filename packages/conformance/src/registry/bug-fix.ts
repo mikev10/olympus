@@ -17,6 +17,7 @@ import type { AdmissionOutcome, BugFixIntent, RunRequest } from '@olympus-ai/api
 import type { CandidateId, CapabilityScope, Policy, RoleId, TriggerKind, TriggerSubscription } from '@olympus-ai/core';
 import type { DraftRecord, Vault } from '@olympus-ai/vault';
 import { runtime } from '../kit/assert.js';
+import { commitFixture } from '../kit/git.js';
 import type { LocalAssertion } from '../kit/types.js';
 import {
   HELLO_CHECK, admitAndDrive, approveAndResume, artifactsFor, awaiting, drafting, draftingPolicy, draftingScopes, helloSpec, lastAttempt, type DraftingRig,
@@ -299,7 +300,7 @@ const RUN_TEMPLATE_IS_GRANTED: LocalAssertion = runtime({
         const res = await fetch(`${address}/runs`, {
           method: 'POST',
           headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
-          body: JSON.stringify({ workspace: rig.dirs.artifacts, baseCommit: '0', requestedLevel: 1, artifacts: artifactsFor(true, true), approvedCostUsd: null, candidate, intent: parts }),
+          body: JSON.stringify({ workspace: rig.dirs.artifacts, baseCommit: commitFixture(rig.dirs.artifacts), requestedLevel: 1, artifacts: artifactsFor(true, true), approvedCostUsd: null, candidate, intent: parts }),
         });
         const body = await res.json() as { refusal?: { reason?: string } };
         if (res.status !== 422 || body.refusal?.reason !== 'cost-unapproved') throw new Error(`R16: a run from a bug-fix candidate through POST /runs, naming no template, answered ${String(res.status)} ${JSON.stringify(body)}, not the cost to approve`);

@@ -44,9 +44,9 @@ export interface Integrating {
 /** The hello fixture, seeded as the remote's base commit, with a build task that adds `FEATURE`. */
 /** `meter`, when given, is what every sandbox reads at its destroy. */
 /** `checkout`, when given, lays the fixture out as a checkout and returns the commit it is of, which the remote is seeded with (R36a). */
-export async function withIntegration<T>(prefix: string, body: (it: Integrating) => Promise<T>, meter?: MeterReading, checkout?: (dir: string) => string): Promise<T> {
+export async function withIntegration<T>(prefix: string, body: (it: Integrating) => Promise<T>, meter?: MeterReading, checkout?: (dir: string) => string | Promise<string>): Promise<T> {
   return withLine(prefix, async (rig) =>
-    withFakeGitHub(rig.dirs.artifacts, { token: TOKEN, ...(checkout === undefined ? {} : { commit: checkout(rig.dirs.artifacts) }) }, async (github, baseCommit) => {
+    withFakeGitHub(rig.dirs.artifacts, { token: TOKEN, ...(checkout === undefined ? {} : { commit: await checkout(rig.dirs.artifacts) }) }, async (github, baseCommit) => {
       const { GitHubIntegrator } = await api();
       const { StubSandboxProvider } = await import('@olympus-ai/sandbox');
       const specs: SandboxSpec[] = [];
@@ -182,7 +182,7 @@ export const INTEGRATE_MERGES_THE_VERIFIED_TREE = runtime({
 export const FAILED_INTEGRATION_NEVER_REPORTS_DONE = runtime({
   id: 'I5.failed-integration-never-reports-done',
   title:
-    "a merge GitHub refuses, a base branch that moved after the run was verified, an accepted empty change, and a base commit that is not the base the run was built over each stop the run at integrate with nothing merged; none stands passed",
+    "a merge GitHub refuses, a base branch that moved after the run was verified, an accepted empty change, and a base commit that is not the base the run was built over each stop the run with nothing merged, the last at admission, before anything runs; none stands passed",
   run: async () => {
     const { runStanding } = await api();
     const { LocalVault } = await import('@olympus-ai/vault');
@@ -193,12 +193,15 @@ export const FAILED_INTEGRATION_NEVER_REPORTS_DONE = runtime({
     };
     const rejects = async (work: Promise<unknown>, pattern: RegExp, context: string): Promise<void> => {
       let threw: unknown;
+      let resolved: unknown;
       try {
-        await work;
+        resolved = await work;
       } catch (error) {
         threw = error;
       }
-      if (!(threw instanceof Error) || !pattern.test(threw.message)) throw new Error(`I5: ${context} did not stop the run at integrate: ${String(threw)}`);
+      if (!(threw instanceof Error) || !pattern.test(threw.message)) {
+        throw new Error(`I5: ${context} did not stop the run at integrate: ${threw === undefined ? `it resolved as ${JSON.stringify(resolved).slice(0, 600)}` : String(threw)}`);
+      }
     };
 
     await withIntegration('i1b-refused-', async (it) => {
@@ -235,8 +238,11 @@ export const FAILED_INTEGRATION_NEVER_REPORTS_DONE = runtime({
           return result;
         },
       });
+      // The manifest as the request commits it, and the remote moved to that commit, as a person pushes what they run (D-R36a-10).
+      const req = await it.rig.request({ ...base, sandbox });
+      if ((await it.github.seed(it.rig.dirs.artifacts)) !== req.baseCommit) throw new Error('I5 control: the remote holds another commit than the run names');
       await rejects(
-        (async () => startRun(await it.rig.request({ ...base, sandbox }, { baseCommit: it.baseCommit })))(),
+        startRun(req),
         /accepted no change/u,
         'an accepted empty change',
       );
@@ -245,16 +251,17 @@ export const FAILED_INTEGRATION_NEVER_REPORTS_DONE = runtime({
     });
 
     await withIntegration('i1b-drift-', async (it) => {
-      // The working copy the run is admitted from differs from the commit it names.
+      // The working copy the run is admitted from differs from the commit it names: refused at admission, before anything
+      // runs or is spent, since the base is read from the commit and a run file must be the bytes it holds (D-R36a-10).
       await writeFile(join(it.rig.dirs.artifacts, 'spec.md'), '# hello\n\nNot what the base commit holds.\n');
       const { startRun } = await api();
-      await rejects(
-        (async () => startRun(await it.rig.request(await it.components(), { baseCommit: it.baseCommit })))(),
-        /not the base the run was verified over/u,
-        'a base commit that is not the admitted base',
-      );
+      const drifted = await startRun(await it.rig.request(await it.components(), { baseCommit: it.baseCommit }));
+      if (drifted.ok || drifted.reason !== 'invalid-request' || !drifted.problems.some((p) => p.code === 'differs-from-commit')) {
+        throw new Error(`I5: a working copy that differs from its base commit was answered ${JSON.stringify(drifted)}, not refused at admission`);
+      }
       if (it.github.hasBranch(`factory/${it.rig.runId}`)) throw new Error('I5: a branch was pushed over a base that is not the verified one');
-      await notPassed(it, 'a drifted base');
+      // Refused before its first state: nothing ran, so there is no run to stand passed.
+      if (await it.rig.state().then(() => true, () => false)) throw new Error('I5: a run refused at admission left run state behind');
     });
   },
 });

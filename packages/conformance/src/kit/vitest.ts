@@ -6,7 +6,7 @@
  *
  *     invariantTest('I1.mount-rejects-second-rw', 'a second rw mount is refused', async () => { ... });
  */
-import { test } from 'vitest';
+import { test, type TestContext } from 'vitest';
 import { INVARIANT_IDS, type AssertionId, type ClaimId, type InvariantId } from './types.js';
 
 /** An invariant assertion: `I<n>.` and a kebab-case name. */
@@ -47,7 +47,8 @@ export function validateAssertionId(id: string): asserts id is AssertionId | Cla
   }
 }
 
-export function invariantTest(id: string, title: string, fn: () => void | Promise<void>): void {
+/** `fn` is given vitest's test context, so a test can annotate what it measured without touching a stream (I9). */
+export function invariantTest(id: string, title: string, fn: (context: TestContext) => void | Promise<void>): void {
   validateAssertionId(id);
   test(`[${id}] ${title}`, fn);
 }

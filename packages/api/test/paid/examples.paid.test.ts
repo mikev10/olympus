@@ -87,12 +87,6 @@ beforeAll(async () => {
     outcome = await resumeRun({ runId, components });
   }
   usage = await readUsage(components.vault, await components.vault.readRunState(runId));
-  const cost = usage.reduce((sum, r) => sum + (r.reading.kind === 'metered' ? r.reading.costUsd : 0), 0);
-  // The measured cost, for the pull request (R36a acceptance).
-  console.log(`paid example: ${outcome.ok ? 'passed' : `stopped (${JSON.stringify(outcome).slice(0, 400)})`}; gates ${gates.join(', ')}; cost $${cost.toFixed(4)} over ${String(usage.filter((r) => r.reading.kind === 'metered').length)} metered calls`);
-  for (const r of usage.filter((u) => u.reading.kind === 'metered')) {
-    console.log(`  ${r.taskId} at ${r.station}: ${JSON.stringify(r.reading)}`);
-  }
 }, 2_400_000);
 
 afterAll(async () => {
@@ -103,7 +97,11 @@ afterAll(async () => {
 invariantTest(
   'I5.shipped-example-merges-on-the-real-driver',
   "the shipped examples, unmodified, drafting the spec from the README's intent, run on the composed host with the Claude Code driver in every seat through each gate a person holds at L1 — the drafted spec, the tests, and the merge — to a pull request merged into the base branch; paid (#145, #148 to #152, #154)",
-  () => {
+  async ({ annotate }) => {
+    // The measured cost, for the pull request (R36a acceptance), as a test annotation the reporter prints.
+    const metered = usage.filter((r) => r.reading.kind === 'metered');
+    const cost = metered.reduce((sum, r) => sum + (r.reading.kind === 'metered' ? r.reading.costUsd : 0), 0);
+    await annotate(`cost $${cost.toFixed(4)} over ${String(metered.length)} metered calls; gates ${gates.join(', ')}; ${metered.map((r) => `${r.taskId}@${r.station} ${JSON.stringify(r.reading)}`).join('; ')}`);
     expect(outcome, JSON.stringify(outcome).slice(0, 2000)).toMatchObject({ ok: true });
     expect(gates).toEqual(['spec:1', 'test-design:1', 'integrate:1']);
     const [pull] = github.pulls();

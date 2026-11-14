@@ -6,7 +6,7 @@ import { R4_I5 } from './parallel.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { R17_I5 } from './security.js';
 import { OVER_REQUEST_REFUSED_AT_ADMISSION, STATION_MISSING_CAPABILITY_REFUSED, TASK_ATTEMPTS_ARE_BOUNDED } from './line-assertions.js';
-import { doingTheWork, withLine } from './line.js';
+import { doingTheWork, RIG_TOOLS, withLine } from './line.js';
 import { UNSUPPORTED_STACK_IS_LOUD } from './adapters.js';
 import { HTTP_PROBE_ABSENT_IS_NAMED } from './http.js';
 import {
@@ -151,7 +151,8 @@ export const I5: InvariantEntry = {
             import('@olympus-ai/sandbox'),
             import('@olympus-ai/vault'),
           ]);
-          const stub = new core.StubDriver();
+          // The stub as it is, declaring the tools the rig grants and nothing else of its own, so it is still named StubDriver (D-R36a-07).
+          const stub = Object.assign(Object.create(new core.StubDriver()) as InstanceType<typeof core.StubDriver>, { declaredTools: () => RIG_TOOLS });
           const stubSandbox = new sandbox.StubSandboxProvider();
           const builder = doingTheWork(stub, stubSandbox);
           const components = api.buildGraph({

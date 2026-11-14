@@ -36,7 +36,7 @@ export interface CommitOptions {
 }
 
 function git(dir: string, args: readonly string[], autocrlf = 'false'): string {
-  return execFileSync('git', ['-C', dir, '-c', `core.autocrlf=${autocrlf}`, '-c', 'core.safecrlf=false', '-c', 'core.fsmonitor=false', ...args], {
+  return execFileSync('git', ['-C', dir, '-c', `core.autocrlf=${autocrlf}`, '-c', 'core.safecrlf=false', '-c', 'core.fsmonitor=false', '-c', 'core.longpaths=true', ...args], {
     encoding: 'utf8',
     env: { ...process.env, ...IDENTITY },
     stdio: ['ignore', 'pipe', 'pipe'],

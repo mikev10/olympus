@@ -9879,3 +9879,17 @@ Started on `v2` at abe344a, after the amendment (#156). Issues #145, #148 to
   the README's flow); letting an absent artifact pass `tamperedIn` (a check
   over a tree without its acceptance tests).
 - **Reverse:** drop `overlayArtifacts` and require committed artifacts.
+
+### D-R36a-11: what moved from `integrate` to admission
+
+- **Found:** `I5.failed-integration-never-reports-done` drove a working copy
+  whose `spec.md` differed from its base commit to `integrate`, where the
+  base comparison refused it. With the base read from the commit and the run
+  files held to it (D-R36a-10), that run is refused at admission, before
+  anything runs. The assertion now requires that refusal and that no run
+  state was left; its other three cases still stop at `integrate`.
+- **Also:** the paid example case reports its measured cost as a vitest
+  annotation, since the I9 scan refuses `console` anywhere in `api`; the
+  conformance kit's `invariantTest` now types the test context it already
+  passed. Fixture commits set `core.longpaths=true` for Windows.
+- **Reverse:** restore the `integrate` expectation with D-R36a-10's reversal.
