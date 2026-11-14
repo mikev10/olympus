@@ -20,5 +20,5 @@ R36a: the shipped example runs on the real driver.
   sends `attempt-failed`; `createApiServer` takes a `log` sink (#149).
 - The drafter's request names `.drafts/<run id>/` (#151).
 - The Claude Code CLI is pinned at 2.1.310, which calls every tier's model;
-  its tool inventory gains `DesignSync`, `Monitor`, and `PushNotification`
+  its tool inventory gains `Monitor`
   (#152).

@@ -9942,3 +9942,16 @@ The external reviews and their triage are in `docs/reviews/2026-11-14-R36a-first
 - **Recorded:** codex-2. A verify-time sandbox exec failure is not shown as `lastFailure`. Covering it needs a contract change to the decision causes, so it is filed as #158.
 - **Rejected:** gemini-1. The walk sees only the runtime-built artifacts, so no node can carry a requester's `path`/`sha256`.
 - **Reverse gemini-3's leave-it-alone choice:** discard in the `BaseExists` arm, which lets a retry clear a stale base and also lets it delete a concurrent admission's base.
+
+### D-R36a-15: two tools the first paid run showed the CLI does not offer
+
+- **Found in CI:** the first `run-driver` run on #157 failed
+  `I4.driver-tool-inventory-validated`. A session granted the whole
+  declaration did not offer `DesignSync` or `PushNotification`, although a
+  2.1.310 probe had listed them. This is D-P5-17's finding again, for one
+  more tool.
+- **Chosen:** both leave `DECLARED_TOOLS`, by D-P5-17's rule: declare only
+  what a session reliably offers. `Monitor` stays, since the session offered
+  it. Policy that grants either is refused at admission, before anything
+  runs.
+- **Reverse:** add them back, and the inventory assertion fails again.
