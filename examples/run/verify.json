@@ -7,6 +7,11 @@
     {
       "id": "secret-scan", "kind": "secret-scan", "required": true, "timeoutMs": 60000, "config": null,
       "image": "zricethezav/gitleaks@sha256:0e99e8821643ea5b235718642b93bb32486af9c8162c8b8731f7cbdc951a7f46"
+    },
+    {
+      "id": "static-analysis", "kind": "static-analysis", "required": true, "timeoutMs": 120000,
+      "config": "rules:\n  - id: no-eval\n    languages: [javascript, typescript]\n    severity: ERROR\n    message: eval runs a string as code\n    pattern: eval($X)\n",
+      "image": "semgrep/semgrep@sha256:30e6afa99ebd8e7b4115d4904898108eb4bf77025819e9263f09cf14e6f6e549"
     }
   ]
 }

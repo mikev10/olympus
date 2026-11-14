@@ -33,10 +33,23 @@ import type { OtherCheckSpec } from '@olympus-ai/integrity';
 import { StubSandboxProvider, type SandboxProvider } from '@olympus-ai/sandbox';
 import { StubVault } from '@olympus-ai/vault';
 import { buildGraph, isBuilt, localWorkspaceStore, parseGraph, worstCaseCost, type BuiltGraph, type GraphParts, type RunRequest, type WorkspaceStore } from '../src/index.js';
+import { commitFixture } from '@olympus-ai/conformance/git';
 import { DelegatingDriver } from './wrappers.js';
 
 export const HELLO = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'hello');
+/**
+ * A commit no fixture has: a request that names it is refused at admission,
+ * since the base is read from the commit (D-R36a-04). `runRequest` commits
+ * the workspace and names that commit instead, unless a test names one.
+ */
 export const BASE_COMMIT = '0'.repeat(40);
+
+/**
+ * The tools the fixture policy grants, by the names the Claude Code driver
+ * declares. A test driver that declares none is wrapped to declare these, so
+ * admission's tool check (D-R36a-07) passes over a stub that runs no tool.
+ */
+export const TEST_TOOLS: readonly string[] = ['Read', 'Write'];
 export const BUILDER = 'builder' as RoleId;
 export const REVIEWER = 'reviewer' as RoleId;
 
@@ -128,7 +141,7 @@ function scope(stations: CapabilityScope['stations'], tier: ModelTier): Capabili
   return {
     stations,
     writableGlobs: ['**'],
-    tools: ['read', 'write'],
+    tools: [...TEST_TOOLS],
     network: { egress: 'none' },
     tier,
     tierByStation: {},
@@ -259,7 +272,7 @@ export function stubComponents(workspace: string, overrides: Partial<GraphParts>
   const driver = doingTheWork(overrides.driver ?? stub, sandbox);
   // One stub in both seats, as before the builder did the work: a reviewer it never writes as.
   const reviewer = overrides.driver === undefined ? driver : stub;
-  return buildGraph({ vault: new StubVault(workspace), sandbox, reviewer, workspaces: storeFor(workspace), scanners: STAND_IN_SCANNERS, ...overrides, driver });
+  return declaringAll(buildGraph({ vault: new StubVault(workspace), sandbox, reviewer, workspaces: storeFor(workspace), scanners: STAND_IN_SCANNERS, ...overrides, driver }));
 }
 
 /**
@@ -272,7 +285,8 @@ export function stubComponents(workspace: string, overrides: Partial<GraphParts>
 export function runRequest(runId: RunId, workspace: string, parts: GraphParts, overrides: Partial<RunRequest> = {}): RunRequest {
   const req: RunRequest = {
     runId,
-    baseCommit: BASE_COMMIT,
+    // The workspace as it stands, committed, so the base admission reads is the fixture (D-R36a-04).
+    baseCommit: Object.hasOwn(overrides, 'baseCommit') ? BASE_COMMIT : commitFixture(workspace),
     requestedLevel: 1,
     workspace,
     artifacts: ARTIFACTS,
@@ -287,8 +301,47 @@ export function runRequest(runId: RunId, workspace: string, parts: GraphParts, o
 
 /** `graph` with its builder doing the fixture's work through the graph's own sandbox, whichever the test put there. */
 function working(graph: BuiltGraph): BuiltGraph {
-  const driver = doingTheWork(graph.driver, graph.sandbox);
-  return { ...graph, driver, reviewer: UNWRAPPED.get(graph.reviewer) === UNWRAPPED.get(graph.driver) && UNWRAPPED.has(graph.reviewer) ? driver : graph.reviewer };
+  const driver = doingTheWork(UNDECLARED.get(graph.driver) ?? graph.driver, graph.sandbox);
+  const given = UNDECLARED.get(graph.reviewer) ?? graph.reviewer;
+  const reviewer = UNWRAPPED.get(given) === UNWRAPPED.get(driver) && UNWRAPPED.has(given) ? driver : given;
+  return declaringAll({ ...graph, driver, reviewer });
+}
+
+/** `graph` with every seat's driver `declaring` the test tools. */
+function declaringAll(graph: BuiltGraph): BuiltGraph {
+  const drafting = graph.drafting ?? null;
+  return {
+    ...graph,
+    driver: declaring(graph.driver),
+    reviewer: declaring(graph.reviewer),
+    ...(drafting === null ? {} : {
+      drafting: {
+        specDrafter: declaring(drafting.specDrafter), specCritic: declaring(drafting.specCritic),
+        testDrafter: declaring(drafting.testDrafter), testCritic: declaring(drafting.testCritic),
+      },
+    }),
+  };
+}
+
+const DECLARING = new WeakMap<Driver, Driver>();
+/** Each declaring wrapper, back to the driver it wraps, so wrapping again starts from the driver itself. */
+const UNDECLARED = new WeakMap<Driver, Driver>();
+
+/** `driver`, declaring `TEST_TOOLS` when it declares no tool itself; every other member is its own. */
+export function declaring<D extends Driver>(driver: D): D {
+  if (driver.declaredTools().length > 0) return driver;
+  const known = DECLARING.get(driver);
+  if (known !== undefined) return known as D;
+  const wrapped = new Proxy(driver, {
+    get(target, key, receiver) {
+      if (key === 'declaredTools') return () => TEST_TOOLS;
+      const value = Reflect.get(target, key, receiver) as unknown;
+      return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+    },
+  });
+  DECLARING.set(driver, wrapped);
+  UNDECLARED.set(wrapped, driver);
+  return wrapped;
 }
 
 function approvedFigure(req: RunRequest): number | null {

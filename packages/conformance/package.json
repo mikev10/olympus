@@ -11,6 +11,7 @@
     ".": "./src/index.ts",
     "./vitest": "./src/kit/vitest.ts",
     "./fake-github": "./src/kit/fake-github.ts",
+    "./git": "./src/kit/git.ts",
     "./reporter": "./src/kit/reporter.ts"
   },
   "sideEffects": false,

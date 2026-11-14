@@ -372,7 +372,7 @@ export function securityProblems(
   });
   for (const kind of ['secret-scan', 'static-analysis'] as const) {
     if (declared[kind] !== null && !pinned.has(kind)) {
-      report('manifest.checks', 'missing', `manifest.checks pins no ${kind} check; every run is scanned for it (R17)`);
+      report('manifest.checks', 'missing', `manifest.checks pins no ${kind} check; every run is scanned for it`);
     }
   }
   return problems;

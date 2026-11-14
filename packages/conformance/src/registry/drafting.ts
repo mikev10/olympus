@@ -40,7 +40,7 @@ import type { CriticRecord, DraftLockRecord, DraftRecord, EnforcementDecision, E
 import { compileError, runtime } from '../kit/assert.js';
 import type { LocalAssertion } from '../kit/types.js';
 import { around } from './line-assertions.js';
-import { ARTIFACTS, lineScope, linePolicy, readRecord, refusalOf, withLine, type LineRig } from './line.js';
+import { ARTIFACTS, lineScope, linePolicy, readRecord, refusalOf, RIG_TOOLS, withLine, type LineRig } from './line.js';
 
 const api = async () => import('@olympus-ai/api');
 const core = async () => import('@olympus-ai/core');
@@ -161,7 +161,7 @@ async function seat(options: SeatOptions): Promise<ObservedSeat> {
     workspaces,
     provenanceId: () => inner.provenanceId(),
     capabilities: () => inner.capabilities(),
-    declaredTools: () => inner.declaredTools(),
+    declaredTools: () => RIG_TOOLS,
     resolveModel: () => model,
     relayRequest: () => null,
     runTask: async (req: TaskRequest): Promise<TaskResult> => {

@@ -6,15 +6,17 @@
  * which drafts its spec from an intent. Both at L1, each approving the
  * worst-case cost the first create was refused with.
  */
-import { cp, mkdtemp } from 'node:fs/promises';
+import { cp, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { createApiServer, SCANNERS, type ApiServer } from '../src/index.js';
+import { hashedLockfile } from '@olympus-ai/adapters';
 import { StrictPolicyEngine, StubDriver, type RoleId } from '@olympus-ai/core';
 import { loadPolicyFile } from '../src/policy-file.js';
-import { BASE_COMMIT, removeWorkspace, stubComponents } from './harness.js';
+import { commitFixture } from '@olympus-ai/conformance/git';
+import { removeWorkspace, stubComponents } from './harness.js';
 
 const EXAMPLES = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'examples');
 const TOKEN = 't'.repeat(40);
@@ -27,6 +29,9 @@ beforeEach(async () => {
   // The user's repository: the run files copied in, as the README says to.
   workspace = await mkdtemp(join(tmpdir(), 'r35-examples-'));
   await cp(join(EXAMPLES, 'run'), workspace, { recursive: true });
+  // A JavaScript repository, as most the README addresses are: its stack is scanned for static analysis (#145).
+  await writeFile(join(workspace, 'package.json'), JSON.stringify({ name: 'user-repo', private: true }));
+  await writeFile(join(workspace, 'package-lock.json'), hashedLockfile('user-repo', []));
   server = createApiServer({
     // The host's own scanners, so the manifest's pinned secret-scan image is the one checked; stub drivers in the
     // drafting seats, since the host seats real ones and this proves the files, not the models.
@@ -59,7 +64,7 @@ async function admit(body: Record<string, unknown>): Promise<{ status: number; b
 describe('the shipped examples', () => {
   test('admit an L1 run with every file supplied', async () => {
     const created = await admit({
-      workspace, baseCommit: BASE_COMMIT, requestedLevel: 1,
+      workspace, baseCommit: commitFixture(workspace), requestedLevel: 1,
       artifacts: { spec: ['spec.md'], acceptanceTests: ['acceptance.md'], verificationManifest: 'verify.json', taskGraph: 'graph.json', specParts: { security: 'security.json' } },
     });
     expect(created.status, JSON.stringify(created.body)).toBe(201);
@@ -67,7 +72,7 @@ describe('the shipped examples', () => {
 
   test('admit the smallest L1 run: the spec drafted from an intent', async () => {
     const created = await admit({
-      workspace, baseCommit: BASE_COMMIT, requestedLevel: 1, intent: 'Add hello.txt at the repository root, saying hello.',
+      workspace, baseCommit: commitFixture(workspace), requestedLevel: 1, intent: 'Add hello.txt at the repository root, saying hello.',
       artifacts: { spec: 'draft', acceptanceTests: ['acceptance.md'], verificationManifest: 'verify.json', taskGraph: 'graph.json' },
     });
     expect(created.status, JSON.stringify(created.body)).toBe(201);

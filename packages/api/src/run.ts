@@ -72,12 +72,12 @@ import type {
   TaskId,
   VaultRef,
 } from '@olympus-ai/core';
-import { isRunTemplate } from '@olympus-ai/core';
+import { isRunTemplate, validateToolGrants } from '@olympus-ai/core';
 import { adapterAdmission, buildAdapterSet, missingControls, type AdapterSet, type DependencyInstaller } from '@olympus-ai/adapters';
 import { compileRoles, readRepoInstructions, type RepoInstructionRefusal, type RoleFileRefusal } from '@olympus-ai/compiler';
 import type { CheckSpec } from '@olympus-ai/integrity';
 import type { SandboxProvider } from '@olympus-ai/sandbox';
-import type { AdmissionRecord, AdmissionRefusal, AdmittedArtifact, AdmittedManifest, AdmittedPlan, AdmittedSet, CriticRecord, DraftLockRecord, DraftRecord, EvidenceBundle, IntakeEntry, IntentRecord, ResumeRefusal, RubricRecord, RubricVersion, Vault } from '@olympus-ai/vault';
+import type { AdmissionRecord, AdmissionRefusal, AdmittedArtifact, AdmittedManifest, AdmittedPlan, AdmittedSet, AttemptFailure, CriticRecord, EnforcementDecision, DraftLockRecord, DraftRecord, EvidenceBundle, IntakeEntry, IntentRecord, ResumeRefusal, RubricRecord, RubricVersion, Vault } from '@olympus-ai/vault';
 import { repoInstructionsProblem } from '@olympus-ai/vault';
 import { readUsage, unsettledCalls, worstCaseCost, type WorstCaseCost } from './cost.js';
 import { estimateCost, type CostEstimate, type EstimateCell } from './outcomes.js';
@@ -94,7 +94,7 @@ import { parseSecurityPart, type SecurityPart, type SecurityScanners } from './s
 import { mergedCheckProblems, parseGraph, parseManifest, reproductionProblems, requestProblems, securityProblems, type RequestProblem } from './validate.js';
 import { suiteBindingProblems } from './verification.js';
 import { planInstall } from './install.js';
-import { basePath, discardRun, existsIn, snapshotBase, treeDigest, within, type WorkspaceStore } from './workspace.js';
+import { BaseRefusal, basePath, discardRun, existsIn, snapshotBase, treeDigest, within, type WorkspaceStore } from './workspace.js';
 
 export interface ComponentGraph {
   readonly vault: Vault;
@@ -252,6 +252,8 @@ export interface DriveHooks {
   readonly cancelRequested?: () => RunCancellation | null;
   /** Told of every committed state, in order. */
   readonly onCommit?: (state: RunState) => void;
+  /** Told of every failed attempt, after its record is stored (#149). */
+  readonly onAttemptFailed?: NonNullable<LineContext['onAttemptFailed']>;
   /** Input a declared source brought for a build task, which narrows the run first (D-R10-06). The HTTP service never sets it. */
   readonly inputFor?: NonNullable<LineContext['inputFor']>;
 }
@@ -791,6 +793,41 @@ async function likelyCost(components: ComponentGraph, worstCase: WorstCaseCost, 
 }
 
 /**
+ * A tool a seated role is granted that the driver its station seats does not
+ * declare, checked for every seat the worst case counts (I4, D-R36a-07).
+ * Policy validation accepts any tool name, and a driver refuses a grant it
+ * does not declare only when the task is driven, after the spend; here the
+ * run is refused before the estimate, naming the tool and the driver.
+ */
+function toolGrantRefusal(worstCase: WorstCaseCost, policy: Policy, components: ComponentGraph): Extract<RunOutcome, { reason: 'policy-refused' }> | undefined {
+  for (const task of worstCase.tasks) {
+    if (!isAgentStation(task.station)) continue;
+    const driver = driverOfTask(task, components);
+    if (driver === undefined) continue;
+    const resolved = engine.resolveCapabilities(task.role, task.station, policy);
+    // `worstCaseCost` resolved every one of these scopes, and throws where one does not.
+    if (!resolved.ok) throw new Error(`tool grants: role ${task.role} has no scope at ${task.station}: ${resolved.detail}`);
+    const verdict = validateToolGrants({ ...policy, roles: { [task.role]: resolved.scope } }, driver.declaredTools());
+    if (verdict.ok) continue;
+    const tools = verdict.ungranted.map((u) => `'${u.tool}'`).join(', ');
+    const declared = driver.declaredTools();
+    return {
+      ok: false,
+      reason: 'policy-refused',
+      station: task.station,
+      role: task.role,
+      refusal: {
+        ok: false,
+        reason: 'capability-missing',
+        detail: `role ${task.role} is granted ${tools} at ${task.station}, which the driver ${driver.id} does not declare; ` +
+          (declared.length === 0 ? 'it declares no tool' : `it declares ${declared.map((t) => `'${t}'`).join(', ')}`),
+      },
+    };
+  }
+  return undefined;
+}
+
+/**
  * A capability refusal at any station the run seats a driver at, checked
  * before anything is admitted, locked, or run (I5): `build`, `review`, and
  * each seat a drafting station holds (R19).
@@ -1062,11 +1099,10 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
   // from the locked spec, and any other run has no defect to reproduce (A-R16-04).
   const declared = reproductionProblems(admitted.admitted.checks, template === 'bug-fix', 'artifacts', true);
   if (declared.length > 0) return { ok: false, reason: 'invalid-request', problems: declared };
-  // Where the run's drafts are written; a workspace that already holds it would have them mixed with what it holds (R19).
+  // Where the run's approved drafts are written in the working copy; one that already holds it would mix them (R19).
   if (drafted.length > 0 && (await existsIn(req.workspace, `${DRAFT_DIR}/${req.runId}`))) {
     return { ok: false, reason: 'invalid-request', problems: [{ path: 'workspace', code: 'exists', message: `the workspace already holds ${DRAFT_DIR}/${req.runId}, where this run's drafts are written` }] };
   }
-
   const capability = capabilityRefusalFor(req.components, drafted);
   if (capability !== undefined) return { ok: false, reason: 'refused', at: capability.at, transition: capability.refusal, state: null };
   const remote = remoteEgress(policy.policy, req.components.integrator ?? null);
@@ -1108,10 +1144,10 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
     rubrics = read.rubrics;
   }
   const worstCase = worstCaseCost(admitted.admitted.graph, policy.policy, drafted);
-  if (req.requestedLevel > 0 && req.approvedCostUsd !== worstCase.usd) {
-    const likely = await likelyCost(req.components, worstCase, policy.policy);
-    return { ok: false, reason: 'cost-unapproved', requestedLevel: req.requestedLevel, worstCase, likely, approvedCostUsd: req.approvedCostUsd };
-  }
+  // A tool a seat is granted and its driver does not declare would refuse that seat's every call, after the
+  // spend was approved; it is refused here, before the estimate (I4, I5, #150).
+  const ungranted = toolGrantRefusal(worstCase, policy.policy, req.components);
+  if (ungranted !== undefined) return ungranted;
 
   const { vault } = req.components;
   if (await hasState(vault, req.runId)) {
@@ -1122,10 +1158,24 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
     };
   }
 
-  // The base is what every workspace is built from, so it is taken before anything is recorded,
-  // and discarded if admission refuses after it: a refusal leaves nothing behind.
+  // The base is what every workspace is built from: the tree of the base commit, never the working
+  // folder (D-R36a-04). It is taken before anything is recorded and before the cost estimate, so every
+  // refusal that reads it comes before the spend is approved (#145), and it is discarded if admission
+  // refuses after it: a refusal leaves nothing behind.
   const { workspaces } = req.components;
-  const baseTreeSha256 = await snapshotBase(workspaces, req.runId, req.workspace);
+  let baseTreeSha256: string;
+  try {
+    baseTreeSha256 = await snapshotBase(workspaces, req.runId, req.workspace, req.baseCommit);
+  } catch (error) {
+    await discardRun(workspaces, req.runId);
+    if (!(error instanceof BaseRefusal)) throw error;
+    return { ok: false, reason: 'invalid-request', problems: [{ path: 'baseCommit', code: 'unreadable', message: error.message }] };
+  }
+  // Where the drafters write, in trees copied from the base; a base that already holds it would mix them (R19).
+  if (drafted.length > 0 && (await existsIn(basePath(workspaces, req.runId), `${DRAFT_DIR}/${req.runId}`))) {
+    await discardRun(workspaces, req.runId);
+    return { ok: false, reason: 'invalid-request', problems: [{ path: 'baseCommit', code: 'exists', message: `the base commit already holds ${DRAFT_DIR}/${req.runId}, where this run's drafts are written` }] };
+  }
   // Drafted tests are bound at `test-design`, over the base with the draft in it (R19).
   const supplied = req.artifacts.acceptanceTests === 'draft' ? [] : req.artifacts.acceptanceTests;
   // What the base declares to install is read from its root before anything runs: a lockfile the runtime
@@ -1154,6 +1204,12 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
   if (!instructions.ok) {
     await discardRun(workspaces, req.runId);
     return { ok: false, reason: 'instructions-refused', refused: instructions.refused };
+  }
+  // Last of the refusals, so a person approves a figure only for a run nothing else refuses (#145).
+  if (req.requestedLevel > 0 && req.approvedCostUsd !== worstCase.usd) {
+    await discardRun(workspaces, req.runId);
+    const likely = await likelyCost(req.components, worstCase, policy.policy);
+    return { ok: false, reason: 'cost-unapproved', requestedLevel: req.requestedLevel, worstCase, likely, approvedCostUsd: req.approvedCostUsd };
   }
 
   const now = new Date().toISOString();
@@ -1761,7 +1817,11 @@ export interface DraftStanding {
  */
 export type RunStanding =
   | { readonly standing: 'passed' }
-  | { readonly standing: 'stopped'; readonly refusal: StationRefusal }
+  /**
+   * `lastFailure` is the last failed attempt of the task a retry park
+   * stopped, read from the Vault, or null for any other stop (#149).
+   */
+  | { readonly standing: 'stopped'; readonly refusal: StationRefusal; readonly lastFailure: LastFailure | null }
   | { readonly standing: 'awaiting-approval'; readonly key: ApprovalKey; readonly escalations: readonly string[]; readonly draft: DraftStanding | null }
   | { readonly standing: 'open' };
 
@@ -1790,7 +1850,35 @@ async function draftStanding(vault: Vault, state: RunState, station: DraftStatio
   };
 }
 
+/** A failed attempt as `status` and `events` show it. `untrustedDetail` is the CLI's or a container's text: shown, never prompted (I7). */
+export interface LastFailure {
+  readonly task: TaskId;
+  readonly station: StationId | null;
+  readonly decidedAt: string;
+  readonly failure: AttemptFailure;
+}
+
+/** The last recorded failed attempt of the task `refusal` parked for its retries, or null. */
+async function lastFailureOf(vault: Vault, runId: RunId, refusal: StationRefusal): Promise<LastFailure | null> {
+  if (refusal.reason !== 'parked' || refusal.cause !== 'retries-exhausted') return null;
+  let last: LastFailure | null = null;
+  for (const ref of await vault.readDecisions(runId)) {
+    const d = JSON.parse(new TextDecoder().decode(await vault.read(ref))) as EnforcementDecision;
+    if (d.decision.cause !== 'attempt-failed' || d.taskId !== refusal.task) continue;
+    if (last === null || d.decidedAt >= last.decidedAt) last = { task: d.taskId, station: d.station, decidedAt: d.decidedAt, failure: d.decision.failure };
+  }
+  return last;
+}
+
 export async function runStanding(vault: Vault, runId: RunId): Promise<{ state: RunState; standing: RunStanding; source: StandingSource }> {
+  const read = await standingOf(vault, runId);
+  if (read.standing.standing !== 'stopped') return { ...read, standing: read.standing };
+  return { ...read, standing: { ...read.standing, lastFailure: await lastFailureOf(vault, runId, read.standing.refusal) } };
+}
+
+type BareStanding = Exclude<RunStanding, { standing: 'stopped' }> | { readonly standing: 'stopped'; readonly refusal: StationRefusal };
+
+async function standingOf(vault: Vault, runId: RunId): Promise<{ state: RunState; standing: BareStanding; source: StandingSource }> {
   const state = await vault.readRunState(runId);
   const { record, policy } = await readAdmission(vault, state);
   // What was committed is read before what the workspace holds now. A cancellation, a halt, and the grant

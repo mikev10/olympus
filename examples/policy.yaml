@@ -29,12 +29,15 @@ approvals:
 
 # The seats a run fills, each a role file in the roles directory
 # (FACTORY_ROLES_DIR; examples/roles). A role acts only at its stations, writes
-# only its globs, uses only its tools, and spends only its budget.
+# only its globs, uses only its tools, and spends only its budget. Tool names
+# are the driver's own, case and all: the Claude Code driver declares Read,
+# Write, Edit, Bash, and the rest of its CLI's tools, and a run granting a
+# tool its seat's driver does not declare is refused at create.
 roles:
   builder:
     stations: [build, verify]
     writableGlobs: ["**"]          # narrow to the paths a change may touch, e.g. ["src/**", "test/**"]
-    tools: [read, write]
+    tools: [Read, Write]
     network: { egress: none }      # or a list of hosts, e.g. [registry.npmjs.org]
     tier: standard                 # fast, standard, or deep: the model size this seat asks for
     tierByStation: {}
@@ -42,6 +45,8 @@ roles:
     autonomyCeiling: 1
     triggerKinds: [human]
     # Per task. The worst-case cost a run must approve is summed from these.
+    # Cache reads count against maxTokens: a model reading the repository
+    # spends most of its tokens there.
     budget: { maxTokens: 200000, maxCostUsd: 1, maxWallClockMs: 600000 }
     sensitiveGrants: []
     narrowed: null
@@ -49,7 +54,7 @@ roles:
   reviewer:
     stations: [review]
     writableGlobs: ["**"]
-    tools: [read, write]
+    tools: [Read, Write]
     network: { egress: none }
     tier: deep
     tierByStation: {}
@@ -63,24 +68,26 @@ roles:
   # The four drafting seats, used only by a run that drafts its spec
   # (create --draft-spec) or its tests (--draft-tests). Delete them if no run
   # drafts. A drafting run also needs FACTORY_RUBRICS_DIR (examples/rubrics).
+  # A drafter reads the repository before it writes its draft, so each
+  # drafter gets twice the tokens of the other seats.
   spec-drafter:
     stations: [spec]
     writableGlobs: ["**"]
-    tools: [read, write]
+    tools: [Read, Write]
     network: { egress: none }
     tier: standard
     tierByStation: {}
     escalation: none
     autonomyCeiling: 1
     triggerKinds: [human]
-    budget: { maxTokens: 200000, maxCostUsd: 0.5, maxWallClockMs: 600000 }
+    budget: { maxTokens: 400000, maxCostUsd: 1, maxWallClockMs: 600000 }
     sensitiveGrants: []
     narrowed: null
     repoInstructions: false
   spec-critic:
     stations: [spec]
     writableGlobs: ["**"]
-    tools: [read, write]
+    tools: [Read, Write]
     network: { egress: none }
     tier: standard
     tierByStation: {}
@@ -94,21 +101,21 @@ roles:
   test-drafter:
     stations: [test-design]
     writableGlobs: ["**"]
-    tools: [read, write]
+    tools: [Read, Write]
     network: { egress: none }
     tier: standard
     tierByStation: {}
     escalation: none
     autonomyCeiling: 1
     triggerKinds: [human]
-    budget: { maxTokens: 200000, maxCostUsd: 0.5, maxWallClockMs: 600000 }
+    budget: { maxTokens: 400000, maxCostUsd: 1, maxWallClockMs: 600000 }
     sensitiveGrants: []
     narrowed: null
     repoInstructions: false
   test-critic:
     stations: [test-design]
     writableGlobs: ["**"]
-    tools: [read, write]
+    tools: [Read, Write]
     network: { egress: none }
     tier: standard
     tierByStation: {}
@@ -142,7 +149,7 @@ triggers:
 
 concurrency: { maxParallelTasks: 1, maxConflictRetries: 0 }
 
-# The registries the runtime's dependency install may reach (R34). Before any
+# The registries the runtime's dependency install may reach. Before any
 # check runs, the runtime installs the target's lockfile (package-lock.json or
 # pnpm-lock.yaml, every package pinned by hash) in a sandbox of its own, with
 # no lifecycle scripts, and the checks run over that install with no network.

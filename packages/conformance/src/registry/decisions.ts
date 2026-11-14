@@ -59,6 +59,7 @@ export type CauseKey =
   | 'relay-refused'
   | 'tier-escalated'
   | 'task-conflict'
+  | 'attempt-failed'
   | 'approval-rejected'
   | 'draft-sent-back'
   | 'draft-floor-applied'
@@ -88,6 +89,8 @@ export function keyOf(d: DecisionCause): CauseKey {
       return 'tier-escalated';
     case 'task-conflict':
       return 'task-conflict';
+    case 'attempt-failed':
+      return 'attempt-failed';
     case 'approval-rejected':
       return 'approval-rejected';
     case 'draft-sent-back':
@@ -384,6 +387,8 @@ export const DECISION_TABLE: Readonly<Record<CauseKey, Row>> = {
     const { startRun } = await api();
     // A directory where the base's CLAUDE.md would be: not a regular file, so the reader refuses it (A-R24-04).
     await mkdir(join(rig.dirs.artifacts, 'CLAUDE.md'), { recursive: true });
+    // Holding a file, so the commit the base is read from has the directory (D-R36a-04).
+    await writeFile(join(rig.dirs.artifacts, 'CLAUDE.md', 'notes.md'), 'a directory, not instructions');
     await startRun(await rig.request(await rig.components()));
     // Removed after, so the control admission that follows reads a base the reader accepts.
     await rm(join(rig.dirs.artifacts, 'CLAUDE.md'), { recursive: true });
@@ -774,6 +779,42 @@ export const DECISION_TABLE: Readonly<Record<CauseKey, Row>> = {
         throw new Error(`P14: a conflict was recorded as ${JSON.stringify(found)}`);
       }
     }),
+  },
+  // R36a: every failed attempt is recorded by the line with its source, layer, and trimmed text, before the retry it spends
+  // or the park it leads to, and the park names the last one's layer (#149, D-R36a-05).
+  'attempt-failed': {
+    kind: 'scenario',
+    run: async () => {
+      const { STATION_CONTRACTS } = await import('@olympus-ai/core');
+      const { runStanding, startRun } = await api();
+      await withLine('p14-attempt-', async (rig) => {
+        const refusal = Object.assign(new Error(`the CLI produced no session (exit code 1); stderr: ${'x'.repeat(600)}`), { name: 'DriverRefusal', layer: 'invocation' });
+        const components = await rig.components({ driver: await stubDriver({ failWith: refusal }) });
+        const parked = refusalOf(await startRun(await rig.request(components)), 'R36a attempt');
+        const failed = (await decisionsOf(rig, components.vault)).filter((d) => d.decision.cause === 'attempt-failed');
+        const retries = STATION_CONTRACTS.build.retry.max;
+        if (failed.length !== retries + 1) throw new Error(`R36a: ${String(retries + 1)} failed attempts were recorded as ${String(failed.length)}`);
+        // Recorded in order; read back in any, so sorted by the count each carries.
+        failed.sort((a, b) => (a.decision.cause === 'attempt-failed' ? a.decision.failure.retries : 0) - (b.decision.cause === 'attempt-failed' ? b.decision.failure.retries : 0));
+        for (const [i, d] of failed.entries()) {
+          if (d.decision.cause !== 'attempt-failed' || d.decision.decidedBy !== 'line' || d.taskId !== HELLO_TASK || d.station !== 'build') throw new Error(`R36a: recorded as ${JSON.stringify(d)}`);
+          const { failure } = d.decision;
+          if (failure.source !== 'driver' || failure.layer !== 'invocation' || failure.retries !== i + 1) throw new Error(`R36a: the failure was read as ${JSON.stringify(failure)}`);
+          if (!failure.untrustedDetail.startsWith('the CLI produced no session (exit code 1)') || failure.untrustedDetail.length > 401) {
+            throw new Error(`R36a: the failure's text was kept as ${String(failure.untrustedDetail.length)} characters starting ${JSON.stringify(failure.untrustedDetail.slice(0, 60))}`);
+          }
+        }
+        if (parked.transition.reason !== 'parked' || !parked.transition.message.includes("the last attempt failed at the driver's invocation layer")) {
+          throw new Error(`R36a: the park does not name the last attempt's cause: ${JSON.stringify(parked.transition)}`);
+        }
+        // What `status` and `events` show: the stopped standing carries the last failure, read from the Vault.
+        const { standing } = await runStanding(components.vault, rig.runId);
+        if (standing.standing !== 'stopped' || standing.lastFailure?.task !== HELLO_TASK || standing.lastFailure.failure.retries !== retries + 1
+          || standing.lastFailure.failure.layer !== 'invocation') {
+          throw new Error(`R36a: the stopped standing does not show the last failure: ${JSON.stringify(standing)}`);
+        }
+      });
+    },
   },
   'tier-escalated': {
     kind: 'scenario',

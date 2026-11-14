@@ -42,12 +42,12 @@ const SECOND_INPUT = 'r10-second-input-from-another-source';
 
 /** What a role keeps once narrowed: read only, no network, at most `ceiling`. */
 function narrowTo(ceiling: 0 | 1 | 2): NarrowedScope {
-  return { tools: ['read'], network: { egress: 'none' }, autonomyCeiling: ceiling };
+  return { tools: ['Read'], network: { egress: 'none' }, autonomyCeiling: ceiling };
 }
 
 /** A role's full scope here: two tools and one host, so a narrowing has something to take away. */
 function wide(scope: CapabilityScope, narrowed: NarrowedScope | null, grants: string[] = []): CapabilityScope {
-  return { ...scope, tools: ['read', 'write'], network: { egress: [HOST] }, narrowed, sensitiveGrants: grants };
+  return { ...scope, tools: ['Read', 'Write'], network: { egress: [HOST] }, narrowed, sensitiveGrants: grants };
 }
 
 /** The line's two roles, wide, each with `narrowed` (or none), and the builder granted `grants`. */
@@ -143,7 +143,7 @@ async function history(rig: LineRig): Promise<RunState[]> {
 function withinNarrowed(specs: readonly SandboxSpec[], requests: readonly TaskRequest[], context: string): void {
   const wideSpec = specs.find((s) => s.egress.mode !== 'deny-all' || s.egress.allow.includes(HOST));
   if (wideSpec !== undefined) throw new Error(`${context}: a sandbox was provisioned with egress ${JSON.stringify(wideSpec.egress)} after the run narrowed`);
-  const wideRequest = requests.find((r) => r.tools.some((t) => t !== 'read'));
+  const wideRequest = requests.find((r) => r.tools.some((t) => t !== 'Read'));
   if (wideRequest !== undefined) throw new Error(`${context}: task ${wideRequest.taskId} was handed the tools ${JSON.stringify(wideRequest.tools)} after the run narrowed`);
 }
 
@@ -169,7 +169,7 @@ export const NARROWED_SCOPE_NO_WIDER: LocalAssertion = runtime({
     const control = validatePolicyDocument(doc(narrowTo(1), ['secrets']));
     if (!control.ok) throw new Error(`R10 control: a narrowed scope within its role's was refused: ${JSON.stringify(control.defects)}`);
     const cases: Array<[string, NarrowedScope | null, string[]]> = [
-      ['a tool the role lacks', { ...narrowTo(1), tools: ['read', 'shell'] }, []],
+      ['a tool the role lacks', { ...narrowTo(1), tools: ['Read', 'shell'] }, []],
       ['a host the role cannot reach', { ...narrowTo(1), network: { egress: [HOST, 'elsewhere.example.test'] } }, []],
       ['a ceiling above the role', narrowTo(2), []],
       ['an undeclared class', narrowTo(1), ['keys']],

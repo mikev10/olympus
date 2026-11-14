@@ -14,9 +14,9 @@
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { isAbsolute } from 'node:path';
-import { isApprovalKey, isRunTemplate, type CandidateId, type RunCancellation, type RunId, type RunState } from '@olympus-ai/core';
+import { isApprovalKey, isRunTemplate, type CandidateId, type RunCancellation, type RunId, type RunState, type TaskId } from '@olympus-ai/core';
 import { MAX_DELIVERY_BYTES } from '@olympus-ai/triggers';
-import { DISMISSAL_CAUSES, UNSUBSCRIBED_BUCKET, isNoRunState, type CandidateRecord, type DismissalCause, type IntakeEntry } from '@olympus-ai/vault';
+import { DISMISSAL_CAUSES, UNSUBSCRIBED_BUCKET, isNoRunState, type AttemptFailure, type CandidateRecord, type DismissalCause, type IntakeEntry } from '@olympus-ai/vault';
 import { Intake, type DeliveryOutcome, type SecretSource } from '../intake.js';
 import { startSchedules, type Scheduler } from '../schedule.js';
 import { NightlyJobs, type NightlyTarget } from '../nightly.js';
@@ -58,6 +58,18 @@ export interface ApiServerOptions {
    * route is refused: a server over stub components has no repository to scan.
    */
   readonly readiness?: ReadinessScanner | null;
+  /**
+   * Where the service writes one line per failed attempt, for the host to
+   * log (#149, D-R36a-06). The service touches no stream itself (I9).
+   */
+  readonly log?: (line: string) => void;
+}
+
+/** One line a failed attempt is logged as. Control characters in the failure's text are spaced out, so it stays one line. */
+export function attemptLine(runId: RunId, task: TaskId, failure: AttemptFailure): string {
+  // eslint-disable-next-line no-control-regex
+  const detail = failure.untrustedDetail.replace(/[\u0000-\u001f\u007f]+/gu, ' ');
+  return `run ${runId} task ${task}: attempt failed (${failure.source} ${failure.layer}, retry ${String(failure.retries)}): ${detail}`;
 }
 
 export interface ApiServer {
@@ -360,6 +372,10 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
     const hooks: DriveHooks = {
       cancelRequested: () => entry.cancel,
       onCommit: (state) => { publish(entry, { event: 'state', data: state }); },
+      onAttemptFailed: (task, failure) => {
+        publish(entry, { event: 'attempt-failed', data: { task, failure } });
+        options.log?.(attemptLine(runId, task, failure));
+      },
     };
     entry.drive = start(hooks)
       .then((outcome): DriveEnd => ({ kind: 'outcome', outcome }), (error: unknown): DriveEnd => ({ kind: 'error', message: describe(error) }))
