@@ -54,9 +54,32 @@ export function textOf(module: PythonModule, node: SyntaxNode): string {
   return module.text.slice(node.from, node.to);
 }
 
-/** Source text with its whitespace collapsed: the form an assertion's argument is compared in. */
+const LITERALS = new Set(['String', 'FormatString']);
+
+/**
+ * Source text with its whitespace collapsed outside string literals and kept
+ * as written inside them: the form an assertion's argument is compared in.
+ * `"a  b"` and `"a b"` are different values, and an expected value or a
+ * `match` pattern changed by its spacing alone is a changed assertion
+ * (codex-5).
+ */
 export function flatText(module: PythonModule, node: SyntaxNode): string {
-  return textOf(module, node).replace(/\s+/gu, ' ').trim();
+  const spans: Array<[number, number]> = [];
+  node.toTree().iterate({
+    enter: (ref) => {
+      if (!LITERALS.has(ref.name)) return undefined;
+      spans.push([node.from + ref.from, node.from + ref.to]);
+      return false;
+    },
+  });
+  let out = '';
+  let at = node.from;
+  for (const [from, to] of spans) {
+    out += module.text.slice(at, from).replace(/\s+/gu, ' ') + module.text.slice(from, to);
+    at = to;
+  }
+  out += module.text.slice(at, node.to).replace(/\s+/gu, ' ');
+  return out.trim();
 }
 
 /** Every direct child, in order. */

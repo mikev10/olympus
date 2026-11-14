@@ -61,6 +61,23 @@ function numberOf(module: PythonModule, node: SyntaxNode | undefined): number | 
 
 const APPROX = new Set(['pytest.approx', 'approx']);
 
+/** Keywords that never change what an assertion accepts: a failure message. */
+const MESSAGE_KEYWORDS = new Set(['msg']);
+
+/**
+ * Every keyword argument the reading does not model, `name=value`, sorted by
+ * name: one added, removed, or changed is then a change to the assertion,
+ * never dropped (codex-5).
+ */
+function otherKeywords(module: PythonModule, keyword: ReadonlyMap<string, SyntaxNode>, modelled: ReadonlySet<string>): string[] {
+  return [...keyword.entries()]
+    .filter(([name]) => !modelled.has(name) && !MESSAGE_KEYWORDS.has(name))
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([name, value]) => `${name}=${flatText(module, value)}`);
+}
+
+const APPROX_MODELLED = new Set(['rel', 'abs']);
+
 /**
  * `x == pytest.approx(v, rel=r, abs=a)`. pytest's default band is `rel=1e-6`;
  * with only `abs` given, `rel` is not applied at all. A tolerance is one
@@ -74,14 +91,19 @@ function approxAssertion(module: PythonModule, operator: string, subject: Syntax
   if (args === undefined || expected === undefined) return undefined;
   const rel = args.keyword.get('rel') ?? args.positional[1];
   const abs = args.keyword.get('abs') ?? args.positional[2];
+  // `nan_ok` loosens what equals, by keyword or as the fourth argument. It goes in the operator, beside the band, since a
+  // tolerance comparison reads only the subject and the value: `nan_ok` given, dropped, or changed is then reported (codex-5).
+  const nanOk = args.positional[3];
+  const extra = [...otherKeywords(module, args.keyword, APPROX_MODELLED), ...(nanOk === undefined ? [] : [`nan_ok=${flatText(module, nanOk)}`]), ...args.positional.slice(4).map((p) => flatText(module, p))];
+  const also = extra.length === 0 ? '' : ` [${extra.join('; ')}]`;
   const base = [flatText(module, subject), flatText(module, expected)];
   const relValue = numberOf(module, rel);
   const absValue = numberOf(module, abs);
-  if (rel === undefined && abs === undefined) return { file, line, operator: `${operator} approx`, args: base, tolerance: 1e-6 };
-  if (abs === undefined && relValue !== undefined) return { file, line, operator: `${operator} approx`, args: base, tolerance: relValue };
-  if (rel === undefined && absValue !== undefined) return { file, line, operator: `${operator} approx abs`, args: base, tolerance: absValue };
+  if (rel === undefined && abs === undefined) return { file, line, operator: `${operator} approx${also}`, args: base, tolerance: 1e-6 };
+  if (abs === undefined && relValue !== undefined) return { file, line, operator: `${operator} approx${also}`, args: base, tolerance: relValue };
+  if (rel === undefined && absValue !== undefined) return { file, line, operator: `${operator} approx abs${also}`, args: base, tolerance: absValue };
   const bounds = [rel === undefined ? null : `rel=${flatText(module, rel)}`, abs === undefined ? null : `abs=${flatText(module, abs)}`].filter((b): b is string => b !== null);
-  return { file, line, operator: `${operator} approx bounds`, args: [...base, ...bounds] };
+  return { file, line, operator: `${operator} approx bounds${also}`, args: [...base, ...bounds] };
 }
 
 function assertStatement(module: PythonModule, node: SyntaxNode, file: string): Assertion {
@@ -105,9 +127,13 @@ function assertStatement(module: PythonModule, node: SyntaxNode, file: string): 
   return { file, line, operator: 'truthy', args: [flatText(module, test)] };
 }
 
+const ALMOST_MODELLED = new Set(['delta', 'places']);
+const NONE_MODELLED: ReadonlySet<string> = new Set();
+const RAISES_MODELLED = new Set(['match']);
+
 /** unittest's almost-equal: `places` (default 7) as the band it implies, 0.5·10^-places, or `delta` as given. */
 function almostEqual(module: PythonModule, method: string, args: NonNullable<ReturnType<typeof argumentsOf>>, line: number, file: string): Assertion {
-  const operands = args.positional.slice(0, 2).map((p) => flatText(module, p));
+  const operands = [...args.positional.slice(0, 2).map((p) => flatText(module, p)), ...otherKeywords(module, args.keyword, ALMOST_MODELLED)];
   const delta = args.keyword.get('delta');
   if (delta !== undefined) {
     const value = numberOf(module, delta);
@@ -131,13 +157,16 @@ function callAssertion(module: PythonModule, node: SyntaxNode, file: string): As
   if (method !== undefined) {
     if (args === undefined) return { file, line, operator: method, args: [flatText(module, call.args)] };
     if (method === 'assertAlmostEqual' || method === 'assertNotAlmostEqual') return almostEqual(module, method, args, line, file);
-    return { file, line, operator: method, args: args.positional.map((p) => flatText(module, p)) };
+    return { file, line, operator: method, args: [...args.positional.map((p) => flatText(module, p)), ...otherKeywords(module, args.keyword, NONE_MODELLED)] };
   }
   if (RAISES.has(call.name)) {
     const kinds = call.name.endsWith('raises') ? 'raises' : call.name.endsWith('warns') ? 'warns' : 'deprecated_call';
     if (args === undefined) return { file, line, operator: kinds, args: [flatText(module, call.args)] };
     const match = args.keyword.get('match');
-    return { file, line, operator: kinds, args: [...args.positional.map((p) => flatText(module, p)), ...(match === undefined ? [] : [`match=${flatText(module, match)}`])] };
+    return {
+      file, line, operator: kinds,
+      args: [...args.positional.map((p) => flatText(module, p)), ...(match === undefined ? [] : [`match=${flatText(module, match)}`]), ...otherKeywords(module, args.keyword, RAISES_MODELLED)],
+    };
   }
   return undefined;
 }
@@ -177,7 +206,12 @@ function truthyLiteral(text: string | undefined): boolean {
 function atLeastAsStrong(before: Assertion, after: Assertion): boolean {
   if (isNegated(before.operator) || isNegated(after.operator)) return false;
   const value = after.args[1];
-  if (before.operator === after.operator && after.args.length > before.args.length && before.args.every((a, i) => after.args[i] === a)) return true;
+  // Only a `match` or `check` appended to what was there narrows what passes; any other argument appended, `nan_ok=True`
+  // among them, can loosen it, and is reported (codex-5).
+  if (
+    before.operator === after.operator && after.args.length > before.args.length && before.args.every((a, i) => after.args[i] === a)
+    && after.args.slice(before.args.length).every((a) => /^(?:match|check)=/u.test(a))
+  ) return true;
   const equality = after.operator === '==' || after.operator === 'assertEqual';
   if ((before.operator === 'truthy' || before.operator === 'assertTrue') && equality) return truthyLiteral(value);
   if ((before.operator === 'is not' || before.operator === 'assertIsNotNone') && equality) {

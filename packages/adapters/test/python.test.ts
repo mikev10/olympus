@@ -361,6 +361,36 @@ def test_x():
     expect(delta.removed.map((a) => adapter.spell(a))).toEqual(['line 9: assert gone == 1']);
   });
 
+  // Every argument that changes what an assertion accepts is part of it, and a literal is compared as written (codex-5).
+  test.each([
+    ['nan_ok added to approx', 'assert x == pytest.approx(1.0)', 'assert x == pytest.approx(1.0, nan_ok=True)'],
+    ['nan_ok flipped', 'assert x == pytest.approx(1.0, nan_ok=False)', 'assert x == pytest.approx(1.0, nan_ok=True)'],
+    ['nan_ok given by position', 'assert x == pytest.approx(1.0, 1e-6, 1e-12)', 'assert x == pytest.approx(1.0, 1e-6, 1e-12, True)'],
+    ['a raises check removed', 'with pytest.raises(ValueError, check=lambda e: e.code == 403):\n        f()', 'with pytest.raises(ValueError):\n        f()'],
+    ['a warns argument removed', 'with pytest.warns(UserWarning, match="x"):\n        f()', 'with pytest.warns(UserWarning):\n        f()'],
+    ['a unittest keyword changed', 'self.assertRegex(s, r"a+", flags=1)', 'self.assertRegex(s, r"a+", flags=2)'],
+    ['whitespace inside an expected string', 'assert f() == "a  b"', 'assert f() == "a b"'],
+    ['whitespace inside a match pattern', 'with pytest.raises(ValueError, match="a  b"):\n        f()', 'with pytest.raises(ValueError, match="a b"):\n        f()'],
+    ['whitespace inside an f-string', 'assert f() == f"a  {b}"', 'assert f() == f"a {b}"'],
+  ])('%s is reported', async (_name, before, after) => {
+    const root = await python({ 'tests/b.py': `import pytest\n\ndef test_x():\n    ${before}\n`, 'tests/a.py': `import pytest\n\ndef test_x():\n    ${after}\n` });
+    const adapter = await pytestOf(root);
+    const delta = adapter.compareAssertions(await adapter.parseAssertions(join(root, 'tests', 'b.py')), await adapter.parseAssertions(join(root, 'tests', 'a.py')));
+    expect([...delta.weakened, ...delta.toleranceWidened, ...delta.removed]).not.toHaveLength(0);
+  });
+
+  test.each([
+    ['a raises check added', 'with pytest.raises(ValueError):\n        f()', 'with pytest.raises(ValueError, check=lambda e: e.code == 403):\n        f()'],
+    ['a match added', 'with pytest.raises(ValueError):\n        f()', 'with pytest.raises(ValueError, match="bad"):\n        f()'],
+    ['an operand reflowed across lines', 'assert f(1, 2) == "a  b"', 'assert f(1,\n             2) == "a  b"'],
+    ['a message changed', 'self.assertEqual(a, b, msg="one")', 'self.assertEqual(a, b, msg="two")'],
+  ])('%s is not reported', async (_name, before, after) => {
+    const root = await python({ 'tests/b.py': `import pytest\n\ndef test_x():\n    ${before}\n`, 'tests/a.py': `import pytest\n\ndef test_x():\n    ${after}\n` });
+    const adapter = await pytestOf(root);
+    const delta = adapter.compareAssertions(await adapter.parseAssertions(join(root, 'tests', 'b.py')), await adapter.parseAssertions(join(root, 'tests', 'a.py')));
+    expect([...delta.weakened, ...delta.toleranceWidened, ...delta.removed]).toEqual([]);
+  });
+
   test('unittest assertions and almost-equal places become a comparable band', async () => {
     const root = await python({ 'tests/u.py': 'class T:\n    def test(self):\n        self.assertAlmostEqual(a, 1.0, places=3)\n        self.assertIn(x, y, msg="m")\n' });
     const found = await (await pytestOf(root)).parseAssertions(join(root, 'tests', 'u.py'));
