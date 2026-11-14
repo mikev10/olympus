@@ -1,3 +1,19 @@
+# External review of R36a, gemini, 2026-11-14
+
+The admission path, base snapshot, and failure reporting of R36a (the shipped example runs on the real driver), reviewed from the bundle alone. Triage: `2026-11-14-R36a-first-run-triage.md`.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini. A direct `generateContent` API call to `gemini-3.1-pro-preview`, offering no tools. `cleanRoom` is `null` because an API call loads no local configuration.
+- **Cross-family agreement:** none. All three findings (gemini-1 to gemini-3) were raised by this family alone; none of Codex's four describes the same mechanism.
+- **Date:** 2026-11-14
+- **Bundle:** `2026-11-14-R36a-first-run-review-bundle.txt`, SHA-256 `d2c0aa21ad7b0d17436859593bd8a03c7bf1174fc185bce8f5dc02dc214206bd`, base `eab6a44` (`reviewed/R34`), head `6a634ff` (unit/r36a after D-R36a-13, before the review files). Every file added since the base in full and every modified file as a function-context diff, 44 sections; `docs/decisions.md`, `docs/reviews/`, `docs/plan/` and `pnpm-lock.yaml` excluded. Prompt: `2026-11-14-R36a-first-run-review-prompt.txt`.
+- **Prior context and lookups:** it reported no prior context and no external lookups. Self-reported, not independently verifiable.
+- **Coverage, and any gap:** items 1 (gemini-1, gemini-2), 3 (gemini-3), 6 (soundness listed) and 7 (framing endorsed) answered; items 2 (tautological checks), 4 (language escape hatches) and 5 (configuration satisfied without effect) came back empty.
+- **Citations:** line numbers are positions in the bundle, not the repository; the triage located each construct by name.
+
+---
+
 BASE: eab6a44
 HEAD: 6a634ff
 packages/vault/src/types.ts

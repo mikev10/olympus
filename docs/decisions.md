@@ -9928,3 +9928,17 @@ The two paid assertions (`I5.every-tier-model-callable-by-the-pinned-cli`,
 - **Reverse:** after #132 merges, pass
   `log: (line) => process.stderr.write(line + '\n')` in `main.ts`, with a
   test that a failed attempt prints one line.
+
+### D-R36a-14: review triage
+
+The external reviews and their triage are in `docs/reviews/2026-11-14-R36a-first-run-*`.
+
+- **Fixed on this branch:**
+  - codex-1: the controls refusal now comes before the cost estimate.
+  - codex-3: the leaked-file search fails on any unread tree and searches while a task runs.
+  - codex-4: a fixture commit starts from an empty index.
+  - gemini-2: the log line flattens every text it interpolates.
+  - gemini-3: a run that already has a base is refused as a request (code `exists`), and that base is left alone.
+- **Recorded:** codex-2. A verify-time sandbox exec failure is not shown as `lastFailure`. Covering it needs a contract change to the decision causes, so it is filed as #158.
+- **Rejected:** gemini-1. The walk sees only the runtime-built artifacts, so no node can carry a requester's `path`/`sha256`.
+- **Reverse gemini-3's leave-it-alone choice:** discard in the `BaseExists` arm, which lets a retry clear a stale base and also lets it delete a concurrent admission's base.

@@ -1,3 +1,19 @@
+# External review of R36a, codex, 2026-11-14
+
+The admission path, base snapshot, and failure reporting of R36a (the shipped example runs on the real driver), reviewed from the bundle alone. Triage: `2026-11-14-R36a-first-run-triage.md`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex. A headless `codex exec` run under a read-only sandbox, with recorded approval policy `never`, in an empty scratch working directory and a scratch config home holding only `auth.json`, with an environment of `CODEX_HOME` alone. The pre-run listing of both is the manifest's `cleanRoom`.
+- **Cross-family agreement:** none. All four findings (codex-1 to codex-4) were raised by this family alone; none of Gemini's three describes the same mechanism.
+- **Date:** 2026-11-14
+- **Bundle:** `2026-11-14-R36a-first-run-review-bundle.txt`, SHA-256 `d2c0aa21ad7b0d17436859593bd8a03c7bf1174fc185bce8f5dc02dc214206bd`, base `eab6a44` (`reviewed/R34`), head `6a634ff` (unit/r36a after D-R36a-13, before the review files). Every file added since the base in full and every modified file as a function-context diff, 44 sections; `docs/decisions.md`, `docs/reviews/`, `docs/plan/` and `pnpm-lock.yaml` excluded. Prompt: `2026-11-14-R36a-first-run-review-prompt.txt`.
+- **Prior context and lookups:** it reported no prior context and no external lookups, and that a local file-discovery command was blocked. Self-reported, not independently verifiable.
+- **Coverage, and any gap:** items 1 (codex-1 to codex-4), 2 (no tautology found), 3 (codex-3), 4 (no exploitable escape found), 6 (soundness listed) and 7 (framing qualified) answered; item 5 (configuration satisfied without effect) not addressed separately.
+- **Citations:** line numbers are positions in the bundle, not the repository; the triage located each construct by name.
+
+---
+
 BASE: eab6a44
 HEAD: 6a634ff
 packages/vault/src/types.ts
