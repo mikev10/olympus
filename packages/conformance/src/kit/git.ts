@@ -3,11 +3,14 @@
  * base commit, read from git's object store (D-R36a-04), so a fixture a test
  * admits a run over is committed first, and the run names that commit.
  *
- * The commit is a function of the tree alone: a fixed identity, fixed dates,
- * no parent, and `core.autocrlf=false`, so the blobs are the fixture's bytes
- * whatever the host's git config says, and committing the same tree twice
- * names the same commit. No ref is moved; the object is enough for
- * admission to read it. Test code only.
+ * The commit is a function of the directory and the options alone: the index
+ * starts empty on every call, so nothing an earlier commit added survives
+ * into this one; a fixed identity, fixed dates, no parent, and
+ * `core.autocrlf=false`, so the host's git config changes no blob, and
+ * committing the same tree twice names the same commit. A `.gitattributes`
+ * the fixture itself lays out still applies, as it would to the user's own
+ * commit (codex-4). No ref is moved; the object is enough for admission to
+ * read it. Test code only.
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync, rmSync } from 'node:fs';
@@ -46,6 +49,8 @@ function git(dir: string, args: readonly string[], autocrlf = 'false'): string {
 /** Commits everything under `dir` and returns the commit's full object name. */
 export function commitFixture(dir: string, options: CommitOptions = {}): string {
   if (!existsSync(join(dir, '.git'))) git(dir, ['init', '-q']);
+  // From an empty index, so `paths` is all the commit holds and no earlier commit's entries leak into it (codex-4).
+  git(dir, ['read-tree', '--empty']);
   git(dir, ['add', '-A', ...(options.includeIgnored === false ? [] : ['-f']), '--', ...(options.paths ?? ['.'])], options.normalizeEndings === true ? 'input' : 'false');
   const tree = git(dir, ['write-tree']);
   return git(dir, ['commit-tree', tree, '-m', 'fixture']);
