@@ -110,7 +110,10 @@ invariantTest(
     // The measured cost, for the pull request (R36a acceptance), as a test annotation the reporter prints.
     const metered = usage.filter((r) => r.reading.kind === 'metered');
     const cost = metered.reduce((sum, r) => sum + (r.reading.kind === 'metered' ? r.reading.costUsd : 0), 0);
-    await annotate(`cost $${cost.toFixed(4)} over ${String(metered.length)} metered calls; gates ${gates.join(', ')}; ${metered.map((r) => `${r.taskId}@${r.station} ${JSON.stringify(r.reading)}`).join('; ')}`);
+    const line = `cost $${cost.toFixed(4)} over ${String(metered.length)} metered calls; gates ${gates.join(', ')}; ${metered.map((r) => `${r.taskId}@${r.station} ${JSON.stringify(r.reading)}`).join('; ')}`;
+    // Annotations print only for a failing test, so the figure also goes to the log, where a passing run shows it too.
+    process.stdout.write(`R36a paid example ${line}\n`);
+    await annotate(line);
     if (!outcome.ok) await annotate(`run records:\n${records.join('\n')}`);
     expect(outcome, JSON.stringify(outcome).slice(0, 2000)).toMatchObject({ ok: true });
     expect(gates).toEqual(['spec:1', 'test-design:1', 'integrate:1']);
