@@ -250,7 +250,9 @@ export const PYTHON_INSTALL_RUNS_NO_PACKAGE_CODE: LocalAssertion = runtime({
   run: async () => {
     const { UV_INSTALLER, PIP_INSTALLER, UNSUPPORTED_LOCKFILES } = await adapters();
     for (const installer of [UV_INSTALLER, PIP_INSTALLER]) {
-      if (installer.steps[0].join(' ') !== 'python -m venv --copies .venv') throw new Error(`I3: the ${installer.stack} install's first step is ${installer.steps[0].join(' ')}`);
+      // Isolated (`-I`), so no file beside the manifest is imported while the virtualenv is made (codex-1).
+      if (installer.steps[0].join(' ') !== 'python -I -m venv --copies .venv') throw new Error(`I3: the ${installer.stack} install's first step is ${installer.steps[0].join(' ')}`);
+      for (const step of installer.steps) if (step[0].endsWith('python') && step[1] !== '-I') throw new Error(`I3: the ${installer.stack} install runs ${step.join(' ')} without -I`);
     }
     const uv = UV_INSTALLER.steps[1]?.join(' ') ?? '';
     for (const flag of ['--frozen', '--no-build', '--no-install-workspace']) if (!uv.includes(flag)) throw new Error(`I3: the uv install runs without ${flag}: ${uv}`);
@@ -262,10 +264,16 @@ export const PYTHON_INSTALL_RUNS_NO_PACKAGE_CODE: LocalAssertion = runtime({
       '[[package]]', 'name = "fromgit"', 'version = "1.0"', 'source = { git = "https://example.com/x.git" }', '',
       '[[package]]', 'name = "sdistonly"', 'version = "1.0"', 'source = { registry = "https://pypi.org/simple" }', 'sdist = { url = "https://x/s.tar.gz", hash = "sha256:00" }', '',
     ].join('\n');
-    const read = UV_INSTALLER.packages(lock);
-    if (!read.ok || read.packages.some((p) => p.unverifiable === null)) throw new Error(`I3: uv.lock's git and source-only packages were read as verifiable: ${JSON.stringify(read)}`);
-    const reqs = PIP_INSTALLER.packages(`requests>=2 --hash=${hash}\nidna==3.0\n`);
-    if (!reqs.ok || reqs.packages.some((p) => p.unverifiable === null)) throw new Error(`I3: an unpinned or unhashed requirement was read as verifiable: ${JSON.stringify(reqs)}`);
+    // Each refusal is named, package by package, beside a package the same reader verifies: a reader that dropped what
+    // it could not verify, rather than naming it, would read both lockfiles as clean and fail here (codex-7).
+    const named = (read: ReturnType<typeof UV_INSTALLER.packages>): string => (read.ok ? JSON.stringify(read.packages.map((p) => [p.key, p.unverifiable === null ? null : p.unverifiable.split(',')[0]])) : `refused: ${read.reason}`);
+    const wheel = ['[[package]]', 'name = "pytest"', 'version = "8.4.2"', 'source = { registry = "https://pypi.org/simple" }', `wheels = [{ url = "https://files.pythonhosted.org/p/pytest-8.4.2-py3-none-any.whl", hash = "${hash}" }]`, ''].join('\n');
+    const read = named(UV_INSTALLER.packages(`${lock}\n${wheel}`));
+    const expectedUv = JSON.stringify([['fromgit@1.0', 'it comes from git'], ['pytest@8.4.2', null], ['sdistonly@1.0', 'it has no wheel']]);
+    if (read !== expectedUv) throw new Error(`I3: uv.lock's packages were read as ${read}, not ${expectedUv}`);
+    const reqs = named(PIP_INSTALLER.packages(`pytest==8.4.2 --hash=${hash}\nrequests>=2 --hash=${hash}\nidna==3.0\n`));
+    const expectedPip = JSON.stringify([['idna@3.0', 'it records no hash'], ['pytest@8.4.2', null], ['requests@(unpinned)', 'it is not pinned to one version with ==']]);
+    if (reqs !== expectedPip) throw new Error(`I3: requirements.txt was read as ${reqs}, not ${expectedPip}`);
     const option = PIP_INSTALLER.packages(`--extra-index-url https://example.com/simple\nidna==3.0 --hash=${hash}\n`);
     if (option.ok) throw new Error('I3: a requirements file naming another index was read');
     for (const name of ['poetry.lock', 'Pipfile.lock', 'pdm.lock']) if (!UNSUPPORTED_LOCKFILES.includes(name)) throw new Error(`I3: ${name} is not refused`);
