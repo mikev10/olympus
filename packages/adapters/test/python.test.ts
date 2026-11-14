@@ -240,12 +240,13 @@ describe('pytest collection', () => {
     const root = await python({ ...LAYOUT, 'tests/test_m.py': 'import pytest\npytestmark = pytest.mark.skip\n\ndef test_z():\n    pass\n' });
     const adapter = await pytestOf(root);
     expect([...(await adapter.detectSkipMarkers(join(root, 'tests', 'test_a.py')))].sort()).toEqual([
+      'pytest.mark.skip: test_params',
       'pytest.mark.skip: test_skipped',
-      'pytest.param(marks=mark.skip): test_params[2]',
-      'pytest.skip(): test_skipped',
+      'pytest.skip: test_skipped',
       'unittest.skip: Checks > test_skipped_u',
     ]);
-    expect(await adapter.detectSkipMarkers(join(root, 'tests', 'test_m.py'))).toEqual([`pytestmark pytest.mark.skip: ${join(root, 'tests', 'test_m.py')}`]);
+    // Owned by the module, never by its absolute path, so the same marker in the base and the head pairs.
+    expect(await adapter.detectSkipMarkers(join(root, 'tests', 'test_m.py'))).toEqual(['pytest.mark.skip: (module)']);
   });
 
   // A table the parse cannot count could lose its rows, or empty into pytest's one skipped case, with nothing reported
@@ -280,6 +281,38 @@ describe('pytest collection', () => {
     const adapter = await pytestOf(root);
     expect(await adapter.enumerateCases(join(root, 'tests', 'test_f.py'))).toEqual(['fixture db[?1]', 'fixture db[?2]', 'test_p']);
     await expect(adapter.enumerateCases(join(root, 'tests', 'test_g.py'))).rejects.toThrow(/fixture db is parametrized by a table the parse cannot count/);
+  });
+
+  // A skip is found by what it names, wherever it is and whatever it is called: under an alias, from a fixture or a
+  // helper, under a module-level condition, raised as an exception, or an exit that ends the run (gemini-2, gemini-4).
+  test.each([
+    ['a module alias', 'import pytest as pt\n\ndef test_x():\n    assert f()\n', 'import pytest as pt\n\ndef test_x():\n    pt.skip()\n    assert f()\n'],
+    ['a function imported under another name in the base', 'from pytest import skip as s\n\ndef test_x():\n    assert f()\n', 'from pytest import skip as s\n\ndef test_x():\n    s()\n    assert f()\n'],
+    ['a function assigned to a name in the base', 'import pytest\ns = pytest.skip\n\ndef test_x():\n    assert f()\n', 'import pytest\ns = pytest.skip\n\ndef test_x():\n    s()\n    assert f()\n'],
+    ['an attribute named by a string', 'import pytest\n\ndef test_x():\n    assert f()\n', 'import pytest\n\ndef test_x():\n    getattr(pytest, "skip")()\n    assert f()\n'],
+    ['a raised skip exception', 'import pytest\n\ndef test_x():\n    assert f()\n', 'import pytest\n\ndef test_x():\n    raise pytest.skip.Exception("x")\n'],
+    ["unittest's SkipTest", 'import unittest\n\ndef test_x():\n    assert f()\n', 'import unittest\n\ndef test_x():\n    raise unittest.SkipTest()\n'],
+    ['an autouse fixture', 'import pytest\n\n@pytest.fixture(autouse=True)\ndef env():\n    return 1\n\ndef test_x():\n    assert f()\n', 'import pytest\n\n@pytest.fixture(autouse=True)\ndef env():\n    pytest.skip()\n\ndef test_x():\n    assert f()\n'],
+    ['a helper a test calls', 'import pytest\n\ndef helper():\n    return 1\n\ndef test_x():\n    assert helper()\n', 'import pytest\n\ndef helper():\n    pytest.skip()\n\ndef test_x():\n    assert helper()\n'],
+    ['a module-level condition', 'import pytest\n\ndef test_x():\n    assert f()\n', 'import pytest\nif True:\n    pytest.skip("x", allow_module_level=True)\n\ndef test_x():\n    assert f()\n'],
+    ['an exit that ends the run', 'import os\n\ndef test_x():\n    assert f()\n', 'import os\n\ndef test_x():\n    os._exit(0)\n'],
+    ["pytest's own exit", 'import pytest\n\ndef test_x():\n    assert f()\n', 'import pytest\n\ndef test_x():\n    pytest.exit("done", returncode=0)\n'],
+  ])('a skip through %s is reported', async (_name, before, after) => {
+    const root = await python({ 'tests/test_b.py': before, 'tests/test_c.py': after });
+    const adapter = await pytestOf(root);
+    const was = await adapter.detectSkipMarkers(join(root, 'tests', 'test_b.py'));
+    const added = (await adapter.detectSkipMarkers(join(root, 'tests', 'test_c.py'))).filter((m) => {
+      const i = was.indexOf(m);
+      if (i === -1) return true;
+      was.splice(i, 1);
+      return false;
+    });
+    expect(added).not.toEqual([]);
+  });
+
+  test('an attribute of pytest named by a value the parse cannot see is refused', async () => {
+    const root = await python({ 'tests/test_x.py': 'import pytest\n\ndef test_x():\n    getattr(pytest, "sk" + "ip")()\n' });
+    await expect((await pytestOf(root)).detectSkipMarkers(join(root, 'tests', 'test_x.py'))).rejects.toThrow(/getattr on pytest/);
   });
 
   test('a file the grammar cannot read is refused, never read in part', async () => {

@@ -14,7 +14,7 @@ import type { PytestRules } from './config.js';
 import { refuse } from '../refusal.js';
 import { fnmatch } from './ini.js';
 import {
-  argumentsOf, callOf, childrenOf, decoratorOf, flatText, lineOf, partsOf, statementsOf, stringValue, textOf, type PythonModule,
+  argumentsOf, callOf, childrenOf, decoratorOf, dottedName, flatText, lineOf, partsOf, statementsOf, stringValue, textOf, type PythonModule,
 } from './parse.js';
 
 // ---- assertions ------------------------------------------------------------
@@ -271,8 +271,15 @@ function nameOf(module: PythonModule, def: SyntaxNode): string {
   return name === undefined ? '' : textOf(module, name);
 }
 
-const SKIP_DECORATORS = /(?:^|\.)(?:mark\.(?:skip|skipif|xfail)|skip|skipIf|skipUnless|expectedFailure)$/u;
-const SKIP_CALLS = /^(?:pytest\.(?:skip|xfail|importorskip)|self\.skipTest|cls\.skipTest|skip|importorskip)$/u;
+/**
+ * The names through which a test, a fixture, a helper, or a module stops a
+ * test from running to a verdict: pytest's skip and xfail marks and calls,
+ * unittest's decorators, `skipTest`, and `SkipTest`, and an exit that ends
+ * the run (`pytest.exit`, `os._exit`).
+ */
+const SKIP_NAMES = new Set(['skip', 'skipif', 'xfail', 'importorskip', 'skipTest', 'SkipTest', 'skipIf', 'skipUnless', 'expectedFailure', 'exit', '_exit']);
+/** The modules those names are reached through, by any alias: `getattr` on one with a name the parse cannot read is refused. */
+const SKIP_MODULES = /^(?:pytest|_pytest|unittest)(?:\.|$)/u;
 const PARAMETRIZE = /^(?:pytest\.)?mark\.parametrize$/u;
 const FIXTURE = /(?:^|\.)fixture$/u;
 const UNITTEST_BASES = new Set(['TestCase', 'unittest.TestCase', 'IsolatedAsyncioTestCase', 'unittest.IsolatedAsyncioTestCase']);
@@ -425,21 +432,131 @@ function assigns(module: PythonModule, statement: SyntaxNode, name: string): Syn
   return target?.name === 'VariableName' && textOf(module, target) === name && op?.name === 'AssignOp' ? value : undefined;
 }
 
-function skipCallsIn(module: PythonModule, node: SyntaxNode, owner: string, out: string[]): void {
-  module.tree.iterate({
-    from: node.from,
-    to: node.to,
-    enter: (ref) => {
-      if (ref.name !== 'CallExpression') return;
-      const call = callOf(module, ref.node);
-      if (call !== undefined && SKIP_CALLS.test(call.name)) out.push(`${call.name}(): ${owner}`);
-    },
-  });
+/** The definitions a node sits in, outermost first, `Class > method`, or `(module)`; a decorator belongs to what it decorates. */
+function ownerOf(module: PythonModule, node: SyntaxNode): string {
+  const names: string[] = [];
+  for (let at: SyntaxNode | null = node.parent; at !== null; at = at.parent) {
+    if (at.name === 'FunctionDefinition' || at.name === 'ClassDefinition') names.push(nameOf(module, at));
+    else if (at.name === 'DecoratedStatement') {
+      const def = childrenOf(at).find((c) => c.name === 'FunctionDefinition' || c.name === 'ClassDefinition');
+      if (def !== undefined && !(node.from >= def.from && node.to <= def.to)) names.push(nameOf(module, def));
+    }
+  }
+  return names.length === 0 ? '(module)' : names.reverse().join(' > ');
 }
 
-function marksOf(module: PythonModule, value: SyntaxNode | undefined): string[] {
-  if (value === undefined) return [];
-  return [...flatText(module, value).matchAll(/(?:pytest\.)?mark\.(?:skip|skipif|xfail)\b/gu)].map((m) => m[0]);
+/** How a reference is written: its whole dotted chain, `pytest.mark.skip`, or the name alone. */
+function spellingOf(module: PythonModule, node: SyntaxNode): string {
+  const parent = node.parent;
+  if (parent?.name === 'Decorator') return decoratorOf(module, parent)?.name ?? textOf(module, node);
+  let top = node;
+  while (top.parent?.name === 'MemberExpression') top = top.parent;
+  return dottedName(module, top) ?? textOf(module, node);
+}
+
+/** The names an import statement binds, each with the name it imports, and the module it imports from. */
+function importBindings(module: PythonModule, statement: SyntaxNode): { readonly from: string | null; readonly bound: Array<{ readonly imported: string; readonly as: string }> } {
+  const children = childrenOf(statement);
+  const from = children[0]?.name === 'from';
+  const at = children.findIndex((c) => c.name === 'import');
+  const items: SyntaxNode[][] = [[]];
+  for (const c of children.slice(at + 1)) {
+    if (c.name === ',') items.push([]);
+    else items[items.length - 1]?.push(c);
+  }
+  const bound = items.filter((item) => item.length > 0).map((item) => {
+    const as = item.findIndex((c) => c.name === 'as');
+    const path = (as === -1 ? item : item.slice(0, as)).map((c) => textOf(module, c)).join('');
+    const alias = as === -1 ? undefined : item[as + 1];
+    // `import a.b` binds `a`; `import a.b as c` and `from m import x as c` bind `c`.
+    return { imported: path, as: alias !== undefined ? textOf(module, alias) : from ? path : (path.split('.')[0] ?? path) };
+  });
+  return { from: from ? children.slice(1, at).map((c) => textOf(module, c)).join('') : null, bound };
+}
+
+/**
+ * Every reference in a module to a name that stops a test reaching a verdict
+ * (`SKIP_NAMES`), wherever it is: a test, a fixture, a helper, a class, or
+ * module level, under a condition or not, called or raised or taken as a
+ * value; through any name bound to one, by an import or an assignment; and a
+ * string naming one. Each is `spelling: owner`, so a reference added
+ * anywhere is a marker added (gemini-2, gemini-4). `getattr` on pytest or
+ * unittest with a name the parse cannot read is refused, as the TypeScript
+ * set refuses a computed key on the test context.
+ */
+export function skipReferences(module: PythonModule): string[] {
+  const aliases = new Set<string>();
+  const modules = new Set<string>();
+  const statements: SyntaxNode[] = [];
+  module.tree.iterate({
+    enter: (ref) => {
+      if (ref.name === 'ImportStatement' || ref.name === 'AssignStatement') statements.push(ref.node);
+    },
+  });
+  for (const s of statements.filter((x) => x.name === 'ImportStatement')) {
+    const read = importBindings(module, s);
+    for (const b of read.bound) {
+      if (read.from !== null && SKIP_NAMES.has(b.imported)) aliases.add(b.as);
+      else if (SKIP_MODULES.test(read.from === null ? b.imported : `${read.from}.${b.imported}`)) modules.add(b.as);
+    }
+  }
+  const mentions = (node: SyntaxNode): boolean => {
+    let found = false;
+    node.toTree().iterate({
+      enter: (ref) => {
+        if (found) return false;
+        const text = module.text.slice(node.from + ref.from, node.from + ref.to);
+        if ((ref.name === 'VariableName' || ref.name === 'PropertyName') && (SKIP_NAMES.has(text) || aliases.has(text))) found = true;
+        return undefined;
+      },
+    });
+    return found;
+  };
+  // `s = pytest.skip`, and `t = s` after it: a name bound to a skip is a skip, followed to a fixed point.
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const s of statements.filter((x) => x.name === 'AssignStatement')) {
+      const parts = childrenOf(s);
+      const op = parts.findIndex((c) => c.name === 'AssignOp');
+      const value = parts[parts.length - 1];
+      if (op === -1 || value === undefined || !mentions(value)) continue;
+      for (const target of parts.slice(0, op)) {
+        if (target.name === 'VariableName' && !aliases.has(textOf(module, target))) {
+          aliases.add(textOf(module, target));
+          grew = true;
+        }
+      }
+    }
+  }
+  const out: string[] = [];
+  module.tree.iterate({
+    enter: (ref) => {
+      const node = ref.node;
+      if (node.name === 'CallExpression') {
+        const call = callOf(module, node);
+        const args = call?.name === 'getattr' ? argumentsOf(module, call.args) : undefined;
+        const [target, attribute] = args?.positional ?? [];
+        const root = target === undefined ? undefined : dottedName(module, target)?.split('.')[0];
+        if (root !== undefined && (modules.has(root) || SKIP_MODULES.test(root)) && (attribute === undefined || stringValue(module, attribute) === undefined)) {
+          refuse('unsupported-feature', `${module.file}: getattr on ${root} with an attribute the parse cannot see`);
+        }
+      }
+      if (node.name === 'String') {
+        const value = stringValue(module, node);
+        if (value !== undefined && SKIP_NAMES.has(value)) out.push(`"${value}": ${ownerOf(module, node)}`);
+        return;
+      }
+      if (node.name !== 'VariableName' && node.name !== 'PropertyName') return;
+      const text = textOf(module, node);
+      if (!SKIP_NAMES.has(text) && !(node.name === 'VariableName' && aliases.has(text))) return;
+      // The name an alias is bound to is not a reference: its value already counted, and every use of it counts.
+      const assign = node.parent?.name === 'AssignStatement' ? childrenOf(node.parent).find((c) => c.name === 'AssignOp') : undefined;
+      if (assign !== undefined && node.to <= assign.from && !SKIP_NAMES.has(text)) return;
+      // A name in a member chain is counted once, at its own position: `pytest.mark.skip` is one reference.
+      out.push(`${spellingOf(module, node)}: ${ownerOf(module, node)}`);
+    },
+  });
+  return out;
 }
 
 /**
@@ -471,13 +588,7 @@ export function readTestFile(module: PythonModule, rules: PytestRules): PythonTe
     },
   });
 
-  for (const s of top) {
-    for (const mark of marksOf(module, assigns(module, s, 'pytestmark'))) skips.push(`pytestmark ${mark}: ${module.file}`);
-    if (s.name === 'ExpressionStatement') {
-      const call = callOf(module, childrenOf(s)[0] ?? s);
-      if (call !== undefined && SKIP_CALLS.test(call.name)) skips.push(`${call.name}(): ${module.file}`);
-    }
-  }
+  skips.push(...skipReferences(module));
 
   const isUnittest = (bases: readonly string[], seen: Set<string>): boolean => bases.some((b) => {
     if (UNITTEST_BASES.has(b)) return true;
@@ -507,8 +618,6 @@ export function readTestFile(module: PythonModule, rules: PytestRules): PythonTe
     }
     if (unittest ? !name.startsWith('test') : !matchesOption(name, rules.pythonFunctions)) return;
     const qualified = owner === '' ? name : `${owner} > ${name}`;
-    for (const x of decorators) if (SKIP_DECORATORS.test(x.name)) skips.push(`${x.name}: ${qualified}`);
-    skipCallsIn(module, d.node, qualified, skips);
     let ids: string[] = [''];
     if (!unittest) {
       for (const x of decorators.filter((y) => PARAMETRIZE.test(y.name))) {
@@ -517,7 +626,6 @@ export function readTestFile(module: PythonModule, rules: PytestRules): PythonTe
           skips.push(`parametrize([]): ${qualified}`);
           continue;
         }
-        for (const s of read.skips) skips.push(`${s.mark}: ${qualified}[${s.id}]`);
         ids = ids.flatMap((prefix) => read.ids.map((id) => (prefix === '' ? id : `${prefix}-${id}`)));
       }
     }
@@ -535,8 +643,6 @@ export function readTestFile(module: PythonModule, rules: PytestRules): PythonTe
     const own = members(body);
     if (own.some((m) => m.node.name === 'FunctionDefinition' && ['__init__', '__new__'].includes(nameOf(module, m.node)))) return;
     if (body.some((s) => assigns(module, s, '__test__') !== undefined && textOf(module, assigns(module, s, '__test__') ?? s) === 'False')) return;
-    for (const x of d.decorators) if (SKIP_DECORATORS.test(x.name)) skips.push(`${x.name}: ${qualified}`);
-    for (const s of body) for (const mark of marksOf(module, assigns(module, s, 'pytestmark'))) skips.push(`pytestmark ${mark}: ${qualified}`);
     const classMarks = [...d.decorators];
     const methods = new Map<string, Decorated>();
     const inherit = (bs: readonly string[], chain: Set<string>): void => {
