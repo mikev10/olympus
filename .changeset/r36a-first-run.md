@@ -3,6 +3,7 @@
 "@olympus-ai/vault": minor
 "@olympus-ai/driver-claude-code": minor
 "@olympus-ai/compiler": patch
+"@olympus-ai/benchmark": patch
 ---
 
 R36a: the shipped example runs on the real driver.
@@ -22,3 +23,5 @@ R36a: the shipped example runs on the real driver.
 - The Claude Code CLI is pinned at 2.1.310, which calls every tier's model;
   its tool inventory gains `Monitor`
   (#152).
+
+- The benchmark's seats declare the tools its policy grants, by the names a driver declares.
