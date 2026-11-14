@@ -29,10 +29,11 @@ function examples(): string {
  * the README says, committed: a `package.json` and a lockfile pinning
  * nothing, so its stack is scanned for static analysis (#145).
  */
-async function userRepository(dir: string): Promise<string> {
+async function userRepository(dir: string, edit?: (dir: string) => Promise<void>): Promise<string> {
   const { hashedLockfile } = await import('@olympus-ai/adapters');
   await mkdir(dir, { recursive: true });
   await cp(join(examples(), 'run'), dir, { recursive: true });
+  await edit?.(dir);
   await writeFile(join(dir, 'package.json'), JSON.stringify({ name: 'user-repo', private: true }));
   await writeFile(join(dir, 'package-lock.json'), hashedLockfile('user-repo', []));
   return commitFixture(dir);
@@ -61,12 +62,12 @@ async function exampleGraph(dirs: { store: string; artifacts: string }, base: st
 }
 
 /** A create of the example's two runs, as the README's "First run" gives them, at L1 and with no figure approved yet. */
-async function exampleCreate(policyFile: string, drafted: boolean, body: (outcome: RunOutcome, what: string) => void): Promise<void> {
+async function exampleCreate(policyFile: string, drafted: boolean, body: (outcome: RunOutcome, what: string) => void, edit?: (dir: string) => Promise<void>): Promise<void> {
   const { loadPolicyFile, startRun } = await api();
   const loaded = await loadPolicyFile(policyFile);
   if (!loaded.ok) throw new Error(`R36a: the policy does not load: ${JSON.stringify(loaded)}`);
   await withVaultDirs(`r36a-example-${drafted ? 'drafted' : 'supplied'}-`, async (dirs, base) => {
-    const baseCommit = await userRepository(dirs.artifacts);
+    const baseCommit = await userRepository(dirs.artifacts, edit);
     const req: RunRequest = {
       runId: `r36a-example-${drafted ? 'drafted' : 'supplied'}` as RunRequest['runId'],
       baseCommit, requestedLevel: 1, workspace: dirs.artifacts, policy: loaded.policy,
@@ -226,5 +227,25 @@ export const DRAFTER_TOLD_WHERE_TO_WRITE: LocalAssertion = runtime({
   },
 });
 
+export const MANIFEST_REFUSED_BEFORE_THE_ESTIMATE: LocalAssertion = runtime({
+  id: 'I5.manifest-refused-before-the-estimate',
+  title:
+    "a manifest admission refuses for what the base needs — the example's, with its static-analysis check removed, on a JavaScript repository — is refused at the first create, with no figure approved, rather than after the person approved the spend (#145)",
+  run: async () => {
+    const withoutStaticAnalysis = async (dir: string): Promise<void> => {
+      const manifest = JSON.parse(await readFile(join(dir, 'verify.json'), 'utf8')) as { checks: Array<{ kind: string }> };
+      const kept = manifest.checks.filter((c) => c.kind !== 'static-analysis');
+      if (kept.length === manifest.checks.length) throw new Error('R36a control: the example manifest pins no static-analysis check to remove');
+      await writeFile(join(dir, 'verify.json'), JSON.stringify({ checks: kept }));
+    };
+    await exampleCreate(join(examples(), 'policy.yaml'), false, (outcome) => {
+      if (outcome.ok || outcome.reason !== 'invalid-request' || !outcome.problems.some((p) => p.code === 'missing' && p.message.includes('static-analysis'))) {
+        throw new Error(`R36a: a manifest with no static-analysis check was answered ${JSON.stringify(outcome)}, not refused before the estimate`);
+      }
+      if (outcome.problems.some((p) => p.message.includes('(R17)'))) throw new Error('R36a: the refusal names an internal plan id');
+    }, withoutStaticAnalysis);
+  },
+});
+
 export const R36A_I4: readonly LocalAssertion[] = [EXAMPLE_TOOLS_DECLARED, UNDECLARED_TOOL_REFUSED_BEFORE_THE_ESTIMATE, IGNORED_FILE_REACHES_NO_TREE];
-export const R36A_I5: readonly LocalAssertion[] = [EXAMPLE_ADMITTED_AS_SHIPPED, CRLF_CHECKOUT_MERGES, DRAFTER_TOLD_WHERE_TO_WRITE];
+export const R36A_I5: readonly LocalAssertion[] = [EXAMPLE_ADMITTED_AS_SHIPPED, MANIFEST_REFUSED_BEFORE_THE_ESTIMATE, CRLF_CHECKOUT_MERGES, DRAFTER_TOLD_WHERE_TO_WRITE];

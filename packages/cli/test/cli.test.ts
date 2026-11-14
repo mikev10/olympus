@@ -7,6 +7,8 @@ import { createServer, type IncomingHttpHeaders } from 'node:http';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { buildGraph, createApiServer, outcomes, STAND_IN_SCANNERS, telemetryOf, UNANALYSED_TESTS, localWorkspaceStore, type ApiServer, type CreatedRun, type RunView } from '@olympus-ai/api';
 import { StubDriver, type Driver, type TaskRequest, type TaskResult } from '@olympus-ai/core';
@@ -20,7 +22,7 @@ function scope(stations: string[], tier: string): Record<string, unknown> {
   return {
     stations,
     writableGlobs: ['**'],
-    tools: ['read', 'write'],
+    tools: ['Read', 'Write'],
     network: { egress: 'none' },
     tier,
     tierByStation: {},
@@ -85,6 +87,8 @@ beforeEach(async () => {
   const stub = new StubDriver();
   // The builder makes the change the reproduction asks for, through its own sandbox, and claims it.
   const driver: Driver = Object.assign(Object.create(stub) as Driver, {
+    // The tools the policy grants, as a real driver declares them; the stub runs none (D-R36a-07).
+    declaredTools: () => ['Read', 'Write'],
     runTask: async (req: TaskRequest): Promise<TaskResult> => {
       if (req.role.role !== 'builder') return stub.runTask(req);
       await sandbox.exec(req.sandbox, ['node', '-e', "require('node:fs').writeFileSync('done', 'done')"]);
@@ -134,9 +138,21 @@ function remote(...args: string[]): string[] {
 
 const CREATE = ['create', '--workspace', '', '--base-commit', '0'.repeat(40), '--level', '1', '--spec', 'spec.md', '--tests', 'acceptance.md', '--manifest', 'verify.json', '--graph', 'graph.json', '--security-part', 'security.json'];
 
+/** The workspace committed, as a user's repository is: admission reads the base from the commit (D-R36a-04). */
+function commitWorkspace(): string {
+  const git = (...args: string[]): string => execFileSync('git', ['-C', workspace, '-c', 'core.autocrlf=false', ...args], {
+    encoding: 'utf8',
+    env: { ...process.env, GIT_AUTHOR_NAME: 'cli', GIT_AUTHOR_EMAIL: 'cli@example.invalid', GIT_COMMITTER_NAME: 'cli', GIT_COMMITTER_EMAIL: 'cli@example.invalid', GIT_AUTHOR_DATE: '2026-01-01T00:00:00Z', GIT_COMMITTER_DATE: '2026-01-01T00:00:00Z' },
+  }).trim();
+  if (!existsSync(join(workspace, '.git'))) git('init', '-q');
+  git('add', '-A', '.');
+  return git('commit-tree', git('write-tree'), '-m', 'workspace');
+}
+
 function createArgs(...extra: string[]): string[] {
   const args = [...CREATE];
   args[2] = workspace;
+  args[4] = commitWorkspace();
   return [...args, ...extra];
 }
 
