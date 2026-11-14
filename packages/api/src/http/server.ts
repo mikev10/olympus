@@ -65,11 +65,15 @@ export interface ApiServerOptions {
   readonly log?: (line: string) => void;
 }
 
-/** One line a failed attempt is logged as. Control characters in the failure's text are spaced out, so it stays one line. */
+/**
+ * One line a failed attempt is logged as. Control characters in every text it interpolates are spaced out, so it
+ * stays one line: the failure's detail is a model's or a container's output, the layer an adapter's, and a task id
+ * the requester's, admitted with no character class (gemini-2).
+ */
 export function attemptLine(runId: RunId, task: TaskId, failure: AttemptFailure): string {
   // eslint-disable-next-line no-control-regex
-  const detail = failure.untrustedDetail.replace(/[\u0000-\u001f\u007f]+/gu, ' ');
-  return `run ${runId} task ${task}: attempt failed (${failure.source} ${failure.layer}, retry ${String(failure.retries)}): ${detail}`;
+  const flat = (text: string): string => text.replace(/[\u0000-\u001f\u007f]+/gu, ' ');
+  return `run ${runId} task ${flat(task)}: attempt failed (${failure.source} ${flat(failure.layer)}, retry ${String(failure.retries)}): ${flat(failure.untrustedDetail)}`;
 }
 
 export interface ApiServer {
