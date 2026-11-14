@@ -9911,3 +9911,20 @@ Run on Windows at 2041637, each revert applied alone and restored after:
 
 The two paid assertions (`I5.every-tier-model-callable-by-the-pinned-cli`,
 `I5.shipped-example-merges-on-the-real-driver`) run only under `run-driver`.
+
+### D-R36a-13: the host's log sink ships unwired (maintainer: proceed)
+
+- **Ambiguous:** the failed attempt reaches the host as one line through
+  `createApiServer`'s `log` option, but writing it to stderr from
+  `packages/api/src/host/main.ts` needs the stream exemption that #132
+  proposes, and #132 is open and conflicting. The name scan refuses any
+  process stream in `api` today.
+- **Chosen:** ship the hook, the `attempt-failed` event, and the standing's
+  `lastFailure`; the host passes no `log` until #132 merges. A failure is
+  still never silent: the client sees it in the event stream and in `status`.
+- **Rejected:** widening the scan's exemption inside this unit (a gate change
+  the unit does not declare); rebasing #132 here (an amendment, which waits
+  for its own confirmation).
+- **Reverse:** after #132 merges, pass
+  `log: (line) => process.stderr.write(line + '\n')` in `main.ts`, with a
+  test that a failed attempt prints one line.
