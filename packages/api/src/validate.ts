@@ -22,6 +22,10 @@ import type { RequestedArtifacts } from './run.js';
 export type RequestProblemCode =
   /** A required list has no entries. */
   | 'missing'
+  /** An admitted artifact's bytes changed between being read and being written into the base (D-R36a-10). */
+  | 'changed'
+  /** An admitted artifact the base commit holds with other bytes than the workspace does (D-R36a-10, #154). */
+  | 'differs-from-commit'
   /** A string that must have content is blank, or is not a string. */
   | 'empty'
   /** A run id that is not one directory name, so neither the Vault nor the workspace store can hold it (D-P14-14). */

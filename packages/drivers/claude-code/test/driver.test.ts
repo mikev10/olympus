@@ -104,7 +104,7 @@ function stream(parts: { tools?: string[]; servers?: Array<{ name: string; statu
     agents: ['claude', 'builder'],
     model: 'claude-sonnet-5',
     apiKeySource: KEY_VARIABLE,
-    claude_code_version: '2.1.277',
+    claude_code_version: '2.1.310',
   };
   const result = {
     type: 'result',

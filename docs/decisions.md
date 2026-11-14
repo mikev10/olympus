@@ -9858,3 +9858,24 @@ Started on `v2` at abe344a, after the amendment (#156). Issues #145, #148 to
   there; a `cost-unapproved` answer discards the base like any other
   refusal.
 - **Reverse:** move the block back after the estimate.
+
+### D-R36a-10: the admitted artifacts join the base (found while building)
+
+- **Found:** the line requires every admitted artifact in every tree it
+  builds (`tamperedIn`, `packages/api/src/line.ts`: an absent artifact is
+  `missing`, a tamper). The README has the run files copied into the working
+  copy and not committed, so a base read from the commit alone refused every
+  first run at `test-design`. The CRLF assertion found it.
+- **Chosen:** after the base is read from the commit, admission writes each
+  admitted artifact into it with the bytes it hashed. An artifact the commit
+  also holds must be those bytes, or admission refuses it
+  (`differs-from-commit`), before the cost estimate: on a
+  `core.autocrlf=true` checkout a committed run file differs from its blob,
+  and merging the commit's version of a file the run was judged by is the
+  failure `integrate`'s comparison exists to catch. The base's digest is
+  taken after the overlay. `integrate`'s comparison is unchanged.
+- **Rejected:** skipping artifact paths in `integrate`'s comparison (loosens
+  the merged-base check); requiring every artifact to be committed (refuses
+  the README's flow); letting an absent artifact pass `tamperedIn` (a check
+  over a tree without its acceptance tests).
+- **Reverse:** drop `overlayArtifacts` and require committed artifacts.

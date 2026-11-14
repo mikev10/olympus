@@ -126,6 +126,16 @@ export function specDraftPaths(runId: string): {
   };
 }
 
+/**
+ * The line a drafter's request opens with: the directory the runtime made for
+ * the run's drafts, and the files the station reads from it. Runtime text
+ * only: the run id is the runtime's, and nothing a model wrote is in it.
+ */
+export function draftDestination(ctx: Pick<LineContext, 'run' | 'drafting'>, station: DraftStation): string {
+  const files = station === 'spec' ? specDraftFiles(ctx) : [manifestDraftPath(ctx.run.id)];
+  return `[drafts] write the draft under ${DRAFT_DIR}/${ctx.run.id}/: ${files.join(', ')}`;
+}
+
 /** The files a spec draft holds: four, and a bug fix's two more (A-R16-03). */
 function specDraftFiles(ctx: Pick<LineContext, 'run' | 'drafting'>): string[] {
   const paths = specDraftPaths(ctx.run.id);
@@ -407,7 +417,8 @@ async function draft(ctx: LineContext, station: DraftStation, current: DraftAtte
     if (spec.tampered.length > 0) return recordTamper(ctx, station, null, spec.tampered, { phase: 'context' }, null);
     context = joinParts(grantedContext(STATION_CONTRACTS['test-design'], { 'locked-spec': spec.text }));
   }
-  const suffix = retrySuffix(station, current.attempt, await retryParts(ctx, station, previous));
+  // Where the draft is written, named by the runtime: a drafter granted no listing tool cannot find it otherwise (#151).
+  const suffix = [draftDestination(ctx, station), retrySuffix(station, current.attempt, await retryParts(ctx, station, previous))].join('\n');
 
   const started = await startAttempt(ctx, seat);
   if (started !== undefined) return started;

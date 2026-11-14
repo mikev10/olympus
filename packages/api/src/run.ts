@@ -94,7 +94,7 @@ import { parseSecurityPart, type SecurityPart, type SecurityScanners } from './s
 import { mergedCheckProblems, parseGraph, parseManifest, reproductionProblems, requestProblems, securityProblems, type RequestProblem } from './validate.js';
 import { suiteBindingProblems } from './verification.js';
 import { planInstall } from './install.js';
-import { BaseRefusal, basePath, discardRun, existsIn, snapshotBase, treeDigest, within, type WorkspaceStore } from './workspace.js';
+import { BaseRefusal, basePath, discardRun, existsIn, hashAt, snapshotBase, treeDigest, within, writeFiles, type WorkspaceStore } from './workspace.js';
 
 export interface ComponentGraph {
   readonly vault: Vault;
@@ -882,6 +882,53 @@ function policyRefusal(level: AutonomyLevel, graph: TaskGraph, policy: Policy, d
  * locked artifact is offered to seats as text in their context, which tree
  * omission cannot reach, so classifying one sensitive would withhold nothing.
  */
+/** Every artifact a request admitted, by path and hash, once each. */
+function admittedEntries(artifacts: unknown): AdmittedArtifact[] {
+  const found = new Map<string, string>();
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) value.forEach(walk);
+    else if (typeof value === 'object' && value !== null) {
+      const record = value as Record<string, unknown>;
+      if (typeof record.path === 'string' && typeof record.sha256 === 'string') found.set(record.path, record.sha256);
+      else Object.values(record).forEach(walk);
+    }
+  };
+  walk(artifacts);
+  return [...found].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([path, sha]) => ({ path, sha256: sha }));
+}
+
+/**
+ * Writes each admitted artifact into the base with the bytes admission hashed
+ * (D-R36a-10). The base is the commit's tree, and a run's artifacts are
+ * usually files the person wrote and did not commit; the line reads every one
+ * of them in every tree it builds. One the commit holds must be the bytes
+ * admitted, or what merges would be another tree than the one verified: a
+ * checkout whose line endings differ from its commit's is refused here,
+ * before any spend, and never at `integrate` after it (#154).
+ */
+async function overlayArtifacts(base: string, workspace: string, artifacts: unknown): Promise<RequestProblem[]> {
+  const problems: RequestProblem[] = [];
+  const files: Array<{ path: string; bytes: Uint8Array }> = [];
+  for (const artifact of admittedEntries(artifacts)) {
+    const bytes = await readFile(resolve(workspace, artifact.path)).catch(() => null);
+    if (bytes === null || sha256(bytes) !== artifact.sha256) {
+      problems.push({ path: 'artifacts', code: 'changed', message: `${artifact.path} changed in the workspace while the run was being admitted` });
+      continue;
+    }
+    const committed = await hashAt(base, artifact.path);
+    if (committed !== null && committed !== artifact.sha256) {
+      problems.push({
+        path: 'artifacts', code: 'differs-from-commit',
+        message: `${artifact.path} is committed at the base commit with other bytes than the workspace holds; commit it as it stands, or leave it out of the commit (a checkout with core.autocrlf=true writes other line endings than the commit holds)`,
+      });
+      continue;
+    }
+    files.push({ path: artifact.path, bytes });
+  }
+  if (problems.length === 0) await writeFiles(base, files);
+  return problems;
+}
+
 function sensitiveArtifacts(artifacts: unknown, policy: Policy): RequestProblem[] {
   const globs = Object.values(policy.sensitivePaths).flat();
   if (globs.length === 0) return [];
@@ -1171,6 +1218,14 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
     if (!(error instanceof BaseRefusal)) throw error;
     return { ok: false, reason: 'invalid-request', problems: [{ path: 'baseCommit', code: 'unreadable', message: error.message }] };
   }
+  // The admitted artifacts join the base with the bytes admission hashed: the run is judged by them, and a check
+  // runs the acceptance tests over trees built from the base. A committed one must be those bytes (D-R36a-10).
+  const overlaid = await overlayArtifacts(basePath(workspaces, req.runId), req.workspace, admitted.admitted.artifacts);
+  if (overlaid.length > 0) {
+    await discardRun(workspaces, req.runId);
+    return { ok: false, reason: 'invalid-request', problems: overlaid };
+  }
+  baseTreeSha256 = await treeDigest(basePath(workspaces, req.runId));
   // Where the drafters write, in trees copied from the base; a base that already holds it would mix them (R19).
   if (drafted.length > 0 && (await existsIn(basePath(workspaces, req.runId), `${DRAFT_DIR}/${req.runId}`))) {
     await discardRun(workspaces, req.runId);

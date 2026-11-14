@@ -21,11 +21,14 @@ export const DECLARED_TOOLS: readonly string[] = [
   'CronCreate',
   'CronDelete',
   'CronList',
+  'DesignSync',
   'Edit',
   'EnterWorktree',
   'ExitWorktree',
   'ListAgents',
+  'Monitor',
   'NotebookEdit',
+  'PushNotification',
   'Read',
   'ReportFindings',
   'ScheduleWakeup',
@@ -44,7 +47,7 @@ export const DECLARED_TOOLS: readonly string[] = [
 const WRITE_TOOLS = new Set(['Edit', 'NotebookEdit', 'Write']);
 
 /** Tools whose use leaves the sandbox, for event classification. */
-const NETWORK_TOOLS = new Set(['WebFetch', 'WebSearch']);
+const NETWORK_TOOLS = new Set(['DesignSync', 'PushNotification', 'WebFetch', 'WebSearch']);
 
 /** Tools whose use starts a child task under the same provenance. */
 const SUBAGENT_TOOLS = new Set(['Task']);
@@ -61,8 +64,9 @@ export function isSubagentTool(name: string): boolean {
   return SUBAGENT_TOOLS.has(name);
 }
 
+/** Tools whose use runs a command in the sandbox: `Monitor` watches one it started, as `Bash` runs one. */
 export function isCommandTool(name: string): boolean {
-  return name === 'Bash';
+  return name === 'Bash' || name === 'Monitor';
 }
 
 /**

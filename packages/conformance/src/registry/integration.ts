@@ -31,7 +31,7 @@ const REPORT_METER: MeterReading = { kind: 'metered', calls: 1, inputTokens: 100
 /** What the build task adds: one file, so the run has a change to merge. */
 const FEATURE = { 'src/feature.ts': 'export const feature = 1;\n' };
 
-interface Integrating {
+export interface Integrating {
   readonly rig: LineRig;
   readonly github: FakeGitHub;
   readonly baseCommit: string;
@@ -43,9 +43,10 @@ interface Integrating {
 
 /** The hello fixture, seeded as the remote's base commit, with a build task that adds `FEATURE`. */
 /** `meter`, when given, is what every sandbox reads at its destroy. */
-async function withIntegration<T>(prefix: string, body: (it: Integrating) => Promise<T>, meter?: MeterReading): Promise<T> {
+/** `checkout`, when given, lays the fixture out as a checkout and returns the commit it is of, which the remote is seeded with (R36a). */
+export async function withIntegration<T>(prefix: string, body: (it: Integrating) => Promise<T>, meter?: MeterReading, checkout?: (dir: string) => string): Promise<T> {
   return withLine(prefix, async (rig) =>
-    withFakeGitHub(rig.dirs.artifacts, { token: TOKEN }, async (github, baseCommit) => {
+    withFakeGitHub(rig.dirs.artifacts, { token: TOKEN, ...(checkout === undefined ? {} : { commit: checkout(rig.dirs.artifacts) }) }, async (github, baseCommit) => {
       const { GitHubIntegrator } = await api();
       const { StubSandboxProvider } = await import('@olympus-ai/sandbox');
       const specs: SandboxSpec[] = [];
@@ -78,7 +79,7 @@ async function integrationOf(rig: LineRig): Promise<IntegrationRecord[]> {
 }
 
 /** Drives to the integrate approval, approves it, and resumes. */
-async function approveAndResume(it: Integrating): Promise<RunOutcome> {
+export async function approveAndResume(it: Integrating): Promise<RunOutcome> {
   const { approveStation, resumeRun } = await api();
   const components = await it.components();
   const approved = await approveStation({ runId: it.rig.runId, key: 'integrate:1', approvedBy: 'conformance', vault: components.vault });
@@ -86,7 +87,7 @@ async function approveAndResume(it: Integrating): Promise<RunOutcome> {
   return resumeRun({ runId: it.rig.runId, components: await it.components() });
 }
 
-async function toApproval(it: Integrating): Promise<void> {
+export async function toApproval(it: Integrating): Promise<void> {
   const { startRun } = await api();
   const waiting = refusalOf(await startRun(await it.rig.request(await it.components(), { baseCommit: it.baseCommit })), 'integrate');
   if (waiting.at !== 'integrate' || waiting.transition.reason !== 'approval-required') {

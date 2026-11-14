@@ -13,8 +13,8 @@ except the four files below.
 
 ## What you write
 
-Write exactly these four files in the one directory under `.drafts/` in your
-working directory, which the runtime made for this run and left empty:
+Write exactly these four files in the directory under `.drafts/` that your
+request names, which the runtime made for this run and left empty:
 
 - `spec.md`: one shippable capability, in statements each of which a test can
   check. Say what the change does, and what it must not do. Cover the intent

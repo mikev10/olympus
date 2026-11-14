@@ -37,6 +37,7 @@ import { INDETERMINATE_PROBE_LOWERS, UNSUPPORTED_STACK_REFUSES, REFUSAL_NAMES_TH
 import { R20_I5 } from './roles.js';
 import { R13A_I5 } from './nightly.js';
 import { R34_I5 } from './install.js';
+import { R36A_I5 } from './first-run.js';
 import { R8A_I5 } from './observe.js';
 import { R8B_I5 } from './observe-plan.js';
 import { R8A_REVIEW_I5 } from './observe-review.js';
@@ -61,7 +62,18 @@ export const I5: InvariantEntry = {
     ...R24_I5,
     // R20: the role compiler.
     // R19: drafting at spec and test-design.
+    // R36a: the pinned CLI calls every tier's model (#152). Paid, under the run-driver label.
+    external({
+      id: 'I5.every-tier-model-callable-by-the-pinned-cli',
+      title:
+        "every tier's model is one the pinned CLI can call: one minimal call per tier through the driver's own image reaches the model the tier resolves to, "
+        + 'so a tier map and a CLI pin that drift apart fail here rather than parking every seat of that tier (#152)',
+      level: 'runtime',
+      package: '@olympus-ai/driver-claude-code',
+      file: 'test/invariants.test.ts',
+    }),
     ...R19_ASSERTIONS.I5,
+    ...R36A_I5,
     ...R16_ASSERTIONS.I5,
     ...R20_I5,
     // R22: the trigger framework.
