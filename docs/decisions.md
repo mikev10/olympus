@@ -9955,3 +9955,21 @@ The external reviews and their triage are in `docs/reviews/2026-11-14-R36a-first
   it. Policy that grants either is refused at admission, before anything
   runs.
 - **Reverse:** add them back, and the inventory assertion fails again.
+
+### D-R36a-16: the subagent claim's message no longer competes with the role's token
+
+- **Found in CI:** the second `run-driver` run on #157 failed
+  `driver.subagents`: the child replied `child` with no `PLUM-6620`. The
+  message asked for "the single word: child", which a reply that also ends
+  with the role's token cannot satisfy. So either the model obeyed the
+  message over the role, or CLI 2.1.310 stopped applying the role's
+  instructions. The CI log cannot tell these apart.
+- **Chosen:** the message becomes "Reply with the word child." It no longer
+  limits the reply to one word, and it still never names the token, so only
+  the role's instructions ask for it and a session that drops them still
+  fails. No assertion changed.
+- **Rejected:** rerunning unchanged. The conflict stays, so a pass would
+  not show the role was applied.
+- **If it fails again:** the role's instructions are not reaching the
+  session, which is a driver defect to find, not a wording problem.
+- **Reverse:** restore the old message.
