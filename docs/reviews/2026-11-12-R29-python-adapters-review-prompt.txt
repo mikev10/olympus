@@ -1,0 +1,141 @@
+The code under review is in the file
+`2026-11-12-R29-python-adapters-review-bundle.txt` (SHA-256 a1bb1d2e086c7323a7f0337807fae863bb1cbff36890cee2d7fcabe271e4bc42) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing the Python stack support of a software factory runtime: the
+code that decides which Python tests exist, reads what they assert, installs a
+Python repository's dependencies, and runs its tests as the gate a change must
+pass. It is a TypeScript project. You have the source and nothing else — no
+design documents, no author reasoning, no prior version, no conversation that
+produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The runtime carries a change written by a model agent through fixed stations
+and lets it advance only on checks the runtime runs itself. Until this change it
+supported only TypeScript repositories (vitest or jest). This change adds a
+Python adapter set: pytest test discovery, assertion, skip-marker, and test-case
+reading done by parsing files on the host (TOML, INI, and Python parsed in
+TypeScript, nothing executed); coverage read from coverage.py's JSON report;
+Python config files treated as protected; and two dependency installers (uv for
+`uv.lock`, pip for a hashed `requirements.txt`) that build a virtualenv with
+copied binaries and install it in a sandbox, after which every check runs over
+that install, read-only, with no network, in the same container image. It also
+changes the installer contract from one argument vector to a list of steps.
+
+It must hold against a capable, motivated party trying to make a Python change
+pass the gate without the tests that judge it really passing — by weakening,
+skipping, deleting, or hiding tests, by changing what the test runner collects
+or loads, or by getting code of its own run as the judge. Assume no deceptive
+intent — only that the easiest path gets taken.
+
+That party controls every file of the repository's working tree the change
+produces: test files, source files, conftest.py, pyproject.toml, setup.cfg,
+pytest.ini, tox.ini, requirements files, uv.lock, and anything else it can write,
+including files under directories named .venv, site-packages, or __pycache__. It
+also controls what the base repository a run starts from contains, within what a
+repository author could commit. It does not control the components the runtime
+is wired with — the Vault, the sandbox provider, the container images pinned by
+digest, the installer declarations, and the drivers are runtime-selected and
+trusted, even where a function takes one as an argument — and it does not
+control code running inside the runtime's own process. Package registries
+(PyPI) are reached only by the install sandbox, and only to hosts a policy
+grants.
+
+The invariants at stake:
+
+- An agent may not be judged by an artifact it can write. The tests and the
+  runner that judge a change must be ones the change cannot alter; a change's
+  writes into dependency trees are recorded and never carried into the tree the
+  checks run over.
+- Fail closed. A missing check, an absent capability, an unsupported stack, an
+  unreadable config, or a shrunken suite is a refusal — never a silent degrade
+  and never a warning that lets the run continue.
+- Nothing an adapter does runs repository code on the host: configs and tests
+  are parsed, never loaded or executed.
+- The runtime derives status; a test runner's own output is not trusted to say
+  how many tests exist.
+
+The mechanisms that matter most:
+
+- Static pytest collection (`packages/adapters/src/python/discovery.ts`,
+  `config.ts`, `ini.ts`): which files and cases the host believes pytest will
+  collect, and what config or conftest content is refused.
+- Assertion, skip-marker, and case reading (`python/tests.ts`), which tamper
+  analysis compares between the tree a change was handed and the tree it left.
+- The installers and lockfile readers (`python/install.ts`) and the runtime's
+  multi-step install (`packages/api/src/install.ts`): what may reach the
+  virtualenv a check then trusts as its runner.
+- Dependency-tree handling and the check image (`packages/adapters/src/trees.ts`,
+  `packages/api/src/workspace.ts`, `line.ts`, `verification.ts`).
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+Partial support. A stack with tests and no tamper analysis gets the readiness
+level R1 already derives, never presented as full support. A dependency audit
+for Python (R13a audits npm and pnpm only), which is filed as its own issue. The
+unittest runner, nose, and any pytest plugin that changes collection.
+
+"R1" and "R13a" are other units of this project; the out-of-scope list means
+that a readiness level below full support, a missing vulnerability audit of
+Python dependencies, no unittest-runner or nose support, and no support for
+collection-changing pytest plugins are not defects here.
+
+THE QUESTION
+
+How would I get a Python change through the gate while the tests that judge it
+do not really pass, or while a weakened, skipped, or deleted test goes
+unreported — by making the host's static reading of pytest disagree with what
+pytest actually collects and runs, by getting code of my own loaded by the
+interpreter or pytest at check time, or by getting something unverified into
+the installed virtualenv?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.

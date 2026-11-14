@@ -271,8 +271,8 @@ export const INSTALL_REFUSES_TREE_CODE: LocalAssertion = runtime({
       await withDependencies(rig, hashedLockfile('hello', [EXTRA]));
       await writeManifest(rig.dirs, [NEEDS_EXTRA]);
       const linking = standInNpmInstaller(rig.dirs.artifacts);
-      const script = `${linking.invocation.at(-1) ?? ''}\nrequire('node:fs').symlinkSync('../judge', 'node_modules/escape', 'dir');`;
-      const components = await rig.components({ installers: [{ ...linking, invocation: ['node', '-e', script] }] });
+      const script = `${linking.steps[0].at(-1) ?? ''}\nrequire('node:fs').symlinkSync('../judge', 'node_modules/escape', 'dir');`;
+      const components = await rig.components({ installers: [{ ...linking, steps: [['node', '-e', script]] }] });
       refusalOf(await startRun(await rig.request(components)), 'R34 escape');
       const baseRun = await components.vault.readBaseRun(rig.runId, null);
       const record = baseRun === null ? null : await readRecord<BaseRunRecord>(components.vault, baseRun);
@@ -321,9 +321,9 @@ export const INSTALL_FAILING_A_HASH_REFUSES: LocalAssertion = runtime({
     // npm itself, in its pinned image with no network, refuses a package whose bytes are not its lockfile's hash,
     // and the declaration names that cause; the same lockfile with the true hash installs (external review, codex-3).
     const { NPM_INSTALLER: npm } = await adapters();
-    const intact = await integrityProbe(npm.image, npm.invocation, npm.env, false);
+    const intact = await integrityProbe(npm.image, npm.steps[0], npm.env, false);
     if (intact.exit !== 0) throw new Error(`R34: npm's declared install failed over an intact lockfile: ${intact.output}`);
-    const tampered = await integrityProbe(npm.image, npm.invocation, npm.env, true);
+    const tampered = await integrityProbe(npm.image, npm.steps[0], npm.env, true);
     if (tampered.exit === 0 || npm.failure(tampered.output) !== 'a package failed the integrity hash its lockfile records') {
       throw new Error(`R34: npm's declared install over a tampered hash exited ${String(tampered.exit)}: ${tampered.output}`);
     }
@@ -383,12 +383,12 @@ export const INSTALL_RUNS_NO_SCRIPT: LocalAssertion = runtime({
     "npm's declared install, run with its declared arguments and environment in its pinned image, leaves a dependency's postinstall unrun, where the same install without them runs it; pnpm's declaration disables scripts and its pnpmfile, which pnpm runs despite --ignore-scripts, and neither installer reads a .npmrc or a pnpmfile from the tree (R34, D-R34-02)",
   run: async () => {
     const { NPM_INSTALLER, PNPM_INSTALLER } = await adapters();
-    if (await postinstallRan(NPM_INSTALLER.image, NPM_INSTALLER.invocation, NPM_INSTALLER.env)) throw new Error("R34: npm's declared install ran a dependency's postinstall");
+    if (await postinstallRan(NPM_INSTALLER.image, NPM_INSTALLER.steps[0], NPM_INSTALLER.env)) throw new Error("R34: npm's declared install ran a dependency's postinstall");
     // The probe can see a script run: without the flag and the environment, npm runs it.
-    const bare = NPM_INSTALLER.invocation.filter((a) => a !== '--ignore-scripts');
+    const bare = NPM_INSTALLER.steps[0].filter((a) => a !== '--ignore-scripts');
     if (!(await postinstallRan(NPM_INSTALLER.image, bare, { HOME: '/tmp' }))) throw new Error('R34: the probe did not see a postinstall run without --ignore-scripts, so it proves nothing');
     for (const flag of ['--frozen-lockfile', '--ignore-scripts', '--ignore-pnpmfile']) {
-      if (!PNPM_INSTALLER.invocation.includes(flag)) throw new Error(`R34: pnpm's install does not pass ${flag}`);
+      if (!PNPM_INSTALLER.steps[0].includes(flag)) throw new Error(`R34: pnpm's install does not pass ${flag}`);
     }
     for (const installer of [NPM_INSTALLER, PNPM_INSTALLER]) {
       const read = [...installer.files, ...(installer.nested === null ? [] : [installer.nested])];

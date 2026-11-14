@@ -47,9 +47,10 @@ function sha256(bytes: string | Buffer): string {
 export function lockedPackages(installer: DependencyInstaller, text: string): ReturnType<DependencyInstaller['packages']> {
   let document: unknown;
   try {
-    document = installer.format === 'json' ? (JSON.parse(text) as unknown) : (parseYaml(text) as unknown);
+    // A `text` lockfile is read by its installer, which names what it cannot read (D-R29-05).
+    document = installer.format === 'json' ? (JSON.parse(text) as unknown) : installer.format === 'yaml' ? (parseYaml(text) as unknown) : text;
   } catch (error) {
-    return { ok: false, reason: `${installer.lockfile} is not ${installer.format === 'json' ? 'JSON' : 'YAML'}: ${error instanceof Error ? error.message : String(error)}` };
+    return { ok: false, reason: `${installer.lockfile} is not ${installer.format === 'json' ? 'JSON' : 'YAML'}:${error instanceof Error ? error.message : String(error)}` };
   }
   return installer.packages(document);
 }
@@ -212,7 +213,7 @@ export async function installInto(ctx: LineContext, tree: string, base: string, 
 
   const inputs = await inputFiles(tree, installer, isTree);
   const key = createHash('sha256');
-  key.update(`${installer.stack}\0${installer.image}\0${JSON.stringify(installer.invocation)}\0${JSON.stringify(installer.env)}\n`);
+  key.update(`${installer.stack}\0${installer.image}\0${JSON.stringify(installer.steps)}\0${JSON.stringify(installer.env)}\n`);
   for (const path of inputs) key.update(`${path}\0${sha256(await readFile(join(tree, ...path.split('/'))))}\n`);
   const dir = installPath(ctx.components.workspaces, ctx.run.id, key.digest('hex'));
 
@@ -261,10 +262,13 @@ async function install(
   }
   let failed: string | undefined;
   try {
-    const exec = await sandbox.exec(handle, [...installer.invocation], { env: { ...installer.env } });
-    if (exec.exitCode !== 0) {
-      const cause = installer.failure(`${exec.stdout}\n${exec.stderr}`) ?? `it exited ${String(exec.exitCode)}`;
+    // Each step in turn, in the one sandbox, stopping at the first that fails (A-R29-02).
+    for (const [index, step] of installer.steps.entries()) {
+      const exec = await sandbox.exec(handle, [...step], { env: { ...installer.env } });
+      if (exec.exitCode === 0) continue;
+      const cause = installer.failure(`${exec.stdout}\n${exec.stderr}`) ?? `step ${String(index + 1)} of ${String(installer.steps.length)} (${step[0]}) exited ${String(exec.exitCode)}`;
       failed = `the install from ${installer.lockfile} failed: ${cause}`;
+      break;
     }
   } catch (error) {
     failed = `the install from ${installer.lockfile} did not run: ${error instanceof Error ? error.message : String(error)}`;
@@ -290,7 +294,7 @@ async function install(
     stack: installer.stack,
     lockfile: installer.lockfile,
     image: installer.image,
-    invocation: [...installer.invocation],
+    steps: installer.steps.map((step) => [...step]),
     lockfileSha256: sha256(plan.lockfileText),
     baseLockfileSha256: baseText === null ? null : sha256(baseText),
     lockfileDiff: lockfileDiff(plan.packages, baseRead?.ok === true ? baseRead.packages : []),

@@ -401,13 +401,17 @@ describe('the base record (D-A-BF-01)', () => {
 
   test('R34: stores a whole install, and refuses one that is not the runtime\'s or names no tree digest', async () => {
     const install = {
-      stack: 'npm', lockfile: 'package-lock.json', image: `node@sha256:${'d'.repeat(64)}`, invocation: ['npm', 'ci', '--ignore-scripts'],
+      stack: 'npm', lockfile: 'package-lock.json', image: `node@sha256:${'d'.repeat(64)}`, steps: [['npm', 'ci', '--ignore-scripts']],
       lockfileSha256: 'e'.repeat(64), baseLockfileSha256: null, lockfileDiff: { added: ['node_modules/a'], removed: [], changed: [] },
       installedTreeSha256: 'f'.repeat(64), collectedBy: 'runtime' as const,
     };
     await expect(vault.recordBaseRun({ ...record, install: { ...install, collectedBy: 'agent' } } as never)).rejects.toThrow(/install/);
     await expect(vault.recordBaseRun({ ...record, install: { ...install, installedTreeSha256: 'x' } })).rejects.toThrow(/install/);
     await expect(vault.recordBaseRun({ ...record, install: undefined } as never)).rejects.toThrow(/install/);
+    // A-R29-02: the steps it ran, at least one and none empty.
+    await expect(vault.recordBaseRun({ ...record, install: { ...install, steps: [] } })).rejects.toThrow(/install/);
+    await expect(vault.recordBaseRun({ ...record, install: { ...install, steps: [['python', '-m', 'venv', '--copies', '.venv'], []] } })).rejects.toThrow(/install/);
+    await expect(vault.recordBaseRun({ ...record, install: { ...install, invocation: ['npm', 'ci'], steps: undefined } } as never)).rejects.toThrow(/install/);
     expect(await vault.readBaseRun(runId, null)).toBeNull();
     const ref = await vault.recordBaseRun({ ...record, install });
     expect(ref.kind).toBe('base-run');

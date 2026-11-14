@@ -185,3 +185,42 @@ describe('a revision', () => {
     });
   });
 });
+
+/** The Python fixture: pytest and coverage.py pinned by a uv.lock with every wheel hashed, one module, one passing test (R29). */
+async function pythonRepository(dir: string, extra: Readonly<Record<string, string>> = {}): Promise<void> {
+  const { readFile } = await import('node:fs/promises');
+  const fixture = join(import.meta.dirname, 'fixtures', 'python');
+  const files: Record<string, string> = {};
+  for (const path of ['pyproject.toml', 'uv.lock', 'hello/__init__.py', 'tests/test_hello.py']) files[path] = await readFile(join(fixture, ...path.split('/')), 'utf8');
+  await gitRepository(dir, { ...files, 'AGENTS.md': '# Agents\n', ...extra });
+}
+
+describe('a Python repository (R29)', () => {
+  it('clears L2: pinned by uv.lock, installed by uv in the Python image, compiled, green and measured at base, with tamper analysis', async () => {
+    await withWorkbench(async (bench) => {
+      const dir = join(bench.base, 'python');
+      await pythonRepository(dir);
+      const report = await scan(options(bench, dir, { branchProtection: PROTECTED, protectedPaths: ['pyproject.toml', 'uv.lock'] }));
+      for (const id of ['build.pinned-manifest', 'build.install', 'build.clean', 'testing.adapter', 'testing.enumerate', 'testing.green-at-base', 'testing.coverage', 'testing.tamper-analysis'] as const) {
+        expect(probe(report, id).outcome, `${id}: ${probe(report, id).detail}`).toBe('supported');
+      }
+      expect(probe(report, 'testing.adapter').detail).toMatch(/pytest@8/);
+      const install = probe(report, 'build.install').evidence;
+      expect(install.via === 'executed' ? install.image : '').toMatch(/^ghcr\.io\/astral-sh\/uv@sha256:/u);
+      expect(report.ceiling, renderReport(report)).toMatchObject({ kind: 'scanned', level: 2 });
+    });
+  });
+
+  it('holds a Python repository at L0 on its failing suite, and one with no lockfile at its manifest', async () => {
+    await withWorkbench(async (bench) => {
+      const failing = join(bench.base, 'failing');
+      await pythonRepository(failing, { 'tests/test_hello.py': 'def test_fails():\n    assert 1 == 2\n' });
+      const red = await scan(options(bench, failing, { branchProtection: PROTECTED }));
+      expect(red.ceiling).toMatchObject({ level: 0, heldBy: { kind: 'probe', probe: 'testing.green-at-base' } });
+      const unpinned = join(bench.base, 'unpinned');
+      await gitRepository(unpinned, { 'pyproject.toml': '[project]\nname = "x"\nversion = "0"\n[dependency-groups]\ndev = ["pytest"]\n' });
+      const loose = await scan(options(bench, unpinned, { branchProtection: PROTECTED }));
+      expect(loose.ceiling).toMatchObject({ level: 0, heldBy: { kind: 'probe', probe: 'build.pinned-manifest' } });
+    });
+  });
+});

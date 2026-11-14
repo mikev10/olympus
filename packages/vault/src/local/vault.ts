@@ -561,7 +561,8 @@ function isStrings(value: unknown): boolean {
 /** A-R34-02: the runtime's install, whole: the lockfile's hashes, its diff by package, and the installed trees' digest. */
 function isInstallRecord(i: unknown): boolean {
   return isRecord(i) && i.collectedBy === 'runtime' && hasString(i, 'stack') && hasString(i, 'lockfile') && hasString(i, 'image') &&
-    isStrings(i.invocation) && (i.invocation as unknown[]).length > 0 &&
+    // A-R29-02: every step the install ran, in order; none empty, and at least one.
+    Array.isArray(i.steps) && i.steps.length > 0 && i.steps.every((s) => isStrings(s) && (s as unknown[]).length > 0) &&
     typeof i.lockfileSha256 === 'string' && SHA256_HEX.test(i.lockfileSha256) &&
     (i.baseLockfileSha256 === null || (typeof i.baseLockfileSha256 === 'string' && SHA256_HEX.test(i.baseLockfileSha256))) &&
     isRecord(i.lockfileDiff) && isStrings(i.lockfileDiff.added) && isStrings(i.lockfileDiff.removed) && isStrings(i.lockfileDiff.changed) &&

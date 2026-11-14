@@ -131,9 +131,9 @@ describe('the installers read their lockfiles (D-R34-06)', () => {
   });
 
   test('neither installer runs a lifecycle script or reads a pnpmfile, and each names a failed hash (D-R34-02)', () => {
-    expect(NPM_INSTALLER.invocation).toContain('--ignore-scripts');
+    expect(NPM_INSTALLER.steps).toEqual([expect.arrayContaining(['--ignore-scripts'])]);
     expect(NPM_INSTALLER.env.npm_config_ignore_scripts).toBe('true');
-    expect(PNPM_INSTALLER.invocation).toEqual(expect.arrayContaining(['--frozen-lockfile', '--ignore-scripts', '--ignore-pnpmfile']));
+    expect(PNPM_INSTALLER.steps).toEqual([expect.arrayContaining(['--frozen-lockfile', '--ignore-scripts', '--ignore-pnpmfile'])]);
     expect([...NPM_INSTALLER.files, ...PNPM_INSTALLER.files]).not.toEqual(expect.arrayContaining(['.npmrc']));
     expect([...NPM_INSTALLER.files, ...PNPM_INSTALLER.files]).not.toEqual(expect.arrayContaining(['.pnpmfile.cjs']));
     expect(NPM_INSTALLER.failure('npm error code EINTEGRITY')).toMatch(/integrity hash/);

@@ -26,6 +26,7 @@ export {
   composeDiff,
   diffDigest,
   draftPaths,
+  inDependencyTree,
   localWorkspaceStore,
   ownDiff,
   treeDigest,

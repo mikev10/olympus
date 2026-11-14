@@ -1,5 +1,5 @@
 /**
- * Files that change how a Node.js project installs, compiles, lints, tests,
+ * Files that change how a Node.js or Python project installs, compiles, lints, tests,
  * or measures coverage, wherever they sit in the tree. A change to one
  * changes what every check means without changing a line of product or test
  * code, which is why `ManifestAdapter` reports them.
@@ -22,6 +22,10 @@ export const CONFIG_FILE_GLOBS: readonly string[] = [
   '.c8rc', '.c8rc.json', '.nycrc', '.nycrc.*', 'nyc.config.*',
   // Lint and format.
   'eslint.config.*', '.eslintrc', '.eslintrc.*', '.eslintignore', '.prettierrc', '.prettierrc.*', 'prettier.config.*', '.prettierignore',
+  // Python: dependencies, packaging, pytest and coverage, and the files an interpreter loads at start (D-R29-08).
+  'pyproject.toml', 'setup.cfg', 'setup.py', 'tox.ini', 'pytest.ini', '.pytest.ini', 'pytest.toml', '.pytest.toml', 'conftest.py',
+  '.coveragerc', 'uv.lock', 'uv.toml', 'requirements*.txt', 'constraints*.txt', 'poetry.lock', 'Pipfile', 'Pipfile.lock', 'pdm.lock',
+  '.python-version', 'sitecustomize.py', 'usercustomize.py', '*.pth',
   // What the diff and the environment contain.
   '.gitignore', '.gitattributes', '.env', '.env.*',
 ].map((name) => `**/${name}`);

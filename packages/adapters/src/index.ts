@@ -17,7 +17,7 @@ export {
   BEHAVIORAL_KINDS,
   buildAdapterSet,
   missingControls,
-  TypeScriptAdapterSet,
+  StackAdapterSet,
   type AdapterSetOptions,
   type Control,
 } from './detect.js';
@@ -63,3 +63,8 @@ export {
 } from './stand-in.js';
 export { AUDITORS, DEPENDENCY_AUDIT_IMAGE, NPM_AUDITOR, PNPM_AUDITOR, PNPM_AUDIT_VERSION, UNSUPPORTED_LOCKFILES } from './audit.js';
 export { INSTALLERS, NPM_INSTALLER, PNPM_INSTALLER } from './install.js';
+export { DEPENDENCY_TREES, isDependencyTree, NODE_DEPENDENCY_TREES, PYTHON_DEPENDENCY_TREES } from './trees.js';
+export { PIP_INSTALLER, PYPI_REGISTRIES, PYTHON_IMAGE, UV_INSTALLER } from './python/install.js';
+export { PytestAdapter } from './python/framework.js';
+export { CoveragePyAdapter, type CoveragePyOptions } from './python/coverage.js';
+export { PYTEST_DEFAULTS, pytestMajor, type PytestMajor, type PytestRules } from './python/config.js';

@@ -18,6 +18,7 @@ import { isConfigFile } from './config-files.js';
 import { diffTrees, exists, readRegularFile, SOURCE_FILE_CAP, toPosix, VCS_DIRECTORIES } from './files.js';
 import { changedLines, splitLines } from './line-diff.js';
 import { refuse } from './refusal.js';
+import { isDependencyTree } from './trees.js';
 import { parseModule } from './static.js';
 import type { CoverageAdapter, TestFrameworkAdapter } from './types.js';
 
@@ -151,7 +152,7 @@ export class IstanbulCoverageAdapter implements CoverageAdapter {
       SOURCE.test(path) && !DECLARATION.test(path) && !isConfigFile(path) && !tests.has(`${headPosix}/${path}`);
 
     const changes = await diffTrees(base, head, isSource, {
-      skipDirectory: (name) => name === 'node_modules' || VCS_DIRECTORIES.has(name),
+      skipDirectory: (name) => isDependencyTree(name) || VCS_DIRECTORIES.has(name),
     });
     let total = 0;
     let covered = 0;

@@ -66,7 +66,7 @@ export const UNSUPPORTED_STACK_IS_LOUD: LocalAssertion = runtime({
 
     // The refusal reads the slots, not only the set's own report of itself.
     const underReporting = {
-      stack: 'custom', test: null, coverage: null, mutation: null, behavioral: [], manifest: null, staticAnalysis: null, unavailableControls: (): string[] => [],
+      stack: 'custom', test: null, coverage: null, mutation: null, behavioral: [], manifest: null, staticAnalysis: null, dependencyTrees: [], checkImage: null, unavailableControls: (): string[] => [],
     };
     const lied = adapterAdmission(underReporting, 3);
     if (lied.ok || !lied.unavailable.includes('mutation')) {

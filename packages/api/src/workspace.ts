@@ -25,7 +25,7 @@
 import { createHash } from 'node:crypto';
 import { copyFile, cp, lstat, mkdir, readlink, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { diffTrees, hashRegularFile, walkTree, type WalkOptions } from '@olympus-ai/adapters';
+import { diffTrees, hashRegularFile, isDependencyTree, walkTree, type WalkOptions } from '@olympus-ai/adapters';
 import type { DraftSeat, DraftStation, RunId, TaskId } from '@olympus-ai/core';
 import type { DiffEntry } from '@olympus-ai/vault';
 
@@ -238,8 +238,9 @@ export async function discardRun(store: WorkspaceStore, runId: RunId): Promise<v
 }
 
 /**
- * Whether a path lies in a dependency tree: under a `node_modules` directory
- * at any depth. Every check runs over the runtime's install of the tree's
+ * Whether a path lies in a dependency tree: under a `node_modules`, `.venv`,
+ * `site-packages`, or `__pycache__` directory at any depth, whatever the
+ * run's stack (D-R29-10). Every check runs over the runtime's install of the tree's
  * lockfile (R34), so the runner a suite check starts is no task's; a task's
  * writes there are recorded and escalated, and never carried into the tree
  * the checks judge, or the change could replace its own judge (D-R15-05).
@@ -251,7 +252,7 @@ export function inDependencyTree(path: string): boolean {
 }
 
 function dependencyIndex(parts: readonly string[]): number {
-  return parts.findIndex((part) => part.toLowerCase() === 'node_modules');
+  return parts.findIndex((part) => isDependencyTree(part));
 }
 
 /**
