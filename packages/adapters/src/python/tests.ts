@@ -11,6 +11,7 @@ import type { SyntaxNode } from '@lezer/common';
 import { pairAssertions, type AssertionRules } from '../assertions.js';
 import type { Assertion, AssertionDelta } from '../types.js';
 import type { PytestRules } from './config.js';
+import { refuse } from '../refusal.js';
 import { fnmatch } from './ini.js';
 import {
   argumentsOf, callOf, childrenOf, decoratorOf, flatText, lineOf, partsOf, statementsOf, stringValue, textOf, type PythonModule,
@@ -317,67 +318,87 @@ function unique(ids: readonly string[]): string[] {
   return resolved;
 }
 
-/** One `parametrize` mark's ids, and the skip marks its `pytest.param` rows carry, or undefined where a row is not literal. */
-function parametrizeIds(module: PythonModule, args: SyntaxNode | null, rules: PytestRules): { ids: string[]; skips: Array<{ id: string; mark: string }> } | undefined {
-  if (args === null) return undefined;
+/** Whether a list or tuple display spreads another iterable into itself, `[*rows]`, so its length is not in the source. */
+function spreads(node: SyntaxNode): boolean {
+  return childrenOf(node).some((c) => c.name === '*' || c.name === '**');
+}
+
+/** A row named by its source where pytest's id for it depends on what the parse cannot see: stable, and changed by any edit to the row. */
+function opaqueId(module: PythonModule, row: SyntaxNode): string {
+  return `?${flatText(module, row)}`;
+}
+
+/**
+ * One `parametrize` mark's ids, and the skip marks its `pytest.param` rows
+ * carry. The table must be a list or tuple display, so the parse can count
+ * its rows; anything else is refused, since a table the parse cannot count
+ * could lose rows, or empty into pytest's one skipped case, with nothing
+ * reported (codex-3, gemini-3). A row whose id pytest makes from what the
+ * parse cannot see is named by its source instead, so dropping it is still
+ * a deleted case. An empty table is reported as a skip, which it is.
+ */
+function parametrizeIds(module: PythonModule, args: SyntaxNode | null, rules: PytestRules, qualified: string): { ids: string[]; skips: Array<{ id: string; mark: string }>; empty: boolean } {
+  const uncountable = (): never => refuse('unsupported-feature', `${module.file}: ${qualified} is parametrized by a table the parse cannot count`);
+  if (args === null) return uncountable();
   const read = argumentsOf(module, args);
-  const [namesNode, valuesNode] = read?.positional ?? [];
-  if (read === undefined || namesNode === undefined) return undefined;
+  if (read === undefined) return uncountable();
+  const [namesNode, valuesNode] = read.positional;
   const values = valuesNode ?? read.keyword.get('argvalues');
-  if (values === undefined || (values.name !== 'ArrayExpression' && values.name !== 'TupleExpression')) return undefined;
+  if (namesNode === undefined || values === undefined || (values.name !== 'ArrayExpression' && values.name !== 'TupleExpression') || spreads(values)) return uncountable();
+  const rows = partsOf(values);
+  if (rows.length === 0) return { ids: [], skips: [], empty: true };
   const namesText = stringValue(module, namesNode);
   const argnames = namesText !== undefined
     ? namesText.split(',').map((n) => n.trim()).filter((n) => n !== '')
     : (namesNode.name === 'ArrayExpression' || namesNode.name === 'TupleExpression') ? partsOf(namesNode).map((n) => stringValue(module, n)) : [undefined];
-  if (argnames.length === 0 || argnames.some((n) => n === undefined)) return undefined;
-  const names = argnames as string[];
+  const names = argnames.length === 0 || argnames.some((n) => n === undefined) ? undefined : (argnames as string[]);
   const explicit = read.keyword.get('ids');
-  let given: Array<string | null> | undefined;
+  // `ids=` that is not a list display (a callable, a name) makes ids the parse cannot see.
+  let given: Array<string | null> | 'opaque' | undefined;
   if (explicit !== undefined) {
-    if (explicit.name !== 'ArrayExpression' && explicit.name !== 'TupleExpression') return undefined;
-    given = [];
-    for (const item of partsOf(explicit)) {
-      if (item.name === 'None') given.push(null);
-      else {
+    if ((explicit.name !== 'ArrayExpression' && explicit.name !== 'TupleExpression') || spreads(explicit)) given = 'opaque';
+    else {
+      given = partsOf(explicit).map((item) => {
+        if (item.name === 'None') return null;
         const s = stringValue(module, item);
-        if (s === undefined || !/^[\x20-\x7e]*$/u.test(s)) return undefined;
-        given.push(s);
-      }
+        return s === undefined || !/^[\x20-\x7e]*$/u.test(s) ? '' : s;
+      });
+      if (given.includes('')) given = 'opaque';
     }
   }
-  const rows = partsOf(values);
-  if (rows.length === 0) return undefined;
   const ids: string[] = [];
   const skips: Array<{ index: number; mark: string }> = [];
   for (const [index, row] of rows.entries()) {
-    let cells: SyntaxNode[];
+    let cells: SyntaxNode[] | undefined;
     let rowId: string | undefined;
     const param = callOf(module, row);
     if (param !== undefined && (param.name === 'pytest.param' || param.name === 'param')) {
       const p = argumentsOf(module, param.args);
-      if (p === undefined) return undefined;
+      if (p === undefined) return uncountable();
       cells = p.positional;
       const id = p.keyword.get('id');
       if (id !== undefined) {
-        rowId = stringValue(module, id);
-        if (rowId === undefined || !/^[\x20-\x7e]*$/u.test(rowId)) return undefined;
+        const s = stringValue(module, id);
+        rowId = s === undefined || !/^[\x20-\x7e]*$/u.test(s) ? opaqueId(module, row) : s;
       }
       const marks = p.keyword.get('marks');
       if (marks !== undefined) for (const m of /mark\.(?:skip|skipif|xfail)/u.exec(flatText(module, marks)) ?? []) skips.push({ index, mark: `pytest.param(marks=${m})` });
-    } else if (names.length === 1) cells = [row];
-    else if (row.name === 'TupleExpression' || row.name === 'ArrayExpression') cells = partsOf(row);
-    else return undefined;
-    if (cells.length !== names.length) return undefined;
+    } else if (names?.length === 1) cells = [row];
+    else if (row.name === 'TupleExpression' || row.name === 'ArrayExpression') {
+      if (spreads(row)) return uncountable();
+      cells = partsOf(row);
+    }
     if (rowId !== undefined) ids.push(rowId);
+    else if (given === 'opaque') ids.push(opaqueId(module, row));
     else if (given !== undefined && index < given.length && given[index] !== null) ids.push(given[index] ?? '');
+    else if (names === undefined || cells?.length !== names.length) ids.push(opaqueId(module, row));
     else {
       const parts = cells.map((cell, i) => idOf(module, cell, names[i] ?? '', index, rules));
-      if (parts.some((p) => p === undefined)) return undefined;
-      ids.push(parts.join('-'));
+      ids.push(parts.some((part) => part === undefined) ? opaqueId(module, row) : parts.join('-'));
     }
   }
   const resolved = unique(ids);
-  return { ids: resolved, skips: skips.map((s) => ({ id: resolved[s.index] ?? '', mark: s.mark })) };
+  return { ids: resolved, skips: skips.map((s) => ({ id: resolved[s.index] ?? '', mark: s.mark })), empty: false };
 }
 
 // ---- the walk ----------------------------------------------------------------
@@ -439,6 +460,17 @@ export function readTestFile(module: PythonModule, rules: PytestRules): PythonTe
     if (d?.node.name === 'ClassDefinition') classes.set(nameOf(module, d.node), d.node);
   }
 
+  module.tree.iterate({
+    enter: (ref) => {
+      if (ref.name !== 'VariableName' && ref.name !== 'PropertyName') return;
+      const text = textOf(module, ref.node);
+      if (text === 'pytest_generate_tests') refuse('unsupported-feature', `${module.file} defines pytest_generate_tests, which makes cases the parse cannot see`);
+      if (text === 'parametrize' && ref.node.parent?.name !== 'Decorator') {
+        refuse('unsupported-feature', `${module.file} uses parametrize outside a test's own decorator, whose table the parse cannot follow`);
+      }
+    },
+  });
+
   for (const s of top) {
     for (const mark of marksOf(module, assigns(module, s, 'pytestmark'))) skips.push(`pytestmark ${mark}: ${module.file}`);
     if (s.name === 'ExpressionStatement') {
@@ -458,24 +490,38 @@ export function readTestFile(module: PythonModule, rules: PytestRules): PythonTe
   const functionCases = (d: Decorated, owner: string, inherited: Decorated['decorators'], unittest: boolean): void => {
     const name = nameOf(module, d.node);
     const decorators = [...d.decorators, ...inherited];
-    if (decorators.some((x) => FIXTURE.test(x.name))) return;
+    const fixture = decorators.find((x) => FIXTURE.test(x.name));
+    if (fixture !== undefined) {
+      // A fixture's `params` multiply every test that requests it: each row is recorded as a case of the fixture's, so a
+      // row dropped is a deleted case, and a table the parse cannot count is refused, as a parametrize table is (codex-3).
+      const params = fixture.args === null ? undefined : argumentsOf(module, fixture.args)?.keyword.get('params');
+      const label = owner === '' ? `fixture ${name}` : `${owner} > fixture ${name}`;
+      if (fixture.args !== null && argumentsOf(module, fixture.args) === undefined) refuse('unsupported-feature', `${module.file}: ${label} is parametrized by a table the parse cannot count`);
+      if (params !== undefined) {
+        if ((params.name !== 'ArrayExpression' && params.name !== 'TupleExpression') || spreads(params)) refuse('unsupported-feature', `${module.file}: ${label} is parametrized by a table the parse cannot count`);
+        const rows = partsOf(params);
+        if (rows.length === 0) skips.push(`params([]): ${label}`);
+        for (const id of unique(rows.map((row) => opaqueId(module, row)))) cases.push(`${label}[${id}]`);
+      }
+      return;
+    }
     if (unittest ? !name.startsWith('test') : !matchesOption(name, rules.pythonFunctions)) return;
     const qualified = owner === '' ? name : `${owner} > ${name}`;
     for (const x of decorators) if (SKIP_DECORATORS.test(x.name)) skips.push(`${x.name}: ${qualified}`);
     skipCallsIn(module, d.node, qualified, skips);
-    let ids: string[] | undefined = [''];
+    let ids: string[] = [''];
     if (!unittest) {
       for (const x of decorators.filter((y) => PARAMETRIZE.test(y.name))) {
-        const read = parametrizeIds(module, x.args, rules);
-        if (read === undefined || ids === undefined) {
-          ids = undefined;
+        const read = parametrizeIds(module, x.args, rules, qualified);
+        if (read.empty) {
+          skips.push(`parametrize([]): ${qualified}`);
           continue;
         }
         for (const s of read.skips) skips.push(`${s.mark}: ${qualified}[${s.id}]`);
         ids = ids.flatMap((prefix) => read.ids.map((id) => (prefix === '' ? id : `${prefix}-${id}`)));
       }
     }
-    if (ids === undefined || (ids.length === 1 && ids[0] === '')) cases.push(qualified);
+    if (ids.length === 1 && ids[0] === '') cases.push(qualified);
     else for (const id of ids) cases.push(`${qualified}[${id}]`);
   };
 

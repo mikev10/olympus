@@ -219,7 +219,7 @@ describe('pytest collection', () => {
     expect(await adapter.selectSuites(root, ['tests/helper.py', 'tests/test_a.py', 'tests/absent.py'])).toEqual(['tests/helper.py', 'tests/test_a.py']);
   });
 
-  test('cases are the ones pytest 8.4.2 collects, with a non-literal table counted as its bare name', async () => {
+  test('cases are the ones pytest 8.4.2 collects, with a row whose id the parse cannot make named by its source', async () => {
     const root = await python(LAYOUT);
     const cases = await (await pytestOf(root)).enumerateCases(join(root, 'tests', 'test_a.py'));
     expect([...cases].sort()).toEqual([
@@ -228,7 +228,7 @@ describe('pytest collection', () => {
       'TestPlain > TestInner > test_n', 'TestPlain > test_m',
       'test_async',
       'test_multi[one]', 'test_multi[q-q]',
-      'test_nonliteral',
+      'test_nonliteral[?"L" * 3]', 'test_nonliteral[?"a" + "b"]',
       'test_params[1_0]', 'test_params[1_1]', 'test_params[2]', 'test_params[first]',
       'test_single[-3]', 'test_single[1.0]', 'test_single[1]', 'test_single[2.5]', 'test_single[None]', 'test_single[True]', 'test_single[a7]', 'test_single[a8]', 'test_single[x]',
       'test_skipped',
@@ -246,6 +246,40 @@ describe('pytest collection', () => {
       'unittest.skip: Checks > test_skipped_u',
     ]);
     expect(await adapter.detectSkipMarkers(join(root, 'tests', 'test_m.py'))).toEqual([`pytestmark pytest.mark.skip: ${join(root, 'tests', 'test_m.py')}`]);
+  });
+
+  // A table the parse cannot count could lose its rows, or empty into pytest's one skipped case, with nothing reported
+  // (codex-3, gemini-3): it is refused, as the TypeScript set refuses a non-literal `.each` (D-R29-07's reverse).
+  test.each([
+    ['a computed table', '@pytest.mark.parametrize("x", list(range(2)))\ndef test_p(x):\n    assert x >= 0\n', /test_p is parametrized by a table the parse cannot count/],
+    ['a table from a call', '@pytest.mark.parametrize("x", dynamic_cases())\ndef test_p(x):\n    assert x\n', /test_p is parametrized by a table the parse cannot count/],
+    ['a spread row', '@pytest.mark.parametrize("x", [*ROWS])\ndef test_p(x):\n    assert x\n', /test_p is parametrized by a table the parse cannot count/],
+    ['a parametrize mark held in a name', 'p = pytest.mark.parametrize("x", [1, 2])\n\n@p\ndef test_p(x):\n    assert x\n', /parametrize outside a test's own decorator/],
+    ['a parametrize mark on pytestmark', 'pytestmark = pytest.mark.parametrize("x", [1, 2])\n\ndef test_p(x):\n    assert x\n', /parametrize outside a test's own decorator/],
+    ['a test module that generates tests', 'def pytest_generate_tests(metafunc):\n    metafunc.parametrize("x", [1])\n\ndef test_p(x):\n    assert x\n', /pytest_generate_tests/],
+  ])('%s is refused', async (_name, body, reason) => {
+    const root = await python({ 'tests/test_p.py': `import pytest\n\n${body}` });
+    await expect((await pytestOf(root)).enumerateCases(join(root, 'tests', 'test_p.py'))).rejects.toThrow(reason);
+  });
+
+  test('an empty table is a skip marker, and a dropped literal row a deleted case', async () => {
+    const root = await python({
+      'tests/test_e.py': 'import pytest\n\n@pytest.mark.parametrize("x", [])\ndef test_p(x):\n    assert x\n',
+      'tests/test_i.py': 'import pytest\n\n@pytest.mark.parametrize("x", [Decimal(1), Decimal(2)], ids=str)\ndef test_p(x):\n    assert x\n',
+    });
+    const adapter = await pytestOf(root);
+    expect(await adapter.detectSkipMarkers(join(root, 'tests', 'test_e.py'))).toContain('parametrize([]): test_p');
+    expect(await adapter.enumerateCases(join(root, 'tests', 'test_i.py'))).toEqual(['test_p[?Decimal(1)]', 'test_p[?Decimal(2)]']);
+  });
+
+  test("a fixture's params are cases of the fixture's, and a table of them the parse cannot count is refused", async () => {
+    const root = await python({
+      'tests/test_f.py': 'import pytest\n\n@pytest.fixture(params=[1, 2])\ndef db(request):\n    return request.param\n\ndef test_p(db):\n    assert db\n',
+      'tests/test_g.py': 'import pytest\n\n@pytest.fixture(params=make())\ndef db(request):\n    return request.param\n\ndef test_p(db):\n    assert db\n',
+    });
+    const adapter = await pytestOf(root);
+    expect(await adapter.enumerateCases(join(root, 'tests', 'test_f.py'))).toEqual(['fixture db[?1]', 'fixture db[?2]', 'test_p']);
+    await expect(adapter.enumerateCases(join(root, 'tests', 'test_g.py'))).rejects.toThrow(/fixture db is parametrized by a table the parse cannot count/);
   });
 
   test('a file the grammar cannot read is refused, never read in part', async () => {
