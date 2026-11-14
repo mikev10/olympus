@@ -240,6 +240,7 @@ describe('pytest collection', () => {
     const root = await python({ ...LAYOUT, 'tests/test_m.py': 'import pytest\npytestmark = pytest.mark.skip\n\ndef test_z():\n    pass\n' });
     const adapter = await pytestOf(root);
     expect([...(await adapter.detectSkipMarkers(join(root, 'tests', 'test_a.py')))].sort()).toEqual([
+      '__test__ set: TestNotCollected',
       'pytest.mark.skip: test_params',
       'pytest.mark.skip: test_skipped',
       'pytest.skip: test_skipped',
@@ -308,6 +309,39 @@ describe('pytest collection', () => {
       return false;
     });
     expect(added).not.toEqual([]);
+  });
+
+  // A test rebound, hidden, or redefined after its definition runs something else, or nothing, while its definition and
+  // its assertions still read as they did (codex-4): each is a marker of the test it rebinds.
+  test.each([
+    ['__test__ set on a test function', 'test_bad.__test__ = False\n'],
+    ['a test rebound to another callable', 'test_bad = lambda: None\n'],
+    ['a test rebound under a condition', 'if True:\n    test_bad = lambda: None\n'],
+    ['a test rebound by a loop', 'for test_bad in [None]:\n    pass\n'],
+    ['a test redefined', 'def test_bad():\n    pass\n'],
+    ['a test deleted from the module', 'del test_bad\n'],
+    ['a test replaced by an import', 'from helpers import test_bad\n'],
+    ['a marks list replaced', 'test_bad.pytestmark = []\n'],
+    ['__test__ set on the module', '__test__ = False\n'],
+    ['a test method rebound in its class', 'class TestK:\n    def test_m(self):\n        assert f()\n\n    test_m = None\n'],
+    ['__test__ set to a falsy value on a class', 'class TestK:\n    __test__ = 0\n\n    def test_m(self):\n        assert f()\n'],
+  ])('%s is reported', async (_name, appended) => {
+    const base = 'import pytest\n\ndef test_bad():\n    assert f()\n\ndef test_ok():\n    assert g()\n';
+    const root = await python({ 'tests/test_b.py': base, 'tests/test_c.py': `${base}\n${appended}` });
+    const adapter = await pytestOf(root);
+    const was = await adapter.detectSkipMarkers(join(root, 'tests', 'test_b.py'));
+    const now = await adapter.detectSkipMarkers(join(root, 'tests', 'test_c.py'));
+    expect(now.filter((m) => !was.includes(m))).not.toEqual([]);
+  });
+
+  test('a module that binds names dynamically is refused', async () => {
+    const root = await python({ 'tests/test_x.py': 'def test_bad():\n    assert f()\n\nglobals()["test_bad"] = None\n' });
+    await expect((await pytestOf(root)).enumerateCases(join(root, 'tests', 'test_x.py'))).rejects.toThrow(/globals\(\)/);
+  });
+
+  test('a module-level name that is not a test, and setattr inside a test, are not markers', async () => {
+    const root = await python({ 'tests/test_x.py': 'import pytest\nLIMIT = 3\nhelper_value = LIMIT + 1\n\ndef test_ok():\n    setattr(obj, "x", 1)\n    assert obj.x == 1\n' });
+    expect(await (await pytestOf(root)).detectSkipMarkers(join(root, 'tests', 'test_x.py'))).toEqual([]);
   });
 
   test('an attribute of pytest named by a value the parse cannot see is refused', async () => {

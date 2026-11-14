@@ -432,6 +432,87 @@ function assigns(module: PythonModule, statement: SyntaxNode, name: string): Syn
   return target?.name === 'VariableName' && textOf(module, target) === name && op?.name === 'AssignOp' ? value : undefined;
 }
 
+/** Calls that bind names no parse can see; at module or class level they could rebind any test. */
+const DYNAMIC_BINDERS = new Set(['globals', 'vars', 'locals', 'setattr', 'delattr', 'exec', 'eval']);
+/** Statements whose bodies run at the level they sit at, so a binding in one is a module's or a class's own. */
+const COMPOUND = new Set(['IfStatement', 'ForStatement', 'WhileStatement', 'TryStatement', 'WithStatement', 'MatchStatement']);
+
+/** The name a binding target is rooted at: `test_x` for `test_x`, `test_x.__test__`, and `test_x[0]`. */
+function rootName(module: PythonModule, target: SyntaxNode): string | undefined {
+  let at: SyntaxNode | null = target;
+  while (at !== null && at.name !== 'VariableName') at = at.firstChild;
+  return at === null ? undefined : textOf(module, at);
+}
+
+/**
+ * What a module or class body does to the tests it defines once they are
+ * defined: rebinding one (`test_x = ...`, `test_x.__test__ = False`, a
+ * loop variable, an import), deleting one, defining one twice, or setting
+ * `__test__` on the module or a class. pytest collects what the name holds
+ * when collection runs, so each of these runs something else, or nothing,
+ * while the definition and its assertions read as before (codex-4). Each
+ * is a marker; a call that binds names dynamically at that level is
+ * refused.
+ */
+function rebindings(module: PythonModule): string[] {
+  const out: string[] = [];
+  const level = (statements: readonly SyntaxNode[], owner: string): void => {
+    const flat: SyntaxNode[] = [];
+    const gather = (list: readonly SyntaxNode[]): void => {
+      for (const s of list) {
+        flat.push(s);
+        if (COMPOUND.has(s.name)) for (const body of childrenOf(s).filter((c) => c.name === 'Body')) gather(statementsOf(body));
+      }
+    };
+    gather(statements);
+    const defined = new Map<string, number>();
+    for (const s of flat) {
+      const d = decorated(module, s);
+      if (d !== undefined) defined.set(nameOf(module, d.node), (defined.get(nameOf(module, d.node)) ?? 0) + 1);
+    }
+    const tests = new Set(defined.keys());
+    for (const [name, count] of defined) if (count > 1) out.push(`redefines ${name}: ${owner}`);
+    const bound = (target: SyntaxNode, how: string): void => {
+      const name = rootName(module, target);
+      if (name === undefined) return;
+      if (tests.has(name)) out.push(`${how} ${flatText(module, target)}: ${owner}`);
+      else if (name === '__test__' && target.name === 'VariableName') out.push(`__test__ set: ${owner}`);
+    };
+    for (const s of flat) {
+      const parts = childrenOf(s);
+      if (s.name === 'AssignStatement' || s.name === 'UpdateStatement') {
+        const op = parts.findIndex((c) => c.name === 'AssignOp' || c.name === 'UpdateOp');
+        for (const target of parts.slice(0, op === -1 ? 0 : op)) bound(target, 'rebinds');
+      } else if (s.name === 'DeleteStatement') {
+        for (const target of partsOf(s)) bound(target, 'deletes');
+      } else if (s.name === 'ForStatement') {
+        const at = parts.findIndex((c) => c.name === 'in');
+        for (const target of parts.slice(1, at === -1 ? 1 : at)) bound(target, 'rebinds');
+      } else if (s.name === 'ImportStatement') {
+        for (const b of importBindings(module, s).bound) if (tests.has(b.as)) out.push(`rebinds ${b.as} by import: ${owner}`);
+      }
+      if (s.name !== 'FunctionDefinition' && s.name !== 'ClassDefinition' && s.name !== 'DecoratedStatement' && !COMPOUND.has(s.name)) {
+        s.toTree().iterate({
+          enter: (ref) => {
+            if (ref.name === 'LambdaExpression') return false;
+            if (ref.name !== 'VariableName' || !DYNAMIC_BINDERS.has(module.text.slice(s.from + ref.from, s.from + ref.to))) return undefined;
+            refuse('unsupported-feature', `${module.file}: ${module.text.slice(s.from + ref.from, s.from + ref.to)}() at ${owner === '(module)' ? 'module' : owner} level can rebind a test the parse cannot see`);
+          },
+        });
+      }
+    }
+    for (const s of flat) {
+      const d = decorated(module, s);
+      if (d?.node.name !== 'ClassDefinition') continue;
+      const body = childrenOf(d.node).find((c) => c.name === 'Body');
+      const name = nameOf(module, d.node);
+      if (body !== undefined) level(statementsOf(body), owner === '(module)' ? name : `${owner} > ${name}`);
+    }
+  };
+  level(statementsOf(module.tree.topNode), '(module)');
+  return out;
+}
+
 /** The definitions a node sits in, outermost first, `Class > method`, or `(module)`; a decorator belongs to what it decorates. */
 function ownerOf(module: PythonModule, node: SyntaxNode): string {
   const names: string[] = [];
@@ -588,7 +669,7 @@ export function readTestFile(module: PythonModule, rules: PytestRules): PythonTe
     },
   });
 
-  skips.push(...skipReferences(module));
+  skips.push(...skipReferences(module), ...rebindings(module));
 
   const isUnittest = (bases: readonly string[], seen: Set<string>): boolean => bases.some((b) => {
     if (UNITTEST_BASES.has(b)) return true;
@@ -642,7 +723,8 @@ export function readTestFile(module: PythonModule, rules: PytestRules): PythonTe
     const members = (statements: readonly SyntaxNode[]): Decorated[] => statements.map((s) => decorated(module, s)).filter((x): x is Decorated => x !== undefined);
     const own = members(body);
     if (own.some((m) => m.node.name === 'FunctionDefinition' && ['__init__', '__new__'].includes(nameOf(module, m.node)))) return;
-    if (body.some((s) => assigns(module, s, '__test__') !== undefined && textOf(module, assigns(module, s, '__test__') ?? s) === 'False')) return;
+    // pytest reads `__test__` for its truth, so any falsy literal passes the class over (codex-4).
+    if (body.some((s) => /^(?:False|None|0|""|''|\[\]|\(\)|\{\})$/u.test(textOf(module, assigns(module, s, '__test__') ?? s)))) return;
     const classMarks = [...d.decorators];
     const methods = new Map<string, Decorated>();
     const inherit = (bs: readonly string[], chain: Set<string>): void => {
