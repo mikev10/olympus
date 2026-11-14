@@ -9893,3 +9893,21 @@ Started on `v2` at abe344a, after the amendment (#156). Issues #145, #148 to
   conformance kit's `invariantTest` now types the test context it already
   passed. Fixture commits set `core.longpaths=true` for Windows.
 - **Reverse:** restore the `integrate` expectation with D-R36a-10's reversal.
+
+### D-R36a-12: each assertion fails with its fix reverted (I8)
+
+Run on Windows at 2041637, each revert applied alone and restored after:
+
+| Revert | Fails |
+|---|---|
+| base copied from the working folder | `I4.ignored-file-reaches-no-tree`, `I5.base-is-the-commit-under-autocrlf` |
+| no tool-grant check at admission | `I4.tool-grant-undeclared-by-the-seat-driver-refused` |
+| example grants `read`, `write` | `I4.example-tools-declared-by-the-seat-driver`, `I5.shipped-example-admitted-as-shipped` |
+| example manifest without `static-analysis` | `I5.shipped-example-admitted-as-shipped` |
+| no drafts directory in the drafter's request | `I5.drafter-request-names-its-drafts-directory` |
+| no `attempt-failed` record | `I2.enforcement-decisions-recorded-by-the-enforcer` |
+| cost estimate before the base refusals | `I5.manifest-refused-before-the-estimate` |
+| no artifact overlay | `I5.base-is-the-commit-under-autocrlf` |
+
+The two paid assertions (`I5.every-tier-model-callable-by-the-pinned-cli`,
+`I5.shipped-example-merges-on-the-real-driver`) run only under `run-driver`.
