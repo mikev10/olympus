@@ -260,6 +260,16 @@ describe('what pytest collection refuses', () => {
     ['a conftest that loads plugins', { 'conftest.py': 'pytest_plugins = ["x"]\n' }, '', /pytest_plugins/],
     ['a conftest that ignores paths', { 'conftest.py': 'collect_ignore = ["tests"]\n' }, '', /collect_ignore/],
     ['a pytest_configure that does more than register markers', { 'conftest.py': 'def pytest_configure(config):\n    config.option.keyword = "x"\n' }, '', /pytest_configure/],
+    // Any hook can change what runs or what is reported, not only a collection hook (codex-2).
+    ['a conftest run-protocol hook', { 'conftest.py': 'def pytest_runtest_protocol(item, nextitem):\n    return True\n' }, '', /pytest_runtest_protocol/],
+    ['a conftest that rewrites the exit status', { 'conftest.py': 'def pytest_sessionfinish(session, exitstatus):\n    session.exitstatus = 0\n' }, '', /pytest_sessionfinish/],
+    ['a conftest hook imported from a module', { 'conftest.py': 'from judge_switch import pytest_runtest_protocol\n' }, '', /pytest_runtest_protocol/],
+    ['a conftest hook imported under another name', { 'conftest.py': 'from judge_switch import protocol as pytest_runtest_protocol\n' }, '', /pytest_runtest_protocol/],
+    ['a conftest hook defined under a condition', { 'conftest.py': 'if True:\n    def pytest_collection_modifyitems(items):\n        items.clear()\n' }, '', /pytest_collection_modifyitems/],
+    ['a conftest hook on a class it registers', { 'conftest.py': 'class P:\n    def pytest_runtest_call(self, item):\n        pass\n' }, '', /pytest_runtest_call/],
+    ['a conftest wildcard import', { 'conftest.py': 'from judge_switch import *\n' }, '', /imports \* from judge_switch/],
+    ['a conftest that binds names dynamically', { 'conftest.py': 'globals()["pytest_" + "runtest_protocol"] = print\n' }, '', /globals/],
+    ['a conftest that registers a plugin', { 'conftest.py': 'import pytest\n\n@pytest.fixture(autouse=True)\ndef reg(request):\n    request.config.pluginmanager.register(object())\n' }, '', /pluginmanager/],
     ['a pytest.ini below the root', { 'tests/pytest.ini': '' }, '', /configures pytest below the root/],
     ['addopts that select', {}, '\n[tool.pytest.ini_options]\naddopts = "-k fast"\n', /addopts passes -k/],
     ['a required plugin', {}, '\n[tool.pytest.ini_options]\nrequired_plugins = "pytest-xdist"\n', /requires plugins/],
@@ -275,6 +285,13 @@ describe('what pytest collection refuses', () => {
       { 'conftest.py': 'def pytest_configure(config):\n    """Markers."""\n    config.addinivalue_line("markers", "slow: slow")\n' },
       '8.4.2', '\n[tool.pytest.ini_options]\naddopts = "-ra -q --strict-markers --tb=short"\n',
     );
+    expect((await buildAdapterSet(root, { provider: null, coverage: null })).test).not.toBeNull();
+  });
+
+  test('a conftest of fixtures, and a plugin module imported by name, is read', async () => {
+    const root = await python({
+      'conftest.py': 'import pytest\nimport pytest_mock\nfrom pytest_mock import MockerFixture\n\n\n@pytest.fixture\ndef db(monkeypatch):\n    monkeypatch.setattr("os.sep", "/")\n    return 1\n',
+    });
     expect((await buildAdapterSet(root, { provider: null, coverage: null })).test).not.toBeNull();
   });
 });

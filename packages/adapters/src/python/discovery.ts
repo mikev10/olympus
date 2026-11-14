@@ -52,7 +52,77 @@ function onlyRegistersMarkers(module: PythonModule, def: SyntaxNode): boolean {
   });
 }
 
-/** Refuses a conftest that changes collection: a plugin it loads, a path it ignores, or a collection hook (D-R29-06). */
+/** Calls that bind or reach a name no parse can see: through them a conftest could define any hook. */
+const DYNAMIC_BINDERS = new Set(['globals', 'vars', 'locals', 'setattr', 'delattr', 'exec', 'eval', 'compile', '__import__']);
+/** Attributes through which a conftest reaches pytest's plugin registry or its own namespace. */
+const REGISTRY_ATTRIBUTES = new Set(['pluginmanager', '__dict__']);
+
+/** The names a `from m import a as b, c` statement binds, with the module it reads them from; undefined for `import m`. */
+function fromImport(module: PythonModule, statement: SyntaxNode): { readonly from: string; readonly names: string[]; readonly star: boolean } | undefined {
+  const children = childrenOf(statement);
+  if (children[0]?.name !== 'from') return undefined;
+  const at = children.findIndex((c) => c.name === 'import');
+  const from = children.slice(1, at).map((c) => textOf(module, c)).join('');
+  const names: string[] = [];
+  let star = false;
+  for (const c of children.slice(at + 1)) {
+    if (c.name === '*') star = true;
+    // Both the imported name and its alias are recorded, so `from m import protocol as pytest_runtest_protocol` is seen.
+    if (c.name === 'VariableName') names.push(textOf(module, c));
+  }
+  return { from, names, star };
+}
+
+/**
+ * Refuses a conftest through which anything but fixtures and markers could
+ * reach pytest: a hook of any kind (a run-protocol, report, or session hook
+ * changes what runs and what exit status is reported as surely as a
+ * collection hook changes what is collected), a hook imported from a module
+ * the conftest does not hold, one defined under a condition or on a class,
+ * a wildcard import, a name bound dynamically, and the plugin registry
+ * (codex-2, D-R29-15). The one hook read is a `pytest_configure` that only
+ * registers markers.
+ */
+function checkHookReach(module: PythonModule, label: string): void {
+  const top = statementsOf(module.tree.topNode);
+  const allowed = new Set<number>();
+  for (const s of top) {
+    if (s.name !== 'FunctionDefinition') continue;
+    const name = childrenOf(s).find((c) => c.name === 'VariableName');
+    if (name !== undefined && textOf(module, name) === 'pytest_configure') allowed.add(name.from);
+  }
+  module.tree.iterate({
+    enter: (ref) => {
+      const node = ref.node;
+      if (node.name === 'ImportStatement') {
+        const read = fromImport(module, node);
+        if (read === undefined) return false; // `import pytest_mock` binds a module, which pytest never takes for a hook.
+        if (read.star) refuse('unsupported-feature', `${label} imports * from ${read.from}, which can bind a pytest hook no parse sees`);
+        const hook = read.names.find((n) => n.startsWith('pytest_'));
+        if (hook !== undefined) refuse('unsupported-feature', `${label} imports ${hook} from ${read.from}, a pytest hook, which can change what pytest runs or reports`);
+        return false;
+      }
+      if (node.name === 'VariableName') {
+        const text = textOf(module, node);
+        if (text.startsWith('pytest_') && !allowed.has(node.from)) {
+          refuse('unsupported-feature', `${label} binds or names ${text}, a pytest hook, which can change what pytest runs or reports`);
+        }
+      }
+      if (node.name === 'PropertyName' && REGISTRY_ATTRIBUTES.has(textOf(module, node))) {
+        refuse('unsupported-feature', `${label} reaches ${textOf(module, node)}, through which a hook can be registered that no parse sees`);
+      }
+      if (node.name === 'CallExpression') {
+        const callee = childrenOf(node)[0];
+        if (callee?.name === 'VariableName' && DYNAMIC_BINDERS.has(textOf(module, callee))) {
+          refuse('unsupported-feature', `${label} calls ${textOf(module, callee)}(), which can bind a pytest hook no parse sees`);
+        }
+      }
+      return undefined;
+    },
+  });
+}
+
+/** Refuses a conftest that changes collection or what runs: a plugin it loads, a path it ignores, or a hook (D-R29-06, D-R29-15). */
 export async function checkConftest(file: string, label: string): Promise<void> {
   const module = await readPython(file);
   for (const statement of statementsOf(module.tree.topNode)) {
@@ -74,6 +144,7 @@ export async function checkConftest(file: string, label: string): Promise<void> 
       }
     }
   }
+  checkHookReach(module, label);
 }
 
 function skipped(name: string): boolean {
