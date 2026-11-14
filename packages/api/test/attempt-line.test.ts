@@ -9,6 +9,7 @@ test('a failed attempt is one log line, whatever its task id, layer, or detail h
     retries: 1,
     untrustedDetail: 'stderr\nmore',
   });
+  // eslint-disable-next-line no-control-regex
   expect(line).not.toMatch(/[\u0000-\u001f\u007f]/u);
   expect(line).toContain('task run 2 task x: forged');
 });
