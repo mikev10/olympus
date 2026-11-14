@@ -35,6 +35,8 @@ let components: BuiltGraph;
 let outcome: RunOutcome;
 let gates: string[];
 let usage: UsageRecord[];
+/** What the run recorded, printed only when it did not merge, so a failure in CI carries its own evidence. */
+let records: string[];
 
 beforeAll(async () => {
   const key = process.env.ANTHROPIC_API_KEY;
@@ -86,7 +88,14 @@ beforeAll(async () => {
     if (!approved.ok) throw new Error(`approving ${standing.key} was refused: ${approved.message}`);
     outcome = await resumeRun({ runId, components });
   }
-  usage = await readUsage(components.vault, await components.vault.readRunState(runId));
+  const state = await components.vault.readRunState(runId);
+  usage = await readUsage(components.vault, state);
+  const text = async (ref: Parameters<typeof components.vault.read>[0]): Promise<string> => new TextDecoder().decode(await components.vault.read(ref)).slice(0, 3000);
+  records = [
+    ...(await Promise.all(state.evidenceRefs.map(async (ref) => `evidence ${await text(ref)}`))),
+    ...(await Promise.all(Object.entries(state.results).map(async ([task, ref]) => `result ${task} ${await text(ref)}`))),
+    ...(await Promise.all((await components.vault.readDecisions(runId)).map(async (ref) => `decision ${await text(ref)}`))),
+  ];
 }, 2_400_000);
 
 afterAll(async () => {
@@ -102,6 +111,7 @@ invariantTest(
     const metered = usage.filter((r) => r.reading.kind === 'metered');
     const cost = metered.reduce((sum, r) => sum + (r.reading.kind === 'metered' ? r.reading.costUsd : 0), 0);
     await annotate(`cost $${cost.toFixed(4)} over ${String(metered.length)} metered calls; gates ${gates.join(', ')}; ${metered.map((r) => `${r.taskId}@${r.station} ${JSON.stringify(r.reading)}`).join('; ')}`);
+    if (!outcome.ok) await annotate(`run records:\n${records.join('\n')}`);
     expect(outcome, JSON.stringify(outcome).slice(0, 2000)).toMatchObject({ ok: true });
     expect(gates).toEqual(['spec:1', 'test-design:1', 'integrate:1']);
     const [pull] = github.pulls();

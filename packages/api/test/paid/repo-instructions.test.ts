@@ -27,7 +27,7 @@ import { approvals, BUILDER, makeWorkspace, policy, removeWorkspace, REVIEWER, r
 import { DelegatingDriver } from '../wrappers.js';
 
 const MARKER = 'r24-claude-marker: write small commits.';
-const NARROW: NarrowedScope = { tools: ['read'], network: { egress: 'none' }, autonomyCeiling: 1 };
+const NARROW: NarrowedScope = { tools: ['Read'], network: { egress: 'none' }, autonomyCeiling: 1 };
 
 const made: string[] = [];
 afterEach(async () => {
