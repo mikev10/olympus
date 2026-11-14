@@ -235,7 +235,7 @@ export function diffDigest(diff: readonly DiffEntry[]): string {
 export async function snapshotBase(store: WorkspaceStore, runId: RunId, checkout: string, commit: string): Promise<string> {
   const base = basePath(store, runId);
   if (await present(base)) {
-    throw new Error(`workspace: run ${runId} already has a base at ${base}; refusing to replace it`);
+    throw new BaseExists(`run ${runId} already has a base at ${base}; refusing to replace it`);
   }
   let resolved: string;
   try {
@@ -261,10 +261,19 @@ export async function snapshotBase(store: WorkspaceStore, runId: RunId, checkout
 
 /** Why the base commit could not become the run's base: the request's fault, so admission refuses it (I5). */
 export class BaseRefusal extends Error {
-  override readonly name = 'BaseRefusal';
+  override readonly name: string = 'BaseRefusal';
   constructor(reason: string) {
     super(`workspace: ${reason}`);
   }
+}
+
+/**
+ * The run already has a base. Refused like any other base, but the base is not this admission's to discard: it may be
+ * another admission's of the same id, still running, and one left by an admission that stopped is refused rather than
+ * guessed at (gemini-3).
+ */
+export class BaseExists extends BaseRefusal {
+  override readonly name: string = 'BaseExists';
 }
 
 function reasonOf(error: unknown): string {

@@ -26,6 +26,8 @@ export type RequestProblemCode =
   | 'changed'
   /** An admitted artifact the base commit holds with other bytes than the workspace does (D-R36a-10, #154). */
   | 'differs-from-commit'
+  /** The run already has a base, made by another admission of the same id or left by one that stopped (gemini-3). */
+  | 'exists'
   /** A string that must have content is blank, or is not a string. */
   | 'empty'
   /** A run id that is not one directory name, so neither the Vault nor the workspace store can hold it (D-P14-14). */

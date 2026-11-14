@@ -94,7 +94,7 @@ import { parseSecurityPart, type SecurityPart, type SecurityScanners } from './s
 import { mergedCheckProblems, parseGraph, parseManifest, reproductionProblems, requestProblems, securityProblems, type RequestProblem } from './validate.js';
 import { suiteBindingProblems } from './verification.js';
 import { planInstall } from './install.js';
-import { BaseRefusal, basePath, discardRun, existsIn, hashAt, snapshotBase, treeDigest, within, writeFiles, type WorkspaceStore } from './workspace.js';
+import { BaseExists, BaseRefusal, basePath, discardRun, existsIn, hashAt, snapshotBase, treeDigest, within, writeFiles, type WorkspaceStore } from './workspace.js';
 
 export interface ComponentGraph {
   readonly vault: Vault;
@@ -1214,6 +1214,8 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
   try {
     baseTreeSha256 = await snapshotBase(workspaces, req.runId, req.workspace, req.baseCommit);
   } catch (error) {
+    // A base this admission did not make is left as it stands (gemini-3).
+    if (error instanceof BaseExists) return { ok: false, reason: 'invalid-request', problems: [{ path: 'runId', code: 'exists', message: error.message }] };
     await discardRun(workspaces, req.runId);
     if (!(error instanceof BaseRefusal)) throw error;
     return { ok: false, reason: 'invalid-request', problems: [{ path: 'baseCommit', code: 'unreadable', message: error.message }] };
