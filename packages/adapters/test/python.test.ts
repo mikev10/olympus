@@ -8,7 +8,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
 import {
-  AdapterRefusal, buildAdapterSet, CoveragePyAdapter, isConfigFile, PIP_INSTALLER, PYTHON_DEPENDENCY_TREES, PYTHON_IMAGE, PytestAdapter, UV_INSTALLER,
+  AdapterRefusal, buildAdapterSet, CoveragePyAdapter, isConfigFile, PIP_INSTALLER, PYTHON_DEPENDENCY_TREES, PYTHON_IMAGE, PYTEST_BOOTSTRAP, PytestAdapter, UV_INSTALLER,
 } from '../src/index.js';
 import { pkg, repo, cleanup } from './repo.js';
 
@@ -283,8 +283,17 @@ describe('the pytest runner', () => {
   test('the install\'s interpreter, no plugin autoloaded, no doctest, no cache, each named test ./-led', async () => {
     const adapter = await pytestOf(await python());
     expect(adapter.runner).toBe('.venv/bin/python');
-    expect(adapter.invocation(['tests/-x.py'])).toEqual(['.venv/bin/python', '-m', 'pytest', '--disable-plugin-autoload', '-p', 'no:cacheprovider', '-p', 'no:doctest', './tests/-x.py']);
-    expect(adapter.invocation(null)).toHaveLength(8);
+    expect(adapter.invocation(['tests/-x.py'])).toEqual(['.venv/bin/python', '-I', '-c', PYTEST_BOOTSTRAP, '--disable-plugin-autoload', '-p', 'no:cacheprovider', '-p', 'no:doctest', './tests/-x.py']);
+    expect(adapter.invocation(null)).toHaveLength(9);
+  });
+
+  test('pytest is imported from the install before the tree joins the path, and the tree joins it last (codex-1)', () => {
+    // `-I` keeps the working directory off `sys.path`, so a root `pytest.py` or `pytest.pyc` cannot stand in for the runner;
+    // appending the tree afterwards keeps the tree's own modules importable without letting one shadow an installed module.
+    const statements = PYTEST_BOOTSTRAP.split(';').map((s) => s.trim());
+    expect(statements.indexOf('import pytest')).toBeGreaterThan(statements.indexOf('sys.path.append(os.getcwd())'));
+    expect(statements.some((s) => /sys\.path\.(?:insert|__setitem__)|sys\.path\s*=/u.test(s))).toBe(false);
+    expect(statements.at(-1)).toBe('raise SystemExit(pytest.console_main())');
   });
 
   test('missingRunner names a missing interpreter, then a missing pytest, and is null when both are installed', async () => {
@@ -368,7 +377,8 @@ describe('coverage.py', () => {
 describe('the Python installers', () => {
   test('each makes a virtualenv with copies first, builds nothing, installs no project, and verifies every hash', () => {
     for (const installer of [UV_INSTALLER, PIP_INSTALLER]) {
-      expect(installer.steps[0]).toEqual(['python', '-m', 'venv', '--copies', '.venv']);
+      expect(installer.steps[0]).toEqual(['python', '-I', '-m', 'venv', '--copies', '.venv']);
+      for (const step of installer.steps) if (step[0]?.endsWith('python') === true) expect(step[1]).toBe('-I');
       expect(installer.image).toBe(PYTHON_IMAGE);
       expect(installer.trees).toEqual(PYTHON_DEPENDENCY_TREES);
     }

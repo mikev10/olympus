@@ -149,7 +149,7 @@ export async function scan(options: ScanOptions): Promise<ReadinessReport> {
     if (python) {
       const installed = record('build.install', await pythonInstall(ctx, pinned.installer));
       record('build.clean', installed.outcome === 'supported'
-        ? judged(await execute(ctx, inTree(['.venv/bin/python', '-m', 'compileall', '-q', '-x', '/\\.venv/', '.']), { image: PYTHON_IMAGE }), 'every module compiled in a fresh container')
+        ? judged(await execute(ctx, inTree(['.venv/bin/python', '-I', '-m', 'compileall', '-q', '-x', '/\\.venv/', '.']), { image: PYTHON_IMAGE }), 'every module compiled in a fresh container')
         : { outcome: 'absent', detail: 'nothing was installed, so no interpreter is there to compile with', evidence: { via: 'not-run', because: 'build.install' } });
       record('testing.green-at-base', await pythonSuite(ctx, framework, 'green'));
       record('testing.coverage', await pythonSuite(ctx, framework, 'coverage'));
@@ -474,11 +474,13 @@ async function pythonSuite(ctx: Context, test: AdapterSet['test'], kind: 'green'
   const name = `${kind}-${randomUUID()}`;
   await mkdir(join(ctx.scanDir, 'out', name));
   const out = `${MOUNT}/out/${name}`;
-  const pytest = test.invocation(null).slice(3);
+  // The runner's own start, under `-I`, so no file in the tree stands in for pytest or coverage.py (codex-1).
+  const runner = test.invocation(null);
+  const pytest = runner.slice(4);
   const python = { image: PYTHON_IMAGE, env: { PYTHONDONTWRITEBYTECODE: '1' } };
   if (kind === 'green') {
     const what = 'the suite at base';
-    const ran = judged(await execute(ctx, inTree(['.venv/bin/python', '-m', 'pytest', ...pytest, `--junitxml=${out}/results.xml`]), python), what);
+    const ran = judged(await execute(ctx, inTree([...runner, `--junitxml=${out}/results.xml`]), python), what);
     if (ran.outcome !== 'supported') return ran;
     const counts = await junitCounts(join(ctx.scanDir, 'out', name, 'results.xml'));
     if (counts === null) return { ...ran, outcome: 'absent', detail: `${what} exited 0 and wrote no readable report` };
@@ -488,9 +490,12 @@ async function pythonSuite(ctx: Context, test: AdapterSet['test'], kind: 'green'
   }
   const what = 'the suite under coverage.py, writing a JSON report';
   const data = `--data-file=${out}/.coverage`;
-  const ran = judged(await execute(ctx, inTree(['.venv/bin/python', '-m', 'coverage', 'run', data, '-m', 'pytest', ...pytest]), python), what);
+  // coverage.py's `run -m` under `-I` leaves the tree off the path altogether, so it starts the way the runner does:
+  // coverage and pytest imported from the install, then the tree appended behind them.
+  const measure = `import os, sys; sys.path.append(os.getcwd()); import coverage; c = coverage.Coverage(data_file=${JSON.stringify(`${out}/.coverage`)}); c.start(); import pytest; r = pytest.console_main(); c.stop(); c.save(); raise SystemExit(r)`;
+  const ran = judged(await execute(ctx, inTree(['.venv/bin/python', '-I', '-c', measure, ...pytest]), python), what);
   if (ran.outcome !== 'supported') return ran;
-  const wrote = judged(await execute(ctx, inTree(['.venv/bin/python', '-m', 'coverage', 'json', data, '-o', `${out}/coverage.json`]), python), 'the coverage.py JSON report');
+  const wrote = judged(await execute(ctx, inTree(['.venv/bin/python', '-I', '-m', 'coverage', 'json', data, '-o', `${out}/coverage.json`]), python), 'the coverage.py JSON report');
   if (wrote.outcome !== 'supported') return wrote;
   const report = await readReport(join(ctx.scanDir, 'out', name, 'coverage.json'));
   const files = report?.files;

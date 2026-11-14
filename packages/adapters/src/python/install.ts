@@ -18,8 +18,8 @@ export const PYTHON_IMAGE = 'ghcr.io/astral-sh/uv@sha256:c5db46150ecdfa1dcb35f2c
 /** The hosts a Python install downloads from: the index and the files it links to. */
 export const PYPI_REGISTRIES: readonly string[] = Object.freeze(['pypi.org', 'files.pythonhosted.org']);
 
-/** The first step of both: a virtualenv whose interpreter is a copy, inside the tree. */
-const VENV = Object.freeze(['python', '-m', 'venv', '--copies', '.venv'] as const);
+/** The first step of both: a virtualenv whose interpreter is a copy, inside the tree, made under `-I` so no file beside it is imported (codex-1). */
+const VENV = Object.freeze(['python', '-I', '-m', 'venv', '--copies', '.venv'] as const);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value) && !(value instanceof Date);
@@ -140,7 +140,7 @@ export const PIP_INSTALLER: DependencyInstaller = Object.freeze({
   steps: Object.freeze([
     VENV,
     Object.freeze([
-      '.venv/bin/python', '-m', 'pip', 'install', '--require-hashes', '--no-deps', '--only-binary', ':all:', '--no-input',
+      '.venv/bin/python', '-I', '-m', 'pip', 'install', '--require-hashes', '--no-deps', '--only-binary', ':all:', '--no-input',
       '--disable-pip-version-check', '--no-cache-dir', '-r', 'requirements.txt',
     ] as const),
   ] as const),

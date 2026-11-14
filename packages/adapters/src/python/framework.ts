@@ -14,6 +14,17 @@ import { pytestSelection, pytestSuites } from './discovery.js';
 import { readPython } from './parse.js';
 import { comparePythonAssertions, extractAssertions, readTestFile, spellPython } from './tests.js';
 
+/**
+ * How the runner starts pytest: under `-I`, so neither the working directory
+ * nor a `PYTHON*` variable is on `sys.path` while pytest is imported, and a
+ * `pytest.py`, `pytest.pyc`, or `sitecustomize.py` in the tree cannot stand
+ * in for the installed runner. The tree then joins the path last, which is
+ * where `python -m pytest` would have made its modules importable, behind
+ * the standard library and the install, so no file in it shadows either
+ * (codex-1, D-R29-15).
+ */
+export const PYTEST_BOOTSTRAP = 'import os, sys; sys.path.append(os.getcwd()); import pytest; raise SystemExit(pytest.console_main())';
+
 /** A named test as a runner argument: `./`-led, so a file named `-x.py` is never an option. */
 function asArgument(test: string): string {
   return `./${test}`;
@@ -31,7 +42,7 @@ export class PytestAdapter implements TestFrameworkAdapter {
   }
 
   invocation(tests: readonly string[] | null): readonly [string, ...string[]] {
-    return [this.runner, '-m', 'pytest', '--disable-plugin-autoload', '-p', 'no:cacheprovider', '-p', 'no:doctest', ...(tests ?? []).map(asArgument)];
+    return [this.runner, '-I', '-c', PYTEST_BOOTSTRAP, '--disable-plugin-autoload', '-p', 'no:cacheprovider', '-p', 'no:doctest', ...(tests ?? []).map(asArgument)];
   }
 
   selectSuites(dir: string, tests: readonly string[]): Promise<string[]> {
