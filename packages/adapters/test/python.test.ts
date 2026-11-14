@@ -395,7 +395,7 @@ describe('the Python installers', () => {
   test('each makes a virtualenv with copies first, builds nothing, installs no project, and verifies every hash', () => {
     for (const installer of [UV_INSTALLER, PIP_INSTALLER]) {
       expect(installer.steps[0]).toEqual(['python', '-I', '-m', 'venv', '--copies', '.venv']);
-      for (const step of installer.steps) if (step[0]?.endsWith('python') === true) expect(step[1]).toBe('-I');
+      for (const step of installer.steps) if (step[0].endsWith('python')) expect(step[1]).toBe('-I');
       expect(installer.image).toBe(PYTHON_IMAGE);
       expect(installer.trees).toEqual(PYTHON_DEPENDENCY_TREES);
     }
