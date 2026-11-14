@@ -14,7 +14,7 @@ import { checkOutWithCrlf, commitFixture, committedFiles } from '../kit/git.js';
 import type { LocalAssertion } from '../kit/types.js';
 import { workspaceRoot } from '../kit/workspace.js';
 import { approveAndResume, toApproval, withIntegration } from './integration.js';
-import { refusalOf, withLine } from './line.js';
+import { refusalOf, stubDriver, withLine } from './line.js';
 import { withVaultDirs } from './local-vault.js';
 import { drafting } from './drafting.js';
 
@@ -170,10 +170,13 @@ export const CRLF_CHECKOUT_MERGES: LocalAssertion = runtime({
   },
 });
 
-/** Every path under `root`, files and directories alike, by its path relative to it. */
+/**
+ * Every path under `root`, files and directories alike, by its path relative to it. A directory that cannot be read
+ * throws: an unread subtree is not an empty one, and a search that skipped it proves nothing (codex-3).
+ */
 async function everyPath(root: string, at = ''): Promise<string[]> {
   const out: string[] = [];
-  for (const entry of await readdir(join(root, ...at.split('/').filter(Boolean)), { withFileTypes: true }).catch(() => [])) {
+  for (const entry of await readdir(join(root, ...at.split('/').filter(Boolean)), { withFileTypes: true })) {
     const path = at === '' ? entry.name : `${at}/${entry.name}`;
     out.push(path);
     if (entry.isDirectory()) out.push(...(await everyPath(root, path)));
@@ -188,7 +191,12 @@ export const IGNORED_FILE_REACHES_NO_TREE: LocalAssertion = runtime({
   run: async () => {
     await withLine('r36a-ignored-', async (rig) => {
       const { startRun } = await api();
-      const components = await rig.components();
+      const trees = join(rig.workspaces.root, rig.runId);
+      // The trees as they stand while a model works in one: searched from inside each task the driver is handed, so the
+      // assertion is about what a model sees, not only what is left after the run (codex-3).
+      const during: string[][] = [];
+      const driver = await stubDriver({ during: async () => { during.push(await everyPath(trees)); } });
+      const components = await rig.components({ driver });
       const req = await rig.request(components);
       // Written after the rig's own commit, which adds ignored files too; a user's .env is never added.
       await writeFile(join(rig.dirs.artifacts, '.gitignore'), '.env\n');
@@ -197,9 +205,12 @@ export const IGNORED_FILE_REACHES_NO_TREE: LocalAssertion = runtime({
       const baseCommit = commitFixture(rig.dirs.artifacts, { includeIgnored: false });
       if (committedFiles(rig.dirs.artifacts, baseCommit).some((f) => f.path === '.env')) throw new Error('R36a control: the commit holds the ignored .env');
       refusalOf(await startRun({ ...req, baseCommit }), 'R36a ignored');
-      const trees = join(rig.workspaces.root, rig.runId);
-      const paths = await everyPath(trees);
+      if (during.length === 0 || driver.requests.length === 0) throw new Error('R36a control: no task was handed to the driver, so no model tree was searched');
+      const paths = [...during.flat(), ...(await everyPath(trees))];
       if (!paths.some((p) => p.endsWith('/base') || p === 'base')) throw new Error('R36a control: the run built no base, so the search found nothing to find');
+      if (!during.some((seen) => seen.some((p) => p.startsWith('tasks/') || p.includes('/tasks/')))) {
+        throw new Error(`R36a control: no task tree stood while the driver worked, so the search found no model tree: ${JSON.stringify(during[0])}`);
+      }
       const leaked = paths.filter((p) => p.split('/').includes('.env'));
       if (leaked.length > 0) throw new Error(`R36a: the ignored .env reached the run's trees at ${leaked.join(', ')}`);
     });
