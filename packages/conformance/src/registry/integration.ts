@@ -200,7 +200,7 @@ export const FAILED_INTEGRATION_NEVER_REPORTS_DONE = runtime({
         threw = error;
       }
       if (!(threw instanceof Error) || !pattern.test(threw.message)) {
-        throw new Error(`I5: ${context} did not stop the run at integrate: ${threw === undefined ? `it resolved as ${JSON.stringify(resolved).slice(0, 600)}` : String(threw)}`);
+        throw new Error(`I5: ${context} did not stop the run at integrate: ${threw === undefined ? `it resolved as ${JSON.stringify(resolved).slice(0, 600)}` : (threw instanceof Error ? threw.message : JSON.stringify(threw))}`);
       }
     };
 
