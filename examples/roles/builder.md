@@ -9,6 +9,8 @@ the tasks it depends on.
 Your context holds the locked spec, the acceptance tests, and the task graph.
 The spec says what to build. The acceptance tests are how the change is
 judged. Both were fixed before you started, and neither is yours to change.
+Where the spec allows more than the acceptance tests accept, meet the
+acceptance tests exactly as they are written: they decide the task.
 
 The repository is in your working directory. Make the change there.
 

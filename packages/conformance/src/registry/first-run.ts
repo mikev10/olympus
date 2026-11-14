@@ -74,7 +74,7 @@ async function exampleCreate(policyFile: string, drafted: boolean, body: (outcom
       roles: join(examples(), 'roles'), rubrics: join(examples(), 'rubrics'),
       components: await exampleGraph(dirs, base), approvedCostUsd: null,
       ...(drafted
-        ? { intent: { text: 'Add hello.txt at the repository root, saying hello.', from: 'principal' }, artifacts: { spec: 'draft', acceptanceTests: ['acceptance.md'], verificationManifest: 'verify.json', taskGraph: 'graph.json' } }
+        ? { intent: { text: 'Add hello.txt at the repository root, containing exactly the line hello.', from: 'principal' }, artifacts: { spec: 'draft', acceptanceTests: ['acceptance.md'], verificationManifest: 'verify.json', taskGraph: 'graph.json' } }
         : { artifacts: { spec: ['spec.md'], acceptanceTests: ['acceptance.md'], verificationManifest: 'verify.json', taskGraph: 'graph.json', specParts: { security: 'security.json' } } }),
     };
     body(await startRun(req), drafted ? 'the drafted run' : 'the supplied run');

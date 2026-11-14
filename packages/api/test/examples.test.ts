@@ -72,7 +72,7 @@ describe('the shipped examples', () => {
 
   test('admit the smallest L1 run: the spec drafted from an intent', async () => {
     const created = await admit({
-      workspace, baseCommit: commitFixture(workspace), requestedLevel: 1, intent: 'Add hello.txt at the repository root, saying hello.',
+      workspace, baseCommit: commitFixture(workspace), requestedLevel: 1, intent: 'Add hello.txt at the repository root, containing exactly the line hello.',
       artifacts: { spec: 'draft', acceptanceTests: ['acceptance.md'], verificationManifest: 'verify.json', taskGraph: 'graph.json' },
     });
     expect(created.status, JSON.stringify(created.body)).toBe(201);

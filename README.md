@@ -299,7 +299,7 @@ part to supply:
 
 ```
 olympus-ai create --workspace /abs/path/to/repo --base-commit $(git -C /abs/path/to/repo rev-parse HEAD) \
-  --level 1 --draft-spec --intent "Add hello.txt at the repository root, saying hello." \
+  --level 1 --draft-spec --intent "Add hello.txt at the repository root, containing exactly the line hello." \
   --tests run/acceptance.md --manifest run/verify.json --graph run/graph.json
 ```
 

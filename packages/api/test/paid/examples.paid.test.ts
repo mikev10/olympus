@@ -27,7 +27,7 @@ import { approveStation, composeHost, loadPolicyFile, parseGraph, readUsage, res
 const EXAMPLES = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', 'examples');
 const runId = 'paid-example' as RunId;
 /** The README's smallest first run: the spec drafted from this intent. */
-const INTENT = 'Add hello.txt at the repository root, saying hello.';
+const INTENT = 'Add hello.txt at the repository root, containing exactly the line hello.';
 
 let base: string;
 let github: FakeGitHub;

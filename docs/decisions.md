@@ -9973,3 +9973,29 @@ The external reviews and their triage are in `docs/reviews/2026-11-14-R36a-first
 - **If it fails again:** the role's instructions are not reaching the
   session, which is a driver defect to find, not a wording problem.
 - **Reverse:** restore the old message.
+
+### D-R36a-17: the shipped example's intent is exact, and the builder meets the tests
+
+- **Found in CI:** the paid example parked at `verify`. Its `hello-written`
+  check exited 1 on all three iterations. The drafted spec had read "saying
+  hello" as "case-insensitively contains hello, without pinning exact
+  wording". The builder followed that spec and wrote `Hello, world!`. The
+  shipped acceptance test requires the file to say exactly `hello`.
+- **Cause:** the spec drafter sees the intent, not the acceptance tests the
+  run was admitted with. So a loose reading of an ambiguous intent produces
+  a spec that is looser than the tests. A build retry also does not say
+  which check failed: only a drafter's retry carries feedback. So the
+  builder repeated the same change on every iteration.
+- **Chosen:**
+  - The intent becomes "Add hello.txt at the repository root, containing
+    exactly the line hello." It changes in the README and in all three
+    places that run it, so a user copying the README gets an intent the
+    shipped tests agree with.
+  - The builder role now says that where the spec allows more than the
+    acceptance tests accept, the tests decide.
+  - No check, test or acceptance criterion changed.
+- **Rejected:**
+  - Loosening `hello-written`. That would weaken a check.
+  - Giving the build retry the failed check. That is a line change outside
+    this unit, so it is filed as #159.
+- **Reverse:** restore the old intent and the old role text.
