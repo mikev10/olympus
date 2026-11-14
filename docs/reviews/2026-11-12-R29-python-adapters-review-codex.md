@@ -1,3 +1,36 @@
+# External review of R29, codex, 2026-11-12
+
+The external review of R29, the Python adapter set (pytest collection read
+statically, assertion and skip reading, the uv and pip installers, and the
+check image), by the Codex family. Its findings are triaged, beside
+Gemini's, in `2026-11-12-R29-python-adapters-triage.md`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex. A headless `codex exec` run under
+  a read-only sandbox, with recorded approval policy `never`, in an empty
+  scratch working directory and a scratch config home holding only
+  `auth.json`, with an environment of `CODEX_HOME` alone. The pre-run listing
+  of both is the manifest's `cleanRoom`. Outcome `counted`: 120,431 input
+  tokens against a floor of 74,935; all four bundle markers echoed.
+- **Cross-family agreement:** codex-3 (an unresolved parametrize table hides
+  deleted cases) was raised by Gemini too, as gemini-3. codex-1, codex-2,
+  codex-4, codex-5, codex-6, and codex-7 were raised by Codex alone.
+- **Date:** 2026-11-12 (run 2026-11-13, committed untouched in `48abb85`).
+- **Bundle:** `2026-11-12-R29-python-adapters-review-bundle.txt`, SHA-256 `a1bb1d2e086c7323a7f0337807fae863bb1cbff36890cee2d7fcabe271e4bc42` (the manifest's `bundleSha256`), base `eab6a44` (`reviewed/R34`), head `97c8267` (R29's tip when the review was requested: "the AdapterSet type fixture names the set's trees and image"). Every new file in full and every modified file as a function-context diff; `docs/decisions.md`, `docs/reviews/`, `docs/plan/`, and `pnpm-lock.yaml` excluded. Prompt: `2026-11-12-R29-python-adapters-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated it had no prior project
+  context and performed no external lookups, and that local file access was
+  blocked, so it ran no reproduction. Self-reported; not independently
+  verifiable.
+- **Coverage, and any gap:** items 1 (codex-1 to codex-6), 2 and 5 (codex-7,
+  "vacuous" rather than tautological), 3 (codex-3, codex-4), 4 (stated: no
+  cast or type-predicate bypass found), 6 (four mechanisms assessed sound),
+  and 7 (the framing held right, with a sharper question proposed) were
+  answered. None was left empty.
+- **Citations:** line numbers refer to positions in the bundle's new-side hunks, not the repository; they are hints, and each finding was located by its construct during triage.
+
+---
+
 BASE: reviewed/R34  
 HEAD: 97c8267  
 packages/vault/test/local.test.ts  

@@ -9985,3 +9985,76 @@ Dependencies P8, R1, R18, and R34 are each merged and tagged `reviewed/*`.
   cannot be built at all; a refusal inside the set is recorded and never
   throws, so this is the case of an unreadable tree, whose checks then fail.
 
+
+### D-R29-15: the external review's fixes, and the limits they leave
+
+Both families reviewed the bundle (Codex counted first time; Gemini's
+first run failed on depleted prepaid credits and counted on its rerun).
+All eleven findings held against the code; the triage is
+`docs/reviews/2026-11-12-R29-python-adapters-triage.md`.
+
+- **The runner starts isolated (codex-1).** `.venv/bin/python -I -c
+  PYTEST_BOOTSTRAP`: pytest is imported from the install before the tree
+  joins `sys.path`, and the tree joins last. Measured in the pinned image:
+  a root `pytest.py` that called `os._exit(0)` passed a failing suite
+  under `python -m pytest` and fails it now. Every `python` step of both
+  installers and readiness's probes run under `-I` too; readiness's
+  coverage probe starts coverage.py through the same kind of bootstrap,
+  since `coverage run -m` under `-I` leaves the tree off the path.
+  Rejected: `-P` with `python -m pytest`, which drops the tree from the
+  path, so a test importing a root module fails; appending the tree is
+  what `python -m` gave, behind the install instead of before it.
+  Reverse: restore `-m pytest` in `framework.ts`.
+- **A conftest holds fixtures and markers, and no hook (codex-2).** Any
+  `pytest_*` name a conftest defines, imports, nests, or binds
+  dynamically, a wildcard import, and the plugin manager are refused;
+  the one hook read is a markers-only `pytest_configure`. Rejected: a
+  longer denylist of outcome-changing hooks, which is the list that was
+  wrong. Reverse: drop `checkHookReach` from `checkConftest`.
+- **A parametrize table the parse cannot count is refused (codex-3,
+  gemini-3).** D-R29-07's recorded reverse, the TypeScript set's rule. A
+  row whose id depends on what the parse cannot see is named `?<source>`,
+  so a dropped row is still a deleted case; an empty table is a skip
+  marker; a fixture's `params` rows are cases of the fixture's; a
+  parametrize mark anywhere but a test's own decorator, and a test
+  module's `pytest_generate_tests`, are refused. Rejected: keying the
+  bare case on the table's source text, which misses a change inside a
+  called function's body. Reverse: `parametrizeIds` returning the bare
+  name, as D-R29-07 had it.
+- **A rebound test is a marker (codex-4).** Rebinding, deleting, or
+  redefining a test at module or class level, setting `__test__` on the
+  module or a class, or importing over a test name is reported as a
+  marker; a dynamic binder at that level is refused; any falsy
+  `__test__` passes a class over. Reverse: drop `rebindings`.
+- **Assertions keep every argument that changes what passes (codex-5).**
+  String literals are compared as written; unmodelled keywords are part
+  of the assertion, failure messages aside; `approx`'s `nan_ok` rides in
+  the operator, since a tolerance comparison reads only the subject and
+  the value; only an appended `match` or `check` counts as stronger.
+  Reverse: `flatText` collapsing all whitespace, and `otherKeywords`
+  removed.
+- **Skips are found by name anywhere (gemini-2, gemini-4), in every
+  module (gemini-1).** `skipReferences` counts every reference to the skip
+  family, `pytest.exit`, and `os._exit`, through import aliases and
+  assigned names, followed to a fixed point, and refuses `getattr` on
+  pytest or unittest with a name it cannot read. `TestFrameworkAdapter`
+  gains `skipSources(dir)`, on the gate path this unit declared, as
+  D-R29-13's two methods did: the suites for vitest and jest, whose skips
+  are bound to the test context, every source module for pytest. A
+  module's own `sys.exit` is not counted. Reverse: `skipSources` returning
+  `enumerateSuites` for pytest.
+- **The install assertion names what it refuses (codex-7).**
+  `I3.python-install-runs-no-package-code` requires the exact packages
+  and reasons beside a verified one, and `-I` on every python step.
+- **Limits left, each owned.** (1) Any module a test imports runs in the
+  runner's process, so `os._exit(0)` spelled indirectly, or a
+  monkeypatch of pytest, still ends the run with exit 0: the pending
+  `I3.runner-process-loads-only-base-code` (M3, issue #42) now names
+  pytest's route, and the product-module scan is a tripwire for the easy
+  path, not a closure. (2) Readiness installs over the whole materialised
+  base rather than its manifests, removes no committed dependency tree
+  first, and judges its green and coverage probes by reports the suite's
+  own process writes (codex-6). Readiness scans the base, which its
+  author controls, and sets a ceiling of L2; the npm path has the same
+  properties (`npm ci` runs lifecycle scripts, and the vitest report is
+  written in-process). Filed as issue #160 for readiness, not fixed here.

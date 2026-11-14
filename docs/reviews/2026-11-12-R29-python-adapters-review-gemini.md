@@ -1,3 +1,36 @@
+# External review of R29, gemini, 2026-11-12
+
+The external review of R29, the Python adapter set (pytest collection read
+statically, assertion and skip reading, the uv and pip installers, and the
+check image), by the Gemini family. Its findings are triaged, beside Codex's,
+in `2026-11-12-R29-python-adapters-triage.md`.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini. A direct
+  `generateContent` API call to `gemini-3.1-pro-preview`, offering no tools.
+  `cleanRoom` is `null` because an API call loads no local configuration.
+  Outcome `counted` on the second run: 126,843 input tokens against a floor
+  of 74,935; all four bundle markers echoed. The first run, kept as
+  `2026-11-12-R29-python-adapters-review-gemini.attempt-1.*`, was `FAILED`: HTTP 402, prepaid credits
+  depleted, no model reported and no reply.
+- **Cross-family agreement:** gemini-3 (an unresolved parametrize table
+  hides deleted cases) was raised by Codex too, as codex-3. gemini-1,
+  gemini-2, and gemini-4 were raised by Gemini alone.
+- **Date:** 2026-11-12 (rerun 2026-11-14, committed untouched in `8f150d4`).
+- **Bundle:** `2026-11-12-R29-python-adapters-review-bundle.txt`, SHA-256 `a1bb1d2e086c7323a7f0337807fae863bb1cbff36890cee2d7fcabe271e4bc42` (the manifest's `bundleSha256`), base `eab6a44` (`reviewed/R34`), head `97c8267` (R29's tip when the review was requested: "the AdapterSet type fixture names the set's trees and image"). Every new file in full and every modified file as a function-context diff; `docs/decisions.md`, `docs/reviews/`, `docs/plan/`, and `pnpm-lock.yaml` excluded. Prompt: `2026-11-12-R29-python-adapters-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated it had no prior context
+  and performed no external lookups. Self-reported; not independently
+  verifiable.
+- **Coverage, and any gap:** items 1 and 3 (gemini-1 to gemini-4) and 7 (the
+  framing held "exactly right") were answered. Items 2 (tautological
+  checks), 4 (language escape hatches), 5 (configuration satisfied without
+  effect), and 6 (sound mechanisms) came back empty; silence on them is not
+  an endorsement.
+- **Citations:** line numbers refer to positions in the bundle's new-side hunks, not the repository; they are hints, and each finding was located by its construct during triage.
+
+---
+
 BASE: reviewed/R34
 HEAD: 97c8267
 packages/vault/test/local.test.ts
