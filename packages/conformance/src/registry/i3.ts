@@ -293,7 +293,10 @@ export const I3: InvariantEntry = {
         + "vitest loads files outside node_modules into its own process: a globalSetup file the base's config "
         + 'already names, rewritten to call process.exit(0), makes vitest 4.1.11 exit 0 with no test run, and it is '
         + 'carried unflagged unless policy protects it (codex-2). Both were raised by the external review of the R15 '
-        + 'fixes and recorded as D-R15-08. Closing it means a runner, and every input its process loads, that the '
+        + 'fixes and recorded as D-R15-08. pytest widens the second route: it runs every module a test imports in '
+        + 'its own process, product modules included, so os._exit(0) or a pytest monkeypatch in any of them ends '
+        + 'the run with exit 0. A plainly spelled skip or exit there is reported as a marker (R29 gemini-1), which '
+        + 'is a tripwire for the easy path and not a closure (D-R29-15). Closing it means a runner, and every input its process loads, that the '
         + 'change cannot write: provisioned by the runtime outside the tree, or authenticated and held to the base. '
         + 'That needs an assertion that each route fails the check. Tracked as issue #42. Owned by M3, beside the '
         + 'L3 canary, which needs the same trusted runner.',
