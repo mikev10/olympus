@@ -1260,13 +1260,6 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
     await discardRun(workspaces, req.runId);
     return { ok: false, reason: 'instructions-refused', refused: instructions.refused };
   }
-  // Last of the refusals, so a person approves a figure only for a run nothing else refuses (#145).
-  if (req.requestedLevel > 0 && req.approvedCostUsd !== worstCase.usd) {
-    await discardRun(workspaces, req.runId);
-    const likely = await likelyCost(req.components, worstCase, policy.policy);
-    return { ok: false, reason: 'cost-unapproved', requestedLevel: req.requestedLevel, worstCase, likely, approvedCostUsd: req.approvedCostUsd };
-  }
-
   const now = new Date().toISOString();
   const run: Run = {
     id: req.runId,
@@ -1320,6 +1313,14 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
   if (refusedControls !== undefined) {
     await discardRun(workspaces, req.runId);
     return refusedControls;
+  }
+  // Last of the refusals, so a person approves a figure only for a run nothing else refuses (#145, codex-1). The
+  // candidate checks after it repeat ones made at the start, at the moment the candidate is spent, so they refuse
+  // only a run whose candidate changed while it was admitted.
+  if (req.requestedLevel > 0 && req.approvedCostUsd !== worstCase.usd) {
+    await discardRun(workspaces, req.runId);
+    const likely = await likelyCost(req.components, worstCase, policy.policy);
+    return { ok: false, reason: 'cost-unapproved', requestedLevel: req.requestedLevel, worstCase, likely, approvedCostUsd: req.approvedCostUsd };
   }
   // Taken last, before the record: a candidate admits one run, and the exclusive mark is what makes it once (A-R22-04).
   // A record that then fails to write leaves the candidate spent, which refuses a second run rather than admitting one.
