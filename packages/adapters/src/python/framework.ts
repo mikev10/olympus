@@ -7,12 +7,13 @@
  * (D-R29-06).
  */
 import { readdir, stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import type { Assertion, AssertionDelta, TestFrameworkAdapter } from '../types.js';
 import type { PytestMajor, PytestRules } from './config.js';
-import { pytestSelection, pytestSuites } from './discovery.js';
+import { pythonSources, pytestSelection, pytestSuites } from './discovery.js';
+import { fnmatch } from './ini.js';
 import { readPython } from './parse.js';
-import { comparePythonAssertions, extractAssertions, readTestFile, spellPython } from './tests.js';
+import { comparePythonAssertions, extractAssertions, readTestFile, skipReferences, spellPython } from './tests.js';
 
 /**
  * How the runner starts pytest: under `-I`, so neither the working directory
@@ -61,8 +62,22 @@ export class PytestAdapter implements TestFrameworkAdapter {
     return comparePythonAssertions(before, after);
   }
 
+  /**
+   * A test module's or conftest's markers as `readTestFile` reads them; any
+   * other module's skip references alone, since `pytest.skip` and `os._exit`
+   * stop a test from any module it imports (gemini-1). A module's own
+   * `sys.exit` is not one: under pytest it fails the test that reaches it.
+   */
   async detectSkipMarkers(file: string): Promise<string[]> {
-    return readTestFile(await readPython(file), this.#rules).skips;
+    const module = await readPython(file);
+    const name = basename(file);
+    if (name === 'conftest.py' || this.#rules.pythonFiles.some((p) => fnmatch(name, p))) return readTestFile(module, this.#rules).skips;
+    return skipReferences(module, { module: true });
+  }
+
+  /** Every module in the tree: pytest's skip is a function, and any module a test imports can call it (gemini-1). */
+  skipSources(dir: string): Promise<string[]> {
+    return pythonSources(dir);
   }
 
   async enumerateCases(file: string): Promise<string[]> {

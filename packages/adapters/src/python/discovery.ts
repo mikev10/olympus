@@ -203,6 +203,12 @@ async function startPaths(root: string, rules: PytestRules): Promise<string[]> {
 }
 
 /** Every suite pytest collects from the root with no path given, absolute and sorted. */
+/** Every regular `.py` file under `root`, absolute and sorted, outside every dependency tree and VCS directory. */
+export async function pythonSources(root: string): Promise<string[]> {
+  const entries = await walkTree(root, { skipDirectory: (name) => isDependencyTree(name) || VCS_DIRECTORIES.has(name) });
+  return [...entries.entries()].filter(([rel, entry]) => entry.kind === 'file' && rel.endsWith('.py')).map(([, entry]) => entry.absolute).sort();
+}
+
 export async function pytestSuites(root: string): Promise<string[]> {
   const { rules } = await pytestDiscovery(root);
   const top = resolve(root);

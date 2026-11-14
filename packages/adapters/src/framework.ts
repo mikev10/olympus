@@ -49,6 +49,11 @@ abstract class ExpectFrameworkAdapter implements TestFrameworkAdapter {
     return compareAssertions(before, after);
   }
 
+  /** A vitest or jest skip is a method of the test context or the suite's globals, so only a suite can hold one. */
+  skipSources(dir: string): Promise<string[]> {
+    return this.enumerateSuites(dir);
+  }
+
   async detectSkipMarkers(file: string): Promise<string[]> {
     return extractSkipMarkers(await parseTestFile(file), this.testContext);
   }

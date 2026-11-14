@@ -565,7 +565,7 @@ function importBindings(module: PythonModule, statement: SyntaxNode): { readonly
  * unittest with a name the parse cannot read is refused, as the TypeScript
  * set refuses a computed key on the test context.
  */
-export function skipReferences(module: PythonModule): string[] {
+export function skipReferences(module: PythonModule, options: { readonly module: boolean } = { module: false }): string[] {
   const aliases = new Set<string>();
   const modules = new Set<string>();
   const statements: SyntaxNode[] = [];
@@ -630,6 +630,8 @@ export function skipReferences(module: PythonModule): string[] {
       if (node.name !== 'VariableName' && node.name !== 'PropertyName') return;
       const text = textOf(module, node);
       if (!SKIP_NAMES.has(text) && !(node.name === 'VariableName' && aliases.has(text))) return;
+      // In a module that is not a test, `exit` counts only as pytest's: `sys.exit` there fails the test that reaches it.
+      if (options.module && text === 'exit' && !/^(?:pytest|_pytest)\./u.test(spellingOf(module, node)) && !modules.has(spellingOf(module, node).split('.')[0] ?? '')) return;
       // The name an alias is bound to is not a reference: its value already counted, and every use of it counts.
       const assign = node.parent?.name === 'AssignStatement' ? childrenOf(node.parent).find((c) => c.name === 'AssignOp') : undefined;
       if (assign !== undefined && node.to <= assign.from && !SKIP_NAMES.has(text)) return;

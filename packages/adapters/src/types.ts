@@ -35,6 +35,14 @@ export interface TestFrameworkAdapter {
   compareAssertions(before: Assertion[], after: Assertion[]): AssertionDelta;
   detectSkipMarkers(file: string): Promise<string[]>;
   /**
+   * The files of `dir`, absolute and sorted, whose skip markers can stop a
+   * test reaching a verdict, for `detectSkipMarkers` to read: the suites,
+   * where a skip is bound to the test that calls it, and every source module
+   * where the runner's skip is a function any imported module can call, as
+   * pytest's is (gemini-1, D-R29-15).
+   */
+  skipSources(dir: string): Promise<string[]>;
+  /**
    * The test cases a file declares, each by its describe-qualified title, e.g.
    * `math > adds`. A title the parser cannot resolve to a literal refuses,
    * naming the file and line, rather than dropping the case (A-P7-01).
