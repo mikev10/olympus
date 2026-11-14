@@ -9660,3 +9660,201 @@ maintainer chose the recommended answer on 2026-11-12.
   (`packages/adapters/src/types.ts`), and the install record's `invocation`
   by `steps` (`packages/vault/src/types.ts`); the api's install runs each
   in turn. Both files are R29's declared gate paths after this amendment.
+
+## R36a: The shipped example runs on the real driver
+
+Started on `v2` at abe344a, after the amendment (#156). Issues #145, #148 to
+#152, #154.
+
+### D-R36a-01: boundary, verified
+
+- **Deliverables:**
+  - The base is the tree of `--base-commit`, read from git's object store,
+    never a copy of the working folder (#148, #154).
+  - A failed driver or sandbox attempt records its cause and trimmed text;
+    `status` and `events` show it; the host logs it; a `retries-exhausted`
+    park names the last attempt's cause (#149).
+  - Admission refuses a tool grant the driver a role resolves to does not
+    declare, before the cost estimate; the example and the harness use the
+    declared names (#150).
+  - The drafter's message names `.drafts/<run id>/`; the example drafter's
+    budget is set from measurement and the README states it (#151).
+  - The Claude Code CLI pin moves to a version that accepts every tier's
+    model, with a paid assertion making one call per tier (#152).
+  - `examples/run/verify.json` pins `static-analysis`; the README documents
+    both security checks without a plan id; admission's manifest refusals
+    come before the cost estimate (#145).
+  - Free assertions, one per fix, and one paid case: the shipped
+    `examples/`, unmodified, through the real driver with `--draft-spec`, to
+    a merged PR on the fake GitHub the composed line's paid case uses.
+- **Out of scope (verbatim):** resuming a halted run; a free stand-in mode for
+  users (#147); the remaining getting-started doc gaps (#133, #135, #140 to
+  #144), which stay open issues; enforcing the readiness ceiling (#129).
+- **Acceptance:** `pnpm typecheck`, `pnpm lint`, `pnpm test`,
+  `pnpm conformance` pass; each new assertion is shown failing with its fix
+  reverted; under `run-driver`, the driver's per-tier assertion and the
+  api's paid example case pass, and the case's measured cost is in the PR.
+- **Invariants:** I4 (a grant no driver declares is refused, never passed
+  through); I5 (every refusal comes before spend; an unreadable commit, an
+  escaping link, or an undeclared tool refuses, never degrades); I7 (the
+  attempt's text is the CLI's or the container's output: stored and shown
+  as untrusted data, never placed in a prompt); I8 (every fix has an
+  assertion that fails when it is reverted); I9 (the host's log goes through
+  the one file allowed to write a stream, D-R36a-06).
+- **Pending registry entries owed:** none name R36a. Assertions are added;
+  the baseline is unchanged.
+- **Gate paths touched, all declared:** `packages/vault/src/types.ts` (the
+  attempt's cause), `packages/drivers/claude-code/src/image.ts` (the pin,
+  and so the driver tree hash and a paid run), and `packages/conformance/`.
+  `packages/core/src/policy/` is declared and not needed (D-R36a-03).
+  `workspace.ts` and `integrate.ts` are declared and match no protected
+  pattern. The PR needs the `gate-change` label and the squash body
+  `Gate-Change: acknowledged`.
+
+### D-R36a-02: assumptions, each verified
+
+- Every dependency is merged and tagged: `reviewed/{P5,P6,P14,I1b,R17,R19,
+  R34,R35}` exist (`git tag -l`).
+- `snapshotBase` byte-copies the working folder with `cp`
+  (`packages/api/src/workspace.ts:225`), called once, at admission
+  (`packages/api/src/run.ts:1128`).
+- `integrate` hashes the snapshot's bytes as git blobs and compares them with
+  the commit's tree (`packages/api/src/integrate.ts`, `baseMismatches`), so
+  a CRLF working copy fails every text file (#154's reproduction).
+- A raw reader of a commit already exists and is exported:
+  `materialize(checkout, commit, dest)` and `resolveCommit` in
+  `@olympus-ai/readiness` (`packages/readiness/src/tree.ts`,
+  `src/index.ts`). It reads blobs through `git cat-file --batch` with
+  `core.fsmonitor=false`, so no repository filter, attribute, or
+  `core.autocrlf` conversion applies. `@olympus-ai/api` already depends on
+  it (`packages/api/package.json`).
+- The driver's refusal text exists and is dropped: `#refuseUnusableStream`
+  (`packages/drivers/claude-code/src/driver.ts:783`) throws a
+  `DriverRefusal`; `runTask` returns `{ ok: false, error }`
+  (`packages/api/src/line.ts:1021,1056`), and every caller calls
+  `spendRetry(ctx, task)` without it (`line.ts:1415,1557,1580,1603,1820`,
+  `drafting.ts:432,757`).
+- `validateToolGrants(policy, inventory)` exists in core
+  (`packages/core/src/policy/engine.ts:320`), and nothing in `api` calls it
+  (`grep -rn validateToolGrants packages/api/src`: none). The driver
+  contract has `declaredTools()`; the Claude Code driver declares `Read`,
+  `Write`, and the rest (`packages/drivers/claude-code/src/tools.ts`);
+  `StubDriver` declares none (`packages/core/src/driver/stub/driver.ts:64`).
+- `examples/policy.yaml` grants `[read, write]` to every role; the api
+  harness grants `['read', 'write']` (`packages/api/test/harness.ts:131`).
+- The manifest refusals (`suiteBindingProblems`, `securityProblems`) run
+  after the `cost-unapproved` return (`run.ts:1110`, then `1137` and
+  `1144`), because they read the base, which is taken after it.
+- The drafting message's variable part is `variableSuffix`, built from the
+  task id and the retry suffix (`line.ts:1043`); the runtime creates
+  `.drafts/<run id>/` in the drafter's work copy and says nothing of it
+  (`drafting.ts:428`).
+- `CLI_VERSION = '2.1.277'` (`image.ts:26`); `deep` resolves to
+  `claude-opus-5-5` (`driver.ts:155`). npm lists 2.1.280 and later; 2.1.310
+  was published 2026-10-23 (`npm view @anthropic-ai/claude-code time`).
+- The first real drafter: #151 reports attempt 1 exhausting
+  `maxTokens: 200000` with about 184k cache-read tokens. That run's records
+  are not on this machine; run 40609434's are, and it drafted nothing (its
+  three metered calls read 11k to 13k cache tokens each, under $0.04).
+- The I9 scan refuses any process stream in `packages/api/src`, the host's
+  `main.ts` included (`packages/conformance/src/registry/i9.ts:22,68`). The
+  open amendment #132 exempts exactly `process.stderr.write` and
+  `process.exitCode` in that one file; it is not merged, and conflicts.
+- Test fixtures are plain directories admitted with
+  `baseCommit: '0'.repeat(40)`: the api harness (`harness.ts:40`), the
+  conformance line rig (`registry/line.ts:284`), and seven other call sites.
+
+### D-R36a-03: where the code differs from the entry
+
+- The entry places the tool-name refusal in `packages/core/src/policy/`.
+  The check exists there already (`validateToolGrants`); what is missing is
+  the call at admission, which is `api`'s. No core change.
+- The entry says the attempt's cause is recorded "in run state and the
+  Vault". Decisions are kept beside run state and never in it (A-P14-01,
+  D-P14-02); run state's type (`packages/core/src/run/types.ts`) is not a
+  declared gate path; and untrusted text has no place in the record every
+  station decision reads. See D-R36a-05.
+- `.git` is copied into every workspace today (`workspace.ts:17`); a base
+  read from the object store has none. Nothing reads it: the scanners run
+  with `--no-git` or `--no-git-ignore`, and no adapter opens it (grep for
+  `.git` in `packages/*/src`).
+- The `.drafts/<run id>` collision check reads the working folder
+  (`run.ts:1066`); once the base is the commit, only the base matters, so
+  it reads the base.
+
+### D-R36a-04: the base is read from the commit
+
+- **Chosen:** `snapshotBase(store, runId, checkout, commit)` resolves
+  `commit` with `resolveCommit`, refuses unless it is the full object name
+  given, and writes the commit's tree with readiness's `materialize`.
+  Admission refuses an unreadable or absent commit as `invalid-request` at
+  `baseCommit`, before the cost estimate. A submodule entry is refused (I5):
+  `integrate` refuses one already, after the paid work, and the base must
+  not silently lack what the commit holds. `materialize` also refuses a
+  link that could leave the tree, which the byte copy carried.
+- **Rejected:** normalising line endings at `integrate` (the entry rejects
+  it: it weakens the merged-base check and leaves #148 open); `git archive`
+  or a worktree checkout (each applies the repository's attributes and
+  filters, commands its own config names); a second reader in `api` (a
+  duplicate of a hardened one).
+- **Tests:** every rig and harness that admits a run commits its fixture
+  with a fixed identity and dates and `core.autocrlf=false`, ignored files
+  included (`git add -A -f`), so its base holds what it held; the one
+  assertion about ignored files commits without `-f`.
+- **Reverse:** restore the `cp` in `snapshotBase` and the `'0'` commits.
+
+### D-R36a-05: an attempt's cause is a decision record
+
+- **Chosen:** a new `DecisionCause`, `attempt-failed`, decided by `line`,
+  carrying the failure's `layer` (the driver's or sandbox's refusal layer,
+  or `error`), the attempt's counts, and `detail`: the error's message
+  trimmed to 400 characters, untrusted, never read back into a context.
+  `spendRetry` records it before it spends the retry or parks. The
+  `station-refused` decision for a `retries-exhausted` park points at the
+  last one. `RunStanding`'s `stopped` gains `lastFailure`, read from the
+  Vault, so `status` and `events` show it.
+- **Rejected:** a field in run state, for the reasons in D-R36a-03.
+- **Reverse:** drop the cause and `lastFailure`; `spendRetry` loses its
+  error argument.
+
+### D-R36a-06: the host's log
+
+- **Chosen:** `createApiServer` takes an optional `log` sink, called with
+  one line per recorded attempt failure; the api never touches a stream
+  itself. The host's `main.ts` passes a sink that writes to stderr, which
+  needs #132's exemption. Until #132 merges, R36a ships the sink and its
+  test, and that one line waits on it (asked at the stop).
+- **Rejected:** widening the I9 scan in this unit (a check weakened by the
+  work that needs it); a log file the host writes (a new variable and a new
+  place to look, for the same line).
+
+### D-R36a-07: the tool-name refusal
+
+- **Chosen:** after the policy refusals and before the cost estimate,
+  admission takes every seat the worst case counts, resolves the driver its
+  station seats (`driverOfTask`), and calls `validateToolGrants` on that
+  role's scope with that driver's `declaredTools()`. A refused grant is
+  `policy-refused` at that station and role, `capability-missing`, naming
+  the tool and the driver. Test doubles declare the names their policies
+  grant; `StubDriver` keeps declaring none.
+- **Reverse:** remove the call.
+
+### D-R36a-08: the CLI pin and the drafter budget
+
+- **Chosen:** `CLI_VERSION` moves to 2.1.310: above the 2.1.280 floor the
+  CLI's own refusal names (#152), and three weeks old. `DECLARED_TOOLS` is
+  compared with the new CLI's init event, which the driver's paid inventory
+  assertion holds honest. The example drafters' `maxTokens` rises from
+  200000 to 400000: the only measurement is #151's exhaustion at 200000
+  while it searched for a directory it was never told. The paid case's
+  measured usage is recorded in the PR, and the figure is lowered to it
+  there if it proves much smaller.
+- **Reverse:** restore `2.1.277` and `200000`.
+
+### D-R36a-09: the manifest refusals before the cost estimate
+
+- **Chosen:** the existing-run check and the base are taken before the cost
+  estimate, and the install, suite-binding, and security refusals run
+  there; a `cost-unapproved` answer discards the base like any other
+  refusal.
+- **Reverse:** move the block back after the estimate.
