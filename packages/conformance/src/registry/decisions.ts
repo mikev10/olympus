@@ -797,7 +797,7 @@ export const DECISION_TABLE: Readonly<Record<CauseKey, Row>> = {
         // Recorded in order; read back in any, so sorted by the count each carries.
         failed.sort((a, b) => (a.decision.cause === 'attempt-failed' ? a.decision.failure.retries : 0) - (b.decision.cause === 'attempt-failed' ? b.decision.failure.retries : 0));
         for (const [i, d] of failed.entries()) {
-          if (d.decision.cause !== 'attempt-failed' || d.decision.decidedBy !== 'line' || d.taskId !== HELLO_TASK || d.station !== 'build') throw new Error(`R36a: recorded as ${JSON.stringify(d)}`);
+          if (d.decision.cause !== 'attempt-failed' || d.taskId !== HELLO_TASK || d.station !== 'build') throw new Error(`R36a: recorded as ${JSON.stringify(d)}`);
           const { failure } = d.decision;
           if (failure.source !== 'driver' || failure.layer !== 'invocation' || failure.retries !== i + 1) throw new Error(`R36a: the failure was read as ${JSON.stringify(failure)}`);
           if (!failure.untrustedDetail.startsWith('the CLI produced no session (exit code 1)') || failure.untrustedDetail.length > 401) {

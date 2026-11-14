@@ -524,6 +524,15 @@ export const I5: InvariantEntry = {
       package: '@olympus-ai/api',
       file: 'test/paid/line.paid.test.ts',
     }),
+    // R36a: the shipped examples, unmodified, through the real driver to a merged pull request. Paid.
+    external({
+      id: 'I5.shipped-example-merges-on-the-real-driver',
+      title:
+        "the shipped examples, unmodified, drafting the spec from the README's intent, run on the composed host with the Claude Code driver in every seat through each gate a person holds at L1 — the drafted spec, the tests, and the merge — to a pull request merged into the base branch; paid (#145, #148 to #152, #154)",
+      level: 'runtime',
+      package: '@olympus-ai/api',
+      file: 'test/paid/examples.paid.test.ts',
+    }),
     // R15: no default declaration, nothing to reproduce is refused, and a check that did not start is not a failure.
     BASE_DECLARATION_HAS_NO_DEFAULT,
     NOTHING_FAILING_ON_THE_BASE_IS_REFUSED,
