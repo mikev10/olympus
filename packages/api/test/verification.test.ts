@@ -25,7 +25,7 @@ import {
   treeDigest,
   writesOutsideGrant,
 } from '../src/index.js';
-import { basePath, copyOnly, dependencyEntry, hashAt, inDependencyTree, localWorkspaceStore, materialize, snapshotBase, treePath } from '../src/workspace.js';
+import { basePath, copyOnly, copyTree, dependencyEntry, hashAt, inDependencyTree, localWorkspaceStore, materialize, treePath } from '../src/workspace.js';
 
 let base: string;
 
@@ -91,7 +91,7 @@ describe('a tree is built from base and a diff', () => {
     const source = await tree('source', { 'a.ts': 'a' });
     const store = localWorkspaceStore(process.getuid === undefined ? { root: join(base, 'store'), user: { uid: 0, gid: 0 } } : { root: join(base, 'store') });
     const runId = 'rebuild' as RunId;
-    await snapshotBase(store, runId, source);
+    await copyTree(source, basePath(store, runId));
     const changed = await tree('changed', { 'a.ts': 'a', 'b.ts': 'b' });
     const diff = await ownDiff(basePath(store, runId), changed);
     const target = treePath(store, runId, diffDigest(diff));
@@ -141,7 +141,7 @@ describe('a tree is built from base and a diff', () => {
     await symlink(outside, join(source, 'p'), 'dir');
     const store = localWorkspaceStore({ root: join(base, 'store-link') });
     const runId = 'linked' as RunId;
-    await snapshotBase(store, runId, source);
+    await copyTree(source, basePath(store, runId));
     const diff = [{ path: 'p/x', change: 'removed' as const, sha256: null }];
     await expect(materialize(store, runId, treePath(store, runId, diffDigest(diff)), diff, () => source)).rejects.toThrow(/link/);
     expect(await readFile(join(outside, 'x'), 'utf8')).toBe('outside');
@@ -151,7 +151,7 @@ describe('a tree is built from base and a diff', () => {
     const source = await tree('source2', { 'a.ts': 'a' });
     const store = localWorkspaceStore(process.getuid === undefined ? { root: join(base, 'store2'), user: { uid: 0, gid: 0 } } : { root: join(base, 'store2') });
     const runId = 'moved' as RunId;
-    await snapshotBase(store, runId, source);
+    await copyTree(source, basePath(store, runId));
     const changed = await tree('changed2', { 'a.ts': 'new' });
     const diff = await ownDiff(basePath(store, runId), changed);
     await writeFile(join(changed, 'a.ts'), 'newer');

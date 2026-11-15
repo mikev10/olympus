@@ -310,3 +310,19 @@ invariantTest(
     }
   },
 );
+
+invariantTest(
+  'I5.every-tier-model-callable-by-the-pinned-cli',
+  "every tier's model is one the pinned CLI can call: one minimal call per tier through the driver's own image reaches the model the tier resolves to, " +
+    'so a tier map and a CLI pin that drift apart fail here rather than parking every seat of that tier (#152)',
+  async () => {
+    await withDriver(async (h) => {
+      for (const tier of ['fast', 'standard', 'deep'] as const) {
+        const taskId = `i5-tier-${tier}` as TaskId;
+        // A CLI that refuses the model answers with an API error the driver refuses, and the call throws here.
+        const result = await h.driver.runTask(h.request({ taskId, tier, tools: [], variableSuffix: 'Reply with the single word: ok' }));
+        expect(result.model.model, `the ${tier} tier`).toBe(h.driver.resolveModel(tier).model);
+      }
+    });
+  },
+);

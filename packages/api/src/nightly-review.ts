@@ -133,6 +133,8 @@ function decisionFields(d: EnforcementDecision, violation: IntegrityViolation | 
     case 'relay-refused': return { ...base, refused: decision.refused, exhausted: decision.exhausted };
     case 'tier-escalated': return { ...base, from: decision.from, to: decision.to, failedGates: decision.failedGates };
     case 'task-conflict': return { ...base, with: decision.with.length, paths: decision.paths.length };
+    // The failure's text quotes the CLI's or a container's output, so only the runtime's reading of it is taken (I7).
+    case 'attempt-failed': return { ...base, source: decision.failure.source, layer: decision.failure.layer, retries: decision.failure.retries };
     case 'capability-narrowed': return { ...base, narrowedBy: decision.narrowing.kind, level: decision.level, roles: Object.keys(decision.scopes).length };
   }
 }

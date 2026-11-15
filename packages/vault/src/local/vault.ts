@@ -492,6 +492,7 @@ const DECIDERS: Readonly<Record<DecisionCause['cause'], readonly string[]>> = {
   'relay-refused': ['model-relay'],
   'tier-escalated': ['line'],
   'task-conflict': ['line'],
+  'attempt-failed': ['line'],
   'capability-narrowed': ['admission', 'line'],
   'approval-rejected': ['approval'],
   'draft-sent-back': ['line'],

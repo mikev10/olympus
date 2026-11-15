@@ -2,8 +2,11 @@
  * The trees a run is built over, owned by the runtime and by nothing else
  * (D-P6-02). A task never runs over `run.repo`, the author's working copy:
  *
- * - at admission the working tree is snapshotted as the run's **base**, and
- *   its digest is recorded in the admission record;
+ * - at admission the tree of the run's base commit is read from git's object
+ *   store as the run's **base**, and its digest is recorded in the admission
+ *   record. Never the working folder: what is untracked or ignored there
+ *   (`.env`, `node_modules/`) never reaches a model, and the bytes are the
+ *   commit's own, whatever line endings the checkout wrote (#148, #154);
  * - each build attempt gets a pristine **start** tree, base plus the diff
  *   accepted so far, and a **work** copy of it, which is what is mounted;
  * - when the task has ended its **own diff** is `work` against `start`,
@@ -14,9 +17,9 @@
  *   from the latest one that passed.
  *
  * The diff is the only channel from a task to anything after it. A write it
- * does not carry does not propagate, whatever a driver reports, and `.git` is
- * copied into every workspace and excluded from every diff, so nothing
- * written under it outlives the task.
+ * does not carry does not propagate, whatever a driver reports. A base holds
+ * no `.git`, and `.git` is excluded from every diff, so nothing a task
+ * writes under one outlives the task.
  *
  * Nothing here is mounted except a `work` copy (rw, to one task) and a tree or
  * a review view (ro). The base, the start copies, and the store's root are
@@ -27,6 +30,7 @@ import { copyFile, cp, lstat, mkdir, readlink, rename, rm, symlink, writeFile } 
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { diffTrees, hashRegularFile, walkTree, type WalkOptions } from '@olympus-ai/adapters';
 import type { DraftSeat, DraftStation, RunId, TaskId } from '@olympus-ai/core';
+import { materialize as materializeCommit, resolveCommit } from '@olympus-ai/readiness';
 import type { DiffEntry } from '@olympus-ai/vault';
 
 /** Who a container runs as, and so who every workspace the store hands out must be writable by. */
@@ -218,18 +222,62 @@ export function diffDigest(diff: readonly DiffEntry[]): string {
 }
 
 /**
- * Copies `source` in as the run's base and returns its digest. A run that
- * already has a base is refused: a second snapshot would replace the tree the
- * admission record's digest names.
+ * Writes the tree of `commit`, read from the object store of the repository
+ * at `checkout`, in as the run's base and returns its digest (D-R36a-04).
+ * Blobs are read raw, so no attribute, filter, or `core.autocrlf` of the
+ * repository applies. `commit` must be the full object name of a commit; a
+ * tree holding a submodule, which a base cannot hold, or a link that could
+ * leave the tree, is refused (I5). A run that already has a base is refused:
+ * a second snapshot would replace the tree the admission record's digest
+ * names. A refusal may leave a partial base, which the caller discards with
+ * the run.
  */
-export async function snapshotBase(store: WorkspaceStore, runId: RunId, source: string): Promise<string> {
+export async function snapshotBase(store: WorkspaceStore, runId: RunId, checkout: string, commit: string): Promise<string> {
   const base = basePath(store, runId);
   if (await present(base)) {
-    throw new Error(`workspace: run ${runId} already has a base at ${base}; refusing to replace it`);
+    throw new BaseExists(`run ${runId} already has a base at ${base}; refusing to replace it`);
+  }
+  let resolved: string;
+  try {
+    resolved = await resolveCommit(checkout, commit);
+  } catch (error) {
+    throw new BaseRefusal(`${checkout} holds no commit ${commit}: ${reasonOf(error)}`);
+  }
+  if (resolved !== commit) {
+    throw new BaseRefusal(`${commit} names the commit ${resolved}; the base commit is given as its full object name`);
   }
   await mkdir(dirname(base), { recursive: true, mode: 0o700 });
-  await cp(source, base, { recursive: true, errorOnExist: true, force: false, verbatimSymlinks: true });
+  let skipped: readonly string[];
+  try {
+    ({ skipped } = await materializeCommit(checkout, resolved, base));
+  } catch (error) {
+    throw new BaseRefusal(`the tree of ${commit} could not be written as the base: ${reasonOf(error)}`);
+  }
+  if (skipped.length > 0) {
+    throw new BaseRefusal(`the tree of ${commit} holds what a base cannot: ${skipped.join('; ')}`);
+  }
   return treeDigest(base);
+}
+
+/** Why the base commit could not become the run's base: the request's fault, so admission refuses it (I5). */
+export class BaseRefusal extends Error {
+  override readonly name: string = 'BaseRefusal';
+  constructor(reason: string) {
+    super(`workspace: ${reason}`);
+  }
+}
+
+/**
+ * The run already has a base. Refused like any other base, but the base is not this admission's to discard: it may be
+ * another admission's of the same id, still running, and one left by an admission that stopped is refused rather than
+ * guessed at (gemini-3).
+ */
+export class BaseExists extends BaseRefusal {
+  override readonly name: string = 'BaseExists';
+}
+
+function reasonOf(error: unknown): string {
+  return (error instanceof Error ? error.message : String(error)).replace(/^readiness: /u, '');
 }
 
 /** Removes everything the store holds for a run. For a run refused after its base was taken, so a refusal leaves nothing behind. */

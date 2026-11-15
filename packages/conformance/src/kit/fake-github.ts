@@ -8,10 +8,9 @@
  * with the credential it bore, so an assertion can say who reached it.
  */
 import { createHash } from 'node:crypto';
+import { commitFixture, committedFiles } from './git.js';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { lstat, readFile, readdir, readlink } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
-import { join } from 'node:path';
 
 /** The time every merge on the fake is reported at: fixed and far ahead, so no runtime clock produces it. */
 export const MERGED_AT = '2099-01-02T03:04:05.000Z';
@@ -44,6 +43,8 @@ export interface FakeGitHubOptions {
   readonly token: string;
   /** Directory names left out of the seeded commit, as `.gitignore` would leave them untracked. */
   readonly untracked?: readonly string[];
+  /** The local commit `seed` makes the base, already made; absent, `seed` commits the directory itself. */
+  readonly commit?: string;
 }
 
 export interface FileEntry { readonly mode: string; readonly bytes: Uint8Array }
@@ -74,6 +75,7 @@ export class FakeGitHub {
   beforeNextMerge: (() => void) | null = null;
   readonly #token: string;
   readonly #untracked: ReadonlySet<string>;
+  readonly #seedCommit: string | undefined;
   readonly #objects = new Map<string, GitObject>();
   readonly #refs = new Map<string, string>();
   readonly #pulls: Pull[] = [];
@@ -85,6 +87,7 @@ export class FakeGitHub {
     this.baseBranch = options.baseBranch ?? 'main';
     this.#token = options.token;
     this.#untracked = new Set(['.git', ...(options.untracked ?? [])]);
+    this.#seedCommit = options.commit;
   }
 
   /** The API base an integrator is pointed at. */
@@ -109,23 +112,23 @@ export class FakeGitHub {
     await new Promise<void>((resolve) => server.close(() => { resolve(); }));
   }
 
-  /** Commits the files under `dir` as the base branch's head, with no parent, and returns its sha. */
+  /**
+   * Commits the files under `dir` locally, as `commitFixture` does, and
+   * makes that commit the base branch's head here, under its own name, so the
+   * commit a run's base is read from (D-R36a-04) is the one the remote holds.
+   * Files named in `untracked` stay out of the remote's tree, as files a
+   * checkout holds and its commit does not. Returns the commit's name.
+   */
   async seed(dir: string): Promise<string> {
+    const commit = this.#seedCommit ?? commitFixture(dir);
     const files = new Map<string, FileEntry>();
-    const walk = async (rel: string): Promise<void> => {
-      for (const name of await readdir(join(dir, rel))) {
-        if (this.#untracked.has(name)) continue;
-        const path = rel === '' ? name : `${rel}/${name}`;
-        const stat = await lstat(join(dir, path));
-        if (stat.isDirectory()) await walk(path);
-        else if (stat.isSymbolicLink()) files.set(path, { mode: '120000', bytes: encoder.encode(await readlink(join(dir, path))) });
-        else if (stat.isFile()) files.set(path, { mode: '100644', bytes: await readFile(join(dir, path)) });
-      }
-    };
-    await walk('');
-    const commit = this.#commit(this.#treeFrom(files), [], 'base');
+    for (const file of committedFiles(dir, commit)) {
+      if (file.path.split('/').some((part) => this.#untracked.has(part))) continue;
+      files.set(file.path, { mode: file.mode, bytes: file.bytes });
+    }
+    this.#objects.set(commit, { type: 'commit', tree: this.#treeFrom(files), parents: [], message: 'base' });
     this.#refs.set(this.baseBranch, commit);
-    return commit;
+    return Promise.resolve(commit);
   }
 
   /** Moves the base branch to a new commit over the same tree, as a push by someone else would. */

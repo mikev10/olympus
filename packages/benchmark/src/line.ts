@@ -19,7 +19,6 @@ import { buildGraph, containerUser, parseGraph, DEFAULT_LIMITS, localWorkspaceSt
 import { DEFAULT_ROLES_DIRECTORY } from '@olympus-ai/compiler';
 import {
   StrictPolicyEngine,
-  StubDriver,
   type ApprovalKey,
   type ApprovalOutcome,
   type CapabilityScope,
@@ -34,7 +33,7 @@ import type { IntegrityViolation } from '@olympus-ai/integrity';
 import { LocalDockerProvider, type SandboxHandle, type SandboxProvider, type SandboxSpec } from '@olympus-ai/sandbox';
 import { LocalVault, type EnforcementDecision, type Vault } from '@olympus-ai/vault';
 import { repoDir, type Corpus, type Item, type RepoPolicy } from './corpus.js';
-import { ScriptedSeat } from './seats.js';
+import { BENCH_TOOLS, BenchStub, ScriptedSeat } from './seats.js';
 
 const run = promisify(execFile);
 
@@ -156,7 +155,7 @@ export function benchPolicyDocument(repo: RepoPolicy): PolicyDocument {
   const scope = (stations: CapabilityScope['stations'], writableGlobs: readonly string[], tier: CapabilityScope['tier']): CapabilityScope => ({
     stations,
     writableGlobs: [...writableGlobs],
-    tools: ['read', 'write'],
+    tools: [...BENCH_TOOLS],
     network: { egress: 'none' },
     tier,
     tierByStation: {},
@@ -223,7 +222,7 @@ export async function throughTheLine(bench: Bench, corpus: Corpus, item: Item): 
     vault,
     sandbox: bench.provider,
     driver: builder,
-    reviewer: new StubDriver(),
+    reviewer: new BenchStub(),
     workspaces: localWorkspaceStore({ root: join(root, 'trees'), user: bench.user }),
     integrator: null,
     profile: { buildImage: BASE_IMAGE, checkImage: BASE_IMAGE, limits: DEFAULT_LIMITS },

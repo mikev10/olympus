@@ -20,6 +20,7 @@ import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import ts from 'typescript';
+import { commitFixture } from '../kit/git.js';
 import { packageProgram } from '../kit/scan.js';
 import { toPosix, workspacePackages } from '../kit/workspace.js';
 
@@ -165,7 +166,8 @@ export async function assertApiRunsHeadless(): Promise<void> {
       void exited.then((code) => { clearTimeout(timer); reject(new Error(`I9: the headless host exited ${String(code)} before serving\n${hostErr}`)); });
     });
     const remote = ['--url', ready.url, '--token', token];
-    const create = ['create', '--workspace', ready.workspace, '--base-commit', '0'.repeat(40), '--level', '1',
+    // The workspace committed, as a user's repository is: the base is read from the commit (D-R36a-04).
+    const create = ['create', '--workspace', ready.workspace, '--base-commit', commitFixture(ready.workspace), '--level', '1',
       '--spec', 'spec.md', '--tests', 'acceptance.md', '--manifest', 'verify.json', '--graph', 'graph.json', '--security-part', 'security.json'];
 
     // The figure is shown before anything starts, and nothing starts without it.

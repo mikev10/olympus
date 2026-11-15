@@ -393,7 +393,29 @@ export type DecisionCause =
       readonly task: TaskId;
       readonly with: readonly [TaskId, ...TaskId[]];
       readonly paths: readonly [string, ...string[]];
-    };
+    }
+  /**
+   * A driver or sandbox attempt that failed, recorded by the line before it
+   * spends the retry or parks the task, so a park names what failed (#149,
+   * D-R36a-05). Nothing here is a status: the attempt produced no result, and
+   * the runtime's count of retries is what bounds it.
+   */
+  | { readonly cause: 'attempt-failed'; readonly decidedBy: 'line'; readonly failure: AttemptFailure };
+
+/**
+ * Why one attempt failed. `source` and `layer` are the runtime's reading of
+ * the error's type: a driver's refusal names its layer, a sandbox's its
+ * layer, and anything else is `error`. `retries` counts this attempt's
+ * failure. `untrustedDetail` is the error's own text, trimmed: it quotes the
+ * CLI's or the container's output, so it is stored and shown as data and
+ * never placed in a prompt (I7).
+ */
+export interface AttemptFailure {
+  readonly source: 'driver' | 'sandbox' | 'runtime';
+  readonly layer: string;
+  readonly retries: number;
+  readonly untrustedDetail: string;
+}
 
 export type DecidingComponent = DecisionCause['decidedBy'];
 

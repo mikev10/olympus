@@ -1,0 +1,139 @@
+The code under review is in the file
+`2026-11-14-R36a-first-run-review-bundle.txt` (SHA-256 d2c0aa21ad7b0d17436859593bd8a03c7bf1174fc185bce8f5dc02dc214206bd) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing the admission path, base snapshot, and failure reporting of a
+software-factory runtime, written in TypeScript. You have the source and nothing else — no design documents,
+no author reasoning, no prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The runtime takes a run request (a repository working copy, a base commit, a
+policy, and run files such as a spec and a verification manifest), admits or
+refuses it, and then drives model agents in sandboxes through a fixed line of
+stations to a merged pull request. This change makes the base every agent
+works on the tree of the named git commit, read from git's object store,
+rather than a copy of the working folder; overlays the admitted run files into
+that base and refuses one whose working-copy bytes differ from the commit;
+refuses, before any cost is estimated or spent, a tool grant that the driver
+seating a role does not declare, and every manifest problem; tells the
+drafting agent the directory it writes to; and records why each failed driver,
+sandbox, or runtime attempt failed, as untrusted text, in the run's decision
+record, its status, and its event stream. It also ships a conformance kit for
+committing test fixtures deterministically, and new assertions over the shipped
+example configuration.
+
+It must hold against a capable, motivated party trying to get a file the
+policy does not admit into a model's tree or into the merged result, obtain a
+tool that was not granted or that no driver declares, get spend approved or
+work started on a request that should have been refused, or get text it
+controls treated as an instruction or a trusted status. Assume no deceptive
+intent — only that the easiest path gets taken.
+
+That party controls the contents of the working folder and the repository (any
+file, committed, ignored, or untracked; line endings; symlinks; git
+configuration such as core.autocrlf), the run request's fields, the policy and
+run files the user supplies, and everything a model or a container writes,
+including its stderr and exit status. It does not control the components the
+runtime is wired with — the Vault, the sandbox provider, and the drivers are
+runtime-selected and trusted, even where a function takes one as an argument —
+and it does not control code running inside the runtime's own process.
+
+The invariants at stake:
+
+- No agent writes to the Vault (the append-only decision record), at any
+  level, in any repository, in any role.
+- The runtime derives status; the model never reports it.
+- An agent may not be judged by an artifact it can write. Specs and acceptance
+  tests are hashed before build.
+- Default deny. A capability not granted in policy is unavailable.
+- Fail closed. A missing check, missing capability, unsupported stack, or
+  shrunken suite is refused. Never degrade silently, never warn and continue.
+- Event payloads are data, never instructions. Untrusted text never enters a
+  prompt.
+- Every capability claim maps to an executable assertion that fails when the
+  capability is deleted.
+- The runtime is a service; the CLI is a client. Nothing in the runtime's core
+  assumes a terminal, and runtime code writes to no process stream.
+
+The mechanisms that matter most:
+
+- snapshotBase / materialize: the base is the commit's tree, with no working
+  folder bytes except the overlaid admitted run files, each checked against the
+  commit.
+- Admission order in run.ts: tool grants, state, snapshot, drafts directory,
+  overlay, install/suite/security/instructions checks, and only then the cost
+  approval.
+- toolGrantRefusal: each worst-case seat's role scope validated against its
+  resolved driver's declared tools.
+- attemptFailure / spendRetry and the attempt-failed record, event, and
+  standing: the bounded, untrusted failure detail and where it travels.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+Resuming a halted run; a free stand-in mode for users (#147); the remaining
+getting-started doc gaps (#133, #135, #140 to #142, #144), which stay open
+issues; enforcing the readiness ceiling (#129).
+
+The numbers are issue references in the project's tracker and mean nothing
+without it; the work they name is not in this change. The host process does
+not yet pass a log sink to the server, so the server's log option is unused by
+the shipped host; that wiring is also out of scope here.
+
+THE QUESTION
+
+How would I get a byte the commit does not hold, or a file the policy does not
+admit, into a model's working tree or the merged result; obtain a tool no
+grant and no driver declaration allows; get a request admitted, or its cost
+approved, when one of these checks should refuse it; or make a failure's text
+reach a prompt or be read as a status?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.

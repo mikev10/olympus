@@ -45,7 +45,20 @@ export function applyCommand(change: Change, runId: string | null = null): strin
  * sandbox and claims the files it wrote: the build seat, or a drafter.
  * Every other task, the review task among them, gets the stub's empty claim.
  */
-export class ScriptedSeat extends StubDriver {
+/** The tools the bench's policy grants every seat, by the names a real driver declares (#150, D-R36a-07). */
+export const BENCH_TOOLS: readonly string[] = ['Read', 'Write'];
+
+/**
+ * The stub, declaring the tools the bench grants: admission refuses a grant the seat's driver does not declare, and
+ * the stub on its own declares none.
+ */
+export class BenchStub extends StubDriver {
+  override declaredTools(): readonly string[] {
+    return BENCH_TOOLS;
+  }
+}
+
+export class ScriptedSeat extends BenchStub {
   /** Every request the seat was handed, so a test can see what reached it. */
   readonly requests: TaskRequest[] = [];
 

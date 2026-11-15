@@ -227,12 +227,15 @@ export const REFUSED_FILE_REFUSES_ADMISSION: LocalAssertion = runtime({
     });
     await withLine('r24-directory-', async (rig) => {
       await mkdir(join(rig.dirs.artifacts, '.claude', 'rules', 'nested.md'), { recursive: true });
+      // Holding a file, so the commit the base is read from has the directory (D-R36a-04).
+      await writeFile(join(rig.dirs.artifacts, '.claude', 'rules', 'nested.md', 'inner.md'), 'a directory, not a rule');
       await refusesNaming(rig, '.claude/rules/nested.md', 'not-regular', 'a rule that is a directory');
     });
     await withLine('r24-link-', async (rig) => {
       await writeFile(join(rig.dirs.artifacts, 'elsewhere.md'), 'r24-linked-marker\n');
       // No catch: a host that cannot make the link fails here rather than passing unexercised (D-R20-10).
-      await symlink(join(rig.dirs.artifacts, 'elsewhere.md'), join(rig.dirs.artifacts, 'CLAUDE.md'), 'file');
+      // Relative and inside the tree, so the commit the base is read from carries it as a link (D-R36a-04).
+      await symlink('elsewhere.md', join(rig.dirs.artifacts, 'CLAUDE.md'), 'file');
       await refusesNaming(rig, 'CLAUDE.md', 'not-regular', 'a CLAUDE.md that is a link');
     });
     await withLine('r24-set-', async (rig) => {

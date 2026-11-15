@@ -16,7 +16,6 @@ import { buildGraph, DEFAULT_LIMITS, DEFAULT_RUBRICS_DIRECTORY, costTotals, loca
 import { DEFAULT_ROLES_DIRECTORY } from '@olympus-ai/compiler';
 import {
   StrictPolicyEngine,
-  StubDriver,
   type CapabilityScope,
   type Driver,
   type Policy,
@@ -28,7 +27,7 @@ import { BASE_IMAGE } from '@olympus-ai/driver-claude-code';
 import { LocalVault, type CriticRecord, type DraftRecord } from '@olympus-ai/vault';
 import type { Corpus, Item } from './corpus.js';
 import { benchPolicyDocument, boundGraph, installed, type Bench } from './line.js';
-import { ScriptedSeat } from './seats.js';
+import { BenchStub, ScriptedSeat } from './seats.js';
 
 export interface CriticOutcome {
   readonly verdict: 'caught' | 'passed' | 'unreadable';
@@ -121,7 +120,7 @@ export async function throughTheCritic(bench: Bench, corpus: Corpus, item: Item,
   const vault = new LocalVault({ store: join(root, 'store'), artifacts: repository });
   const runId = name as RunId;
   const drafter = new ScriptedSeat(bench.provider, (station === 'spec' ? 'spec-drafter' : 'test-drafter') as RoleId, item.change, item.claim, name);
-  const idle = new StubDriver();
+  const idle = new BenchStub();
   const components = buildGraph({
     vault,
     sandbox: bench.provider,
