@@ -23,7 +23,7 @@ import { refuse } from './refusal.js';
 export const BASE_IMAGE = 'node@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5';
 
 /** The CLI, by exact version. Never a range: a range makes the image a function of the day it was built. */
-export const CLI_VERSION = '2.1.277';
+export const CLI_VERSION = '2.1.310';
 
 /**
  * The tag the built image carries, derived from everything that decides what is

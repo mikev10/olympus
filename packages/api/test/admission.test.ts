@@ -6,7 +6,7 @@
  * by field: a path and a code for a request problem, a payload for a transition.
  * And every one leaves nothing behind: no admission, no state, no lock.
  */
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { hashedLockfile } from '@olympus-ai/adapters';
@@ -279,5 +279,20 @@ describe('the roles directory (R20)', () => {
     const outcome = await start({ roles: join(workspace, '..', 'no-such-roles') });
     expect(outcome).toMatchObject({ ok: false, reason: 'roles-refused', refused: [{ entry: '.', code: 'unreadable' }] });
     await expectNothingWritten(components.vault);
+  });
+});
+
+describe('R36a gemini-3: a run that already has a base', () => {
+  test('is refused as a request, and the base it did not make is left where it stands', async () => {
+    await writeChecks(workspace, [ok]);
+    const req = runRequest(runId, workspace, components);
+    const base = join(components.workspaces.root, runId, 'base');
+    await mkdir(base, { recursive: true });
+    await writeFile(join(base, 'marker'), 'another admission\n');
+    const outcome = await startRun(req);
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok || outcome.reason !== 'invalid-request') throw new Error(`expected invalid-request, got ${JSON.stringify(outcome)}`);
+    expect(outcome.problems.map((p) => p.code)).toEqual(['exists']);
+    await expect(readFile(join(base, 'marker'), 'utf8')).resolves.toBe('another admission\n');
   });
 });

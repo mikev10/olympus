@@ -250,6 +250,30 @@ so it stays current:
   (`verify.json`, the checks the runtime runs, one of which must fail on the
   base commit), the spec's security part, and the task graph.
 
+A role's `tools` are the driver's own names, case and all. The Claude Code
+driver, the one the host runs, declares `Read`, `Write`, `Edit`, `Bash`, and
+the rest of its CLI's built-in tools; `create` refuses a run that grants a
+seat a tool its driver does not declare, naming the role and the tool. Each
+role's `budget` is per task, and `maxTokens` counts the tokens a model reads
+from its cache: a model reading the repository spends most of its tokens
+there. The example gives each drafter 400000 and every other seat 200000.
+
+Every run is scanned by two security checks the manifest must pin, each with
+the scanner image the runtime declares for it:
+
+- `secret-scan` runs gitleaks
+  (`zricethezav/gitleaks@sha256:0e99e8821643ea5b235718642b93bb32486af9c8162c8b8731f7cbdc951a7f46`).
+  `config` may be `null`, for gitleaks' default rules, or a gitleaks TOML
+  config as a string.
+- `static-analysis` runs Semgrep
+  (`semgrep/semgrep@sha256:30e6afa99ebd8e7b4115d4904898108eb4bf77025819e9263f09cf14e6f6e549`)
+  on a repository whose stack has a static-analysis scanner: today one with
+  a `package.json`. `config` is required, a string holding Semgrep rules
+  YAML. On a repository without one, delete this check from the example's
+  `verify.json`; pinning it there is refused.
+
+A finding the change adds fails the run; one the base already had does not.
+
 ### First run
 
 The host admits runs from the working copy `FACTORY_REPOSITORY` names.
@@ -258,17 +282,30 @@ locks every artifact against it, and the paths `create` is given are
 relative to it. Copy [examples/run/](examples/run) into the working copy
 (here under `run/`), and start the host with the variables above.
 
+A run is built over the tree of `--base-commit` as git stores it, never over
+the working copy: nothing uncommitted, untracked, or ignored there (a `.env`,
+`node_modules/`, a build output) reaches a model, and uncommitted changes do
+not matter to a run. The one exception is the run's own files, the ones
+`create` names: they join that tree with the bytes `create` read. You need
+not commit them; if you do, commit them as they stand, since a committed run
+file whose bytes differ from the working copy's (on a `core.autocrlf=true`
+checkout its line endings do) is refused. A secret that is committed is in
+the tree; keep it out of every model's tree with the policy's
+`sensitivePaths`.
+
 The smallest run drafts its spec from an intent, at L1. It still needs the
 acceptance tests, the manifest, and the graph; a drafted spec has no security
 part to supply:
 
 ```
 olympus-ai create --workspace /abs/path/to/repo --base-commit $(git -C /abs/path/to/repo rev-parse HEAD) \
-  --level 1 --draft-spec --intent "Add hello.txt at the repository root, saying hello." \
+  --level 1 --draft-spec --intent "Add hello.txt at the repository root, containing exactly the line hello." \
   --tests run/acceptance.md --manifest run/verify.json --graph run/graph.json
 ```
 
-The first `create` starts nothing. It prints the run's worst-case cost: the
+The first `create` starts nothing. It checks everything it can refuse a run
+for, the manifest and the tool grants included, and then prints the run's
+worst-case cost: the
 most it could spend, in US dollars, if every task used every call and every
 retry its role's `budget` allows. Approve that exact figure by running the
 same command again with `--approve-cost <usd>`. With the spec supplied
@@ -280,6 +317,12 @@ pass each gate the policy holds for a person with
 `olympus-ai approve <run id> <station>:1`. `olympus-ai report <run id>`
 prints what it cost and what was decided. Every command prints its flags with
 `olympus-ai <command> --help`.
+
+When a model or sandbox call fails, the run retries it, and the failure is
+recorded with the error's first 400 characters: `events` shows each one as it
+happens, and a run stopped by its retries shows the last under
+`lastFailure` in `status`. That text is the CLI's or the container's own
+output, shown as it was written.
 
 ### Readiness
 

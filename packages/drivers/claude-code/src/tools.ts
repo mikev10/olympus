@@ -25,6 +25,7 @@ export const DECLARED_TOOLS: readonly string[] = [
   'EnterWorktree',
   'ExitWorktree',
   'ListAgents',
+  'Monitor',
   'NotebookEdit',
   'Read',
   'ReportFindings',
@@ -61,8 +62,9 @@ export function isSubagentTool(name: string): boolean {
   return SUBAGENT_TOOLS.has(name);
 }
 
+/** Tools whose use runs a command in the sandbox: `Monitor` watches one it started, as `Bash` runs one. */
 export function isCommandTool(name: string): boolean {
-  return name === 'Bash';
+  return name === 'Bash' || name === 'Monitor';
 }
 
 /**

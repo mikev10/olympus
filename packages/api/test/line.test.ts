@@ -214,7 +214,7 @@ describe('hello at L1', () => {
     expect(driver.requests).toHaveLength(1);
     const [req] = driver.requests;
     if (req === undefined) return;
-    expect(req).toMatchObject({ taskId: hello, role: { role: 'builder' }, variableSuffix: hello, tier: 'standard', tools: ['read', 'write'] });
+    expect(req).toMatchObject({ taskId: hello, role: { role: 'builder' }, variableSuffix: hello, tier: 'standard', tools: ['Read', 'Write'] });
     expect(req.stablePrefix).toContain(await readSpec(workspace));
     expect(req.stablePrefix).toContain('The black-box oracle');
     // The first two run the reproduction and the secret scan over the base (D-A-BF-01, R17); the build's is the third.

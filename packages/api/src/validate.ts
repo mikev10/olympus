@@ -22,6 +22,10 @@ import type { RequestedArtifacts } from './run.js';
 export type RequestProblemCode =
   /** A required list has no entries. */
   | 'missing'
+  /** An admitted artifact's bytes changed between being read and being written into the base (D-R36a-10). */
+  | 'changed'
+  /** An admitted artifact the base commit holds with other bytes than the workspace does (D-R36a-10, #154). */
+  | 'differs-from-commit'
   /** A string that must have content is blank, or is not a string. */
   | 'empty'
   /** A run id that is not one directory name, so neither the Vault nor the workspace store can hold it (D-P14-14). */
@@ -100,7 +104,7 @@ export type RequestProblemCode =
   | 'reserved'
   /** A build task named a role a review seat runs under, so its author could be the identity that reviews it (R9). */
   | 'reviewing-role'
-  /** A path a draft would be written to already exists in the base (R19). */
+  /** A path a draft would be written to already exists in the base (R19), or the run already has a base (gemini-3). */
   | 'exists'
   /** A test drafter or critic granted egress beyond the model relay, which would let it see the repository (R19, I3). */
   | 'not-black-box'
@@ -372,7 +376,7 @@ export function securityProblems(
   });
   for (const kind of ['secret-scan', 'static-analysis'] as const) {
     if (declared[kind] !== null && !pinned.has(kind)) {
-      report('manifest.checks', 'missing', `manifest.checks pins no ${kind} check; every run is scanned for it (R17)`);
+      report('manifest.checks', 'missing', `manifest.checks pins no ${kind} check; every run is scanned for it`);
     }
   }
   return problems;

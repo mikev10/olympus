@@ -7,8 +7,8 @@
  * what the runtime derived and recorded (I2); nothing a model wrote is
  * presented as status, and nothing here is ever placed in a prompt (I7).
  */
-import type { ApprovalKey, AutonomyLevel, CandidateId, RejectionReason, RunId, RunState, RunTemplateId } from '@olympus-ai/core';
-import type { CandidateDismissal, CandidateRecord, DismissalCause } from '@olympus-ai/vault';
+import type { ApprovalKey, AutonomyLevel, CandidateId, RejectionReason, RunId, RunState, RunTemplateId, TaskId } from '@olympus-ai/core';
+import type { AttemptFailure, CandidateDismissal, CandidateRecord, DismissalCause } from '@olympus-ai/vault';
 import type { DeliveryOutcome } from '../intake.js';
 import type { WorstCaseCost } from '../cost.js';
 import type { RequestedArtifacts, RunOutcome, RunStanding } from '../run.js';
@@ -94,6 +94,8 @@ export type DriveEnd =
 export type RunEvent =
   | { readonly event: 'state'; readonly data: RunState }
   | { readonly event: 'standing'; readonly data: RunStanding }
+  /** A failed attempt, as its record holds it; `untrustedDetail` is the CLI's or a container's text, data only (I7, #149). */
+  | { readonly event: 'attempt-failed'; readonly data: { readonly task: TaskId; readonly failure: AttemptFailure } }
   | { readonly event: 'end'; readonly data: DriveEnd | null };
 
 export type ErrorCode =

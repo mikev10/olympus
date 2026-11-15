@@ -126,7 +126,7 @@ import { recordDecision, recordEgress, stationDecider } from './decisions.js';
 import { requiredShortfall } from './gate.js';
 import type { EgressPolicy, RelayMeter, SandboxHandle, SandboxSpec, Teardown } from '@olympus-ai/sandbox';
 import { splitFrontMatter } from '@olympus-ai/compiler';
-import type { AdmissionRecord, AdmittedArtifact, BaseRunRecord, RepoInstructionFile, CallTiming, DiffEntry, EvidenceBundle, IntegrationOpened, IntegrationRecord, UnstartedCheck, UsageReading, UsageRecord, Vault } from '@olympus-ai/vault';
+import type { AdmissionRecord, AdmittedArtifact, AttemptFailure, BaseRunRecord, RepoInstructionFile, CallTiming, DiffEntry, EvidenceBundle, IntegrationOpened, IntegrationRecord, UnstartedCheck, UsageReading, UsageRecord, Vault } from '@olympus-ai/vault';
 import { draftFloorOf, draftStation, isDrafted, lockApproved, testDraftOf, type DraftingContext } from './drafting.js';
 import type { RunRequirements } from './spec-parts.js';
 import { imageFor, type BuiltGraph } from './graph.js';
@@ -212,6 +212,8 @@ export interface LineContext {
   readonly cancelRequested?: () => RunCancellation | null;
   /** Told of every state the line commits, after the Vault stored it. Serves the event stream; it cannot change what is committed. */
   readonly onCommit?: (state: RunState) => void;
+  /** Told of every failed attempt after its record is stored: how the host logs one (D-R36a-06). It cannot change what is recorded. */
+  readonly onAttemptFailed?: (task: TaskId, failure: AttemptFailure) => void;
   /**
    * Asked before each build task runs, for input a declared source brought for
    * it. Whatever it returns narrows the run before it reaches a model, through
@@ -382,10 +384,11 @@ function parksRecorded(ctx: LineContext): Set<TaskId> {
  * cannot always tell one exhaustion from another and a resume reads the park
  * back from committed state (A-R4-05).
  */
-export async function park(ctx: LineContext, task: Task, parking: StateChange, cause: ParkCause): Promise<StationRefusal> {
+export async function park(ctx: LineContext, task: Task, parking: StateChange, cause: ParkCause, because = ''): Promise<StationRefusal> {
   const spent = parking.attempts !== undefined && Object.hasOwn(parking.attempts, task.id) ? parking.attempts[task.id] : undefined;
   const change: StateChange = { ...parking, attempts: { ...parking.attempts, [task.id]: { ...(spent ?? attemptsOf(ctx.state, task)), parkedFor: cause } } };
-  const refusal = parkRefusal({ ...ctx.state, attempts: { ...ctx.state.attempts, ...change.attempts } }, task, stepLimits(ctx));
+  const derived = parkRefusal({ ...ctx.state, attempts: { ...ctx.state.attempts, ...change.attempts } }, task, stepLimits(ctx));
+  const refusal: StationRefusal = because === '' ? derived : { ...derived, message: `${derived.message}${because}` };
   await recordDecision(
     { vault: ctx.components.vault, runId: ctx.run.id, taskId: task.id, station: ctx.state.station },
     { cause: 'station-refused', decidedBy: stationDecider(refusal), refusal },
@@ -724,16 +727,42 @@ export async function startAttempt(ctx: LineContext, task: Task): Promise<Statio
   return undefined;
 }
 
+/** The most of a failure's own text a record keeps: enough for a CLI's or a container's first error, and no transcript. */
+export const FAILURE_DETAIL_LIMIT = 400;
+
+/**
+ * What a failed attempt's error says, read by the runtime: a driver's or a
+ * sandbox's refusal by its name and layer, anything else as `error`. The
+ * text is the error's own and may quote the CLI's or the container's output,
+ * so it is trimmed and kept as untrusted data (I7, D-R36a-05).
+ */
+export function attemptFailure(error: unknown, retries: number): AttemptFailure {
+  const named = typeof error === 'object' && error !== null ? (error as { name?: unknown; layer?: unknown }) : {};
+  const layer = typeof named.layer === 'string' && named.layer !== '' ? named.layer : 'error';
+  const source = named.name === 'DriverRefusal' ? 'driver' : named.name === 'SandboxRefusal' ? 'sandbox' : 'runtime';
+  const text = (error instanceof Error ? error.message : String(error)).trim();
+  return { source, layer: source === 'runtime' ? 'error' : layer, retries, untrustedDetail: text.length > FAILURE_DETAIL_LIMIT ? `${text.slice(0, FAILURE_DETAIL_LIMIT)}…` : text };
+}
+
 /**
  * A driver or sandbox failure: one retry spent, committed before the next
  * attempt. Past the station's `retry.max` the task parks and the run stops.
+ * Why it failed is recorded first, so the retry or the park it leads to has
+ * a cause the record can show (#149, D-R36a-05).
  */
-export async function spendRetry(ctx: LineContext, task: Task): Promise<StationRefusal | undefined> {
+export async function spendRetry(ctx: LineContext, task: Task, error: unknown): Promise<StationRefusal | undefined> {
   const contract = STATION_CONTRACTS[ctx.state.station];
   const spent = attemptsOf(ctx.state, task);
   const attempts = { [task.id]: { ...spent, retries: spent.retries + 1 } };
+  const failure = attemptFailure(error, spent.retries + 1);
+  await recordDecision(
+    { vault: ctx.components.vault, runId: ctx.run.id, taskId: task.id, station: ctx.state.station },
+    { cause: 'attempt-failed', decidedBy: 'line', failure },
+  );
+  ctx.onAttemptFailed?.(task.id, failure);
   if (spent.retries + 1 > contract.retry.max) {
-    return park(ctx, task, { attempts }, 'retries-exhausted');
+    // The park names the last attempt's cause by its source and layer, the runtime's reading; its text stays in the record above.
+    return park(ctx, task, { attempts }, 'retries-exhausted', `; the last attempt failed at the ${failure.source}'s ${failure.layer} layer`);
   }
   await commit(ctx, { attempts });
   await new Promise((done) => setTimeout(done, contract.retry.backoffMs));
@@ -1414,7 +1443,7 @@ async function build(ctx: LineContext, task: Task): Promise<StationRefusal | und
     'task-graph': JSON.stringify(ctx.graph.tasks.map(({ id, station, role, dependsOn }) => ({ id, station, role, dependsOn }))),
   };
   const ran = await runTask(ctx, task, driver, pinnedRole(ctx, task.role), joinParts(grantedContext(STATION_CONTRACTS.build, withInstructions(offered, instructions))), work, { inputs });
-  if (!ran.ok) return spendRetry(ctx, task);
+  if (!ran.ok) return spendRetry(ctx, task, ran.error);
   // I2: a result is recorded only as the contract shapes it. A key it does not name, `status`
   // among them, is a driver speaking outside the contract; it is not recorded, and the run stops.
   const problems = taskResultProblems(ran.result);
@@ -1556,7 +1585,7 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
   // R34: the tree's lockfile, the change's included, is installed by the runtime, and every
   // dependency tree base or task left is replaced by that install before any check runs.
   const installed = await installInto(ctx, tree, basePath(workspaces, ctx.run.id), task.id, ctx.state.station);
-  if (!installed.ok && installed.at === 'provision') return spendRetry(ctx, task);
+  if (!installed.ok && installed.at === 'provision') return spendRetry(ctx, task, installed.reason);
   const runner = await suiteRunner(basePath(workspaces, ctx.run.id));
   const stackImage = await checkImageOf(basePath(workspaces, ctx.run.id));
   const security = ctx.checks.filter(isSecurityCheck);
@@ -1580,7 +1609,7 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
     if (isSecurityCheck(check)) {
       const scanned = await runSecurity(ctx, tree, diffSha256, index, check, task.id);
       if (scanned.ok) results.push(scanned.result);
-      else if (scanned.at === 'provision') return spendRetry(ctx, task);
+      else if (scanned.at === 'provision') return spendRetry(ctx, task, scanned.reason);
       else {
         results.push(undefined);
         unstarted.push({ checkId: check.id, reason: scanned.reason });
@@ -1602,8 +1631,8 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
     let handle: SandboxHandle;
     try {
       handle = await sandbox.provision(checkSandbox(ctx, tree, check, stackImage));
-    } catch {
-      return spendRetry(ctx, task);
+    } catch (error) {
+      return spendRetry(ctx, task, error);
     }
     try {
       const startedAt = new Date().toISOString();
@@ -1820,7 +1849,7 @@ async function review(ctx: LineContext, task: Task): Promise<StationRefusal | un
   const instructions = await repoInstructionsFor(ctx, task, contract, task.role);
   const inputs = instructions.input === undefined ? [] : [instructions.input];
   const ran = await runTask(ctx, task, reviewer, role, joinParts(grantedContext(contract, withInstructions(offered, instructions))), await reviewView(ctx, task, contract), { inputs });
-  if (!ran.ok) return spendRetry(ctx, task);
+  if (!ran.ok) return spendRetry(ctx, task, ran.error);
   // I2: the line receives a result here too, and holds it to the contract exactly as build does (codex-6).
   const problems = taskResultProblems(ran.result);
   if (problems.length > 0) {

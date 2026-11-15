@@ -8,7 +8,7 @@ attempt it also says why the last draft went back.
 
 Your working directory holds the locked spec and nothing else: its text, its
 security part, and its `run-requirements.json`, and a directory under
-`.drafts/` made for this run, which may already hold the spec's files. You cannot see the repository, and nothing you do
+`.drafts/` made for this run, which your request names and which may already hold the spec's files. You cannot see the repository, and nothing you do
 can reach it. That is deliberate: the tests judge the capability the spec
 describes, not an implementation you have seen.
 

@@ -78,12 +78,13 @@ export const UNSAFE_DECLARATION_SURVIVES_COMPOSITION: LocalAssertion = runtime({
 export const ADAPTER_REFUSAL_REFUSES_L3_END_TO_END: LocalAssertion = runtime({
   id: 'I5.adapter-refusal-refuses-l3-end-to-end',
   title:
-    "an L3 run started through startRun on the real composition is refused at admission as controls-unavailable, naming exactly the controls the base's adapter set lacks, mutation among them; nothing is driven",
+    "an L3 run started through startRun on the real composition is refused at admission as controls-unavailable, naming exactly the controls the base's adapter set lacks, mutation among them, before any figure is approved; nothing is driven",
   run: async () => {
     await withLine('i1a-l3-', async (rig) => {
       const { startRun } = await api();
       const adapters = await import('@olympus-ai/adapters');
-      const outcome = await startRun(await rig.request(await realComponents(rig), { requestedLevel: 3, policy: await realPolicy(3) }));
+      // No figure approved: the refusal comes before the estimate, so nobody approves spend for a run refused anyway (codex-1).
+      const outcome = await startRun(await rig.request(await realComponents(rig), { requestedLevel: 3, policy: await realPolicy(3), approvedCostUsd: null }));
       if (outcome.ok || outcome.reason !== 'controls-unavailable') {
         throw new Error(`I5: an L3 run on the real composition was not refused as controls-unavailable (got ${outcome.ok ? 'a completed run' : outcome.reason})`);
       }

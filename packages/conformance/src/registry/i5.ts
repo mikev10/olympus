@@ -6,7 +6,7 @@ import { R4_I5 } from './parallel.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { R17_I5 } from './security.js';
 import { OVER_REQUEST_REFUSED_AT_ADMISSION, STATION_MISSING_CAPABILITY_REFUSED, TASK_ATTEMPTS_ARE_BOUNDED } from './line-assertions.js';
-import { doingTheWork, withLine } from './line.js';
+import { doingTheWork, RIG_TOOLS, withLine } from './line.js';
 import { UNSUPPORTED_STACK_IS_LOUD } from './adapters.js';
 import { HTTP_PROBE_ABSENT_IS_NAMED } from './http.js';
 import {
@@ -37,6 +37,7 @@ import { INDETERMINATE_PROBE_LOWERS, UNSUPPORTED_STACK_REFUSES, REFUSAL_NAMES_TH
 import { R20_I5 } from './roles.js';
 import { R13A_I5 } from './nightly.js';
 import { R34_I5 } from './install.js';
+import { R36A_I5 } from './first-run.js';
 import { R29_I5 } from './stacks.js';
 import { R8A_I5 } from './observe.js';
 import { R8B_I5 } from './observe-plan.js';
@@ -62,7 +63,18 @@ export const I5: InvariantEntry = {
     ...R24_I5,
     // R20: the role compiler.
     // R19: drafting at spec and test-design.
+    // R36a: the pinned CLI calls every tier's model (#152). Paid, under the run-driver label.
+    external({
+      id: 'I5.every-tier-model-callable-by-the-pinned-cli',
+      title:
+        "every tier's model is one the pinned CLI can call: one minimal call per tier through the driver's own image reaches the model the tier resolves to, "
+        + 'so a tier map and a CLI pin that drift apart fail here rather than parking every seat of that tier (#152)',
+      level: 'runtime',
+      package: '@olympus-ai/driver-claude-code',
+      file: 'test/invariants.test.ts',
+    }),
     ...R19_ASSERTIONS.I5,
+    ...R36A_I5,
     ...R16_ASSERTIONS.I5,
     ...R20_I5,
     // R22: the trigger framework.
@@ -142,7 +154,8 @@ export const I5: InvariantEntry = {
             import('@olympus-ai/sandbox'),
             import('@olympus-ai/vault'),
           ]);
-          const stub = new core.StubDriver();
+          // The stub as it is, declaring the tools the rig grants and nothing else of its own, so it is still named StubDriver (D-R36a-07).
+          const stub = Object.assign(Object.create(new core.StubDriver()) as InstanceType<typeof core.StubDriver>, { declaredTools: () => RIG_TOOLS });
           const stubSandbox = new sandbox.StubSandboxProvider();
           const builder = doingTheWork(stub, stubSandbox);
           const components = api.buildGraph({
@@ -514,6 +527,15 @@ export const I5: InvariantEntry = {
       level: 'runtime',
       package: '@olympus-ai/api',
       file: 'test/paid/line.paid.test.ts',
+    }),
+    // R36a: the shipped examples, unmodified, through the real driver to a merged pull request. Paid.
+    external({
+      id: 'I5.shipped-example-merges-on-the-real-driver',
+      title:
+        "the shipped examples, unmodified, drafting the spec from the README's intent, run on the composed host with the Claude Code driver in every seat through each gate a person holds at L1 — the drafted spec, the tests, and the merge — to a pull request merged into the base branch; paid (#145, #148 to #152, #154)",
+      level: 'runtime',
+      package: '@olympus-ai/api',
+      file: 'test/paid/examples.paid.test.ts',
     }),
     // R15: no default declaration, nothing to reproduce is refused, and a check that did not start is not a failure.
     BASE_DECLARATION_HAS_NO_DEFAULT,

@@ -9,7 +9,8 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { StubDriver, type PolicyDocument, type RunState, type TaskRequest, type TaskResult } from '@olympus-ai/core';
 import { StubSandboxProvider, type SandboxHandle, type SandboxSpec } from '@olympus-ai/sandbox';
 import { createApiServer, egressFor, UNANALYSED_TESTS, worstCaseCost, type ApiServer, type BuiltGraph, type ComponentGraph, type CreatedRun, type RunView } from '../src/index.js';
-import { ARTIFACTS, BASE_COMMIT, makeWorkspace, policy, policyDocument, removeWorkspace, ROLES, roleScope, stubComponents, BUILDER, REVIEWER } from './harness.js';
+import { ARTIFACTS, makeWorkspace, policy, policyDocument, removeWorkspace, ROLES, roleScope, stubComponents, BUILDER, REVIEWER } from './harness.js';
+import { commitFixture } from '@olympus-ai/conformance/git';
 import { DelegatingDriver, DelegatingSandbox } from './wrappers.js';
 
 const TOKEN = 't'.repeat(40);
@@ -52,7 +53,7 @@ function createBody(overrides: Record<string, unknown> = {}): Record<string, unk
     ], edges: [] },
     policy(),
   ).usd;
-  return { workspace, baseCommit: BASE_COMMIT, requestedLevel: 1, artifacts: ARTIFACTS, approvedCostUsd: figure, ...overrides };
+  return { workspace, baseCommit: commitFixture(workspace), requestedLevel: 1, artifacts: ARTIFACTS, approvedCostUsd: figure, ...overrides };
 }
 
 /** Waits until the server has stopped driving the run, then returns what it serves. */

@@ -34,6 +34,7 @@ import type {
 } from '@olympus-ai/core';
 import type { SandboxProvider } from '@olympus-ai/sandbox';
 import type { Vault } from '@olympus-ai/vault';
+import { commitFixture } from '../kit/git.js';
 import { workspaceRoot } from '../kit/workspace.js';
 import { withVaultDirs, type VaultDirs } from './local-vault.js';
 
@@ -57,6 +58,13 @@ export const ARTIFACTS = {
   specParts: { security: 'security.json' },
 } satisfies RunRequest['artifacts'];
 
+/**
+ * The tools the rig grants, by the names the Claude Code driver declares, and
+ * what the rig's stub drivers declare, so admission's tool check (D-R36a-07)
+ * passes over a stub that runs no tool.
+ */
+export const RIG_TOOLS: readonly string[] = ['Read', 'Write'];
+
 const M1: readonly string[] = ['intake', 'spec', 'test-design', 'plan', 'build', 'verify', 'review', 'integrate'];
 
 /** A role's scope as the rig grants it: every path writable unless `writableGlobs` narrows it. */
@@ -64,7 +72,7 @@ export function lineScope(stations: CapabilityScope['stations'], tier: ModelTier
   return {
     stations,
     writableGlobs: [...writableGlobs],
-    tools: ['read'],
+    tools: [...RIG_TOOLS],
     network: { egress: 'none' },
     tier,
     tierByStation: {},
@@ -117,6 +125,10 @@ export interface DriverOptions {
   readonly during?: (req: TaskRequest) => Promise<void>;
   /** Every call rejects, like a provider that cannot be reached. */
   readonly failing?: boolean;
+  /** Every call rejects with this error, as a driver's own refusal does. */
+  readonly failWith?: Error;
+  /** The tools it declares. Default: `RIG_TOOLS`. */
+  readonly declaredTools?: readonly string[];
 }
 
 export interface ObservedDriver extends Driver {
@@ -138,11 +150,12 @@ export async function stubDriver(options: DriverOptions = {}): Promise<ObservedD
     requests,
     provenanceId: () => inner.provenanceId(),
     capabilities: () => ({ ...inner.capabilities(), ...options.capabilities }),
-    declaredTools: () => inner.declaredTools(),
+    declaredTools: () => options.declaredTools ?? RIG_TOOLS,
     resolveModel,
     relayRequest: () => inner.relayRequest(),
     runTask: async (req: TaskRequest): Promise<TaskResult> => {
       requests.push(req);
+      if (options.failWith !== undefined) throw options.failWith;
       if (options.failing === true) throw new Error('the model provider is unreachable');
       if (options.during !== undefined) await options.during(req);
       const result = await inner.runTask(req);
@@ -281,7 +294,8 @@ export async function withLine<T>(prefix: string, body: (rig: LineRig) => Promis
         await lockedFixture(dirs.artifacts);
         const req: RunRequest = {
           runId,
-          baseCommit: '0'.repeat(40),
+          // The fixture as it stands, committed: admission reads the base from the commit (D-R36a-04).
+          baseCommit: Object.hasOwn(overrides, 'baseCommit') ? '0'.repeat(40) : commitFixture(dirs.artifacts),
           requestedLevel: 1,
           workspace: dirs.artifacts,
           artifacts: ARTIFACTS,

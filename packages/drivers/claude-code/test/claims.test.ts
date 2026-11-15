@@ -32,7 +32,7 @@ invariantTest(
       const child = await h.driver.spawnSubagent({ role: 'reviewer' as RoleId, instructions: 'You review. Do exactly what the message asks, then end your reply with the exact token PLUM-6620.', sha256: '0'.repeat(64) }, {
         ...parent,
         taskId: 'sub-child' as TaskId,
-        variableSuffix: 'Reply with the single word: child',
+        variableSuffix: 'Reply with the word child.',
       });
 
       // A TaskResult of its own, not the parent's, and carrying the contract
