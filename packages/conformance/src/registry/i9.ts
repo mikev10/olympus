@@ -1,7 +1,8 @@
 import { compileError, runtime } from '../kit/assert.js';
 import { moduleSpecifiers, packageProgram, propertyChains, sourceFilesOutsideProgram, terminalBindings } from '../kit/scan.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
-import { workspacePackages } from '../kit/workspace.js';
+import ts from 'typescript';
+import { workspacePackages, workspaceRelative } from '../kit/workspace.js';
 import { assertApiRunsHeadless } from './headless.js';
 import { assertPackagedHostRuns } from './release.js';
 import { SANDBOX_OUTPUT_IS_BOUNDED } from './output.js';
@@ -29,7 +30,29 @@ const TERMINAL_CHAINS = /^process\.(stdin|stdout|stderr|exit|exitCode|argv)(\.|$
  * refused first: a non-empty program is not evidence that the runtime source
  * is in it.
  */
-function assertNeverTouchesATerminal(packageName: string): void {
+/**
+ * An executable entry that may report its own refusal (A-HS-01): one file,
+ * and only these uses, which write a line to stderr and set a non-zero exit.
+ * stdin, stdout, argv, exit, isTTY, console, and every terminal module stay
+ * refused there too, and the file may export nothing, so no other module can
+ * call through it.
+ */
+interface EntryExemption {
+  readonly file: string;
+  readonly uses: ReadonlySet<string>;
+}
+
+const HOST_ENTRY: EntryExemption = {
+  file: 'packages/api/src/host/main.ts',
+  uses: new Set(['process.stderr.write', 'process.exitCode', 'Process.stderr', 'Process.exitCode']),
+};
+
+function exports(sf: ts.SourceFile): boolean {
+  return sf.statements.some((st) => ts.isExportDeclaration(st) || ts.isExportAssignment(st)
+    || (ts.canHaveModifiers(st) && (ts.getModifiers(st) ?? []).some((m) => m.kind === ts.SyntaxKind.ExportKeyword)));
+}
+
+function assertNeverTouchesATerminal(packageName: string, entry: EntryExemption | null = null): void {
   const pkg = workspacePackages().find((p) => p.name === packageName);
   if (pkg === undefined) throw new Error(`I9: ${packageName} is not in the workspace`);
   const { files, checker } = packageProgram(pkg);
@@ -39,15 +62,23 @@ function assertNeverTouchesATerminal(packageName: string): void {
     throw new Error(`I9: ${packageName}'s tsconfig leaves source files out of its program, where this scan cannot see them\n  ${omitted.join('\n  ')}`);
   }
   const hits: string[] = [];
+  if (entry !== null) {
+    const sf = files.find((f) => workspaceRelative(f.fileName) === entry.file);
+    if (sf === undefined) throw new Error(`I9: the exempt entry ${entry.file} is not in ${packageName}'s program, so the exemption names nothing`);
+    if (exports(sf)) hits.push(`${entry.file} exports, so its terminal write is reachable from other modules`);
+  }
+  const exempt = (site: { readonly file: string; readonly text: string }): boolean => entry !== null && site.file === entry.file && entry.uses.has(site.text);
   for (const sf of files) {
     for (const m of moduleSpecifiers(sf)) {
       if (TERMINAL_MODULES.has(m.text)) hits.push(`${m.file}:${String(m.line)} imports ${m.text}`);
     }
     for (const chain of propertyChains(sf)) {
-      if (TERMINAL_CHAINS.test(chain.text)) hits.push(`${chain.file}:${String(chain.line)} uses ${chain.text}`);
+      if (TERMINAL_CHAINS.test(chain.text) && !exempt(chain)) hits.push(`${chain.file}:${String(chain.line)} uses ${chain.text}`);
     }
     // By binding as well as by spelling: a destructured, aliased, or re-exported terminal is the same terminal.
-    for (const binding of terminalBindings(sf, checker)) hits.push(`${binding.file}:${String(binding.line)} binds ${binding.text}`);
+    for (const binding of terminalBindings(sf, checker)) {
+      if (!exempt(binding)) hits.push(`${binding.file}:${String(binding.line)} binds ${binding.text}`);
+    }
   }
   if (hits.length > 0) throw new Error(`I9: ${packageName} assumes a terminal\n  ${hits.join('\n  ')}`);
 }
@@ -65,9 +96,9 @@ export const I9: InvariantEntry = {
     }),
     runtime({
       id: 'I9.api-never-touches-a-terminal',
-      title: 'no file in api, the entry point, imports a terminal module or touches process streams, argv, exit, isTTY, or console, by spelling or by binding, and every .ts under its src is in the scanned program',
+      title: 'no file in api imports a terminal module or touches process streams, argv, exit, isTTY, or console, by spelling or by binding, and every .ts under its src is in the scanned program; the one exception is the host executable\'s entry, which exports nothing and may only write its refusal to stderr and set its exit code (A-HS-01)',
       run: () => {
-        assertNeverTouchesATerminal('@olympus-ai/api');
+        assertNeverTouchesATerminal('@olympus-ai/api', HOST_ENTRY);
       },
     }),
     runtime({

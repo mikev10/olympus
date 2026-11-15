@@ -167,18 +167,16 @@ export function refusalText(problems: readonly string[]): string {
 }
 
 /**
- * What start-up throws when it refuses. The runtime touches no terminal, so it
- * writes nothing itself (I9): Node reports the uncaught refusal and exits 1.
- * Its stack is replaced by its text, so what is printed is the list and no
- * frame (D-R35-08).
+ * What start-up throws when it refuses. The executable's entry catches it and
+ * prints its message, the list, with no frame (A-HS-01); nothing else here
+ * writes to a terminal.
  */
 export class HostRefusal extends Error {
   constructor(problems: readonly string[]) {
     super(refusalText(problems));
-    this.stack = `${this.name}: ${this.message}`;
   }
 }
-HostRefusal.prototype.name = 'factory-host';
+HostRefusal.prototype.name = 'HostRefusal';
 
 /** What start-up composes from: the checked settings and the endpoint file, read and parsed. */
 export type StartupResult =

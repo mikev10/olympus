@@ -10,7 +10,7 @@ import { buildCodexScratch, listRecursive, removeScratch } from '../scratch.ts';
 const cleanupRoots: string[] = [];
 
 function fixtureAuthJson(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'olympus-scratch-fixture-'));
+  const dir = mkdtempSync(join(tmpdir(), 'factory-scratch-fixture-'));
   cleanupRoots.push(dir);
   const path = join(dir, 'auth.json');
   writeFileSync(path, '{"tokens":{}}');
@@ -45,7 +45,7 @@ describe('buildCodexScratch', () => {
   it('removes the directory it created when a step after mkdtemp fails, then rethrows', () => {
     // A private temp dir, so "nothing left behind" is checked in a directory
     // no other test writes to. os.tmpdir() reads these at call time.
-    const privateTmp = mkdtempSync(join(tmpdir(), 'olympus-scratch-private-tmp-'));
+    const privateTmp = mkdtempSync(join(tmpdir(), 'factory-scratch-private-tmp-'));
     cleanupRoots.push(privateTmp);
     vi.stubEnv('TMPDIR', privateTmp);
     vi.stubEnv('TEMP', privateTmp);
@@ -61,7 +61,7 @@ describe('buildCodexScratch', () => {
 
 describe('listRecursive', () => {
   it('returns forward-slash relative paths, including nested ones', () => {
-    const root = mkdtempSync(join(tmpdir(), 'olympus-listrecursive-'));
+    const root = mkdtempSync(join(tmpdir(), 'factory-listrecursive-'));
     cleanupRoots.push(root);
     mkdirSync(join(root, 'nested', 'deeper'), { recursive: true });
     writeFileSync(join(root, 'top.txt'), 'x');
@@ -78,7 +78,7 @@ describe('listRecursive', () => {
   });
 
   it('returns an empty array for an empty directory', () => {
-    const root = mkdtempSync(join(tmpdir(), 'olympus-listrecursive-empty-'));
+    const root = mkdtempSync(join(tmpdir(), 'factory-listrecursive-empty-'));
     cleanupRoots.push(root);
 
     expect(listRecursive(root)).toEqual([]);
