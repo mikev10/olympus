@@ -6,10 +6,10 @@
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
-import { StubDriver, type PolicyDocument, type RunState, type TaskRequest, type TaskResult } from '@olympus-ai/core';
+import { STATION_CONTRACTS, StubDriver, type PolicyDocument, type RunState, type TaskRequest, type TaskResult } from '@olympus-ai/core';
 import { StubSandboxProvider, type SandboxHandle, type SandboxSpec } from '@olympus-ai/sandbox';
 import { createApiServer, egressFor, UNANALYSED_TESTS, worstCaseCost, type ApiServer, type BuiltGraph, type ComponentGraph, type CreatedRun, type RunView } from '../src/index.js';
-import { ARTIFACTS, makeWorkspace, policy, policyDocument, removeWorkspace, ROLES, roleScope, stubComponents, BUILDER, REVIEWER } from './harness.js';
+import { ARTIFACTS, makeWorkspace, policy, policyDocument, removeWorkspace, ROLES, roleScope, stubComponents, writeChecks, BUILDER, REVIEWER } from './harness.js';
 import { commitFixture } from '@olympus-ai/conformance/git';
 import { DelegatingDriver, DelegatingSandbox } from './wrappers.js';
 
@@ -298,6 +298,24 @@ describe('the event stream', () => {
     const versions = events.filter((e) => e.event === 'state').map((e) => Number((e.data as RunState).version));
     expect(versions.length).toBeGreaterThan(3);
     expect([...versions].sort((a, b) => a - b)).toEqual(versions);
+  });
+
+  // R37 (codex-2): the server publishes each failed gate the line records, so deleting its handler fails here.
+  test('streams a gate-failed event for every failed gate, naming each check and its cause', async () => {
+    await writeChecks(workspace, [{ id: 'always-fails', kind: 'compile', command: ['node', '-e', 'process.exit(1)'], required: true, timeoutMs: 10_000 }]);
+    const driver = new HeldDriver();
+    await serve({ driver });
+    const run = await created();
+    await driver.entered;
+    const res = await fetch(`${url}/runs/${run.runId}/events`, { headers: { authorization: `Bearer ${TOKEN}` } });
+    driver.release();
+    const text = await res.text();
+    const gates = text.trim().split('\n\n').map((block) => block.split('\n')).filter(([name]) => name === 'event: gate-failed')
+      .map(([, data = '']) => JSON.parse(data.replace('data: ', '')) as unknown);
+    expect(gates).toHaveLength(STATION_CONTRACTS.build.maxIterations);
+    for (const gate of gates) {
+      expect(gate).toEqual({ task: 'hello', failure: { failed: [{ checkId: 'always-fails', cause: 'exit-code', untrustedReason: null }] } });
+    }
   });
 
   test('a stream opened on a run nothing is driving sends its state, its standing, and the end, then closes', async () => {
