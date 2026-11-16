@@ -10555,3 +10555,7 @@ Started on `v2` at 1a34231, after R29 (#153). Issues #158, #159.
   `status`, built by the line from the failures and the `unstarted` it holds,
   so a reader of either sees one shape. No host log line: the host's log
   sink is out of scope.
+
+### D-R37-04: review triage
+
+Both families counted, with no reruns. codex-2 is fixed (cdf8029): the server's `gate-failed` publish is asserted over HTTP. codex-1, decisions ordered by wall-clock `decidedAt` with no recording sequence, is a known limit across every "latest decision" reader and is filed as #164. It needs a Vault contract change, so it goes to an amendment. gemini-1 does not hold: a refusal at verify re-verifies the same change and never starts a build. gemini-2 is rejected as a tradeoff: branding one `untrusted*` field would make it an outlier, and the reversal is one amendment branding them all. Full record: `docs/reviews/2026-11-16-R37-gate-failure-told-triage.md`.

@@ -1,3 +1,19 @@
+# External review of R37, codex, 2026-11-16
+
+The codex family's review of R37 (a failed gate tells the retry, and the run, why), verbatim below this header. The triage of both reviews is `2026-11-16-R37-gate-failure-told-triage.md`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex. A headless `codex exec` run under a read-only sandbox, with recorded approval policy `never`, in an empty scratch working directory and a scratch config home holding only `auth.json`, with an environment of `CODEX_HOME` alone. The pre-run listing of both is the manifest's `cleanRoom`.
+- **Cross-family agreement:** none paired. codex-1 (latest decision chosen by wall-clock `decidedAt`) and codex-2 (the server's gate-failed publish untested) were raised by Codex alone.
+- **Date:** 2026-11-16
+- **Bundle:** `2026-11-16-R37-gate-failure-told-review-bundle.txt`, SHA-256 `4dd2357df3ae5ddf633d8770c470eb940830c3fd0fa7947784a6f7a057dac432`, base `1a34231` (`reviewed/R29`), head `5ff110d` (the unit commit). New files in full, modified files as function-context diffs; `docs/decisions.md`, `docs/reviews/`, `docs/plan/` and `pnpm-lock.yaml` excluded. Outcome `counted`: 51312 input tokens against a floor of 29212, all four markers echoed. Prompt: `2026-11-16-R37-gate-failure-told-review-prompt.txt`.
+- **Prior context and lookups:** states it had no prior project context and performed no lookups, and did not run tests. Self-reported; not independently verifiable.
+- **Coverage, and any gap:** items 1 (codex-1), 2 (codex-2, partly), 3, 4, 6 and 7 answered; item 5 not addressed separately. Item 7: framing judged appropriate, with an added question on ordering and delivery-boundary coverage.
+- **Citations:** line numbers are positions in the bundle's new-side diff, not the repository; treated as hints and located by construct.
+
+---
+
 BASE: 1a34231  
 HEAD: 5ff110d  
 packages/core/src/station/machine.ts  

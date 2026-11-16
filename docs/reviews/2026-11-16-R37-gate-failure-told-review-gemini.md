@@ -1,3 +1,19 @@
+# External review of R37, gemini, 2026-11-16
+
+The gemini family's review of R37 (a failed gate tells the retry, and the run, why), verbatim below this header. The triage of both reviews is `2026-11-16-R37-gate-failure-told-triage.md`.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini. A direct `generateContent` API call to `gemini-3.1-pro-preview`, offering no tools. `cleanRoom` is `null` because an API call loads no local configuration.
+- **Cross-family agreement:** none paired. gemini-1 (gateRetry ignores attempt-failed) and gemini-2 (untrustedReason unbranded) were raised by Gemini alone.
+- **Date:** 2026-11-16
+- **Bundle:** `2026-11-16-R37-gate-failure-told-review-bundle.txt`, SHA-256 `4dd2357df3ae5ddf633d8770c470eb940830c3fd0fa7947784a6f7a057dac432`, base `1a34231` (`reviewed/R29`), head `5ff110d` (the unit commit). New files in full, modified files as function-context diffs; `docs/decisions.md`, `docs/reviews/`, `docs/plan/` and `pnpm-lock.yaml` excluded. Outcome `counted`: 41352 input tokens against a floor of 29212, all four markers echoed. Prompt: `2026-11-16-R37-gate-failure-told-review-prompt.txt`.
+- **Prior context and lookups:** states no prior context and no lookups. Self-reported; not independently verifiable.
+- **Coverage, and any gap:** items 1 (gemini-1), 4 (gemini-2), 6 and 7 answered; items 2, 3 and 5 came back empty. Item 7: framing judged correct.
+- **Citations:** line numbers are positions in the bundle's new-side diff, not the repository; treated as hints and located by construct.
+
+---
+
 BASE: 1a34231
 HEAD: 5ff110d
 packages/core/src/station/machine.ts
