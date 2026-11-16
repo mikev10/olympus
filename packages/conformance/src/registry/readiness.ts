@@ -189,7 +189,7 @@ async function commitAll(root: string): Promise<void> {
 /** Scan options over the conformance node image, with modest limits and no branch-protection checker. */
 export async function scanOptions(provider: SandboxProvider, checkout: string): Promise<ScanOptions> {
   const { EGRESS_PROXY_IMAGE } = await import('@olympus-ai/sandbox');
-  const { NPM_REGISTRY, SECRET_SCAN_IMAGE } = await readiness();
+  const { NPM_REGISTRY, PYPI_REGISTRIES, SECRET_SCAN_IMAGE } = await readiness();
   return {
     checkout,
     revision: 'HEAD',
@@ -200,6 +200,7 @@ export async function scanOptions(provider: SandboxProvider, checkout: string): 
     user: RUNTIME_USER,
     timeouts: { installMs: 300_000, probeMs: 120_000, coldProvisionMs: 60_000 },
     registries: NPM_REGISTRY,
+    pythonRegistries: PYPI_REGISTRIES,
     protectedPaths: ['.github/**', 'package.json'],
     branchProtection: null,
   };

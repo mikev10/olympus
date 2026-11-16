@@ -15,7 +15,7 @@
 import { lstat, readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import picomatch from 'picomatch';
-import { buildAdapterSet, diffTrees, markersIn, VCS_DIRECTORIES, type Assertion, type TestFrameworkAdapter } from '@olympus-ai/adapters';
+import { buildAdapterSet, diffTrees, isDependencyTree, markersIn, VCS_DIRECTORIES, type Assertion, type TestFrameworkAdapter } from '@olympus-ai/adapters';
 import type { RunState, TaskId, VaultRef } from '@olympus-ai/core';
 import type { SecurityCheckKind, TamperReport } from '@olympus-ai/integrity';
 import type { EvidenceBundle } from '@olympus-ai/vault';
@@ -33,15 +33,9 @@ export interface TamperOptions {
 
 const SNAPSHOT = /(?:^|\/)__snapshots__\/|\.snap$/;
 
+/** No dependency tree is walked, whatever the stack: what is in one is the install's, never the change's (D-R29-10). */
 function skipDirectory(name: string): boolean {
-  return name === 'node_modules' || VCS_DIRECTORIES.has(name);
-}
-
-/** An assertion as a reader would write it, with its line: `line 3: expect(x).toBe(5)`. */
-function spell(a: Assertion): string {
-  const [subject = '', ...rest] = a.args;
-  const call = a.operator.endsWith('()') ? `${a.operator.slice(0, -2)}(${rest.join(', ')})` : `${a.operator} ${rest.join(', ')}`;
-  return `line ${String(a.line)}: expect(${subject}).${call}`;
+  return isDependencyTree(name) || VCS_DIRECTORIES.has(name);
 }
 
 function key(a: Assertion): string {
@@ -117,21 +111,32 @@ async function testFindings(test: TestFrameworkAdapter, base: string, head: stri
   for (const a of now) take(unpaired, (b) => key(b) === key(a));
   const former = (a: Assertion): string => {
     const b = formerOf(a, unpaired);
-    return b === undefined ? '(no assertion on this subject before)' : spell(b);
+    return b === undefined ? '(no assertion on this subject before)' : test.spell(b);
   };
   const assertionsWeakened: TamperReport['assertionsWeakened'] = [
-    ...[...delta.weakened, ...delta.toleranceWidened].map((a) => ({ file: a.file, before: former(a), after: spell(a) })),
-    ...delta.removed.map((b) => ({ file: b.file, before: spell(b), after: '(removed)' })),
+    ...[...delta.weakened, ...delta.toleranceWidened].map((a) => ({ file: a.file, before: former(a), after: test.spell(a) })),
+    ...delta.removed.map((b) => ({ file: b.file, before: test.spell(b), after: '(removed)' })),
   ];
+
+  // Markers are read from every file the adapter says can hold one: the suites, and for a runner whose
+  // skip any imported module can call, every source module (gemini-1). The same rule as the suites
+  // decides which are read: a file changed, or one on only one side.
+  const sources = async (root: string): Promise<TestFile[]> =>
+    (await test.skipSources(root)).map((abs) => ({ abs, rel: relative(root, abs).replaceAll('\\', '/') }));
+  const [baseSources, headSources] = await Promise.all([sources(base), sources(head)]);
+  const baseSourceSet = new Set(baseSources.map((f) => f.rel));
+  const headSourceSet = new Set(headSources.map((f) => f.rel));
+  const markedBefore = baseSources.filter((f) => changed.has(f.rel) || !headSourceSet.has(f.rel));
+  const markedAfter = headSources.filter((f) => changed.has(f.rel) || !baseSourceSet.has(f.rel));
 
   // A marker pairs within its file, and across files only from a file that left the tests to one
   // that joined them — a rename or a move. Between two files that both survive, a marker is not the
   // same marker: `.only` moved from one to the other focuses a different set of tests.
-  const markersBefore = await read(before, (abs) => test.detectSkipMarkers(abs));
-  const markersAfter = await read(after, (abs) => test.detectSkipMarkers(abs));
+  const markersBefore = await read(markedBefore, (abs) => test.detectSkipMarkers(abs));
+  const markersAfter = await read(markedAfter, (abs) => test.detectSkipMarkers(abs));
   const unmatched = markersAfter.filter((m) => take(markersBefore, (b) => b.file === m.file && b.item === m.item) === undefined);
   const skipMarkersAdded: TamperReport['skipMarkersAdded'] = unmatched
-    .filter((m) => baseSet.has(m.file) || take(markersBefore, (b) => !headSet.has(b.file) && b.item === m.item) === undefined)
+    .filter((m) => baseSourceSet.has(m.file) || take(markersBefore, (b) => !headSourceSet.has(b.file) && b.item === m.item) === undefined)
     .map(({ file, item }) => ({ file, marker: item }));
 
   // Cases pair by title wherever they went, so a move or a rename that keeps a case loses nothing.

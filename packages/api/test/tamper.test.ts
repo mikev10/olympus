@@ -35,6 +35,36 @@ const frameworks = [
 
 const SUM = "test('adds', () => {\n  expect(add(1, 4)).toBe(5);\n});\ntest('subtracts', () => {\n  expect(sub(5, 4)).toBe(1);\n});\n";
 
+describe('pytest', () => {
+  const PYPROJECT = '[project]\nname = "hello"\nversion = "0.1.0"\n\n[dependency-groups]\ndev = ["pytest>=8"]\n';
+  const LOCK = [
+    'version = 1', 'revision = 3', '', '[[package]]', 'name = "hello"', 'version = "0.1.0"', 'source = { virtual = "." }', '',
+    '[[package]]', 'name = "pytest"', 'version = "8.4.2"', 'source = { registry = "https://pypi.org/simple" }',
+    'wheels = [', `    { url = "https://files.pythonhosted.org/p/pytest-8.4.2-py3-none-any.whl", hash = "sha256:${'a'.repeat(64)}" },`, ']', '',
+  ].join('\n');
+  const BASE = { 'pyproject.toml': PYPROJECT, 'uv.lock': LOCK, 'hello/__init__.py': 'def greet(n):\n    return "hi " + n\n', 'tests/test_h.py': 'from hello import greet\n\ndef test_h():\n    assert greet("a") == "hi a"\n' };
+  const analyze = async (head: Record<string, string>): Promise<TamperReport> =>
+    analyzeTamper(await tree(BASE), await tree({ ...BASE, ...head }), { protectedPaths: [], coverage: null, commands: [], markers: [] });
+
+  // pytest's skip is a function any imported module can call, so a module the tests import is read for one too (gemini-1).
+  test('a skip added to a module the tests import is reported', async () => {
+    const report = await analyze({ 'hello/__init__.py': 'import pytest\npytest.skip("x", allow_module_level=True)\n\ndef greet(n):\n    return "hi " + n\n' });
+    expect(report.skipMarkersAdded).toEqual([{ file: 'hello/__init__.py', marker: 'pytest.skip: (module)' }]);
+  });
+
+  test('an exit that ends the run, added to a module, is reported; a CLI exit is not', async () => {
+    const report = await analyze({
+      'hello/__init__.py': 'import os\nos._exit(0)\n\ndef greet(n):\n    return "hi " + n\n',
+      'hello/cli.py': 'import sys\nfrom hello import greet\n\nif __name__ == "__main__":\n    sys.exit(greet("x"))\n',
+    });
+    expect(report.skipMarkersAdded).toEqual([{ file: 'hello/__init__.py', marker: 'os._exit: (module)' }]);
+  });
+
+  test('an ordinary change to a module reports nothing', async () => {
+    expect(await analyze({ 'hello/__init__.py': 'def greet(n):\n    return "hello " + n\n' })).toEqual(EMPTY);
+  });
+});
+
 describe.each(frameworks)('%s', (_, pkg) => {
   async function analyze(base: Record<string, string>, head: Record<string, string>, protectedPaths: readonly string[] = []): Promise<TamperReport> {
     return analyzeTamper(await tree({ 'package.json': pkg, ...base }), await tree({ 'package.json': pkg, ...head }), { protectedPaths, coverage: null, commands: [], markers: [] });

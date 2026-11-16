@@ -12,6 +12,8 @@
  * every byte it writes; a lockfile where one does not is refused (I5).
  */
 import { DEPENDENCY_AUDIT_IMAGE, PNPM_AUDIT_VERSION } from './audit.js';
+import { PIP_INSTALLER, UV_INSTALLER } from './python/install.js';
+import { NODE_DEPENDENCY_TREES } from './trees.js';
 import type { DependencyInstaller, LockedPackage } from './types.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -130,9 +132,9 @@ export const NPM_INSTALLER: DependencyInstaller = Object.freeze({
   manifest: 'package.json',
   files: Object.freeze(['package.json', 'package-lock.json']),
   nested: 'package.json',
-  trees: Object.freeze(['node_modules']),
+  trees: NODE_DEPENDENCY_TREES,
   image: DEPENDENCY_AUDIT_IMAGE,
-  invocation: Object.freeze(['npm', 'ci', '--ignore-scripts', '--no-audit', '--no-fund', '--fetch-retries=0'] as const),
+  steps: Object.freeze([Object.freeze(['npm', 'ci', '--ignore-scripts', '--no-audit', '--no-fund', '--fetch-retries=0'] as const)] as const),
   env: ENV,
   packages: npmPackages,
   failure,
@@ -146,13 +148,13 @@ export const PNPM_INSTALLER: DependencyInstaller = Object.freeze({
   manifest: 'package.json',
   files: Object.freeze(['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml']),
   nested: 'package.json',
-  trees: Object.freeze(['node_modules']),
+  trees: NODE_DEPENDENCY_TREES,
   image: DEPENDENCY_AUDIT_IMAGE,
-  invocation: Object.freeze(['corepack', `pnpm@${PNPM_AUDIT_VERSION}`, 'install', '--frozen-lockfile', '--ignore-scripts', '--ignore-pnpmfile', '--config.fetch-retries=0'] as const),
+  steps: Object.freeze([Object.freeze(['corepack', `pnpm@${PNPM_AUDIT_VERSION}`, 'install', '--frozen-lockfile', '--ignore-scripts', '--ignore-pnpmfile', '--config.fetch-retries=0'] as const)] as const),
   env: ENV,
   packages: pnpmPackages,
   failure,
 });
 
 /** Every installer, by the lockfile that selects it. */
-export const INSTALLERS: readonly DependencyInstaller[] = Object.freeze([NPM_INSTALLER, PNPM_INSTALLER]);
+export const INSTALLERS: readonly DependencyInstaller[] = Object.freeze([NPM_INSTALLER, PNPM_INSTALLER, UV_INSTALLER, PIP_INSTALLER]);

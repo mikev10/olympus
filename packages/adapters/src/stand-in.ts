@@ -100,7 +100,7 @@ export function standInNpmInstaller(registry: string): DependencyInstaller {
     '  fs.cpSync(from, key, { recursive: true, verbatimSymlinks: true });',
     '}',
   ].join('\n');
-  return Object.freeze({ ...NPM_INSTALLER, image: STAND_IN_INSTALL_IMAGE, invocation: Object.freeze(['node', '-e', script] as const) });
+  return Object.freeze({ ...NPM_INSTALLER, image: STAND_IN_INSTALL_IMAGE, steps: Object.freeze([Object.freeze(['node', '-e', script] as const)] as const) });
 }
 
 /** Not an image, as the stand-in scanners' are not. */

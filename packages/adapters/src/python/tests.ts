@@ -1,0 +1,759 @@
+/**
+ * What a pytest file asserts, skips, and declares, read from its parse with
+ * nothing run (I1). Assertions are `assert` statements, `self.assert*`
+ * calls, `pytest.raises` and `pytest.warns`, and `pytest.approx` with its
+ * tolerance. Skip markers are pytest's marks and calls and unittest's
+ * decorators and `skipTest`. Cases are the functions and methods pytest
+ * collects, by the configured name patterns, with each parametrised row's
+ * id where every value in it is a literal (D-R29-07).
+ */
+import type { SyntaxNode } from '@lezer/common';
+import { pairAssertions, type AssertionRules } from '../assertions.js';
+import type { Assertion, AssertionDelta } from '../types.js';
+import type { PytestRules } from './config.js';
+import { refuse } from '../refusal.js';
+import { fnmatch } from './ini.js';
+import {
+  argumentsOf, callOf, childrenOf, decoratorOf, dottedName, flatText, lineOf, partsOf, statementsOf, stringValue, textOf, type PythonModule,
+} from './parse.js';
+
+// ---- assertions ------------------------------------------------------------
+
+const COMPARE_KEYWORDS = new Set(['is', 'not', 'in']);
+
+/** The operator of a comparison `BinaryExpression`, `==` or `is not` or `not in`, or undefined for any other binary. */
+function comparisonOf(module: PythonModule, node: SyntaxNode): string | undefined {
+  const ops = childrenOf(node).slice(1, -1);
+  if (ops.length === 0) return undefined;
+  if (ops.length === 1 && ops[0]?.name === 'CompareOp') return textOf(module, ops[0]);
+  if (ops.every((o) => COMPARE_KEYWORDS.has(o.name))) return ops.map((o) => textOf(module, o)).join(' ');
+  return undefined;
+}
+
+/** A chain `a < b <= c` as its operands and operators, read through the left-nested parse. */
+function chainOf(module: PythonModule, node: SyntaxNode): { operators: string[]; operands: SyntaxNode[] } | undefined {
+  const operator = comparisonOf(module, node);
+  if (node.name !== 'BinaryExpression' || operator === undefined) return undefined;
+  const parts = childrenOf(node);
+  const left = parts[0];
+  const right = parts[parts.length - 1];
+  if (left === undefined || right === undefined) return undefined;
+  const inner = chainOf(module, left);
+  if (inner === undefined) return { operators: [operator], operands: [left, right] };
+  return { operators: [...inner.operators, operator], operands: [...inner.operands, right] };
+}
+
+/** A numeric literal's value, signed, or undefined. */
+function numberOf(module: PythonModule, node: SyntaxNode | undefined): number | undefined {
+  if (node === undefined) return undefined;
+  if (node.name === 'Number') {
+    const text = textOf(module, node).replaceAll('_', '');
+    return /^(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/u.test(text) ? Number(text) : undefined;
+  }
+  if (node.name === 'UnaryExpression') {
+    const [sign, operand] = childrenOf(node);
+    const value = numberOf(module, operand);
+    if (value === undefined || sign === undefined) return undefined;
+    const s = textOf(module, sign);
+    return s === '-' ? -value : s === '+' ? value : undefined;
+  }
+  return undefined;
+}
+
+const APPROX = new Set(['pytest.approx', 'approx']);
+
+/** Keywords that never change what an assertion accepts: a failure message. */
+const MESSAGE_KEYWORDS = new Set(['msg']);
+
+/**
+ * Every keyword argument the reading does not model, `name=value`, sorted by
+ * name: one added, removed, or changed is then a change to the assertion,
+ * never dropped (codex-5).
+ */
+function otherKeywords(module: PythonModule, keyword: ReadonlyMap<string, SyntaxNode>, modelled: ReadonlySet<string>): string[] {
+  return [...keyword.entries()]
+    .filter(([name]) => !modelled.has(name) && !MESSAGE_KEYWORDS.has(name))
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([name, value]) => `${name}=${flatText(module, value)}`);
+}
+
+const APPROX_MODELLED = new Set(['rel', 'abs']);
+
+/**
+ * `x == pytest.approx(v, rel=r, abs=a)`. pytest's default band is `rel=1e-6`;
+ * with only `abs` given, `rel` is not applied at all. A tolerance is one
+ * comparable number only where one bound is given or none: with both, the
+ * pair is in the arguments and any change to it is reported (D-R29-07).
+ */
+function approxAssertion(module: PythonModule, operator: string, subject: SyntaxNode, call: { name: string; args: SyntaxNode }, line: number, file: string): Assertion | undefined {
+  if (!APPROX.has(call.name)) return undefined;
+  const args = argumentsOf(module, call.args);
+  const expected = args?.positional[0];
+  if (args === undefined || expected === undefined) return undefined;
+  const rel = args.keyword.get('rel') ?? args.positional[1];
+  const abs = args.keyword.get('abs') ?? args.positional[2];
+  // `nan_ok` loosens what equals, by keyword or as the fourth argument. It goes in the operator, beside the band, since a
+  // tolerance comparison reads only the subject and the value: `nan_ok` given, dropped, or changed is then reported (codex-5).
+  const nanOk = args.positional[3];
+  const extra = [...otherKeywords(module, args.keyword, APPROX_MODELLED), ...(nanOk === undefined ? [] : [`nan_ok=${flatText(module, nanOk)}`]), ...args.positional.slice(4).map((p) => flatText(module, p))];
+  const also = extra.length === 0 ? '' : ` [${extra.join('; ')}]`;
+  const base = [flatText(module, subject), flatText(module, expected)];
+  const relValue = numberOf(module, rel);
+  const absValue = numberOf(module, abs);
+  if (rel === undefined && abs === undefined) return { file, line, operator: `${operator} approx${also}`, args: base, tolerance: 1e-6 };
+  if (abs === undefined && relValue !== undefined) return { file, line, operator: `${operator} approx${also}`, args: base, tolerance: relValue };
+  if (rel === undefined && absValue !== undefined) return { file, line, operator: `${operator} approx abs${also}`, args: base, tolerance: absValue };
+  const bounds = [rel === undefined ? null : `rel=${flatText(module, rel)}`, abs === undefined ? null : `abs=${flatText(module, abs)}`].filter((b): b is string => b !== null);
+  return { file, line, operator: `${operator} approx bounds${also}`, args: [...base, ...bounds] };
+}
+
+function assertStatement(module: PythonModule, node: SyntaxNode, file: string): Assertion {
+  const line = lineOf(module, node.from);
+  const [test] = partsOf(node);
+  if (test === undefined) return { file, line, operator: 'truthy', args: [''] };
+  const chain = chainOf(module, test);
+  if (chain !== undefined) {
+    const [subject, expected] = chain.operands;
+    const call = expected === undefined ? undefined : callOf(module, expected);
+    if (chain.operators.length === 1 && subject !== undefined && call !== undefined && (chain.operators[0] === '==' || chain.operators[0] === '!=')) {
+      const approx = approxAssertion(module, chain.operators[0], subject, call, line, file);
+      if (approx !== undefined) return approx;
+    }
+    return { file, line, operator: chain.operators.join(','), args: chain.operands.map((o) => flatText(module, o)) };
+  }
+  if (test.name === 'UnaryExpression' && textOf(module, test).startsWith('not')) {
+    const operand = childrenOf(test)[1];
+    return { file, line, operator: 'not', args: [operand === undefined ? '' : flatText(module, operand)] };
+  }
+  return { file, line, operator: 'truthy', args: [flatText(module, test)] };
+}
+
+const ALMOST_MODELLED = new Set(['delta', 'places']);
+const NONE_MODELLED: ReadonlySet<string> = new Set();
+const RAISES_MODELLED = new Set(['match']);
+
+/** unittest's almost-equal: `places` (default 7) as the band it implies, 0.5·10^-places, or `delta` as given. */
+function almostEqual(module: PythonModule, method: string, args: NonNullable<ReturnType<typeof argumentsOf>>, line: number, file: string): Assertion {
+  const operands = [...args.positional.slice(0, 2).map((p) => flatText(module, p)), ...otherKeywords(module, args.keyword, ALMOST_MODELLED)];
+  const delta = args.keyword.get('delta');
+  if (delta !== undefined) {
+    const value = numberOf(module, delta);
+    return value === undefined ? { file, line, operator: `${method} delta`, args: [...operands, `delta=${flatText(module, delta)}`] } : { file, line, operator: `${method} delta`, args: operands, tolerance: value };
+  }
+  const placesNode = args.keyword.get('places') ?? args.positional[2];
+  if (placesNode === undefined) return { file, line, operator: method, args: operands, tolerance: 0.5 * 10 ** -7 };
+  const places = numberOf(module, placesNode);
+  if (places === undefined) return { file, line, operator: method, args: [...operands, `places=${flatText(module, placesNode)}`] };
+  return { file, line, operator: method, args: operands, tolerance: 0.5 * 10 ** -places };
+}
+
+const RAISES = new Set(['pytest.raises', 'raises', 'pytest.warns', 'warns', 'pytest.deprecated_call']);
+
+function callAssertion(module: PythonModule, node: SyntaxNode, file: string): Assertion | undefined {
+  const call = callOf(module, node);
+  if (call === undefined) return undefined;
+  const line = lineOf(module, node.from);
+  const args = argumentsOf(module, call.args);
+  const method = /^(?:self|cls)\.(assert\w*|fail\w*)$/u.exec(call.name)?.[1];
+  if (method !== undefined) {
+    if (args === undefined) return { file, line, operator: method, args: [flatText(module, call.args)] };
+    if (method === 'assertAlmostEqual' || method === 'assertNotAlmostEqual') return almostEqual(module, method, args, line, file);
+    return { file, line, operator: method, args: [...args.positional.map((p) => flatText(module, p)), ...otherKeywords(module, args.keyword, NONE_MODELLED)] };
+  }
+  if (RAISES.has(call.name)) {
+    const kinds = call.name.endsWith('raises') ? 'raises' : call.name.endsWith('warns') ? 'warns' : 'deprecated_call';
+    if (args === undefined) return { file, line, operator: kinds, args: [flatText(module, call.args)] };
+    const match = args.keyword.get('match');
+    return {
+      file, line, operator: kinds,
+      args: [...args.positional.map((p) => flatText(module, p)), ...(match === undefined ? [] : [`match=${flatText(module, match)}`]), ...otherKeywords(module, args.keyword, RAISES_MODELLED)],
+    };
+  }
+  return undefined;
+}
+
+export function extractAssertions(module: PythonModule): Assertion[] {
+  const out: Assertion[] = [];
+  module.tree.iterate({
+    enter: (ref) => {
+      const node = ref.node;
+      if (node.name === 'AssertStatement') out.push(assertStatement(module, node, module.file));
+      else if (node.name === 'CallExpression') {
+        const found = callAssertion(module, node, module.file);
+        if (found !== undefined) out.push(found);
+      }
+    },
+  });
+  return out;
+}
+
+function isNegated(operator: string): boolean {
+  return /^(?:!=|not\b|is not|not in|assertNot|assertIsNot|assertFalse)/u.test(operator) || operator.includes(',not') || operator.startsWith('!=');
+}
+
+/** A literal the parse can judge truthy: a non-zero number, a non-empty string, `True`. */
+function truthyLiteral(text: string | undefined): boolean {
+  if (text === undefined) return false;
+  if (text === 'True') return true;
+  if (/^-?\d+(?:\.\d+)?$/u.test(text)) return Number(text) !== 0;
+  return /^(["']).+\1$/u.test(text);
+}
+
+/**
+ * Whether `after` provably checks at least what `before` did. Only the
+ * strengthenings below are recognised; any other change on the subject is
+ * reported, the direction that fails closed.
+ */
+function atLeastAsStrong(before: Assertion, after: Assertion): boolean {
+  if (isNegated(before.operator) || isNegated(after.operator)) return false;
+  const value = after.args[1];
+  // Only a `match` or `check` appended to what was there narrows what passes; any other argument appended, `nan_ok=True`
+  // among them, can loosen it, and is reported (codex-5).
+  if (
+    before.operator === after.operator && after.args.length > before.args.length && before.args.every((a, i) => after.args[i] === a)
+    && after.args.slice(before.args.length).every((a) => /^(?:match|check)=/u.test(a))
+  ) return true;
+  const equality = after.operator === '==' || after.operator === 'assertEqual';
+  if ((before.operator === 'truthy' || before.operator === 'assertTrue') && equality) return truthyLiteral(value);
+  if ((before.operator === 'is not' || before.operator === 'assertIsNotNone') && equality) {
+    return value !== undefined && value !== 'None' && (before.operator === 'assertIsNotNone' || before.args[1] === 'None');
+  }
+  return false;
+}
+
+export const PYTHON_ASSERTION_RULES: AssertionRules = { atLeastAsStrong, negated: isNegated };
+
+export function comparePythonAssertions(before: readonly Assertion[], after: readonly Assertion[]): AssertionDelta {
+  return pairAssertions(before, after, PYTHON_ASSERTION_RULES);
+}
+
+/** `line 3: assert a == b`, or `line 4: self.assertEqual(a, b)`. */
+export function spellPython(a: Assertion): string {
+  const at = `line ${String(a.line)}: `;
+  const tolerance = a.tolerance === undefined ? '' : ` (tolerance ${String(a.tolerance)})`;
+  if (/^assert|^fail/u.test(a.operator) || ['raises', 'warns', 'deprecated_call'].includes(a.operator)) return `${at}${a.operator}(${a.args.join(', ')})${tolerance}`;
+  if (a.operator === 'truthy') return `${at}assert ${a.args[0] ?? ''}`;
+  if (a.operator === 'not') return `${at}assert not ${a.args[0] ?? ''}`;
+  const ops = a.operator.split(',');
+  let text = a.args[0] ?? '';
+  ops.forEach((op, i) => { text += ` ${op} ${a.args[i + 1] ?? ''}`; });
+  return `${at}assert ${text}${a.args.length > ops.length + 1 ? ` [${a.args.slice(ops.length + 1).join(', ')}]` : ''}${tolerance}`;
+}
+
+// ---- names, marks, and ids --------------------------------------------------
+
+/** `_matches_prefix_or_glob_option`: a prefix, or a glob where the option holds a wildcard. */
+export function matchesOption(name: string, options: readonly string[]): boolean {
+  return options.some((option) => name.startsWith(option) || (/[*?[]/u.test(option) && fnmatch(name, option)));
+}
+
+interface Decorated {
+  readonly node: SyntaxNode;
+  readonly decorators: ReadonlyArray<{ readonly name: string; readonly args: SyntaxNode | null; readonly line: number }>;
+}
+
+/** A definition with its decorators, nearest the `def` first, as pytest stores the marks they apply. */
+function decorated(module: PythonModule, statement: SyntaxNode): Decorated | undefined {
+  if (statement.name === 'FunctionDefinition' || statement.name === 'ClassDefinition') return { node: statement, decorators: [] };
+  if (statement.name !== 'DecoratedStatement') return undefined;
+  const children = childrenOf(statement);
+  const node = children.find((c) => c.name === 'FunctionDefinition' || c.name === 'ClassDefinition');
+  if (node === undefined) return undefined;
+  const decorators = children.filter((c) => c.name === 'Decorator').map((d) => {
+    const read = decoratorOf(module, d);
+    return { name: read?.name ?? flatText(module, d), args: read?.args ?? null, line: lineOf(module, d.from) };
+  });
+  return { node, decorators: decorators.reverse() };
+}
+
+function nameOf(module: PythonModule, def: SyntaxNode): string {
+  const name = childrenOf(def).find((c) => c.name === 'VariableName');
+  return name === undefined ? '' : textOf(module, name);
+}
+
+/**
+ * The names through which a test, a fixture, a helper, or a module stops a
+ * test from running to a verdict: pytest's skip and xfail marks and calls,
+ * unittest's decorators, `skipTest`, and `SkipTest`, and an exit that ends
+ * the run (`pytest.exit`, `os._exit`).
+ */
+const SKIP_NAMES = new Set(['skip', 'skipif', 'xfail', 'importorskip', 'skipTest', 'SkipTest', 'skipIf', 'skipUnless', 'expectedFailure', 'exit', '_exit']);
+/** The modules those names are reached through, by any alias: `getattr` on one with a name the parse cannot read is refused. */
+const SKIP_MODULES = /^(?:pytest|_pytest|unittest)(?:\.|$)/u;
+const PARAMETRIZE = /^(?:pytest\.)?mark\.parametrize$/u;
+const FIXTURE = /(?:^|\.)fixture$/u;
+const UNITTEST_BASES = new Set(['TestCase', 'unittest.TestCase', 'IsolatedAsyncioTestCase', 'unittest.IsolatedAsyncioTestCase']);
+const PLAIN_BASES = new Set(['object']);
+
+/** The id pytest makes for one value (`IdMaker._idval`), or undefined where it depends on what the parse cannot see. */
+function idOf(module: PythonModule, value: SyntaxNode, argname: string, index: number, rules: PytestRules): string | undefined {
+  const str = stringValue(module, value);
+  if (str !== undefined) {
+    // `ascii_escaped` leaves printable ASCII alone; anything else it rewrites, which is not modelled.
+    if (!/^[\x20-\x7e]*$/u.test(str)) return undefined;
+    return str.length > 100 && rules.longStringIds === 'short' ? `${argname}${String(index)}` : str;
+  }
+  if (value.name === 'Boolean' || value.name === 'None') return textOf(module, value);
+  const number = numberOf(module, value);
+  if (number !== undefined) {
+    const text = textOf(module, value).replaceAll('_', '').replace(/^\+/u, '');
+    if (/^-?\s*\d+$/u.test(text)) return String(BigInt(text.replace(/\s/gu, '')));
+    // Python prints a float in fixed notation from 1e-4 to 1e16, as JavaScript does over that range, with `.0` when whole.
+    const magnitude = Math.abs(number);
+    if (magnitude === 0 || (magnitude >= 1e-4 && magnitude < 1e16)) return Number.isInteger(number) ? `${String(number)}.0` : String(number);
+    return undefined;
+  }
+  if (['ArrayExpression', 'TupleExpression', 'DictionaryExpression', 'SetExpression', 'ArrayComprehensionExpression'].includes(value.name)) return `${argname}${String(index)}`;
+  return undefined;
+}
+
+/** `make_unique_parameterset_ids`: a repeated id takes a counter, after `_` where it ends in a digit. */
+function unique(ids: readonly string[]): string[] {
+  const counts = new Map<string, number>();
+  for (const id of ids) counts.set(id, (counts.get(id) ?? 0) + 1);
+  const resolved = [...ids];
+  const suffixes = new Map<string, number>();
+  resolved.forEach((id, index) => {
+    if ((counts.get(id) ?? 0) <= 1) return;
+    const sep = /\d$/u.test(id) ? '_' : '';
+    let n = suffixes.get(id) ?? 0;
+    let candidate = `${id}${sep}${String(n)}`;
+    while (resolved.includes(candidate)) candidate = `${id}${sep}${String(++n)}`;
+    resolved[index] = candidate;
+    suffixes.set(id, n + 1);
+  });
+  return resolved;
+}
+
+/** Whether a list or tuple display spreads another iterable into itself, `[*rows]`, so its length is not in the source. */
+function spreads(node: SyntaxNode): boolean {
+  return childrenOf(node).some((c) => c.name === '*' || c.name === '**');
+}
+
+/** A row named by its source where pytest's id for it depends on what the parse cannot see: stable, and changed by any edit to the row. */
+function opaqueId(module: PythonModule, row: SyntaxNode): string {
+  return `?${flatText(module, row)}`;
+}
+
+/**
+ * One `parametrize` mark's ids, and the skip marks its `pytest.param` rows
+ * carry. The table must be a list or tuple display, so the parse can count
+ * its rows; anything else is refused, since a table the parse cannot count
+ * could lose rows, or empty into pytest's one skipped case, with nothing
+ * reported (codex-3, gemini-3). A row whose id pytest makes from what the
+ * parse cannot see is named by its source instead, so dropping it is still
+ * a deleted case. An empty table is reported as a skip, which it is.
+ */
+function parametrizeIds(module: PythonModule, args: SyntaxNode | null, rules: PytestRules, qualified: string): { ids: string[]; skips: Array<{ id: string; mark: string }>; empty: boolean } {
+  const uncountable = (): never => refuse('unsupported-feature', `${module.file}: ${qualified} is parametrized by a table the parse cannot count`);
+  if (args === null) return uncountable();
+  const read = argumentsOf(module, args);
+  if (read === undefined) return uncountable();
+  const [namesNode, valuesNode] = read.positional;
+  const values = valuesNode ?? read.keyword.get('argvalues');
+  if (namesNode === undefined || values === undefined || (values.name !== 'ArrayExpression' && values.name !== 'TupleExpression') || spreads(values)) return uncountable();
+  const rows = partsOf(values);
+  if (rows.length === 0) return { ids: [], skips: [], empty: true };
+  const namesText = stringValue(module, namesNode);
+  const argnames = namesText !== undefined
+    ? namesText.split(',').map((n) => n.trim()).filter((n) => n !== '')
+    : (namesNode.name === 'ArrayExpression' || namesNode.name === 'TupleExpression') ? partsOf(namesNode).map((n) => stringValue(module, n)) : [undefined];
+  const names = argnames.length === 0 || argnames.some((n) => n === undefined) ? undefined : (argnames as string[]);
+  const explicit = read.keyword.get('ids');
+  // `ids=` that is not a list display (a callable, a name) makes ids the parse cannot see.
+  let given: Array<string | null> | 'opaque' | undefined;
+  if (explicit !== undefined) {
+    if ((explicit.name !== 'ArrayExpression' && explicit.name !== 'TupleExpression') || spreads(explicit)) given = 'opaque';
+    else {
+      given = partsOf(explicit).map((item) => {
+        if (item.name === 'None') return null;
+        const s = stringValue(module, item);
+        return s === undefined || !/^[\x20-\x7e]*$/u.test(s) ? '' : s;
+      });
+      if (given.includes('')) given = 'opaque';
+    }
+  }
+  const ids: string[] = [];
+  const skips: Array<{ index: number; mark: string }> = [];
+  for (const [index, row] of rows.entries()) {
+    let cells: SyntaxNode[] | undefined;
+    let rowId: string | undefined;
+    const param = callOf(module, row);
+    if (param !== undefined && (param.name === 'pytest.param' || param.name === 'param')) {
+      const p = argumentsOf(module, param.args);
+      if (p === undefined) return uncountable();
+      cells = p.positional;
+      const id = p.keyword.get('id');
+      if (id !== undefined) {
+        const s = stringValue(module, id);
+        rowId = s === undefined || !/^[\x20-\x7e]*$/u.test(s) ? opaqueId(module, row) : s;
+      }
+      const marks = p.keyword.get('marks');
+      if (marks !== undefined) for (const m of /mark\.(?:skip|skipif|xfail)/u.exec(flatText(module, marks)) ?? []) skips.push({ index, mark: `pytest.param(marks=${m})` });
+    } else if (names?.length === 1) cells = [row];
+    else if (row.name === 'TupleExpression' || row.name === 'ArrayExpression') {
+      if (spreads(row)) return uncountable();
+      cells = partsOf(row);
+    }
+    if (rowId !== undefined) ids.push(rowId);
+    else if (given === 'opaque') ids.push(opaqueId(module, row));
+    else if (given !== undefined && index < given.length && given[index] !== null) ids.push(given[index] ?? '');
+    else if (names === undefined || cells?.length !== names.length) ids.push(opaqueId(module, row));
+    else {
+      const parts = cells.map((cell, i) => idOf(module, cell, names[i] ?? '', index, rules));
+      ids.push(parts.some((part) => part === undefined) ? opaqueId(module, row) : parts.join('-'));
+    }
+  }
+  const resolved = unique(ids);
+  return { ids: resolved, skips: skips.map((s) => ({ id: resolved[s.index] ?? '', mark: s.mark })), empty: false };
+}
+
+// ---- the walk ----------------------------------------------------------------
+
+export interface PythonTestFile {
+  /** The cases pytest collects, `Class > method[id]`. */
+  readonly cases: string[];
+  /** Each skip mark or call, `mark: case`. */
+  readonly skips: string[];
+}
+
+/** A class's own body statements, and its bases as written. */
+function classParts(module: PythonModule, cls: SyntaxNode): { body: SyntaxNode[]; bases: string[] } {
+  const args = childrenOf(cls).find((c) => c.name === 'ArgList');
+  const bases = args === undefined ? [] : partsOf(args).map((b) => flatText(module, b));
+  const body = childrenOf(cls).find((c) => c.name === 'Body');
+  return { body: body === undefined ? [] : statementsOf(body), bases };
+}
+
+/** Whether a statement assigns `name = value` exactly. */
+function assigns(module: PythonModule, statement: SyntaxNode, name: string): SyntaxNode | undefined {
+  if (statement.name !== 'AssignStatement') return undefined;
+  const [target, op, value] = childrenOf(statement);
+  return target?.name === 'VariableName' && textOf(module, target) === name && op?.name === 'AssignOp' ? value : undefined;
+}
+
+/** Calls that bind names no parse can see; at module or class level they could rebind any test. */
+const DYNAMIC_BINDERS = new Set(['globals', 'vars', 'locals', 'setattr', 'delattr', 'exec', 'eval']);
+/** Statements whose bodies run at the level they sit at, so a binding in one is a module's or a class's own. */
+const COMPOUND = new Set(['IfStatement', 'ForStatement', 'WhileStatement', 'TryStatement', 'WithStatement', 'MatchStatement']);
+
+/** The name a binding target is rooted at: `test_x` for `test_x`, `test_x.__test__`, and `test_x[0]`. */
+function rootName(module: PythonModule, target: SyntaxNode): string | undefined {
+  let at: SyntaxNode | null = target;
+  while (at !== null && at.name !== 'VariableName') at = at.firstChild;
+  return at === null ? undefined : textOf(module, at);
+}
+
+/**
+ * What a module or class body does to the tests it defines once they are
+ * defined: rebinding one (`test_x = ...`, `test_x.__test__ = False`, a
+ * loop variable, an import), deleting one, defining one twice, or setting
+ * `__test__` on the module or a class. pytest collects what the name holds
+ * when collection runs, so each of these runs something else, or nothing,
+ * while the definition and its assertions read as before (codex-4). Each
+ * is a marker; a call that binds names dynamically at that level is
+ * refused.
+ */
+function rebindings(module: PythonModule): string[] {
+  const out: string[] = [];
+  const level = (statements: readonly SyntaxNode[], owner: string): void => {
+    const flat: SyntaxNode[] = [];
+    const gather = (list: readonly SyntaxNode[]): void => {
+      for (const s of list) {
+        flat.push(s);
+        if (COMPOUND.has(s.name)) for (const body of childrenOf(s).filter((c) => c.name === 'Body')) gather(statementsOf(body));
+      }
+    };
+    gather(statements);
+    const defined = new Map<string, number>();
+    for (const s of flat) {
+      const d = decorated(module, s);
+      if (d !== undefined) defined.set(nameOf(module, d.node), (defined.get(nameOf(module, d.node)) ?? 0) + 1);
+    }
+    const tests = new Set(defined.keys());
+    for (const [name, count] of defined) if (count > 1) out.push(`redefines ${name}: ${owner}`);
+    const bound = (target: SyntaxNode, how: string): void => {
+      const name = rootName(module, target);
+      if (name === undefined) return;
+      if (tests.has(name)) out.push(`${how} ${flatText(module, target)}: ${owner}`);
+      else if (name === '__test__' && target.name === 'VariableName') out.push(`__test__ set: ${owner}`);
+    };
+    for (const s of flat) {
+      const parts = childrenOf(s);
+      if (s.name === 'AssignStatement' || s.name === 'UpdateStatement') {
+        const op = parts.findIndex((c) => c.name === 'AssignOp' || c.name === 'UpdateOp');
+        for (const target of parts.slice(0, op === -1 ? 0 : op)) bound(target, 'rebinds');
+      } else if (s.name === 'DeleteStatement') {
+        for (const target of partsOf(s)) bound(target, 'deletes');
+      } else if (s.name === 'ForStatement') {
+        const at = parts.findIndex((c) => c.name === 'in');
+        for (const target of parts.slice(1, at === -1 ? 1 : at)) bound(target, 'rebinds');
+      } else if (s.name === 'ImportStatement') {
+        for (const b of importBindings(module, s).bound) if (tests.has(b.as)) out.push(`rebinds ${b.as} by import: ${owner}`);
+      }
+      if (s.name !== 'FunctionDefinition' && s.name !== 'ClassDefinition' && s.name !== 'DecoratedStatement' && !COMPOUND.has(s.name)) {
+        s.toTree().iterate({
+          enter: (ref) => {
+            if (ref.name === 'LambdaExpression') return false;
+            if (ref.name !== 'VariableName' || !DYNAMIC_BINDERS.has(module.text.slice(s.from + ref.from, s.from + ref.to))) return undefined;
+            refuse('unsupported-feature', `${module.file}: ${module.text.slice(s.from + ref.from, s.from + ref.to)}() at ${owner === '(module)' ? 'module' : owner} level can rebind a test the parse cannot see`);
+          },
+        });
+      }
+    }
+    for (const s of flat) {
+      const d = decorated(module, s);
+      if (d?.node.name !== 'ClassDefinition') continue;
+      const body = childrenOf(d.node).find((c) => c.name === 'Body');
+      const name = nameOf(module, d.node);
+      if (body !== undefined) level(statementsOf(body), owner === '(module)' ? name : `${owner} > ${name}`);
+    }
+  };
+  level(statementsOf(module.tree.topNode), '(module)');
+  return out;
+}
+
+/** The definitions a node sits in, outermost first, `Class > method`, or `(module)`; a decorator belongs to what it decorates. */
+function ownerOf(module: PythonModule, node: SyntaxNode): string {
+  const names: string[] = [];
+  for (let at: SyntaxNode | null = node.parent; at !== null; at = at.parent) {
+    if (at.name === 'FunctionDefinition' || at.name === 'ClassDefinition') names.push(nameOf(module, at));
+    else if (at.name === 'DecoratedStatement') {
+      const def = childrenOf(at).find((c) => c.name === 'FunctionDefinition' || c.name === 'ClassDefinition');
+      if (def !== undefined && !(node.from >= def.from && node.to <= def.to)) names.push(nameOf(module, def));
+    }
+  }
+  return names.length === 0 ? '(module)' : names.reverse().join(' > ');
+}
+
+/** How a reference is written: its whole dotted chain, `pytest.mark.skip`, or the name alone. */
+function spellingOf(module: PythonModule, node: SyntaxNode): string {
+  const parent = node.parent;
+  if (parent?.name === 'Decorator') return decoratorOf(module, parent)?.name ?? textOf(module, node);
+  let top = node;
+  while (top.parent?.name === 'MemberExpression') top = top.parent;
+  return dottedName(module, top) ?? textOf(module, node);
+}
+
+/** The names an import statement binds, each with the name it imports, and the module it imports from. */
+function importBindings(module: PythonModule, statement: SyntaxNode): { readonly from: string | null; readonly bound: Array<{ readonly imported: string; readonly as: string }> } {
+  const children = childrenOf(statement);
+  const from = children[0]?.name === 'from';
+  const at = children.findIndex((c) => c.name === 'import');
+  const items: SyntaxNode[][] = [[]];
+  for (const c of children.slice(at + 1)) {
+    if (c.name === ',') items.push([]);
+    else items[items.length - 1]?.push(c);
+  }
+  const bound = items.filter((item) => item.length > 0).map((item) => {
+    const as = item.findIndex((c) => c.name === 'as');
+    const path = (as === -1 ? item : item.slice(0, as)).map((c) => textOf(module, c)).join('');
+    const alias = as === -1 ? undefined : item[as + 1];
+    // `import a.b` binds `a`; `import a.b as c` and `from m import x as c` bind `c`.
+    return { imported: path, as: alias !== undefined ? textOf(module, alias) : from ? path : (path.split('.')[0] ?? path) };
+  });
+  return { from: from ? children.slice(1, at).map((c) => textOf(module, c)).join('') : null, bound };
+}
+
+/**
+ * Every reference in a module to a name that stops a test reaching a verdict
+ * (`SKIP_NAMES`), wherever it is: a test, a fixture, a helper, a class, or
+ * module level, under a condition or not, called or raised or taken as a
+ * value; through any name bound to one, by an import or an assignment; and a
+ * string naming one. Each is `spelling: owner`, so a reference added
+ * anywhere is a marker added (gemini-2, gemini-4). `getattr` on pytest or
+ * unittest with a name the parse cannot read is refused, as the TypeScript
+ * set refuses a computed key on the test context.
+ */
+export function skipReferences(module: PythonModule, options: { readonly module: boolean } = { module: false }): string[] {
+  const aliases = new Set<string>();
+  const modules = new Set<string>();
+  const statements: SyntaxNode[] = [];
+  module.tree.iterate({
+    enter: (ref) => {
+      if (ref.name === 'ImportStatement' || ref.name === 'AssignStatement') statements.push(ref.node);
+    },
+  });
+  for (const s of statements.filter((x) => x.name === 'ImportStatement')) {
+    const read = importBindings(module, s);
+    for (const b of read.bound) {
+      if (read.from !== null && SKIP_NAMES.has(b.imported)) aliases.add(b.as);
+      else if (SKIP_MODULES.test(read.from === null ? b.imported : `${read.from}.${b.imported}`)) modules.add(b.as);
+    }
+  }
+  const mentions = (node: SyntaxNode): boolean => {
+    let found = false;
+    node.toTree().iterate({
+      enter: (ref) => {
+        if (found) return false;
+        const text = module.text.slice(node.from + ref.from, node.from + ref.to);
+        if ((ref.name === 'VariableName' || ref.name === 'PropertyName') && (SKIP_NAMES.has(text) || aliases.has(text))) found = true;
+        return undefined;
+      },
+    });
+    return found;
+  };
+  // `s = pytest.skip`, and `t = s` after it: a name bound to a skip is a skip, followed to a fixed point.
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const s of statements.filter((x) => x.name === 'AssignStatement')) {
+      const parts = childrenOf(s);
+      const op = parts.findIndex((c) => c.name === 'AssignOp');
+      const value = parts[parts.length - 1];
+      if (op === -1 || value === undefined || !mentions(value)) continue;
+      for (const target of parts.slice(0, op)) {
+        if (target.name === 'VariableName' && !aliases.has(textOf(module, target))) {
+          aliases.add(textOf(module, target));
+          grew = true;
+        }
+      }
+    }
+  }
+  const out: string[] = [];
+  module.tree.iterate({
+    enter: (ref) => {
+      const node = ref.node;
+      if (node.name === 'CallExpression') {
+        const call = callOf(module, node);
+        const args = call?.name === 'getattr' ? argumentsOf(module, call.args) : undefined;
+        const [target, attribute] = args?.positional ?? [];
+        const root = target === undefined ? undefined : dottedName(module, target)?.split('.')[0];
+        if (root !== undefined && (modules.has(root) || SKIP_MODULES.test(root)) && (attribute === undefined || stringValue(module, attribute) === undefined)) {
+          refuse('unsupported-feature', `${module.file}: getattr on ${root} with an attribute the parse cannot see`);
+        }
+      }
+      if (node.name === 'String') {
+        const value = stringValue(module, node);
+        if (value !== undefined && SKIP_NAMES.has(value)) out.push(`"${value}": ${ownerOf(module, node)}`);
+        return;
+      }
+      if (node.name !== 'VariableName' && node.name !== 'PropertyName') return;
+      const text = textOf(module, node);
+      if (!SKIP_NAMES.has(text) && !(node.name === 'VariableName' && aliases.has(text))) return;
+      // In a module that is not a test, `exit` counts only as pytest's: `sys.exit` there fails the test that reaches it.
+      if (options.module && text === 'exit' && !/^(?:pytest|_pytest)\./u.test(spellingOf(module, node)) && !modules.has(spellingOf(module, node).split('.')[0] ?? '')) return;
+      // The name an alias is bound to is not a reference: its value already counted, and every use of it counts.
+      const assign = node.parent?.name === 'AssignStatement' ? childrenOf(node.parent).find((c) => c.name === 'AssignOp') : undefined;
+      if (assign !== undefined && node.to <= assign.from && !SKIP_NAMES.has(text)) return;
+      // A name in a member chain is counted once, at its own position: `pytest.mark.skip` is one reference.
+      out.push(`${spellingOf(module, node)}: ${ownerOf(module, node)}`);
+    },
+  });
+  return out;
+}
+
+/**
+ * The cases and skip markers of one file, under `rules`. A class is a test
+ * class when its name matches `python_classes` or it derives from
+ * unittest's `TestCase`, and it is passed over when it defines `__init__`
+ * or `__new__` or sets `__test__ = False`. A base class the parse cannot see
+ * contributes a case of its own, `Class > *Base`, so a change to what a
+ * class inherits is a change to its cases (D-R29-07).
+ */
+export function readTestFile(module: PythonModule, rules: PytestRules): PythonTestFile {
+  const cases: string[] = [];
+  const skips: string[] = [];
+  const top = statementsOf(module.tree.topNode);
+  const classes = new Map<string, SyntaxNode>();
+  for (const s of top) {
+    const d = decorated(module, s);
+    if (d?.node.name === 'ClassDefinition') classes.set(nameOf(module, d.node), d.node);
+  }
+
+  module.tree.iterate({
+    enter: (ref) => {
+      if (ref.name !== 'VariableName' && ref.name !== 'PropertyName') return;
+      const text = textOf(module, ref.node);
+      if (text === 'pytest_generate_tests') refuse('unsupported-feature', `${module.file} defines pytest_generate_tests, which makes cases the parse cannot see`);
+      if (text === 'parametrize' && ref.node.parent?.name !== 'Decorator') {
+        refuse('unsupported-feature', `${module.file} uses parametrize outside a test's own decorator, whose table the parse cannot follow`);
+      }
+    },
+  });
+
+  skips.push(...skipReferences(module), ...rebindings(module));
+
+  const isUnittest = (bases: readonly string[], seen: Set<string>): boolean => bases.some((b) => {
+    if (UNITTEST_BASES.has(b)) return true;
+    const local = classes.get(b);
+    if (local === undefined || seen.has(b)) return false;
+    seen.add(b);
+    return isUnittest(classParts(module, local).bases, seen);
+  });
+
+  const functionCases = (d: Decorated, owner: string, inherited: Decorated['decorators'], unittest: boolean): void => {
+    const name = nameOf(module, d.node);
+    const decorators = [...d.decorators, ...inherited];
+    const fixture = decorators.find((x) => FIXTURE.test(x.name));
+    if (fixture !== undefined) {
+      // A fixture's `params` multiply every test that requests it: each row is recorded as a case of the fixture's, so a
+      // row dropped is a deleted case, and a table the parse cannot count is refused, as a parametrize table is (codex-3).
+      const params = fixture.args === null ? undefined : argumentsOf(module, fixture.args)?.keyword.get('params');
+      const label = owner === '' ? `fixture ${name}` : `${owner} > fixture ${name}`;
+      if (fixture.args !== null && argumentsOf(module, fixture.args) === undefined) refuse('unsupported-feature', `${module.file}: ${label} is parametrized by a table the parse cannot count`);
+      if (params !== undefined) {
+        if ((params.name !== 'ArrayExpression' && params.name !== 'TupleExpression') || spreads(params)) refuse('unsupported-feature', `${module.file}: ${label} is parametrized by a table the parse cannot count`);
+        const rows = partsOf(params);
+        if (rows.length === 0) skips.push(`params([]): ${label}`);
+        for (const id of unique(rows.map((row) => opaqueId(module, row)))) cases.push(`${label}[${id}]`);
+      }
+      return;
+    }
+    if (unittest ? !name.startsWith('test') : !matchesOption(name, rules.pythonFunctions)) return;
+    const qualified = owner === '' ? name : `${owner} > ${name}`;
+    let ids: string[] = [''];
+    if (!unittest) {
+      for (const x of decorators.filter((y) => PARAMETRIZE.test(y.name))) {
+        const read = parametrizeIds(module, x.args, rules, qualified);
+        if (read.empty) {
+          skips.push(`parametrize([]): ${qualified}`);
+          continue;
+        }
+        ids = ids.flatMap((prefix) => read.ids.map((id) => (prefix === '' ? id : `${prefix}-${id}`)));
+      }
+    }
+    if (ids.length === 1 && ids[0] === '') cases.push(qualified);
+    else for (const id of ids) cases.push(`${qualified}[${id}]`);
+  };
+
+  const classCases = (d: Decorated, owner: string, seen: Set<string>): void => {
+    const name = nameOf(module, d.node);
+    const { body, bases } = classParts(module, d.node);
+    const unittest = isUnittest(bases, new Set());
+    if (!unittest && !matchesOption(name, rules.pythonClasses)) return;
+    const qualified = owner === '' ? name : `${owner} > ${name}`;
+    const members = (statements: readonly SyntaxNode[]): Decorated[] => statements.map((s) => decorated(module, s)).filter((x): x is Decorated => x !== undefined);
+    const own = members(body);
+    if (own.some((m) => m.node.name === 'FunctionDefinition' && ['__init__', '__new__'].includes(nameOf(module, m.node)))) return;
+    // pytest reads `__test__` for its truth, so any falsy literal passes the class over (codex-4).
+    if (body.some((s) => /^(?:False|None|0|""|''|\[\]|\(\)|\{\})$/u.test(textOf(module, assigns(module, s, '__test__') ?? s)))) return;
+    const classMarks = [...d.decorators];
+    const methods = new Map<string, Decorated>();
+    const inherit = (bs: readonly string[], chain: Set<string>): void => {
+      for (const base of bs) {
+        if (UNITTEST_BASES.has(base) || PLAIN_BASES.has(base)) continue;
+        const local = classes.get(base);
+        if (local === undefined || chain.has(base)) {
+          cases.push(`${qualified} > *${base}`);
+          continue;
+        }
+        chain.add(base);
+        const parts = classParts(module, local);
+        inherit(parts.bases, chain);
+        for (const m of members(parts.body)) if (m.node.name === 'FunctionDefinition') methods.set(nameOf(module, m.node), m);
+      }
+    };
+    inherit(bases, new Set([name]));
+    for (const m of own) if (m.node.name === 'FunctionDefinition') methods.set(nameOf(module, m.node), m);
+    for (const m of methods.values()) functionCases(m, qualified, classMarks, unittest);
+    for (const m of own) if (m.node.name === 'ClassDefinition' && !seen.has(nameOf(module, m.node))) classCases(m, qualified, new Set([...seen, nameOf(module, m.node)]));
+  };
+
+  for (const s of top) {
+    const d = decorated(module, s);
+    if (d === undefined) continue;
+    if (d.node.name === 'FunctionDefinition') functionCases(d, '', [], false);
+    else classCases(d, '', new Set([nameOf(module, d.node)]));
+  }
+  return { cases, skips };
+}

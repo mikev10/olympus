@@ -260,6 +260,17 @@ function key(a: Assertion): string {
  * `weakened`. A `before` assertion left without a pair is `removed`.
  */
 export function compareAssertions(before: readonly Assertion[], after: readonly Assertion[]): AssertionDelta {
+  return pairAssertions(before, after, { atLeastAsStrong, negated });
+}
+
+/** What a language's comparison needs: which forms provably check at least as much, and which run a tolerance backwards. */
+export interface AssertionRules {
+  atLeastAsStrong(before: Assertion, after: Assertion): boolean;
+  negated(operator: string): boolean;
+}
+
+/** The pairing `compareAssertions` describes, over one language's `rules` (R29). */
+export function pairAssertions(before: readonly Assertion[], after: readonly Assertion[], rules: AssertionRules): AssertionDelta {
   const unmatched = [...after];
   const take = (index: number): void => {
     unmatched.splice(index, 1);
@@ -301,11 +312,11 @@ export function compareAssertions(before: readonly Assertion[], after: readonly 
       // Under a negation the tolerance runs the other way: `not.toBeCloseTo(v, 2)` becoming
       // `not.toBeCloseTo(v, 3)` narrows the band the value must stay out of, so more values pass.
       // What is reported either way is the change that lets more through.
-      const letsMoreThrough = negated(a.operator) ? a.tolerance < b.tolerance : a.tolerance > b.tolerance;
+      const letsMoreThrough = rules.negated(a.operator) ? a.tolerance < b.tolerance : a.tolerance > b.tolerance;
       if (letsMoreThrough) delta.toleranceWidened.push(a);
       continue;
     }
-    if (!atLeastAsStrong(b, a)) delta.weakened.push(a);
+    if (!rules.atLeastAsStrong(b, a)) delta.weakened.push(a);
   }
   return delta;
 }

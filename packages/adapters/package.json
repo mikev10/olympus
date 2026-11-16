@@ -22,10 +22,13 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@lezer/common": "1.5.5",
+    "@lezer/python": "1.1.19",
     "@olympus-ai/core": "workspace:*",
     "@olympus-ai/integrity": "workspace:*",
     "@olympus-ai/sandbox": "workspace:*",
     "picomatch": "4.0.7",
+    "smol-toml": "1.9.1",
     "tinyglobby": "0.2.17",
     "typescript": "6.0.3"
   },

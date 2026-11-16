@@ -18,6 +18,7 @@ export {
 export {
   NOT_SCANNED,
   NPM_REGISTRY,
+  PYPI_REGISTRIES,
   SECRET_SCAN_IMAGE,
   ceilingOf,
   scan,

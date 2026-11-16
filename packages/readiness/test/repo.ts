@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { promisify } from 'node:util';
 import { EGRESS_PROXY_IMAGE, LocalDockerProvider } from '@olympus-ai/sandbox';
-import { NPM_REGISTRY, SECRET_SCAN_IMAGE, type BranchProtectionChecker, type ScanOptions } from '../src/index.js';
+import { NPM_REGISTRY, PYPI_REGISTRIES, SECRET_SCAN_IMAGE, type BranchProtectionChecker, type ScanOptions } from '../src/index.js';
 
 const run = promisify(execFile);
 
@@ -95,6 +95,7 @@ export function options(bench: Workbench, checkout: string, overrides: Partial<S
     user: RUNTIME_USER,
     timeouts: { installMs: 300_000, probeMs: 180_000, coldProvisionMs: 60_000 },
     registries: NPM_REGISTRY,
+    pythonRegistries: PYPI_REGISTRIES,
     protectedPaths: ['package.json', '.github/**'],
     branchProtection: null,
     ...overrides,

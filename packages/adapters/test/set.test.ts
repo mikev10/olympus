@@ -78,6 +78,8 @@ describe('adapterAdmission', () => {
       behavioral: [],
       manifest: null,
       staticAnalysis: null,
+      dependencyTrees: [],
+      checkImage: null,
       unavailableControls: () => [],
     };
     const admission = adapterAdmission(lying, 3);

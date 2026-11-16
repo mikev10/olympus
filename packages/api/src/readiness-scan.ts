@@ -5,7 +5,7 @@
  * branch-protection checker. It writes nothing, and admission does not read
  * its ceiling: enforcing it there is its own decision (out of scope).
  */
-import { NPM_REGISTRY, resolveCommit, scan, SECRET_SCAN_IMAGE, type BranchProtectionChecker, type ReadinessReport } from '@olympus-ai/readiness';
+import { NPM_REGISTRY, PYPI_REGISTRIES, resolveCommit, scan, SECRET_SCAN_IMAGE, type BranchProtectionChecker, type ReadinessReport } from '@olympus-ai/readiness';
 import type { BuiltGraph } from './graph.js';
 import { loadPolicyFile } from './policy-file.js';
 
@@ -48,6 +48,7 @@ export function readinessScanner(options: ReadinessScannerOptions): ReadinessSca
         user: options.components.workspaces.user,
         timeouts: TIMEOUTS,
         registries: NPM_REGISTRY,
+        pythonRegistries: PYPI_REGISTRIES,
         protectedPaths: policy.protectedPaths,
         branchProtection: options.branchProtection,
       });

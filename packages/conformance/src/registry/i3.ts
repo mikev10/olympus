@@ -18,6 +18,7 @@ import { LOCKED_PATH_IN_DIFF_IS_TAMPER } from './verification.js';
 import { COMPOSED_HOST_LOCKED_TEST_CHANGE_FAILS } from './composition.js';
 import { DEPENDENCY_TREES_ARE_THE_BASES, PASSING_ON_THE_BASE_REFUSES } from './base-run.js';
 import { R34_I3 } from './install.js';
+import { R29_I3 } from './stacks.js';
 import { R20_I3 } from './roles.js';
 import { R23_I3 } from './workspace-instructions.js';
 import { R19_ASSERTIONS } from './drafting.js';
@@ -240,6 +241,8 @@ export const I3: InvariantEntry = {
     // R15: an acceptance check that passes on the base is a gate the change could not fail.
     PASSING_ON_THE_BASE_REFUSES,
     DEPENDENCY_TREES_ARE_THE_BASES,
+    // R29: every supported stack's tamper, coverage, and install controls, and a Python run to integrate.
+    ...R29_I3,
     // R34: every check runs over the runtime's install of the verified tree's lockfile.
     ...R34_I3,
   ],
@@ -290,7 +293,10 @@ export const I3: InvariantEntry = {
         + "vitest loads files outside node_modules into its own process: a globalSetup file the base's config "
         + 'already names, rewritten to call process.exit(0), makes vitest 4.1.11 exit 0 with no test run, and it is '
         + 'carried unflagged unless policy protects it (codex-2). Both were raised by the external review of the R15 '
-        + 'fixes and recorded as D-R15-08. Closing it means a runner, and every input its process loads, that the '
+        + 'fixes and recorded as D-R15-08. pytest widens the second route: it runs every module a test imports in '
+        + 'its own process, product modules included, so os._exit(0) or a pytest monkeypatch in any of them ends '
+        + 'the run with exit 0. A plainly spelled skip or exit there is reported as a marker (R29 gemini-1), which '
+        + 'is a tripwire for the easy path and not a closure (D-R29-15). Closing it means a runner, and every input its process loads, that the '
         + 'change cannot write: provisioned by the runtime outside the tree, or authenticated and held to the base. '
         + 'That needs an assertion that each route fails the check. Tracked as issue #42. Owned by M3, beside the '
         + 'L3 canary, which needs the same trusted runner.',
