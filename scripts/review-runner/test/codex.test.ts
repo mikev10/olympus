@@ -53,7 +53,7 @@ describe('resolveCodexEntry', () => {
   });
 
   it('prefers an explicit CODEX_JS override when the file exists', () => {
-    const root = mkdtempSync(join(tmpdir(), 'olympus-codexjs-override-'));
+    const root = mkdtempSync(join(tmpdir(), 'factory-codexjs-override-'));
     cleanupRoots.push(root);
     const overridePath = join(root, 'codex.js');
     writeFileSync(overridePath, '// fake codex entry');
@@ -64,7 +64,7 @@ describe('resolveCodexEntry', () => {
   });
 
   it('refuses when CODEX_JS is set but the file does not exist, naming the path', () => {
-    const missing = join(tmpdir(), 'olympus-codexjs-does-not-exist', 'codex.js');
+    const missing = join(tmpdir(), 'factory-codexjs-does-not-exist', 'codex.js');
 
     let message = '';
     try {
@@ -76,7 +76,7 @@ describe('resolveCodexEntry', () => {
   });
 
   it('resolves the Windows npm global install path from %APPDATA% when no override is set', () => {
-    const root = mkdtempSync(join(tmpdir(), 'olympus-codexjs-appdata-'));
+    const root = mkdtempSync(join(tmpdir(), 'factory-codexjs-appdata-'));
     cleanupRoots.push(root);
     const entry = join(root, 'npm', 'node_modules', '@openai', 'codex', 'bin', 'codex.js');
     mkdirSync(dirname(entry), { recursive: true });
@@ -92,14 +92,14 @@ describe('resolveCodexEntry', () => {
   });
 
   it('refuses on win32 when the resolved %APPDATA% path does not exist', () => {
-    const root = mkdtempSync(join(tmpdir(), 'olympus-codexjs-appdata-missing-'));
+    const root = mkdtempSync(join(tmpdir(), 'factory-codexjs-appdata-missing-'));
     cleanupRoots.push(root);
 
     expect(() => resolveCodexEntry({ APPDATA: root }, 'win32', 'C:\\node\\node.exe')).toThrow(/codex\.js/);
   });
 
   it('resolves the POSIX global install path relative to execPath when no override is set', () => {
-    const root = mkdtempSync(join(tmpdir(), 'olympus-codexjs-posix-'));
+    const root = mkdtempSync(join(tmpdir(), 'factory-codexjs-posix-'));
     cleanupRoots.push(root);
     const execPath = join(root, 'bin', 'node');
     const entry = join(root, 'lib', 'node_modules', '@openai', 'codex', 'bin', 'codex.js');
@@ -112,7 +112,7 @@ describe('resolveCodexEntry', () => {
   });
 
   it('refuses on POSIX when the resolved path does not exist', () => {
-    const root = mkdtempSync(join(tmpdir(), 'olympus-codexjs-posix-missing-'));
+    const root = mkdtempSync(join(tmpdir(), 'factory-codexjs-posix-missing-'));
     cleanupRoots.push(root);
     const execPath = join(root, 'bin', 'node');
 

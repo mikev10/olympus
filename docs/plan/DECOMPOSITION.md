@@ -631,7 +631,8 @@ order between them is settled before any of them is picked up.
 | R34 | Dependencies installed by the runtime from the lockfile ([#40](https://github.com/mikev10/olympus/issues/40)) | M2 | P3, P6, P10, P14, R1, R15 | — |
 | R35 | Runnable release and first-run docs ([#54](https://github.com/mikev10/olympus/issues/54), [#55](https://github.com/mikev10/olympus/issues/55), [#28](https://github.com/mikev10/olympus/issues/28), [#121](https://github.com/mikev10/olympus/issues/121), [#123](https://github.com/mikev10/olympus/issues/123) to [#127](https://github.com/mikev10/olympus/issues/127)) | M2 | P3, P9, R1, R19, R20 | — |
 | R36a | The shipped example runs on the real driver ([#145](https://github.com/mikev10/olympus/issues/145), [#148](https://github.com/mikev10/olympus/issues/148) to [#152](https://github.com/mikev10/olympus/issues/152), [#154](https://github.com/mikev10/olympus/issues/154)) | M2 | P5, P6, P14, I1b, R17, R19, R34, R35 | — |
-| R36b | `init`, and a real feature from a fresh clone ([#134](https://github.com/mikev10/olympus/issues/134), [#136](https://github.com/mikev10/olympus/issues/136), [#139](https://github.com/mikev10/olympus/issues/139)) | M2 | R36a, R18, R19, R35 | — |
+| R36b | `init`, and a real feature from a fresh clone ([#134](https://github.com/mikev10/olympus/issues/134), [#136](https://github.com/mikev10/olympus/issues/136), [#139](https://github.com/mikev10/olympus/issues/139)) | M2 | R36a, R37, R18, R19, R35 | — |
+| R37 | A failed gate tells the retry, and the run, why ([#158](https://github.com/mikev10/olympus/issues/158), [#159](https://github.com/mikev10/olympus/issues/159)) | M2 | R36a, R19 | — |
 
 ### R1 — Readiness
 
@@ -2786,6 +2787,96 @@ line, and today a first run needs a guide.
   enable produces records that look like real work; it needs its own
   decision about how such a run is marked. It becomes a separate unit after
   R36.
+
+### R37 — A failed gate tells the retry, and the run, why
+
+Found running R36a's paid case (#157). The shipped example's builder wrote
+the wrong file, and its gate failed. The line retried the build with the
+same message, carrying only the task id (`packages/api/src/line.ts`, the
+request's `variableSuffix`). So the builder wrote the same file on every
+iteration until the task parked for `iterations-exhausted`. The run's
+`status` named no cause: `lastFailureOf` (`packages/api/src/run.ts`) reads
+only runs parked for `retries-exhausted`. A real feature fails its gate on
+a first try often, so R36b's run from a fresh clone hits both. R37 lands
+before R36b.
+
+- **A build retry says which check failed** (#159). When a build task's
+  gate fails, its next iteration's variable suffix names each required
+  check that did not pass, with its id and the cause the gate derived
+  (`FailedCheck.cause` in `packages/core/src/station/types.ts`: `exit-code`,
+  `no-result`, `suite-count`, `expectation`, `new-finding`,
+  `suppression-added`). It does
+  this the way `retrySuffix` (`packages/core/src/station/machine.ts`) does
+  for a drafter: typed parts, built by the runtime, in the suffix and never
+  the stable prefix or a role.
+  - It never carries a check's stdout, stderr, or any other text the
+    container produced. That output is untrusted data and never enters a
+    prompt (I7).
+  - The builder already holds the acceptance tests and the manifest. So the
+    check id tells it nothing about the judge it could not already read,
+    and no artifact the builder can write judges it (I3).
+  - A review retry is unchanged.
+- **Every failed gate reaches the run's last failure** (#158). A failed
+  gate already records a `station-refused` decision. Its refusal is
+  `gate-failed` and names each failed check and its cause, including a
+  check that could not start (`no-result`). Nothing reads it:
+  - `lastFailureOf` reads only `attempt-failed` decisions, and only for a
+    task parked on `retries-exhausted`;
+  - `events` publishes only `attempt-failed`.
+
+  So a run parked on `iterations-exhausted` shows no cause. The changes:
+  - `LastFailure` (`packages/api/src/run.ts`) becomes a union of the
+    attempt failure and the gate failure. `lastFailureOf` returns the
+    task's latest of the two, whichever stop the task parked on.
+  - `events` publishes a `gate-failed` event when the line records one.
+  - A check that did not start also shows the reason recorded in its
+    evidence. That reason can quote a container's error, so it is shown as
+    untrusted text, like `untrustedDetail`, and never prompted (I7).
+
+  No Vault contract changes: the decision is already recorded.
+- **Each assertion fails with its fix reverted** (I8). There is one free
+  assertion per fix, on the stand-in drivers:
+  - a builder whose first change fails `hello-written` receives that
+    check's id and cause in its second request's suffix, and no byte of the
+    check's output;
+  - a run whose required check cannot start at `verify` shows that check as
+    its last failure in `status`.
+
+  The paid example case is unchanged. With the retry told the failed check,
+  a builder that misses on its first iteration can meet the check on a
+  later one, and nothing asserts which iteration that is.
+
+**Acceptance:** each assertion above fails with its fix reverted and passes
+with it. `pnpm -r typecheck`, `pnpm -r lint`, and `pnpm -r test` pass
+(the paid suites in CI, under `run-driver`, as for every unit).
+
+**Gate paths:** `packages/core/src/station/` (the build retry's suffix)
+and `packages/conformance/`. No contract type changes. If the
+build-retry part needs a new `RetryPart` kind exported from `core`, that is
+in scope here.
+
+**Out of scope:**
+- telling a retry anything the container printed;
+- a retry message for review seats;
+- raising `maxIterations`, or changing how iterations are counted;
+- the host's log sink, which waits on #132 (D-R36a-13).
+
+**Why M2:** R36b proves the first run from a fresh clone. A first run that
+fails its gate must recover or say why, or the person running it is back to
+reading the Vault by hand.
+
+**Decisions** (proposed, for the maintainer):
+
+- **One unit, before R36b.** Both fixes sit on the same failure path and
+  are reviewed together. Folding them into R36b was rejected: it would
+  mix line changes into a unit whose proof is a run from a fresh clone.
+  Reversal: amend R36b's scope to carry both.
+- **The retry gets ids and causes, never output.** Passing a check's
+  trimmed stderr would help a builder more. But that text is produced by
+  code the builder wrote, so a builder could use it to put instructions
+  into its own next prompt. Reversal: an amendment adding an output part
+  that carries the text as untrusted data, if a later unit decides how it
+  is quoted.
 
 ---
 
