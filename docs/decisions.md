@@ -10039,3 +10039,21 @@ confirmed by the maintainer on 2026-11-11: D-R35-08's compromise, and #131.
   matched by anything else. The success line builds the CLI's name from its
   exact string.
 - **Reverse:** drop the scripts and root loop from the assertion.
+
+### A-HS-03: the host prints each failed attempt (reverses D-R36a-13)
+
+- **Was:** the host's entry could write only its start-up refusal to stderr
+  (A-HS-01). The service's one line per failed attempt (#149, D-R36a-06) went
+  nowhere, because the host passed `createApiServer` no `log`.
+- **Now:** `packages/api/src/host/main.ts` passes
+  `log: (line) => process.stderr.write(...)`, prefixed `factory-host: `. The
+  line is already flattened to one line by `attemptLine`, so a detail cannot
+  forge a second line. The exemption's spelling list is unchanged: the same
+  file, the same `process.stderr.write`. Only its stated purpose widens, in
+  A-HS-01's file header and the scan's title. stderr is not a prompt, so the
+  untrusted detail it carries stays data.
+- **Asserted:** `I9.host-logs-failed-attempts` parses the entry and fails
+  unless its `createApiServer` call has a `log` whose body calls
+  `process.stderr.write`. It fails with the `log` property removed (run).
+- **Reverse:** drop the `log` property and the assertion, and restore
+  A-HS-01's wording.

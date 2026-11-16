@@ -10,9 +10,10 @@
  * unreadable endpoint file, and a trees directory that cannot hold a symbolic
  * link stop the host before it listens, with one list and no stack trace (I5).
  *
- * That list is the one thing this package writes to a terminal, and only this
- * file may (A-HS-01): the executable reports why it did not start, as the
- * CLI's own entry does. Nothing it starts prints anything.
+ * Only this file in this package writes to a terminal (A-HS-01, A-HS-03), and
+ * it writes two things to stderr: why the executable did not start, as the
+ * CLI's own entry does, and the one line the service gives it per failed
+ * attempt. Nothing it starts prints anything itself.
  */
 import { GitHubCheckReader } from '../checks.js';
 import { createApiServer } from '../http/server.js';
@@ -61,6 +62,11 @@ async function start(): Promise<void> {
         checks: config.checksToken === null ? null : new GitHubCheckReader({ repository: config.git.repository, token: config.checksToken }),
       },
       rubricsDirectory: config.rubricsDirectory,
+      // The service hands over one flattened line per failed attempt; the host prints it (A-HS-03, D-R36a-13).
+      log: (line) => {
+        process.stderr.write(`factory-host: ${line}
+`);
+      },
       // R1's scan over the working copy runs are admitted from, read-only (R35, D-R35-06).
       readiness: readinessScanner({
         components, repository: config.repository, policyFile: config.policyFile,
