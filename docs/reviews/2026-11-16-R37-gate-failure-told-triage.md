@@ -36,7 +36,7 @@ Both reply hashes matched their manifests' `replySha256` before the headers were
 
 ## gemini-2: `untrustedReason` is not branded
 
-**Checked.** The field is `string | null`. The existing `AttemptFailure.untrustedDetail` (`packages/vault/src/types.ts`) is a plain `string` with the same naming convention. `UntrustedText` is used only for trigger payloads (`packages/triggers`). The field never reaches a prompt: `gateRetrySuffix` takes only `checkId` and `cause`, and the I7 assertion checks that the startup error marker never reaches `status` through a prompt.
+**Checked.** The field is `string | null`. The existing `AttemptFailure.untrustedDetail` (`packages/vault/src/types.ts`) is a plain `string` with the same naming convention. `UntrustedText` is used only for trigger payloads (`packages/triggers`). The field never reaches a prompt: `gateRetrySuffix` takes only `checkId` and `cause`. No assertion yet checks that a startup error's text stays out of later prompts; the I7 assertion covers check output only.
 
 **Outcome.** The fact holds. Branding one field would make it an outlier among the runtime's stored failure texts. Branding all of them is a cross-cutting change that touches a contract type (`vault/src/types.ts`). Rejected as a tradeoff here. Reversal: an amendment branding every `untrusted*` field together.
 
