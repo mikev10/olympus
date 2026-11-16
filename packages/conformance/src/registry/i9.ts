@@ -83,6 +83,38 @@ function assertNeverTouchesATerminal(packageName: string, entry: EntryExemption 
   if (hits.length > 0) throw new Error(`I9: ${packageName} assumes a terminal\n  ${hits.join('\n  ')}`);
 }
 
+/**
+ * The host's entry passes `createApiServer` a `log` whose body writes to
+ * `process.stderr` (A-HS-03). The service emits the line; this asserts the
+ * executable does not drop it.
+ */
+function assertHostLogsFailedAttempts(): void {
+  const pkg = workspacePackages().find((p) => p.name === '@olympus-ai/api');
+  if (pkg === undefined) throw new Error('I9: @olympus-ai/api is not in the workspace');
+  const sf = packageProgram(pkg).files.find((f) => workspaceRelative(f.fileName) === HOST_ENTRY.file);
+  if (sf === undefined) throw new Error(`I9: ${HOST_ENTRY.file} is not in the api program`);
+  const sinks: ts.Node[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'createApiServer') {
+      const [options] = node.arguments;
+      if (options !== undefined && ts.isObjectLiteralExpression(options)) {
+        for (const prop of options.properties) {
+          if (ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.name) && prop.name.text === 'log') sinks.push(prop.initializer);
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  if (sinks.length === 0) throw new Error(`I9: ${HOST_ENTRY.file} passes createApiServer no log, so a failed attempt is never printed`);
+  const writes = (node: ts.Node): boolean => (ts.isCallExpression(node) && node.expression.getText(sf) === 'process.stderr.write') || (ts.forEachChild(node, writes) ?? false);
+  for (const sink of sinks) {
+    if (!(ts.isArrowFunction(sink) || ts.isFunctionExpression(sink)) || !writes(sink.body)) {
+      throw new Error(`I9: ${HOST_ENTRY.file}'s log does not write to process.stderr`);
+    }
+  }
+}
+
 /** I9: The runtime is a service; the CLI is a client. */
 export const I9: InvariantEntry = {
   title: INVARIANTS.I9,
@@ -96,10 +128,15 @@ export const I9: InvariantEntry = {
     }),
     runtime({
       id: 'I9.api-never-touches-a-terminal',
-      title: 'no file in api imports a terminal module or touches process streams, argv, exit, isTTY, or console, by spelling or by binding, and every .ts under its src is in the scanned program; the one exception is the host executable\'s entry, which exports nothing and may only write its refusal to stderr and set its exit code (A-HS-01)',
+      title: 'no file in api imports a terminal module or touches process streams, argv, exit, isTTY, or console, by spelling or by binding, and every .ts under its src is in the scanned program; the one exception is the host executable\'s entry, which exports nothing and may only write to stderr (its refusal, and each failed-attempt line the service hands it) and set its exit code (A-HS-01, A-HS-03)',
       run: () => {
         assertNeverTouchesATerminal('@olympus-ai/api', HOST_ENTRY);
       },
+    }),
+    runtime({
+      id: 'I9.host-logs-failed-attempts',
+      title: 'the host executable hands the service a log that writes each failed-attempt line to stderr, so an attempt that fails is printed by the process running it (A-HS-03, #149)',
+      run: assertHostLogsFailedAttempts,
     }),
     runtime({
       id: 'I9.api-runs-headless',
