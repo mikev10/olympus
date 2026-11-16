@@ -1,0 +1,2442 @@
+BASE: 1a34231
+HEAD: 5ff110d
+
+=== COMMITS ===
+5ff110d R37: A failed gate tells the retry, and the run, why
+
+=== CHANGED ===
+ .changeset/r37-gate-failure-told.md             |   7 ++
+ docs/decisions.md                               | 101 ++++++++++++++++++++
+ packages/api/src/http/server.ts                 |   3 +
+ packages/api/src/http/wire.ts                   |   3 +
+ packages/api/src/index.ts                       |   2 +-
+ packages/api/src/line.ts                        |  67 ++++++++++++-
+ packages/api/src/run.ts                         |  60 ++++++++----
+ packages/conformance/src/registry/decisions.ts  |   2 +-
+ packages/conformance/src/registry/gate-retry.ts | 119 ++++++++++++++++++++++++
+ packages/conformance/src/registry/i5.ts         |   3 +
+ packages/conformance/src/registry/i7.ts         |   3 +
+ packages/core/src/station/machine.ts            |  13 +++
+ 12 files changed, 359 insertions(+), 24 deletions(-)
+
+
+===== .changeset/r37-gate-failure-told.md =====
+---
+"@olympus-ai/core": minor
+"@olympus-ai/api": minor
+"@olympus-ai/conformance": patch
+---
+
+R37: a failed gate tells the retry, and the run, why. A build task's next iteration after a failed gate carries each failed check's id and cause in its variable suffix (`gateRetrySuffix` in `core`), never the check's output. `LastFailure` is now a union discriminated by `kind` (`attempt-failed` or `gate-failed`), read for any park that names a task; a gate's check that did not start carries its evidence's reason as `untrustedReason`. The event stream publishes `gate-failed`, and `DriveHooks` gains `onGateFailed`.
+
+===== packages/api/src/http/server.ts =====
+diff --git a/packages/api/src/http/server.ts b/packages/api/src/http/server.ts
+index 31a5b8e..9220ba4 100644
+--- a/packages/api/src/http/server.ts
++++ b/packages/api/src/http/server.ts
+@@ -336,429 +336,432 @@ function refusalStatus(outcome: Exclude<RunOutcome, { ok: true }>): number {
+ export function createApiServer(options: ApiServerOptions): ApiServer {
+   if (typeof options.token !== 'string' || options.token.length < MIN_TOKEN_LENGTH) {
+     throw new Error(`api server: the local token must be at least ${String(MIN_TOKEN_LENGTH)} characters`);
+   }
+   if (typeof options.principal !== 'string' || options.principal.trim() === '') throw new Error('api server: principal must name who the token is');
+   const expected = digest(`Bearer ${options.token}`);
+   const { components, principal } = options;
+   const runs = new Map<RunId, Tracked>();
+   const open = new Set<ServerResponse>();
+   // The nightly jobs are given the sandbox, the scanners, and the Vault, and no builder or integrator (I2). The two
+   // reviewer jobs seat the reviewer driver, under the roles runs are admitted with (R13b, D-R13b-03, D-R13b-07).
+   const jobs = new NightlyJobs({
+     vault: components.vault, sandbox: components.sandbox, workspaces: components.workspaces,
+     limits: components.profile === null ? null : components.profile.limits, scanners: components.scanners,
+     target: options.nightlyTarget ?? null,
+     seat: {
+       driver: components.reviewer, roles: options.rolesDirectory,
+       image: components.profile === null ? 'none' : imageFor(components.profile, components.reviewer),
+     },
+   });
+   const intake = new Intake({ vault: components.vault, secrets: options.secrets ?? (() => undefined), jobs });
+   let scheduler: Scheduler | null = null;
+ 
+   const tracked = (runId: RunId): Tracked => {
+     let entry = runs.get(runId);
+     if (entry === undefined) {
+       entry = { drive: null, cancel: null, lastOutcome: null, streams: new Set() };
+       runs.set(runId, entry);
+     }
+     return entry;
+   };
+ 
+   const publish = (entry: Tracked, event: RunEvent): void => {
+     for (const stream of entry.streams) stream(event);
+   };
+ 
+   /** Drives a run in the background; the returned promise never rejects. */
+   const drive = (runId: RunId, start: (hooks: DriveHooks) => Promise<RunOutcome>): void => {
+     const entry = tracked(runId);
+     entry.cancel = null;
+     const hooks: DriveHooks = {
+       cancelRequested: () => entry.cancel,
+       onCommit: (state) => { publish(entry, { event: 'state', data: state }); },
+       onAttemptFailed: (task, failure) => {
+         publish(entry, { event: 'attempt-failed', data: { task, failure } });
+         options.log?.(attemptLine(runId, task, failure));
+       },
++      onGateFailed: (task, failure) => {
++        publish(entry, { event: 'gate-failed', data: { task, failure } });
++      },
+     };
+     entry.drive = start(hooks)
+       .then((outcome): DriveEnd => ({ kind: 'outcome', outcome }), (error: unknown): DriveEnd => ({ kind: 'error', message: describe(error) }))
+       .then((end) => (end.kind === 'error' ? halt(runId, end) : end))
+       .then(async (end) => {
+         entry.lastOutcome = end;
+         entry.drive = null;
+         entry.cancel = null;
+         const standing = await runStanding(components.vault, runId).then((s) => s.standing, () => undefined);
+         if (standing !== undefined) publish(entry, { event: 'standing', data: standing });
+         publish(entry, { event: 'end', data: end });
+       });
+   };
+ 
+   /**
+    * A drive that ended in an error, rather than a refusal the line committed,
+    * left the run's state as it was mid-step, which status would read as open
+    * and a cancel would relabel. The halt is committed so the stop is the
+    * Vault's record, and survives this process (A-P9-02). A run already
+    * cancelled keeps that record instead; if the halt cannot be committed, the
+    * drive's end says so.
+    */
+   const halt = async (runId: RunId, end: DriveEnd & { kind: 'error' }): Promise<DriveEnd> => {
+     try {
+       const state = await components.vault.readRunState(runId);
+       if (state.cancelled !== null || state.halted !== null) return end;
+       await components.vault.commitRunState({ ...state, halted: { at: new Date().toISOString(), message: end.message } }, state.version);
+       return end;
+     } catch (error) {
+       return { kind: 'error', message: `${end.message}; the halt could not be recorded: ${describe(error)}` };
+     }
+   };
+ 
+   /** The per-run report, read from the Vault alone (D-I1b-07). */
+   const report = async (runId: RunId): Promise<RunReport> => {
+     try {
+       await components.vault.readRunState(runId);
+     } catch (error) {
+       throw new HttpError(404, 'not-found', `no run ${runId}: ${describe(error)}`);
+     }
+     return runReport(components.vault, runId);
+   };
+ 
+   /**
+    * The run's records as OTLP/JSON, for the client to send where its operator
+    * chooses: the service itself never makes an outbound request (D-R12-02).
+    */
+   const telemetry = async (runId: RunId): Promise<TelemetryExport> => {
+     try {
+       await components.vault.readRunState(runId);
+     } catch (error) {
+       // A state that cannot be read is a fault, never absence (I5). A run refused at admission has no
+       // state and is still exported; only a run with no record at all is absent.
+       if (!isNoRunState(error)) throw error;
+       if ((await components.vault.readDecisions(runId)).length === 0) throw new HttpError(404, 'not-found', `no run ${runId}: ${describe(error)}`);
+     }
+     const result = await telemetryOf(components.vault, runId);
+     if (!result.ok) throw new HttpError(409, 'not-finished', `run ${runId} has not finished, so its records may still change and it is not exported`);
+     return result.export;
+   };
+ 
+   const view = async (runId: RunId): Promise<RunView> => {
+     // Taken before the read, not after: a drive that ends while the state is read has committed
+     // past what was read, and a view saying `driving: false` beside that state would present a
+     // stale standing as settled. Read first, a drive running at the start is still reported.
+     const entry = runs.get(runId);
+     const driving = entry?.drive != null;
+     const lastOutcome = entry?.lastOutcome ?? null;
+     let read: { state: RunState; standing: RunView['standing'] };
+     try {
+       read = await runStanding(components.vault, runId);
+     } catch (error) {
+       throw new HttpError(404, 'not-found', `no run ${runId}: ${describe(error)}`);
+     }
+     return { runId, state: read.state, standing: read.standing, driving, lastOutcome };
+   };
+ 
+   const create = async (body: CreateRunBody): Promise<CreatedRun> => {
+     const policy = await loadPolicyFile(options.policyFile);
+     if (!policy.ok) throw new HttpError(422, 'refused', `the server's policy file is refused: ${policy.message}`, policy);
+     const runId = randomUUID() as RunId;
+     const { intent, ...request } = body;
+     const admission = await admitRun({
+       runId,
+       ...request,
+       // Only this route, authenticated as the principal, supplies an intent (R19, I7), a bug fix's as its parts (A-R16-02).
+       intent: intent === undefined ? null : typeof intent === 'string' ? { text: intent, from: 'principal' } : { ...intent, from: 'principal', template: 'bug-fix' },
+       rubrics: options.rubricsDirectory ?? null,
+       policy: policy.policy,
+       roles: options.rolesDirectory,
+       components,
+     });
+     if (!admission.ok) throw new HttpError(refusalStatus(admission), 'refused', `run refused: ${admission.reason}`, admission);
+     const { admitted } = admission;
+     drive(runId, (hooks) => admitted.drive(hooks));
+     return { runId, worstCase: admitted.worstCase, state: admitted.state };
+   };
+ 
+   const approve = async (runId: RunId, body: ApproveBody): Promise<RunView> => {
+     const entry = tracked(runId);
+     if (entry.drive !== null) throw new HttpError(409, 'conflict', `run ${runId} is being driven; it is not waiting for an approval`);
+     await view(runId);
+     const outcome = await approveStation({ runId, key: body.key, draft: body.draft ?? null, approvedBy: principal, vault: components.vault });
+     if (!outcome.ok) throw new HttpError(outcome.reason === 'invalid-request' ? 400 : 409, 'refused', outcome.message, outcome);
+     drive(runId, (hooks) => resumeRun({ runId, components }, hooks));
+     return view(runId);
+   };
+ 
+   const reject = async (runId: RunId, body: RejectBody): Promise<RunView> => {
+     const entry = tracked(runId);
+     if (entry.drive !== null) throw new HttpError(409, 'conflict', `run ${runId} is being driven; it is not waiting for a decision on a draft`);
+     await view(runId);
+     const outcome = await rejectDraft({ runId, key: body.key, draft: body.draft, notes: body.notes ?? null, reason: body.reason ?? null, rejectedBy: principal, vault: components.vault });
+     if (!outcome.ok) throw new HttpError(outcome.reason === 'invalid-request' ? 400 : 409, 'refused', outcome.message, outcome);
+     // A draft sent back is drafted again; a parked run is driven only to record where it stopped.
+     drive(runId, (hooks) => resumeRun({ runId, components }, hooks));
+     return view(runId);
+   };
+ 
+   const cancel = async (runId: RunId): Promise<RunView> => {
+     await view(runId);
+     const entry = tracked(runId);
+     const inFlight = entry.drive;
+     if (inFlight !== null) {
+       entry.cancel = { by: principal, at: new Date().toISOString() };
+       await inFlight;
+       const after = await view(runId);
+       if (after.state.cancelled === null) {
+         throw new HttpError(409, 'refused', `run ${runId} finished before the cancellation was taken; there is nothing to cancel`, after.standing);
+       }
+       return after;
+     }
+     const outcome = await cancelRun({ runId, by: principal, vault: components.vault });
+     if (!outcome.ok) throw new HttpError(outcome.reason === 'finished' ? 409 : 400, 'refused', outcome.message, outcome);
+     const now = await view(runId);
+     publish(entry, { event: 'state', data: now.state });
+     publish(entry, { event: 'standing', data: now.standing });
+     return now;
+   };
+ 
+   const events = async (runId: RunId, res: ServerResponse): Promise<void> => {
+     const now = await view(runId);
+     const entry = tracked(runId);
+     res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store', connection: 'keep-alive' });
+     open.add(res);
+     const write = (event: RunEvent): void => {
+       res.write(`event: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`);
+     };
+     const finish = (): void => {
+       entry.streams.delete(stream);
+       open.delete(res);
+       res.end();
+     };
+     const stream = (event: RunEvent): void => {
+       write(event);
+       if (event.event === 'end') finish();
+     };
+     write({ event: 'state', data: now.state });
+     write({ event: 'standing', data: now.standing });
+     if (entry.drive === null) {
+       write({ event: 'end', data: entry.lastOutcome });
+       open.delete(res);
+       res.end();
+       return;
+     }
+     entry.streams.add(stream);
+     res.on('close', () => {
+       entry.streams.delete(stream);
+       open.delete(res);
+     });
+   };
+ 
+   /**
+    * `POST /events/<subscription>`, the one route outside the local token: a
+    * delivery authenticates by its signature (D-A-TF-06). The subscription is
+    * checked before the body is read, and nothing a refusal answers with is
+    * the body's text.
+    */
+   const deliver = async (req: IncomingMessage, res: ServerResponse, id: string): Promise<void> => {
+     const policy = await loadPolicyFile(options.policyFile);
+     // A policy that does not load grants no subscription; nothing is read or recorded against it (I5).
+     if (!policy.ok) throw new HttpError(503, 'refused', 'the server has no policy that loads, so no subscription is granted');
+     const subscription = intake.subscription(policy.policy, id);
+     let outcome: DeliveryOutcome;
+     if (subscription === null) {
+       outcome = await intake.count(UNSUBSCRIBED_BUCKET, 'not-subscribed');
+       discard(req, MAX_DELIVERY_BYTES);
+     } else {
+       const body = await readCapped(req, MAX_DELIVERY_BYTES);
+       if (body === 'oversize') {
+         outcome = await intake.count(subscription.id, 'oversize');
+         discard(req, MAX_DELIVERY_BYTES);
+       } else {
+         const signature = req.headers['x-hub-signature-256'];
+         outcome = await intake.deliver(policy.policy, subscription, typeof signature === 'string' ? signature : undefined, body);
+       }
+     }
+     send(res, deliveryStatus(outcome), outcome satisfies DeliveryAnswer);
+   };
+ 
+   const listIntake = async (): Promise<CandidateSummary[]> => {
+     const entries = await components.vault.readTriggerDecisions();
+     return entries.flatMap((entry) => (entry.candidate === null ? [] : [summary({ ...entry, candidate: entry.candidate })]));
+   };
+ 
+   const readIntake = async (id: string): Promise<CandidateView> => {
+     const entry = /^[0-9a-f]{64}$/.test(id) ? await components.vault.readCandidate(id as CandidateId) : null;
+     if (entry?.candidate == null) throw new HttpError(404, 'not-found', `no intake candidate ${id}`);
+     const c = entry.candidate;
+     return { ...summary({ ...entry, candidate: c }), body: c.body, signedAt: c.signedAt, decisionSha256: entry.sha256 };
+   };
+ 
+   /** A person's dismissal: once, of a candidate neither admitted nor expired, with a cause and no text (A-R16-05). */
+   const dismissIntake = async (id: string, body: DismissBody): Promise<CandidateSummary> => {
+     const entry = /^[0-9a-f]{64}$/.test(id) ? await components.vault.readCandidate(id as CandidateId) : null;
+     if (entry?.candidate == null) throw new HttpError(404, 'not-found', `no intake candidate ${id}`);
+     if (entry.expiredAt !== null) throw new HttpError(409, 'conflict', `candidate ${id} expired at ${entry.expiredAt}; an expired candidate is already recorded as not worked`);
+     if (!(await components.vault.dismissCandidate(entry.candidate.id, body.cause, new Date().toISOString()))) {
+       throw new HttpError(409, 'conflict', `candidate ${id} was admitted or dismissed before`);
+     }
+     const after = await components.vault.readCandidate(entry.candidate.id);
+     if (after?.candidate == null) throw new Error(`server: candidate ${id} is gone after its dismissal`);
+     return summary({ ...after, candidate: after.candidate });
+   };
+ 
+   /**
+    * `GET /readiness`: the scan's report for one revision, as a stream. A bad
+    * revision is refused before the stream opens; then `started` names the
+    * commit, a comment every 15 s keeps a client waiting through a scan that
+    * outlasts its header timeout, and one `report` or `failed` event ends it.
+    * Read-only: nothing is written, and admission does not read the ceiling.
+    */
+   const readiness = async (revision: string, res: ServerResponse): Promise<void> => {
+     const scanner = options.readiness ?? null;
+     if (scanner === null) throw new HttpError(409, 'refused', 'this server scans no repository; readiness is served by factory-host over its FACTORY_REPOSITORY');
+     let commit: string;
+     try {
+       commit = await scanner.resolve(revision);
+     } catch (error) {
+       throw new HttpError(400, 'bad-request', error instanceof Error ? error.message : String(error));
+     }
+     res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store', connection: 'keep-alive' });
+     open.add(res);
+     res.write(`event: started\ndata: ${JSON.stringify({ revision, commit })}\n\n`);
+     const beat = setInterval(() => { res.write(': scanning\n\n'); }, 15_000);
+     try {
+       const report = await scanner.scan(commit);
+       res.write(`event: report\ndata: ${JSON.stringify(report)}\n\n`);
+     } catch (error) {
+       res.write(`event: failed\ndata: ${JSON.stringify({ message: error instanceof Error ? error.message : String(error) })}\n\n`);
+     } finally {
+       clearInterval(beat);
+       open.delete(res);
+       res.end();
+     }
+   };
+ 
+   const route = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+     const url = new URL(req.url ?? '/', 'http://server.invalid');
+     const parts = url.pathname.split('/').filter((p) => p !== '');
+     const method = req.method ?? 'GET';
+     if (parts[0] === 'events') {
+       if (parts.length !== 2 || method !== 'POST') throw new HttpError(404, 'not-found', `no route ${url.pathname}`);
+       await deliver(req, res, decodeURIComponent(parts[1] ?? ''));
+       return;
+     }
+     const presented = digest(req.headers.authorization ?? '');
+     if (!timingSafeEqual(presented, expected)) throw new HttpError(401, 'unauthorized', 'a valid local token is required');
+     if (parts[0] === 'intake' && parts.length === 3 && parts[2] === 'dismiss') {
+       if (method !== 'POST') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
+       send(res, 200, await dismissIntake(decodeURIComponent(parts[1] ?? ''), dismissBody(await readJson(req))));
+       return;
+     }
+     if (parts[0] === 'intake' && parts.length <= 2) {
+       if (method !== 'GET') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
+       send(res, 200, parts.length === 1 ? await listIntake() : await readIntake(decodeURIComponent(parts[1] ?? '')));
+       return;
+     }
+     if (parts[0] === 'nightly' && parts.length === 1) {
+       if (method !== 'GET') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
+       send(res, 200, await components.vault.readNightly());
+       return;
+     }
+     if (parts[0] === 'outcomes' && parts.length === 1) {
+       if (method !== 'GET') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
+       send(res, 200, await outcomes(components.vault, outcomeWindow(url.searchParams)));
+       return;
+     }
+     if (parts[0] === 'readiness' && parts.length === 1) {
+       if (method !== 'GET') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
+       await readiness(url.searchParams.get('revision') ?? 'HEAD', res);
+       return;
+     }
+     if (parts[0] !== 'runs' || parts.length > 3) throw new HttpError(404, 'not-found', `no route ${url.pathname}`);
+     if (parts.length === 1) {
+       if (method !== 'POST') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
+       send(res, 201, await create(createBody(await readJson(req))));
+       return;
+     }
+     const runId = decodeURIComponent(parts[1] ?? '') as RunId;
+     const action = parts[2];
+     if (action === undefined) {
+       if (method !== 'GET') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
+       send(res, 200, await view(runId));
+       return;
+     }
+     if (action === 'report') {
+       if (method !== 'GET') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
+       send(res, 200, await report(runId));
+       return;
+     }
+     if (action === 'telemetry') {
+       if (method !== 'GET') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
+       send(res, 200, await telemetry(runId));
+       return;
+     }
+     if (action === 'events') {
+       if (method !== 'GET') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
+       await events(runId, res);
+       return;
+     }
+     if (action === 'approve' || action === 'cancel' || action === 'reject') {
+       if (method !== 'POST') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
+       if (action === 'approve') send(res, 200, await approve(runId, approveBody(await readJson(req))));
+       else if (action === 'reject') send(res, 200, await reject(runId, rejectBody(await readJson(req))));
+       else send(res, 200, await cancel(runId));
+       return;
+     }
+     throw new HttpError(404, 'not-found', `no route ${url.pathname}`);
+   };
+ 
+   const server: Server = createServer((req, res) => {
+     route(req, res).catch((error: unknown) => {
+       const http = error instanceof HttpError ? error : new HttpError(500, 'internal', describe(error));
+       if (res.headersSent) {
+         res.end();
+         return;
+       }
+       sendError(res, http);
+     });
+   });
+ 
+   return {
+     listen: async (port, host) => {
+       // The schedule is the service's: what a stop missed is recorded before the first request is taken (D-A-TF-08).
+       scheduler ??= await startSchedules(async () => {
+         const loaded = await loadPolicyFile(options.policyFile);
+         return loaded.ok ? loaded.policy : null;
+       }, components.vault, intake);
+       return new Promise((resolveUrl, reject) => {
+         server.once('error', reject);
+         server.listen(port, host, () => {
+           server.off('error', reject);
+           const address = server.address();
+           if (address === null || typeof address === 'string') {
+             reject(new Error('api server: listening on something other than a TCP port'));
+             return;
+           }
+           const shown = address.family === 'IPv6' ? `[${address.address}]` : address.address;
+           resolveUrl(`http://${shown}:${String(address.port)}`);
+         });
+       });
+     },
+     close: async () => {
+       scheduler?.stop();
+       scheduler = null;
+       for (const res of open) res.end();
+       open.clear();
+       await new Promise<void>((done) => {
+         server.close(() => { done(); });
+         server.closeAllConnections();
+       });
+       await Promise.all([...runs.values()].flatMap((entry) => (entry.drive === null ? [] : [entry.drive])));
+     },
+   };
+ }
+ 
+ /**
+  * An ISO 8601 date-time with `Z` or an offset. Without a zone `Date.parse`
+  * reads a time in the server's own, so one request would name a different
+  * window on every host.
+  */
+
+===== packages/api/src/http/wire.ts =====
+diff --git a/packages/api/src/http/wire.ts b/packages/api/src/http/wire.ts
+index 2b71626..ac61206 100644
+--- a/packages/api/src/http/wire.ts
++++ b/packages/api/src/http/wire.ts
+@@ -10,6 +10,7 @@
+ import type { ApprovalKey, AutonomyLevel, CandidateId, RejectionReason, RunId, RunState, RunTemplateId, TaskId } from '@olympus-ai/core';
+ import type { AttemptFailure, CandidateDismissal, CandidateRecord, DismissalCause } from '@olympus-ai/vault';
+ import type { DeliveryOutcome } from '../intake.js';
++import type { GateFailure } from '../line.js';
+ import type { WorstCaseCost } from '../cost.js';
+ import type { RequestedArtifacts, RunOutcome, RunStanding } from '../run.js';
+ 
+@@ -93,9 +94,11 @@ export type DriveEnd =
+ /** One server-sent event on `GET /runs/:id/events`: its `event:` name and its JSON `data:`. */
+ export type RunEvent =
+   | { readonly event: 'state'; readonly data: RunState }
+   | { readonly event: 'standing'; readonly data: RunStanding }
+   /** A failed attempt, as its record holds it; `untrustedDetail` is the CLI's or a container's text, data only (I7, #149). */
+   | { readonly event: 'attempt-failed'; readonly data: { readonly task: TaskId; readonly failure: AttemptFailure } }
++  /** A failed gate, as its decision records it; a check that did not start carries its evidence's `untrustedReason`, data only (I7, R37). */
++  | { readonly event: 'gate-failed'; readonly data: { readonly task: TaskId; readonly failure: GateFailure } }
+   | { readonly event: 'end'; readonly data: DriveEnd | null };
+ 
+ export type ErrorCode =
+
+===== packages/api/src/index.ts =====
+diff --git a/packages/api/src/index.ts b/packages/api/src/index.ts
+index 787767d..1a89e56 100644
+--- a/packages/api/src/index.ts
++++ b/packages/api/src/index.ts
+@@ -26,14 +26,14 @@ export {
+   composeDiff,
+   diffDigest,
+   draftPaths,
+   inDependencyTree,
+   localWorkspaceStore,
+   ownDiff,
+   treeDigest,
+   type ContainerUser,
+   type WorkspaceStore,
+ } from './workspace.js';
+-export { boundTo, egressFor, evidenceFactsOf, integrateEscalations, readIntegration, UNANALYSED_TESTS, type LineArtifacts } from './line.js';
++export { boundTo, egressFor, evidenceFactsOf, integrateEscalations, readIntegration, UNANALYSED_TESTS, type GateFailedCheck, type GateFailure, type LineArtifacts } from './line.js';
+ export { builderModels, manifestDraftPath, readCriticResult, specDraftPaths, type DraftingContext, type DraftingDrivers } from './drafting.js';
+ export { DEFAULT_RUBRICS_DIRECTORY, RUBRIC_MAX_BYTES, type ReadRubric } from './rubrics.js';
+ export { DRAFT_DIR, defectBytes, defectIntentText, isDraftableDirectory, parseQuestions, parseReproduction, parseRunRequirements, type DefectPart, type Questions, type Reproduction, type RunRequirements } from './spec-parts.js';
+
+===== packages/api/src/line.ts =====
+diff --git a/packages/api/src/line.ts b/packages/api/src/line.ts
+index f2c6779..d36f655 100644
+--- a/packages/api/src/line.ts
++++ b/packages/api/src/line.ts
+@@ -54,30 +54,31 @@ import picomatch from 'picomatch';
+ import {
+   capabilityRefusal,
+   DRAFT_ROLES,
+   DRAFT_STATIONS,
+   effectiveApproval,
+   escalationAt,
+   grantClears,
+   isDraftStation,
+   gatedIterations,
++  gateRetrySuffix,
+   grantedContext,
+   locksHeldLeaving,
+   M1_STATIONS,
+   maxStarts,
+   nextStep,
+   parkRefusal,
+   isSecuritySeat,
+   levelOf,
+   planNarrowing,
+   REVIEWER_ROLE,
+   seatReviewer,
+   SECURITY_REVIEWER_ROLE,
+   securitySeatContract,
+   STATION_CONTRACTS,
+   StrictPolicyEngine,
+   tierFor,
+   transition,
+   weakerGrade,
+   type DraftFloor,
+   type StepLimits,
+ } from '@olympus-ai/core';
+@@ -126,7 +127,7 @@ import { recordDecision, recordEgress, stationDecider } from './decisions.js';
+ import { requiredShortfall } from './gate.js';
+ import type { EgressPolicy, RelayMeter, SandboxHandle, SandboxSpec, Teardown } from '@olympus-ai/sandbox';
+ import { splitFrontMatter } from '@olympus-ai/compiler';
+-import type { AdmissionRecord, AdmittedArtifact, AttemptFailure, BaseRunRecord, RepoInstructionFile, CallTiming, DiffEntry, EvidenceBundle, IntegrationOpened, IntegrationRecord, UnstartedCheck, UsageReading, UsageRecord, Vault } from '@olympus-ai/vault';
++import type { AdmissionRecord, AdmittedArtifact, AttemptFailure, BaseRunRecord, RepoInstructionFile, CallTiming, DiffEntry, EnforcementDecision, EvidenceBundle, IntegrationOpened, IntegrationRecord, UnstartedCheck, UsageReading, UsageRecord, Vault } from '@olympus-ai/vault';
+ import { draftFloorOf, draftStation, isDrafted, lockApproved, testDraftOf, type DraftingContext } from './drafting.js';
+ import type { RunRequirements } from './spec-parts.js';
+ import { imageFor, type BuiltGraph } from './graph.js';
+@@ -180,45 +181,47 @@ export interface LineArtifacts {
+ export interface LineContext {
+   readonly run: Run;
+   readonly policy: Policy;
+   /** Every role as admission compiled and pinned it; the only source of a seat's instructions (D-A-RC-01). */
+   readonly roles: readonly CompiledRole[];
+   /**
+    * The target repository's instructions as admission read them from the base
+    * and recorded them: the only source of what a granted seat is given of
+    * them, so nothing written to a workspace or the base since reaches one (I3, A-R24-03).
+    */
+   readonly repoInstructions: readonly RepoInstructionFile[];
+   /** Replaced when a drafted artifact is locked (R19). */
+   artifacts: LineArtifacts;
+   readonly graph: TaskGraph;
+   /** The verification manifest's checks and the acceptance manifest's; replaced when drafted tests are locked (R19). */
+   checks: readonly CheckSpec[];
+   /** The spec's security part as admitted or locked, or null where none was and `spec` refuses (R17). */
+   securityPart: SecurityPart | null;
+   /** The spec's run-requirements part, or null where it has none (R19). */
+   requirements: RunRequirements | null;
+   /** What a drafting run was admitted to draft, its intent, and its rubrics (R19). */
+   readonly drafting: DraftingContext;
+   readonly components: BuiltGraph;
+   /** The digest of the base: the one admission snapshotted, or the one the last locked draft wrote (R19). */
+   baseTreeSha256: string;
+   /** Replaced by every commit. */
+   state: RunState;
+   /**
+    * Asked between steps, never during one: a cancellation it returns is
+    * committed by the line itself, so no step in flight loses a commit to a
+    * version race, and the usage record of a call already made is kept (D-P9-04).
+    */
+   readonly cancelRequested?: () => RunCancellation | null;
+   /** Told of every state the line commits, after the Vault stored it. Serves the event stream; it cannot change what is committed. */
+   readonly onCommit?: (state: RunState) => void;
+   /** Told of every failed attempt after its record is stored: how the host logs one (D-R36a-06). It cannot change what is recorded. */
+   readonly onAttemptFailed?: (task: TaskId, failure: AttemptFailure) => void;
++  /** Told of every failed gate after its decision is stored (R37, #158). It cannot change what is recorded. */
++  readonly onGateFailed?: (task: TaskId, failure: GateFailure) => void;
+   /**
+    * Asked before each build task runs, for input a declared source brought for
+    * it. Whatever it returns narrows the run before it reaches a model, through
+    * `narrowRun` (A-R10-02, D-R10-06). The runtime's own sources set it; no
+    * caller of the service can.
+    */
+   readonly inputFor?: (task: Task) => { readonly source: InputSource; readonly text: string } | null;
+ }
+@@ -733,20 +736,20 @@ export const FAILURE_DETAIL_LIMIT = 400;
+ /**
+  * What a failed attempt's error says, read by the runtime: a driver's or a
+  * sandbox's refusal by its name and layer, anything else as `error`. The
+  * text is the error's own and may quote the CLI's or the container's output,
+  * so it is trimmed and kept as untrusted data (I7, D-R36a-05).
+  */
+ export function attemptFailure(error: unknown, retries: number): AttemptFailure {
+   const named = typeof error === 'object' && error !== null ? (error as { name?: unknown; layer?: unknown }) : {};
+   const layer = typeof named.layer === 'string' && named.layer !== '' ? named.layer : 'error';
+   const source = named.name === 'DriverRefusal' ? 'driver' : named.name === 'SandboxRefusal' ? 'sandbox' : 'runtime';
+   const text = (error instanceof Error ? error.message : String(error)).trim();
+-  return { source, layer: source === 'runtime' ? 'error' : layer, retries, untrustedDetail: text.length > FAILURE_DETAIL_LIMIT ? `${text.slice(0, FAILURE_DETAIL_LIMIT)}…` : text };
++  return { source, layer: source === 'runtime' ? 'error' : layer, retries, untrustedDetail: trimmed(text) };
+ }
+ 
+ /**
+  * A driver or sandbox failure: one retry spent, committed before the next
+  * attempt. Past the station's `retry.max` the task parks and the run stops.
+  * Why it failed is recorded first, so the retry or the park it leads to has
+  * a cause the record can show (#149, D-R36a-05).
+  */
+@@ -773,6 +776,59 @@ function decode(bytes: Uint8Array): string {
+   return new TextDecoder().decode(bytes);
+ }
+ 
++function trimmed(text: string): string {
++  const t = text.trim();
++  return t.length > FAILURE_DETAIL_LIMIT ? `${t.slice(0, FAILURE_DETAIL_LIMIT)}…` : t;
++}
++
++/**
++ * One check a failed gate named, as `status` and `events` show it (R37). For
++ * a check that did not start, `untrustedReason` is the reason its evidence
++ * recorded, which can quote a container's error: trimmed, shown, and never
++ * prompted (I7). Null for every other cause.
++ */
++export interface GateFailedCheck {
++  readonly checkId: string;
++  readonly cause: FailedCheck['cause'];
++  readonly untrustedReason: string | null;
++}
++
++/** A failed gate as `status` and `events` show it: each failed check, in the gate's order (R37, #158). */
++export interface GateFailure {
++  readonly failed: readonly GateFailedCheck[];
++}
++
++/** The gate's failures joined with the reasons the evidence holds for the checks that did not start. */
++export function gateFailure(failed: readonly FailedCheck[], unstarted: readonly UnstartedCheck[]): GateFailure {
++  return {
++    failed: failed.map((f) => {
++      const reason = f.cause === 'no-result' ? unstarted.find((u) => u.checkId === f.checkId)?.reason : undefined;
++      return { checkId: f.checkId, cause: f.cause, untrustedReason: reason === undefined ? null : trimmed(reason) };
++    }),
++  };
++}
++
++/**
++ * What the task's next build is told of its last verify: the checks its gate
++ * failed, by id and cause, read from the decision the gate recorded, so a
++ * resume in another process tells the same (R37, D-R37-03). Nothing when the
++ * task's latest verify outcome is a conflict, which no gate judged (D-R4-03),
++ * or when no gate has failed it.
++ */
++async function gateRetry(ctx: LineContext, task: Task): Promise<string | undefined> {
++  const { vault } = ctx.components;
++  let latest: EnforcementDecision | null = null;
++  for (const ref of await vault.readDecisions(ctx.run.id)) {
++    const d = JSON.parse(decode(await vault.read(ref))) as EnforcementDecision;
++    if (d.taskId !== task.id) continue;
++    const gate = d.decision.cause === 'station-refused' && d.decision.refusal.reason === 'gate-failed';
++    if (!gate && d.decision.cause !== 'task-conflict') continue;
++    if (latest === null || d.decidedAt >= latest.decidedAt) latest = d;
++  }
++  if (latest?.decision.cause !== 'station-refused' || latest.decision.refusal.reason !== 'gate-failed') return undefined;
++  return gateRetrySuffix(latest.decision.refusal.failed);
++}
++
+ export interface ReadArtifacts {
+   readonly text: string;
+   /** Artifacts whose bytes, as read, do not hash to what was admitted. */
+@@ -1409,50 +1465,54 @@ async function recordConflict(ctx: LineContext, task: Task, conflict: TaskConfli
+ /** `build`: one attempt at one task. The result is recorded in the Vault before the task is handed to `verify`. */
+ async function build(ctx: LineContext, task: Task): Promise<StationRefusal | undefined> {
+   const { driver, vault, workspaces } = ctx.components;
+   const capability = capabilityRefusal(STATION_CONTRACTS.build, driver.capabilities());
+   if (capability !== undefined) return capability;
+   const tampered = await tamperedPaths(ctx);
+   // The task has not run, so the mismatch is not its role's doing.
+   if (tampered.length > 0) return recordTamper(ctx, 'build', task, tampered, { phase: 'before-build' }, null);
+ 
+   const spec = await readText(ctx, specArtifacts(ctx));
+   const tests = await readText(ctx, ctx.artifacts.acceptanceTests);
+   const drifted = [...spec.tampered, ...tests.tampered];
+   // Read before the iteration is spent: context that changed under the check costs no budget.
+   if (drifted.length > 0) return recordTamper(ctx, 'build', task, drifted, { phase: 'context' }, null);
+ 
++  // Read before the attempt is counted: a gated iteration behind this one is one a gate may have failed (R37).
++  const gatedBefore = gatedIterations(attemptsOf(ctx.state, task)) > 0;
+   const started = await startAttempt(ctx, task);
+   if (started !== undefined) return started;
+   // A fresh pair for every invocation, a replayed one included: the tree the task is handed is
+   // exactly base and what was accepted, never what an earlier attempt left behind.
+   const { start, work } = attemptPaths(workspaces, ctx.run.id, task.id, attemptsOf(ctx.state, task).iterations);
+   const base = await accepted(ctx);
+   await materialize(workspaces, ctx.run.id, start, base.diff, () => base.tree);
+   // What the role is not given is left out of both copies, so the model never has it and its diff never shows it (D-A-TR-04).
+   await omitWithheld(ctx, task.role, start);
+   await copyTree(start, work);
+   // Input a declared source brought for this task narrows the run before it is placed, and is placed only after (D-A-TR-03).
+   const brought = ctx.inputFor?.(task) ?? null;
+   const input = brought === null ? undefined : await narrowRun(ctx, brought.source, brought.text, task.id);
+   // The target's instructions, where this task is granted them, from the admission record alone (R24).
+   const instructions = await repoInstructionsFor(ctx, task, STATION_CONTRACTS.build, task.role);
+   const inputs = [input, instructions.input].filter((i): i is WithheldInput => i !== undefined);
+   const offered: Partial<Record<ContextGrant, string>> = {
+     'locked-spec': spec.text,
+     'acceptance-tests': tests.text,
+     'task-graph': JSON.stringify(ctx.graph.tasks.map(({ id, station, role, dependsOn }) => ({ id, station, role, dependsOn }))),
+   };
+-  const ran = await runTask(ctx, task, driver, pinnedRole(ctx, task.role), joinParts(grantedContext(STATION_CONTRACTS.build, withInstructions(offered, instructions))), work, { inputs });
++  // The checks a failed gate named, by id and cause, in the suffix and never the prefix or the role; never their output (I7, R37).
++  const suffix = gatedBefore ? await gateRetry(ctx, task) : undefined;
++  const ran = await runTask(ctx, task, driver, pinnedRole(ctx, task.role), joinParts(grantedContext(STATION_CONTRACTS.build, withInstructions(offered, instructions))), work, { inputs, ...(suffix === undefined ? {} : { suffix }) });
+   if (!ran.ok) return spendRetry(ctx, task, ran.error);
+   // I2: a result is recorded only as the contract shapes it. A key it does not name, `status`
+   // among them, is a driver speaking outside the contract; it is not recorded, and the run stops.
+   const problems = taskResultProblems(ran.result);
+   if (problems.length > 0) {
+     throw new Error(`line: the driver's result for task ${task.id} does not match the TaskResult contract, so it was not recorded: ${problems.join('; ')}`);
+   }
+   const ref = await vault.recordTaskResult(ctx.run.id, ran.result);
+   await commit(ctx, { tasks: { [task.id]: 'verifying' }, results: { [task.id]: ref } });
+   return undefined;
+ }
+ 
+ /** Locked artifacts whose content in `tree` is not what was admitted. */
+@@ -1539,205 +1599,206 @@ async function recordFindings(ctx: LineContext, task: Task, report: TamperReport
+ /**
+  * `verify`: the task's own diff, held to the locks and the grant; then the
+  * checks, run over a tree built from base and the cumulative diff, where the
+  * agent never ran, mounted read-only with no egress. The verdict follows the
+  * check results and nothing else (I2).
+  */
+ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | undefined> {
+   const { sandbox, vault, driver, workspaces } = ctx.components;
+   const before = await tamperedPaths(ctx);
+   if (before.length > 0) return recordTamper(ctx, 'verify', task, before, { phase: 'before-checks' });
+   const result = await readResult(ctx, task);
+ 
+   const { start, work } = attemptPaths(workspaces, ctx.run.id, task.id, attemptsOf(ctx.state, task).iterations);
+   const written = await ownDiff(start, work);
+   // A path the role is not given, written or created, is refused: an omitted file is never replaced unseen (D-R10-05).
+   const sensitive = withheldOf(withheldGlobs(ctx, task.role), written.map((entry) => entry.path));
+   if (sensitive.length > 0) return recordEscape(ctx, task, sensitive);
+   // D-R15-05: what the task wrote in a dependency tree is recorded and escalated, never carried. Every
+   // check, and the runner a suite check starts, runs over the runtime's install of the tree's lockfile (R34).
+   const own = written.filter((entry) => !inDependencyTree(entry.path));
+   const notCarried = [...new Set(written.filter((entry) => inDependencyTree(entry.path)).map((entry) => dependencyEntry(entry.path)))].sort();
+ 
+   // I3: the task's copy is not where the Vault checks the locks, so its diff is checked instead.
+   // A locked path in it is the tamper the Vault's own check can no longer see.
+   const admitted = new Map(admittedArtifacts(ctx).map((a) => [a.path, a.sha256]));
+   const locked = own.filter((entry) => admitted.has(entry.path));
+   if (locked.length > 0) {
+     const tampered = locked.map((entry) => ({ path: entry.path, expected: admitted.get(entry.path) ?? 'missing', actual: entry.sha256 ?? 'missing' }));
+     return recordTamper(ctx, 'verify', task, tampered, { phase: 'diff' });
+   }
+   const scope = scopeFor(ctx, task);
+   const outside = writesOutsideGrant(own, scope.writableGlobs, STATION_CONTRACTS.build.writeBoundary.workspaceGlobs);
+   if (outside.length > 0) return recordEscape(ctx, task, outside);
+ 
+   const prior = await accepted(ctx);
+   // I5: a path a sibling's accepted change touched after this task started would be overwritten by
+   // composing; the task is rebuilt over the accepted tree instead, and no side is picked (R4).
+   const conflict = await conflictOf(ctx, task, start, own, prior);
+   if (conflict !== null) return recordConflict(ctx, task, conflict);
+   const diff = await composeDiff(basePath(workspaces, ctx.run.id), prior.diff, own);
+   const diffSha256 = diffDigest(diff);
+   const tree = treePath(workspaces, ctx.run.id, diffSha256);
+   const fromTask = new Set(own.map((entry) => entry.path));
+   await materialize(workspaces, ctx.run.id, tree, diff, (path) => (fromTask.has(path) ? work : prior.tree));
+   const built = await tamperedIn(ctx, tree);
+   if (built.length > 0) return recordTamper(ctx, 'verify', task, built, { phase: 'tree' });
+   // R34: the tree's lockfile, the change's included, is installed by the runtime, and every
+   // dependency tree base or task left is replaced by that install before any check runs.
+   const installed = await installInto(ctx, tree, basePath(workspaces, ctx.run.id), task.id, ctx.state.station);
+   if (!installed.ok && installed.at === 'provision') return spendRetry(ctx, task, installed.reason);
+   const runner = await suiteRunner(basePath(workspaces, ctx.run.id));
+   const stackImage = await checkImageOf(basePath(workspaces, ctx.run.id));
+   const security = ctx.checks.filter(isSecurityCheck);
+   const tamper = await analyzeTamper(prior.tree, tree, {
+     protectedPaths: ctx.policy.protectedPaths,
+     coverage: coverageReport(ctx),
+     // A security check pins no command: its scanner's arguments are the runtime's, and name no file in the tree.
+     commands: ctx.checks.filter((c) => !isSecurityCheck(c)).map((c) => commandOf(c, runner)),
+     markers: [...new Set(security.map((c) => c.kind))].map((kind) => ({ kind, markers: scannerFor(kind, ctx.components.scanners).markers })),
+   });
+ 
+   // Results stay aligned with the specs by position, never matched up by id afterwards.
+   const specs = ctx.checks;
+   const results: Array<CheckResult | undefined> = [];
+   const unstarted: UnstartedCheck[] = [];
+   // Each check gets a sandbox of its own, whose wall clock is the check's pinned timeout. A check
+   // shares no container with the one before it, so nothing an earlier check did to the container
+   // can change what a later one runs (codex-2); and a check that outruns its timeout is ended by
+   // the provider and produces no result, recorded in `unstarted` like any other (codex-7).
+   for (const [index, check] of specs.entries()) {
+     if (isSecurityCheck(check)) {
+       const scanned = await runSecurity(ctx, tree, diffSha256, index, check, task.id);
+       if (scanned.ok) results.push(scanned.result);
+       else if (scanned.at === 'provision') return spendRetry(ctx, task, scanned.reason);
+       else {
+         results.push(undefined);
+         unstarted.push({ checkId: check.id, reason: scanned.reason });
+       }
+       continue;
+     }
+     // With the install refused or failed, the tree holds no dependency tree at all, so no check runs over it as if it did (I5).
+     if (!installed.ok) {
+       results.push(undefined);
+       unstarted.push({ checkId: check.id, reason: installed.reason });
+       continue;
+     }
+     const missing = await runnerMissing(check, runner, tree);
+     if (missing !== undefined) {
+       results.push(undefined);
+       unstarted.push({ checkId: check.id, reason: missing });
+       continue;
+     }
+     let handle: SandboxHandle;
+     try {
+       handle = await sandbox.provision(checkSandbox(ctx, tree, check, stackImage));
+     } catch (error) {
+       return spendRetry(ctx, task, error);
+     }
+     try {
+       const startedAt = new Date().toISOString();
+       try {
+         // The pinned argument vector, or a suite check's runner, exactly: no shell, no splitting (A-P6-01, D-R15-04).
+         const exec = await sandbox.exec(handle, [...commandOf(check, runner)]);
+         results.push({
+           checkId: check.id,
+           exitCode: exec.exitCode,
+           stdout: exec.stdout,
+           stderr: exec.stderr,
+           suiteCount: await suitesRun(check, runner, tree),
+           expectation: null,
+           findings: null,
+           durationMs: exec.durationMs,
+           startedAt,
+         });
+       } catch (error) {
+         // There is no exit code to record and none is invented; the bundle says why (A-P6-02).
+         results.push(undefined);
+         unstarted.push({ checkId: check.id, reason: describe(error) });
+       }
+     } finally {
+       // A check's sandbox has no route out today, and whatever its proxy decided is recorded all the same (D-P14-04).
+       const { egress } = await sandbox.destroy(handle);
+       await recordEgress({ vault: ctx.components.vault, runId: ctx.run.id, taskId: task.id, station: ctx.state.station }, egress);
+     }
+   }
+   const checks = results.filter((r): r is CheckResult => r !== undefined);
+ 
+   // Evidence collected over a changed artifact is not evidence, whatever the provider claims about ro.
+   const after = [...(await tamperedPaths(ctx)), ...(await tamperedIn(ctx, tree))];
+   if (after.length > 0) return recordTamper(ctx, 'verify', task, after, { phase: 'after-checks', checks });
+ 
+   // The `test-design` exit is not crossed without a base record, so a task at verify has one (D-A-BF-01).
+   const baseRun = await vault.readBaseRun(ctx.run.id, testDraftOf(ctx));
+   if (baseRun === null) throw new Error(`line: run ${ctx.run.id} reached verify with no base record`);
+   const baseRecord = await readRecord<BaseRunRecord>(ctx, baseRun);
+   const failed: FailedCheck[] = [];
+   specs.forEach((check, i) => {
+     // A security check is judged by its findings against the base's, never by its exit code alone (D-A-SC-02).
+     const shortfall = isSecurityCheck(check)
+       ? securityShortfall(check, results[i], baseRecord.checks.find((r) => r.checkId === check.id)?.findings ?? [], scannerFor(check.kind, ctx.components.scanners), tamper)
+       : requiredShortfall(check, results[i]);
+     if (shortfall !== undefined) failed.push(shortfall);
+   });
+   const differences = claimEvidenceDiff(result.claim, own);
+   if (differences.length > 0) {
+     // Recorded, and deliberately not entered in run state: every entry there halts the run, and a
+     // halt the claim could trigger would let the model's story decide the outcome (D-P6-03).
+     await recordViolation(ctx, {
+       runId: ctx.run.id,
+       taskId: task.id,
+       kind: 'claim-mismatch',
+       role: task.role,
+       driverProvenanceId: driver.provenanceId(),
+       contractVersion: driver.contractVersion,
+       detectedAt: new Date().toISOString(),
+       detail: { station: 'verify', claimEvidenceDiff: differences },
+     });
+   }
+   await recordFindings(ctx, task, tamper);
+   const evidence: EvidenceBundle = {
+     runId: ctx.run.id,
+     taskId: task.id,
+     baseCommit: ctx.run.baseCommit,
+     baseTreeSha256: ctx.baseTreeSha256,
+     baseRun,
+     diff,
+     diffSha256,
+     checks,
+     unstarted,
+     claim: result.claim,
+     claimEvidenceDiff: differences,
+     tamper,
+     notCarried,
+     install: installed.ok ? installed.install : null,
+     collectedBy: 'runtime',
+     driverProvenanceId: driver.provenanceId(),
+     contractVersion: driver.contractVersion,
+   };
+   const ref = await vault.writeEvidence(evidence);
+   // The status follows the verdict and nothing else (I2). A failure with no iteration left parks the task;
+   // an iteration a conflict sent back was judged by no gate and spends none of them (D-R4-03).
+   const spent = gatedIterations(attemptsOf(ctx.state, task));
+   const status: TaskStatus = failed.length === 0 ? 'passed' : spent >= STATION_CONTRACTS[task.station].maxIterations ? 'parked' : 'failed';
+   // A failed gate is a decision, recorded before the status it sets is committed, at every iteration, so each failure is counted by its cause (R17, D-R17-06).
+   if (failed.length > 0) {
+     await recordDecision(
+       { vault, runId: ctx.run.id, taskId: task.id, station: 'verify' },
+       { cause: 'station-refused', decidedBy: 'line', refusal: { ok: false, reason: 'gate-failed', failed, message: `the gate failed on ${failed.map((f) => `${f.checkId} (${f.cause})`).join(', ')}` } },
+     );
++    ctx.onGateFailed?.(task.id, gateFailure(failed, unstarted));
+   }
+   // The station machine returns this park to the line on its next step; it is recorded here, first.
+   if (status === 'parked') await park(ctx, task, { evidence: ref }, 'iterations-exhausted');
+   else await commit(ctx, { tasks: { [task.id]: status }, evidence: ref });
+   return undefined;
+ }
+ 
+ /**
+  * A review seat's tree: the files its contract's grants cover and nothing
+  * else. The review contract grants the locked spec, the acceptance tests, and
+  * the diff, so the view holds those files as the accepted tree has them; the
+  * security seat's contract does not grant the acceptance tests, so its view
+  * holds none (R9, codex-3). The task graph, the manifest, and every file the
+  * diff does not carry are absent, so a reviewer with a read tool cannot open
+  * what its contract denies it (I6).
+  */
+
+===== packages/api/src/run.ts =====
+diff --git a/packages/api/src/run.ts b/packages/api/src/run.ts
+index 4b2a296..648ac05 100644
+--- a/packages/api/src/run.ts
++++ b/packages/api/src/run.ts
+@@ -82,7 +82,7 @@ import { repoInstructionsProblem } from '@olympus-ai/vault';
+ import { readUsage, unsettledCalls, worstCaseCost, type WorstCaseCost } from './cost.js';
+ import { estimateCost, type CostEstimate, type EstimateCell } from './outcomes.js';
+ import { problemCodes, recordDecision } from './decisions.js';
+-import { integrateEscalations, readIntegration, runLine, type LineArtifacts, type LineContext } from './line.js';
++import { gateFailure, integrateEscalations, readIntegration, runLine, type GateFailure, type LineArtifacts, type LineContext } from './line.js';
+ import { draftFloorOf, lockedArtifacts, NOT_DRAFTING, seatDriver, settleArtifactRoot, settleBase, type DraftingContext, type DraftingDrivers } from './drafting.js';
+ import { readRubrics, rubricsProblems, type ReadRubric } from './rubrics.js';
+ import { parsePlan } from './observation-plan.js';
+@@ -249,13 +249,15 @@ export interface RunRequest {
+ /** What a caller of the line may observe and ask of it while it drives. Neither can change what is committed. */
+ export interface DriveHooks {
+   /** Asked between steps; a cancellation returned is committed by the line and the run stops (A-P9-01). */
+   readonly cancelRequested?: () => RunCancellation | null;
+   /** Told of every committed state, in order. */
+   readonly onCommit?: (state: RunState) => void;
+   /** Told of every failed attempt, after its record is stored (#149). */
+   readonly onAttemptFailed?: NonNullable<LineContext['onAttemptFailed']>;
++  /** Told of every failed gate, after its decision is stored (R37, #158). */
++  readonly onGateFailed?: NonNullable<LineContext['onGateFailed']>;
+   /** Input a declared source brought for a build task, which narrows the run first (D-R10-06). The HTTP service never sets it. */
+   readonly inputFor?: NonNullable<LineContext['inputFor']>;
+ }
+ 
+ /** Deliberately no level, policy, or artifacts: a resume reads them from the run's admission record (A-P4-03). */
+@@ -1865,27 +1867,27 @@ export interface DraftStanding {
+ /**
+  * Where a run stands, derived from its committed state by the rules the line
+  * itself follows (I2). Nothing a model wrote is an input.
+  *
+  * - `passed`: every M1 exit gate is crossed; a resume would return at once.
+  * - `stopped`: the line refuses to continue, and says why.
+  * - `awaiting-approval`: the next exit needs a human's approval of `key`;
+  *   `escalations` says what raised it beyond its floor, if anything (A-I1a-07),
+  *   and `draft` what is being decided at a drafted exit (R19).
+  * - `open`: there is work left, and a drive would do it.
+  */
+ export type RunStanding =
+   | { readonly standing: 'passed' }
+   /**
+-   * `lastFailure` is the last failed attempt of the task a retry park
+-   * stopped, read from the Vault, or null for any other stop (#149).
++   * `lastFailure` is the last failed attempt or failed gate of the task a park
++   * stopped, read from the Vault, or null for any other stop (#149, R37).
+    */
+   | { readonly standing: 'stopped'; readonly refusal: StationRefusal; readonly lastFailure: LastFailure | null }
+   | { readonly standing: 'awaiting-approval'; readonly key: ApprovalKey; readonly escalations: readonly string[]; readonly draft: DraftStanding | null }
+   | { readonly standing: 'open' };
+ 
+ /**
+  * Whether a standing was read from the Vault alone, or after re-hashing the
+  * admitted artifacts in the working copy. A cancelled, halted, or passed run
+  * reads `records`; every other run's standing includes a live lock check
+  * (D-I1b-15), which a reader must not take for a recorded fact.
+  */
+@@ -1897,41 +1899,61 @@ const LAST_STATION: StationId = M1_STATIONS[M1_STATIONS.length - 1] ?? 'integrat
+ async function draftStanding(vault: Vault, state: RunState, station: DraftStation, floor: NonNullable<ReturnType<typeof floorAt>>): Promise<DraftStanding> {
+   const attempt = state.drafts[station]?.attempts.at(-1);
+   const record = attempt?.draft == null ? null : await readVaultJson<DraftRecord>(vault, attempt.draft);
+   const critic = attempt?.critic == null || attempt.critic === 'not-seated' ? null : await readVaultJson<CriticRecord>(vault, attempt.critic);
+   return {
+     station,
+     draft: floor.draft,
+     failed: floor.failed,
+     problems: record?.problems ?? [],
+     critic: critic === null ? null : { grade: critic.grade, binding: critic.binding, findings: critic.findings },
+     attemptsLeft: STATION_CONTRACTS[station].maxIterations - floor.draft.attempt,
+   };
+ }
+ 
+-/** A failed attempt as `status` and `events` show it. `untrustedDetail` is the CLI's or a container's text: shown, never prompted (I7). */
+-export interface LastFailure {
+-  readonly task: TaskId;
+-  readonly station: StationId | null;
+-  readonly decidedAt: string;
+-  readonly failure: AttemptFailure;
+-}
++/**
++ * The last failure of a parked task as `status` shows it: a failed attempt,
++ * whose `untrustedDetail` is the CLI's or a container's text, or a failed
++ * gate, whose checks that did not start carry the reason their evidence
++ * recorded as `untrustedReason`. Either text is shown, never prompted (I7).
++ */
++export type LastFailure =
++  | { readonly kind: 'attempt-failed'; readonly task: TaskId; readonly station: StationId | null; readonly decidedAt: string; readonly failure: AttemptFailure }
++  | ({ readonly kind: 'gate-failed'; readonly task: TaskId; readonly station: StationId | null; readonly decidedAt: string } & GateFailure);
+ 
+-/** The last recorded failed attempt of the task `refusal` parked for its retries, or null. */
+-async function lastFailureOf(vault: Vault, runId: RunId, refusal: StationRefusal): Promise<LastFailure | null> {
+-  if (refusal.reason !== 'parked' || refusal.cause !== 'retries-exhausted') return null;
+-  let last: LastFailure | null = null;
+-  for (const ref of await vault.readDecisions(runId)) {
++/**
++ * The latest failed attempt or failed gate of the task `refusal` parked,
++ * whatever it parked on, or null (#149, R37). A gate's checks that did not
++ * start take their reasons from the task's latest evidence, which the line
++ * writes in the same verify, before the decision.
++ */
++async function lastFailureOf(vault: Vault, state: RunState, refusal: StationRefusal): Promise<LastFailure | null> {
++  if (refusal.reason !== 'parked' || refusal.task === null) return null;
++  let last: EnforcementDecision | null = null;
++  for (const ref of await vault.readDecisions(state.runId)) {
+     const d = JSON.parse(new TextDecoder().decode(await vault.read(ref))) as EnforcementDecision;
+-    if (d.decision.cause !== 'attempt-failed' || d.taskId !== refusal.task) continue;
+-    if (last === null || d.decidedAt >= last.decidedAt) last = { task: d.taskId, station: d.station, decidedAt: d.decidedAt, failure: d.decision.failure };
++    if (d.taskId !== refusal.task) continue;
++    const gate = d.decision.cause === 'station-refused' && d.decision.refusal.reason === 'gate-failed';
++    if (!gate && d.decision.cause !== 'attempt-failed') continue;
++    if (last === null || d.decidedAt >= last.decidedAt) last = d;
++  }
++  if (last === null) return null;
++  const at = { task: refusal.task, station: last.station, decidedAt: last.decidedAt };
++  if (last.decision.cause === 'attempt-failed') return { kind: 'attempt-failed', ...at, failure: last.decision.failure };
++  if (last.decision.cause !== 'station-refused' || last.decision.refusal.reason !== 'gate-failed') return null;
++  let unstarted: EvidenceBundle['unstarted'] = [];
++  for (const ref of [...state.evidenceRefs].reverse()) {
++    const bundle = await readVaultJson<EvidenceBundle>(vault, ref);
++    if (bundle.taskId !== refusal.task) continue;
++    unstarted = bundle.unstarted;
++    break;
+   }
+-  return last;
++  return { kind: 'gate-failed', ...at, ...gateFailure(last.decision.refusal.failed, unstarted) };
+ }
+ 
+ export async function runStanding(vault: Vault, runId: RunId): Promise<{ state: RunState; standing: RunStanding; source: StandingSource }> {
+   const read = await standingOf(vault, runId);
+   if (read.standing.standing !== 'stopped') return { ...read, standing: read.standing };
+-  return { ...read, standing: { ...read.standing, lastFailure: await lastFailureOf(vault, runId, read.standing.refusal) } };
++  return { ...read, standing: { ...read.standing, lastFailure: await lastFailureOf(vault, read.state, read.standing.refusal) } };
+ }
+ 
+ type BareStanding = Exclude<RunStanding, { standing: 'stopped' }> | { readonly standing: 'stopped'; readonly refusal: StationRefusal };
+
+===== packages/conformance/src/registry/decisions.ts =====
+diff --git a/packages/conformance/src/registry/decisions.ts b/packages/conformance/src/registry/decisions.ts
+index 311c453..b342a83 100644
+--- a/packages/conformance/src/registry/decisions.ts
++++ b/packages/conformance/src/registry/decisions.ts
+@@ -342,498 +342,498 @@ function admissionRow(key: CauseKey, prefix: string, arrange: (rig: LineRig) =>
+ export const DECISION_TABLE: Readonly<Record<CauseKey, Row>> = {
+   'admission:invalid-request': {
+     kind: 'scenario',
+     run: async () => {
+       // The one invalid request that has a run id the Vault can name and a run already there: admitting it twice.
+       await withLine('p14-invalid-', async (rig) => {
+         const { startRun } = await api();
+         await stoppedForApproval(rig);
+         const again = await startRun(await rig.request(await rig.components()));
+         if (again.ok || again.reason !== 'invalid-request') throw new Error(`P14: a second admission was ${again.ok ? 'admitted' : again.reason}`);
+         const vault = (await rig.components()).vault;
+         const d = await expectDecision(rig, vault, 'admission:invalid-request', { decidedBy: 'admission', taskId: null, station: null });
+         if (d.decision.cause !== 'admission-refused' || d.decision.refusal.reason !== 'invalid-request') throw new Error('P14: unreachable');
+         const problems = d.decision.refusal.problems;
+         if (!problems.some((p) => p.path === 'runId' && p.code === 'already-admitted') || problems.some((p) => Object.hasOwn(p, 'message'))) {
+           throw new Error(`P14: an invalid request was recorded with ${JSON.stringify(problems)}; each problem keeps its path and code and no message`);
+         }
+       });
+     },
+   },
+   'admission:unsafe-above-l1': admissionRow('admission:unsafe-above-l1', 'p14-unsafe-', async (rig) => {
+     const { startRun } = await api();
+     await startRun(await rig.request(await rig.components(), { requestedLevel: 2 }));
+   }),
+   'admission:cost-unapproved': admissionRow('admission:cost-unapproved', 'p14-cost-', async (rig) => {
+     const { startRun } = await api();
+     await startRun(await rig.request(await rig.components(), { approvedCostUsd: 0 }));
+   }),
+   'admission:controls-unavailable': admissionRow('admission:controls-unavailable', 'p14-controls-', async (rig) => {
+     const { startRun } = await api();
+     await startRun(await rig.request(await realComponents(rig), { requestedLevel: 3, policy: await realPolicy(3) }));
+   }),
+   'admission:policy-refused': admissionRow('admission:policy-refused', 'p14-policy-', async (rig) => {
+     const { startRun } = await api();
+     await startRun(await rig.request(await rig.components(), { policy: await linePolicy({}, { stationCaps: { build: 0 } }) }));
+   }),
+   'admission:roles-refused': admissionRow('admission:roles-refused', 'p14-roles-refused-', async (rig) => {
+     const { startRun } = await api();
+     // A broken copy beside the rig's roles, so the control admission after it reads the intact ones.
+     const roles = join(rig.roles, '..', 'roles-broken');
+     await cp(rig.roles, roles, { recursive: true });
+     await writeFile(join(roles, 'builder.md'), '');
+     await startRun(await rig.request(await rig.components(), { roles }));
+   }),
+   'admission:instructions-refused': admissionRow('admission:instructions-refused', 'p14-instructions-refused-', async (rig) => {
+     const { startRun } = await api();
+     // A directory where the base's CLAUDE.md would be: not a regular file, so the reader refuses it (A-R24-04).
+     await mkdir(join(rig.dirs.artifacts, 'CLAUDE.md'), { recursive: true });
+     // Holding a file, so the commit the base is read from has the directory (D-R36a-04).
+     await writeFile(join(rig.dirs.artifacts, 'CLAUDE.md', 'notes.md'), 'a directory, not instructions');
+     await startRun(await rig.request(await rig.components()));
+     // Removed after, so the control admission that follows reads a base the reader accepts.
+     await rm(join(rig.dirs.artifacts, 'CLAUDE.md'), { recursive: true });
+   }),
+   'admission:role-undefined': admissionRow('admission:role-undefined', 'p14-role-undefined-', async (rig) => {
+     const { startRun } = await api();
+     const roles = join(rig.roles, '..', 'roles-unreviewed');
+     await cp(rig.roles, roles, { recursive: true });
+     await rm(join(roles, 'reviewer.md'));
+     await startRun(await rig.request(await rig.components(), { roles }));
+   }),
+   // R22: the trigger policy refuses a person's run when `human` is not enabled.
+   'admission:trigger-refused': admissionRow('admission:trigger-refused', 'p14-trigger-', async (rig) => {
+     const { startRun } = await api();
+     const base = await linePolicy();
+     await startRun(await rig.request(await rig.components(), { policy: { ...base, triggers: { ...base.triggers, enabled: [] } } }));
+   }),
+   // R22: a candidate past its window, on the runtime's clock.
+   'admission:candidate-expired': admissionRow('admission:candidate-expired', 'p14-expired-', async (rig) => {
+     await expiredCandidateRun(rig);
+   }),
+   'admission:refused': admissionRow('admission:refused', 'p14-capability-', async (rig) => {
+     const { startRun } = await api();
+     const lacking = await stubDriver({ capabilities: { parallelism: 0 } });
+     await startRun(await rig.request(await rig.components({ driver: lacking, reviewer: await stubDriver() })));
+   }),
+   'resume:unsafe-above-l1': {
+     kind: 'scenario',
+     run: async () => {
+       // Admitted at L2 on the real composition, then resumed on the stubs: the resume repeats admission's check.
+       await withLine('p14-resume-unsafe-', async (rig) => {
+         const { admitRun, resumeRun } = await api();
+         const admitted = await admitRun(await rig.request(await realComponents(rig), { requestedLevel: 2, policy: await realPolicy(2) }));
+         if (!admitted.ok) throw new Error(`P14: the real composition at L2 was refused (${admitted.reason}), so no resume can be refused`);
+         const components = await rig.components();
+         const outcome = await resumeRun({ runId: rig.runId, components });
+         if (outcome.ok || outcome.reason !== 'unsafe-above-l1') throw new Error(`P14: a resume on the stubs at L2 was ${outcome.ok ? 'driven' : outcome.reason}`);
+         const d = await expectDecision(rig, components.vault, 'resume:unsafe-above-l1', { decidedBy: 'admission', taskId: null, station: null });
+         if (d.decision.cause !== 'resume-refused' || d.decision.refusal.reason !== 'unsafe-above-l1' || !d.decision.refusal.components.includes('StubSandboxProvider')) {
+           throw new Error(`P14: a resume refused as unsafe was recorded as ${JSON.stringify(d.decision)}`);
+         }
+       });
+     },
+   },
+   'resume:meter-lost': {
+     kind: 'scenario',
+     run: async () => {
+       // A call whose sandbox could not be read stops the run with the reading recorded lost; the resume is refused for it (D-P13-20).
+       await withLine('p14-meter-lost-', async (rig) => {
+         const { resumeRun, startRun } = await api();
+         const base = await rig.components();
+         let destroyed = 0;
+         const unreadable: SandboxProvider = {
+           ...forwarding(base.sandbox),
+           destroy: async (h) => {
+             const teardown = await base.sandbox.destroy(h);
+             destroyed += 1;
+             // The base run's check sandbox is torn down first; the driver's call is the one whose meter is lost.
+             if (destroyed === DRIVER_CALL) throw new Error("the relay's meter could not be read");
+             return teardown;
+           },
+         };
+         await startRun(await rig.request({ ...base, sandbox: unreadable })).then(
+           () => { throw new Error('P14: a run whose meter could not be read was not stopped'); },
+           (error: unknown) => { if (!String(error).includes('could not be destroyed')) throw error; },
+         );
+         const components = await rig.components();
+         const outcome = await resumeRun({ runId: rig.runId, components });
+         if (outcome.ok || outcome.reason !== 'meter-lost') throw new Error(`P14: a resume over a lost reading was ${outcome.ok ? 'driven' : outcome.reason}`);
+         const d = await expectDecision(rig, components.vault, 'resume:meter-lost', { decidedBy: 'admission', taskId: null, station: null });
+         if (d.decision.cause !== 'resume-refused' || d.decision.refusal.reason !== 'meter-lost' || !d.decision.refusal.tasks.includes(HELLO_TASK)) {
+           throw new Error(`P14: a resume over a lost reading was recorded as ${JSON.stringify(d.decision)}`);
+         }
+       });
+     },
+   },
+   'resume:refused': {
+     kind: 'scenario',
+     run: async () => {
+       await withLine('p14-resume-', async (rig) => {
+         const { resumeRun } = await api();
+         await stoppedForApproval(rig);
+         const reviewer = await stubDriver({ capabilities: { parallelism: 0 } });
+         const components = await rig.components({ reviewer });
+         refusalOf(await resumeRun({ runId: rig.runId, components }), 'P14 resume');
+         const d = await expectDecision(rig, components.vault, 'resume:refused', { decidedBy: 'admission', taskId: null, station: null });
+         if (d.decision.cause !== 'resume-refused' || d.decision.refusal.reason !== 'refused' || d.decision.refusal.refusal.reason !== 'capability-missing') {
+           throw new Error(`P14: a resume refused for a missing capability was recorded as ${JSON.stringify(d.decision)}`);
+         }
+       });
+     },
+   },
+   'station:gate-failed': {
+     kind: 'scenario',
+     run: async () => {
+       const { STATION_CONTRACTS } = await import('@olympus-ai/core');
+       await withLine('p14-gate-', async (rig) => {
+         const { startRun } = await api();
+         await writeManifest(rig.dirs, [{ id: 'always-fails', kind: 'compile', command: ['node', '-e', 'process.exit(1)'], required: true, timeoutMs: 10_000 }]);
+         const driver = await stubDriver();
+         const components = await rig.components({ driver, reviewer: driver });
+         refusalOf(await startRun(await rig.request(components)), 'P14 gate');
+         await expectDecision(rig, components.vault, 'station:gate-failed', { decidedBy: 'line', taskId: HELLO_TASK, station: 'verify' });
+         // One decision per failed iteration, the last one's included, each naming the check and why it failed (R17, D-R17-06).
+         const gates = (await decisionsOf(rig, components.vault)).filter((d) => keyOf(d.decision) === 'station:gate-failed');
+         const { maxIterations } = STATION_CONTRACTS.build;
+         for (const d of gates) {
+           if (d.decision.cause !== 'station-refused' || d.decision.refusal.reason !== 'gate-failed' || d.decision.refusal.failed.length !== 1 || d.decision.refusal.failed[0]?.checkId !== 'always-fails' || d.decision.refusal.failed[0].cause !== 'exit-code') {
+             throw new Error(`P14: a failed gate was recorded as ${JSON.stringify(d.decision)}`);
+           }
+         }
+         if (gates.length !== maxIterations) throw new Error(`P14: ${String(maxIterations)} failed iterations recorded ${String(gates.length)} gate-failed decisions`);
+       });
+     },
+   },
+   'station:base-mismatch': {
+     kind: 'scenario',
+     run: async () => {
+       await withLine('p14-base-', async (rig) => {
+         const { startRun } = await api();
+         // The fixture's reproduction made vacuous: it passes over the base, so the test-design exit is refused (D-A-BF-01).
+         const manifest = JSON.parse(await readFile(join(rig.dirs.artifacts, 'verify.json'), 'utf8')) as { checks: Array<{ onBase?: string; command: string[] }> };
+         await writeManifest(rig.dirs, manifest.checks.map((c) => (c.onBase === 'fails' ? { ...c, command: ['node', '-e', 'process.exit(0)'] } : c)));
+         const components = await rig.components();
+         refusalOf(await startRun(await rig.request(components)), 'P14 base');
+         await expectDecision(rig, components.vault, 'station:base-mismatch', { decidedBy: 'line', taskId: null, station: 'test-design' });
+       });
+     },
+   },
+   'station:spec-part-missing': {
+     kind: 'scenario',
+     run: async () => {
+       await withLine('p14-part-', async (rig) => {
+         const { startRun } = await api();
+         const components = await rig.components();
+         // The spec admitted with no security part: admitted, and refused at the spec exit naming the part (R17).
+         const { specParts: _omitted, ...artifacts } = ARTIFACTS;
+         refusalOf(await startRun(await rig.request(components, { artifacts })), 'P14 spec part');
+         const d = await expectDecision(rig, components.vault, 'station:spec-part-missing', { decidedBy: 'line', taskId: null, station: 'spec' });
+         if (d.decision.cause !== 'station-refused' || d.decision.refusal.reason !== 'spec-part-missing') {
+           throw new Error(`P14: a spec with no security part was recorded as ${JSON.stringify(d.decision)}`);
+         }
+       });
+     },
+   },
+   'station:denial-check-missing': {
+     kind: 'scenario',
+     run: async () => {
+       await withLine('p14-denial-', async (rig) => {
+         const { startRun } = await api();
+         await writeFile(join(rig.dirs.artifacts, 'security.json'), JSON.stringify(ONE_RULE));
+         const components = await rig.components();
+         refusalOf(await startRun(await rig.request(components)), 'P14 denial');
+         const d = await expectDecision(rig, components.vault, 'station:denial-check-missing', { decidedBy: 'line', taskId: null, station: 'test-design' });
+         if (d.decision.cause !== 'station-refused' || d.decision.refusal.reason !== 'denial-check-missing' || d.decision.refusal.rules.join() !== 'owner-only') {
+           throw new Error(`P14: a rule with no denial check was recorded as ${JSON.stringify(d.decision)}`);
+         }
+       });
+     },
+   },
+   'station:lock-tamper': {
+     kind: 'scenario',
+     run: async () => {
+       await withLine('p14-tamper-', async (rig) => {
+         const { startRun } = await api();
+         const writer = await stubDriver({ during: async () => writeFile(join(rig.dirs.artifacts, 'spec.md'), '# hello\n\nWidened by the agent.\n') });
+         const components = await rig.components({ driver: writer, reviewer: writer });
+         refusalOf(await startRun(await rig.request(components)), 'P14 tamper');
+         // Found at the station's lock check, over no task: the decision names what its violation names (D-P14-13).
+         await expectDecision(rig, components.vault, 'station:lock-tamper', { decidedBy: 'line', taskId: null, station: 'build' });
+       });
+     },
+   },
+   'station:violation': {
+     kind: 'scenario',
+     run: () => escapeScenario(async (rig, vault) => {
+       await expectDecision(rig, vault, 'station:violation', { decidedBy: 'line', taskId: HELLO_TASK, station: 'verify' });
+     }),
+   },
+   'station:unsafe-above-l1': { kind: 'unconstructed' },
+   'station:capability-missing': {
+     kind: 'scenario',
+     run: async () => {
+       // A driver that declares the capability when admission checks it and not when build does: the line's own check refuses.
+       await withLine('p14-station-capability-', async (rig) => {
+         const { startRun } = await api();
+         const inner = await stubDriver();
+         let asked = 0;
+         const driver = {
+           ...inner,
+           capabilities: () => {
+             asked += 1;
+             return asked === 1 ? inner.capabilities() : { ...inner.capabilities(), parallelism: 0 };
+           },
+         };
+         const components = await rig.components({ driver, reviewer: await stubDriver() });
+         const refusal = refusalOf(await startRun(await rig.request(components)), 'P14 station capability');
+         if (refusal.transition.reason !== 'capability-missing' || refusal.state === null) {
+           throw new Error(`P14: a driver that lost a capability was refused as ${refusal.transition.reason}, with state ${String(refusal.state !== null)}`);
+         }
+         await expectDecision(rig, components.vault, 'station:capability-missing', { decidedBy: 'station-machine', taskId: HELLO_TASK, station: 'build' });
+       });
+     },
+   },
+   'station:approval-blocked': {
+     kind: 'scenario',
+     run: async () => {
+       await withLine('p14-blocked-', async (rig) => {
+         const { startRun } = await api();
+         const components = await rig.components();
+         refusalOf(await startRun(await rig.request(components, { policy: await linePolicy({ 'review:1': 'blocked' }) })), 'P14 blocked');
+         await expectDecision(rig, components.vault, 'station:approval-blocked', { decidedBy: 'station-machine', taskId: null, station: 'review' });
+       });
+     },
+   },
+   'station:approval-required': {
+     kind: 'scenario',
+     run: async () => {
+       await withLine('p14-required-', async (rig) => {
+         const { runStanding } = await api();
+         const components = await rig.components();
+         await stoppedForApproval(rig, components);
+         const d = await expectDecision(rig, components.vault, 'station:approval-required', { decidedBy: 'station-machine', taskId: null, station: 'integrate' });
+         if (Number.isNaN(Date.parse(d.decidedAt))) throw new Error(`P14: approval-required was recorded with time ${d.decidedAt}`);
+         // Reading where a run stands derives the same refusal and decides nothing.
+         const before = (await components.vault.readDecisions(rig.runId)).length;
+         await runStanding(components.vault, rig.runId);
+         if ((await components.vault.readDecisions(rig.runId)).length !== before) throw new Error('P14: a status read recorded a decision');
+       });
+     },
+   },
+   'station:same-family-reviewer': { kind: 'blocked-until-m3' },
+   // R19: a test drafter of the builder's family is refused at L3 alone, as a same-family reviewer is.
+   'station:same-family-drafter': { kind: 'blocked-until-m3' },
+   'station:parked:drafts-rejected': { kind: 'scenario', run: draftsRejectedPark },
+   'approval-rejected': { kind: 'scenario', run: () => draftingDecision('approval-rejected') },
+   'draft-sent-back': { kind: 'scenario', run: () => draftingDecision('draft-sent-back') },
+   'draft-floor-applied': { kind: 'scenario', run: () => draftingDecision('draft-floor-applied') },
+   // R13a: the nightly re-hash records drift that names a run in that run's record, decided by `nightly`.
+   'record-drift': { kind: 'scenario', run: async () => { await REHASH_FINDS_DRIFT.run(); } },
+   // R8a: the history walk closes a merged run's window past its time and records it, decided by observe (D-A-OB-03).
+   'observation-closed': { kind: 'scenario', run: async () => { await OPEN_WINDOW_IN_NO_DENOMINATOR.run(); } },
+   'approval-refused:draft-mismatch': { kind: 'scenario', run: () => draftingDecision('draft-mismatch') },
+   'approval-refused:draft-invalid': { kind: 'scenario', run: () => draftingDecision('draft-invalid') },
+   'station:parked:iterations-exhausted': { kind: 'scenario', run: () => parkScenario('iterations-exhausted') },
+   'station:parked:retries-exhausted': { kind: 'scenario', run: () => parkScenario('retries-exhausted') },
+   'station:parked:starts-exhausted': { kind: 'scenario', run: () => parkScenario('starts-exhausted') },
+   // R4: a conflict past maxConflictRetries 0 parks the task that met it, recorded by the line over that task at verify.
+   'station:parked:conflicts-exhausted': {
+     kind: 'scenario',
+     run: () => conflictScenario('conflicts-exhausted', (decisions) => {
+       const parks = decisions.filter((d) => d.decision.cause === 'station-refused' && d.decision.refusal.reason === 'parked');
+       const [park] = parks;
+       if (parks.length !== 1 || park?.decision.decidedBy !== 'line' || park.taskId !== 'b' || park.station !== 'verify'
+         || park.decision.cause !== 'station-refused' || park.decision.refusal.reason !== 'parked' || park.decision.refusal.cause !== 'conflicts-exhausted') {
+         throw new Error(`P14: a conflict park was recorded as ${JSON.stringify(parks)}`);
+       }
+       // The conflict that parked it is recorded too, no later than the park. The Vault lists decisions by hash, so time orders them.
+       const conflict = decisions.find((d) => d.decision.cause === 'task-conflict');
+       if (conflict === undefined || conflict.decidedAt > park.decidedAt) throw new Error('P14: the park was recorded with no conflict before it');
+     }),
+   },
+   'station:cancelled': {
+     kind: 'scenario',
+     run: async () => {
+       await withLine('p14-cancel-', async (rig) => {
+         const { cancelRun, resumeRun } = await api();
+         const components = await rig.components();
+         await stoppedForApproval(rig, components);
+         const cancelled = await cancelRun({ runId: rig.runId, by: 'maintainer', vault: components.vault });
+         if (!cancelled.ok) throw new Error(`P14: the cancel was refused: ${cancelled.message}`);
+         refusalOf(await resumeRun({ runId: rig.runId, components }), 'P14 cancelled');
+         await expectDecision(rig, components.vault, 'station:cancelled', { decidedBy: 'station-machine', taskId: null, station: 'integrate' });
+       });
+     },
+   },
+   'station:halted': {
+     kind: 'scenario',
+     run: async () => {
+       await withLine('p14-halt-', async (rig) => {
+         const { resumeRun } = await api();
+         const components = await rig.components();
+         await stoppedForApproval(rig, components);
+         // What the service commits when a drive ends in an error (A-P9-02).
+         const state = await rig.state();
+         await components.vault.commitRunState({ ...state, halted: { at: new Date().toISOString(), message: 'the drive failed' } }, state.version);
+         refusalOf(await resumeRun({ runId: rig.runId, components }), 'P14 halted');
+         await expectDecision(rig, components.vault, 'station:halted', { decidedBy: 'station-machine', taskId: null, station: 'integrate' });
+       });
+     },
+   },
+   'approval-granted': {
+     kind: 'scenario',
+     run: async () => {
+       await withLine('p14-granted-', async (rig) => {
+         const { approveStation } = await api();
+         const components = await rig.components();
+         const key = await stoppedForApproval(rig, components);
+         const approved = await approveStation({ runId: rig.runId, key: key as never, approvedBy: 'maintainer', vault: components.vault });
+         if (!approved.ok) throw new Error(`P14: the approval was refused: ${approved.message}`);
+         const d = await expectDecision(rig, components.vault, 'approval-granted', { decidedBy: 'approval', taskId: null, station: 'integrate' });
+         if (d.decision.cause !== 'approval-granted' || d.decision.principal !== 'maintainer' || d.decision.key !== key) {
+           throw new Error(`P14: the grant was recorded as ${JSON.stringify(d.decision)}`);
+         }
+       });
+     },
+   },
+   'approval-refused:invalid-request': {
+     kind: 'scenario',
+     run: async () => {
+       await withLine('p14-approval-invalid-', async (rig) => {
+         const { approveStation } = await api();
+         const components = await rig.components();
+         const key = await stoppedForApproval(rig, components);
+         await approveStation({ runId: rig.runId, key: 'not a key' as never, approvedBy: 'maintainer', vault: components.vault });
+         const d = await expectDecision(rig, components.vault, 'approval-refused:invalid-request', { decidedBy: 'approval', taskId: null, station: null });
+         if (d.decision.cause !== 'approval-refused' || d.decision.key !== null) {
+           throw new Error(`P14: a malformed key was recorded as ${JSON.stringify(d.decision)}; the caller's text is not stored`);
+         }
+         // A blank principal is refused too, and its key is kept because it is a key.
+         await approveStation({ runId: rig.runId, key: key as never, approvedBy: ' ', vault: components.vault });
+         const both = (await decisionsOf(rig, components.vault)).filter((x) => keyOf(x.decision) === 'approval-refused:invalid-request');
+         if (!both.some((x) => x.decision.cause === 'approval-refused' && x.decision.key === key)) throw new Error('P14: a blank approver was not recorded with its key');
+       });
+     },
+   },
+   'approval-refused:not-awaiting': {
+     kind: 'scenario',
+     run: async () => {
+       await withLine('p14-approval-early-', async (rig) => {
+         const { approveStation } = await api();
+         const components = await rig.components();
+         await stoppedForApproval(rig, components);
+         const refused = await approveStation({ runId: rig.runId, key: 'build:1', approvedBy: 'maintainer', vault: components.vault });
+         if (refused.ok) throw new Error('P14: an approval of an exit the run is not at was granted');
+         const d = await expectDecision(rig, components.vault, 'approval-refused:not-awaiting', { decidedBy: 'approval', taskId: null, station: 'integrate' });
+         if (d.decision.cause !== 'approval-refused' || d.decision.key !== 'build:1') throw new Error(`P14: recorded as ${JSON.stringify(d.decision)}`);
+       });
+     },
+   },
+   'egress:opened': { kind: 'scenario', run: () => egressScenario('opened') },
+   'egress:tunnelled': { kind: 'scenario', run: () => egressScenario('tunnelled') },
+   'egress:refused': { kind: 'scenario', run: () => egressScenario('refused') },
+   'violation-recorded': {
+     kind: 'scenario',
+     run: () => escapeScenario(async (rig, vault, state) => {
+       const [violation] = state.violations;
+       if (violation === undefined) throw new Error('P14: the escape recorded no violation');
+       const before = await vault.read(violation);
+       const d = await expectDecision(rig, vault, 'violation-recorded', { decidedBy: 'line', taskId: HELLO_TASK, station: 'verify' });
+       if (d.decision.cause !== 'violation-recorded' || JSON.stringify(d.decision.violation) !== JSON.stringify(violation)) {
+         throw new Error(`P14: the violation decision points at ${JSON.stringify(d.decision)}, not ${JSON.stringify(violation)}`);
+       }
+       if (Buffer.compare(Buffer.from(before), Buffer.from(await vault.read(violation))) !== 0) throw new Error('P14: the violation record changed');
+     }).then(claimMismatchScenario),
+   },
+   'relay-refused': {
+     kind: 'scenario',
+     run: async () => {
+       await withLine('p14-relay-', async (rig) => {
+         const refusing: MeterReading = { kind: 'metered', calls: 3, inputTokens: 300, outputTokens: 30, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 1, exhausted: 'cost', refused: 2 };
+         const sandbox = await reportingProvider((n) => (n === DRIVER_CALL ? { meter: refusing } : {}));
+         const components = await rig.components({ sandbox });
+         await stoppedForApproval(rig, components);
+         const [usage] = (await rig.state()).usage;
+         const d = await expectDecision(rig, components.vault, 'relay-refused', { decidedBy: 'model-relay', taskId: HELLO_TASK, station: 'build' });
+         if (d.decision.cause !== 'relay-refused' || JSON.stringify(d.decision.usage) !== JSON.stringify(usage) || d.decision.refused !== 2 || d.decision.exhausted !== 'cost') {
+           throw new Error(`P14: the relay's refusals were recorded as ${JSON.stringify(d.decision)}`);
+         }
+         // A call whose relay refused nothing records no relay decision.
+         const relayed = (await decisionsOf(rig, components.vault)).filter((x) => x.decision.cause === 'relay-refused');
+         if (relayed.length !== 1) throw new Error(`P14: ${String(relayed.length)} relay decisions for one refusing call`);
+       });
+     },
+   },
+   // R10: each narrowing is recorded by the component that decided it, before the state that carries it.
+   'capability-narrowed:author-trust': { kind: 'scenario', run: authorTrustNarrowing },
+   'capability-narrowed:sensitive-grant': { kind: 'scenario', run: grantNarrowing },
+   'capability-narrowed:input': { kind: 'scenario', run: inputNarrowing },
+   'task-conflict': {
+     kind: 'scenario',
+     run: () => conflictScenario('task-conflict', (decisions) => {
+       const found = decisions.filter((d) => d.decision.cause === 'task-conflict');
+       const [d] = found;
+       // Only the line may record one, which the Vault holds it to (A-R4-03).
+       if (found.length !== 1 || d?.decision.cause !== 'task-conflict' || d.taskId !== 'b' || d.station !== 'verify'
+         || JSON.stringify(d.decision.with) !== '["a"]' || JSON.stringify(d.decision.paths) !== '["parts/shared.txt"]') {
+         throw new Error(`P14: a conflict was recorded as ${JSON.stringify(found)}`);
+       }
+     }),
+   },
+   // R36a: every failed attempt is recorded by the line with its source, layer, and trimmed text, before the retry it spends
+   // or the park it leads to, and the park names the last one's layer (#149, D-R36a-05).
+   'attempt-failed': {
+     kind: 'scenario',
+     run: async () => {
+       const { STATION_CONTRACTS } = await import('@olympus-ai/core');
+       const { runStanding, startRun } = await api();
+       await withLine('p14-attempt-', async (rig) => {
+         const refusal = Object.assign(new Error(`the CLI produced no session (exit code 1); stderr: ${'x'.repeat(600)}`), { name: 'DriverRefusal', layer: 'invocation' });
+         const components = await rig.components({ driver: await stubDriver({ failWith: refusal }) });
+         const parked = refusalOf(await startRun(await rig.request(components)), 'R36a attempt');
+         const failed = (await decisionsOf(rig, components.vault)).filter((d) => d.decision.cause === 'attempt-failed');
+         const retries = STATION_CONTRACTS.build.retry.max;
+         if (failed.length !== retries + 1) throw new Error(`R36a: ${String(retries + 1)} failed attempts were recorded as ${String(failed.length)}`);
+         // Recorded in order; read back in any, so sorted by the count each carries.
+         failed.sort((a, b) => (a.decision.cause === 'attempt-failed' ? a.decision.failure.retries : 0) - (b.decision.cause === 'attempt-failed' ? b.decision.failure.retries : 0));
+         for (const [i, d] of failed.entries()) {
+           if (d.decision.cause !== 'attempt-failed' || d.taskId !== HELLO_TASK || d.station !== 'build') throw new Error(`R36a: recorded as ${JSON.stringify(d)}`);
+           const { failure } = d.decision;
+           if (failure.source !== 'driver' || failure.layer !== 'invocation' || failure.retries !== i + 1) throw new Error(`R36a: the failure was read as ${JSON.stringify(failure)}`);
+           if (!failure.untrustedDetail.startsWith('the CLI produced no session (exit code 1)') || failure.untrustedDetail.length > 401) {
+             throw new Error(`R36a: the failure's text was kept as ${String(failure.untrustedDetail.length)} characters starting ${JSON.stringify(failure.untrustedDetail.slice(0, 60))}`);
+           }
+         }
+         if (parked.transition.reason !== 'parked' || !parked.transition.message.includes("the last attempt failed at the driver's invocation layer")) {
+           throw new Error(`R36a: the park does not name the last attempt's cause: ${JSON.stringify(parked.transition)}`);
+         }
+         // What `status` and `events` show: the stopped standing carries the last failure, read from the Vault.
+         const { standing } = await runStanding(components.vault, rig.runId);
+-        if (standing.standing !== 'stopped' || standing.lastFailure?.task !== HELLO_TASK || standing.lastFailure.failure.retries !== retries + 1
++        if (standing.standing !== 'stopped' || standing.lastFailure?.kind !== 'attempt-failed' || standing.lastFailure.task !== HELLO_TASK || standing.lastFailure.failure.retries !== retries + 1
+           || standing.lastFailure.failure.layer !== 'invocation') {
+           throw new Error(`R36a: the stopped standing does not show the last failure: ${JSON.stringify(standing)}`);
+         }
+       });
+     },
+   },
+   'tier-escalated': {
+     kind: 'scenario',
+     run: async () => {
+       await withLine('p14-escalate-', async (rig) => {
+         const run = await failingRun(rig, { tier: 'fast', escalation: { afterFailedGates: 1, ceiling: 'standard' } });
+         const vault = (await rig.components()).vault;
+         const d = await expectDecision(rig, vault, 'tier-escalated', { decidedBy: 'line', taskId: HELLO_TASK, station: 'build' });
+         if (d.decision.cause !== 'tier-escalated' || d.decision.from !== 'fast' || d.decision.to !== 'standard' || d.decision.failedGates !== 1 || run.decisions.length !== 1) {
+           throw new Error(`P14: an escalation was recorded as ${JSON.stringify(d.decision)}, among ${String(run.decisions.length)}`);
+         }
+       });
+     },
+   },
+ };
+ 
+ /** The literals whose `reason` property is declared by `StationRefusal`, found in a package's own source. */
+ /**
+  * The string a literal's `reason` property is set to, however it is spelled:
+  * a quoted key, and a literal inside parentheses, `as`, `satisfies`, or an
+  * angle-bracket assertion, all count (external review of P14, codex-7).
+  */
+
+===== packages/conformance/src/registry/gate-retry.ts =====
+/**
+ * R37: a failed gate tells the retry, and the run, why. One free assertion per
+ * fix, each failing with its fix reverted (I8): a build retry names each check
+ * its gate failed and the cause the gate derived, and no byte of the check's
+ * output (#159); a run parked on its gate shows the failed check as its last
+ * failure in `status`, and the line tells `events` of it (#158).
+ */
+import type { RoleId, TaskRequest } from '@olympus-ai/core';
+import type { SandboxProvider } from '@olympus-ai/sandbox';
+import { runtime } from '../kit/assert.js';
+import type { LocalAssertion } from '../kit/types.js';
+import { HELLO_REPRODUCTION, HELLO_TASK, refusalOf, stubDriver, withLine, writeManifest } from './line.js';
+
+const api = async () => import('@olympus-ai/api');
+
+/** Printed by the check on both streams: container output, which no prompt may carry (I7). */
+const OUTPUT_MARKER = 'r37-check-output-marker';
+
+/**
+ * `hello-written` as the fixture declares it, printing the marker on stdout
+ * and stderr before it exits. Its script builds the file's name rather than
+ * spelling it, as the fixture's does (D-R15-03).
+ */
+const LOUD_REPRODUCTION = {
+  ...HELLO_REPRODUCTION,
+  command: [
+    'node', '-e',
+    `const fs = require('node:fs'); const file = ['hello', 'txt'].join('.'); console.log('${OUTPUT_MARKER}'); console.error('${OUTPUT_MARKER}'); process.exit(fs.existsSync(file) && fs.readFileSync(file, 'utf8').trim() === 'hello' ? 0 : 1)`,
+  ],
+};
+
+export const BUILD_RETRY_TOLD_FAILED_CHECKS: LocalAssertion = runtime({
+  id: 'I7.build-retry-told-failed-checks-not-output',
+  title:
+    "a builder whose first change fails hello-written receives, in its second request's variable suffix, that check's id and the cause the gate derived, exit-code, and no byte of what the check printed, in the suffix, the stable prefix, or the role (#159)",
+  run: async () => {
+    await withLine('r37-retry-', async (rig) => {
+      await writeManifest(rig.dirs, [LOUD_REPRODUCTION]);
+      const { StubSandboxProvider } = await import('@olympus-ai/sandbox');
+      const sandbox = new StubSandboxProvider();
+      let builds = 0;
+      // The first change writes the wrong content; every later one the right content.
+      const driver = await stubDriver({
+        during: async (req: TaskRequest) => {
+          if (req.role.role !== ('builder' as RoleId)) return;
+          builds += 1;
+          const content = builds === 1 ? 'goodbye' : 'hello';
+          const wrote = await sandbox.exec(req.sandbox, ['node', '-e', `require('node:fs').writeFileSync(['hello', 'txt'].join('.'), ${JSON.stringify(content)})`]);
+          if (wrote.exitCode !== 0) throw new Error(`R37 control: the builder's change did not land: ${wrote.stderr}`);
+        },
+      });
+      const components = await rig.components({ driver, sandbox }, { work: false });
+      const { startRun } = await api();
+      await startRun(await rig.request(components));
+      const built = driver.requests.filter((r) => r.role.role === ('builder' as RoleId));
+      const [first, second] = built;
+      if (first === undefined || second === undefined) throw new Error(`R37 control: the builder was asked ${String(built.length)} times, not twice`);
+      if (first.variableSuffix.includes('[failed-checks]')) throw new Error(`R37: the first build was told of a gate that had not run: ${JSON.stringify(first.variableSuffix)}`);
+      if (!second.variableSuffix.includes('[failed-checks]\n- hello-written: exit-code')) {
+        throw new Error(`R37: the retry was not told hello-written failed on its exit code: ${JSON.stringify(second.variableSuffix)}`);
+      }
+      for (const req of built) {
+        if (req.variableSuffix.includes(OUTPUT_MARKER) || req.stablePrefix.includes(OUTPUT_MARKER) || req.role.instructions.includes(OUTPUT_MARKER)) {
+          throw new Error('R37: the check\'s output reached a builder\'s prompt');
+        }
+      }
+    });
+  },
+});
+
+/** Thrown by the sandbox when the check is run at `verify`: a container's error, which `status` shows as untrusted text. */
+const UNSTARTED_MARKER = 'r37-check-could-not-start';
+
+export const UNSTARTED_CHECK_IS_LAST_FAILURE: LocalAssertion = runtime({
+  id: 'I5.unstarted-check-is-the-last-failure',
+  title:
+    "a run whose required check cannot start at verify parks with that check, its cause no-result, and the reason its evidence recorded as its last failure in status, and the line tells events of each failed gate in the same shape (#158)",
+  run: async () => {
+    await withLine('r37-unstarted-', async (rig) => {
+      const { StubSandboxProvider } = await import('@olympus-ai/sandbox');
+      const inner = new StubSandboxProvider();
+      // The check starts over the base, so test-design's exit holds; once a build has run, it cannot be started.
+      let armed = false;
+      const command = JSON.stringify(HELLO_REPRODUCTION.command);
+      const sandbox: SandboxProvider = new Proxy(inner, {
+        get(target, key, receiver) {
+          if (key !== 'exec') return Reflect.get(target, key, receiver) as unknown;
+          return async (...args: Parameters<SandboxProvider['exec']>) => {
+            if (armed && JSON.stringify(args[1]) === command) throw new Error(UNSTARTED_MARKER);
+            return target.exec(...args);
+          };
+        },
+      });
+      const driver = await stubDriver({ during: (req: TaskRequest) => { if (req.role.role === ('builder' as RoleId)) armed = true; return Promise.resolve(); } });
+      const components = await rig.components({ driver, sandbox });
+      const { admitRun, runStanding } = await api();
+      const admission = await admitRun(await rig.request(components));
+      if (!admission.ok) throw new Error(`R37 control: the run was not admitted: ${JSON.stringify(admission)}`);
+      const told: unknown[] = [];
+      refusalOf(await admission.admitted.drive({ onGateFailed: (task, failure) => { told.push({ task, failure }); } }), 'R37 unstarted');
+      const { standing } = await runStanding(components.vault, rig.runId);
+      if (standing.standing !== 'stopped' || standing.lastFailure?.kind !== 'gate-failed' || standing.lastFailure.task !== HELLO_TASK) {
+        throw new Error(`R37: the parked run shows no failed gate as its last failure: ${JSON.stringify(standing)}`);
+      }
+      const [failed] = standing.lastFailure.failed;
+      if (standing.lastFailure.failed.length !== 1 || failed?.checkId !== 'hello-written' || failed.cause !== 'no-result' || failed.untrustedReason?.includes(UNSTARTED_MARKER) !== true) {
+        throw new Error(`R37: the last failure is ${JSON.stringify(standing.lastFailure)}`);
+      }
+      const { STATION_CONTRACTS } = await import('@olympus-ai/core');
+      const shape = JSON.stringify({ task: HELLO_TASK, failure: { failed: standing.lastFailure.failed } });
+      if (told.length !== STATION_CONTRACTS.build.maxIterations || told.some((t) => JSON.stringify(t) !== shape)) {
+        throw new Error(`R37: events were told of ${String(told.length)} failed gates as ${JSON.stringify(told)}`);
+      }
+    });
+  },
+});
+
+export const R37_I7: readonly LocalAssertion[] = [BUILD_RETRY_TOLD_FAILED_CHECKS];
+export const R37_I5: readonly LocalAssertion[] = [UNSTARTED_CHECK_IS_LAST_FAILURE];
+
+===== packages/conformance/src/registry/i5.ts =====
+diff --git a/packages/conformance/src/registry/i5.ts b/packages/conformance/src/registry/i5.ts
+index ff89a27..654f5e8 100644
+--- a/packages/conformance/src/registry/i5.ts
++++ b/packages/conformance/src/registry/i5.ts
+@@ -38,6 +38,7 @@ import { R20_I5 } from './roles.js';
+ import { R13A_I5 } from './nightly.js';
+ import { R34_I5 } from './install.js';
+ import { R36A_I5 } from './first-run.js';
++import { R37_I5 } from './gate-retry.js';
+ import { R29_I5 } from './stacks.js';
+ import { R8A_I5 } from './observe.js';
+ import { R8B_I5 } from './observe-plan.js';
+@@ -58,490 +59,492 @@ const CONTENDERS = 8;
+ /** I5: Fail closed. */
+ export const I5: InvariantEntry = {
+   title: INVARIANTS.I5,
+   assertions: [
+     // R24: the target repository's instructions as granted context.
+     ...R24_I5,
+     // R20: the role compiler.
+     // R19: drafting at spec and test-design.
+     // R36a: the pinned CLI calls every tier's model (#152). Paid, under the run-driver label.
+     external({
+       id: 'I5.every-tier-model-callable-by-the-pinned-cli',
+       title:
+         "every tier's model is one the pinned CLI can call: one minimal call per tier through the driver's own image reaches the model the tier resolves to, "
+         + 'so a tier map and a CLI pin that drift apart fail here rather than parking every seat of that tier (#152)',
+       level: 'runtime',
+       package: '@olympus-ai/driver-claude-code',
+       file: 'test/invariants.test.ts',
+     }),
+     ...R19_ASSERTIONS.I5,
+     ...R36A_I5,
++    // R37: a run parked on its gate says which check failed.
++    ...R37_I5,
+     ...R16_ASSERTIONS.I5,
+     ...R20_I5,
+     // R22: the trigger framework.
+     ...R22_I5,
+     // R10: the trust ratchet.
+     ...R10_I5,
+     // R13a: the nightly checks that call no model.
+     ...R13A_I5,
+     // R29: every supported stack carries every control the TypeScript set does.
+     ...R29_I5,
+     // R34: a lockfile an install cannot verify, or an install that fails a hash, starts no check.
+     ...R34_I5,
+     ...R8A_I5,
+     ...R8B_I5,
+     ...R8A_REVIEW_I5,
+     // R13b: the nightly reviewers.
+     ...R13B_I5,
+     // R17: security at the gate.
+     ...R17_I5,
+     // R4: parallel task execution.
+     ...R4_I5,
+     // R2: a rate over nothing, a run refused at admission, and an estimate with no history each refuse to guess.
+     OUTCOMES_REFUSE_WITHOUT_A_SAMPLE,
+     // R12: an unfinished run, an unrecorded time, and a lost reading are refused or marked, never guessed.
+     TELEMETRY_GUESSES_NOTHING,
+     INDETERMINATE_PROBE_LOWERS,
+     UNSUPPORTED_STACK_REFUSES,
+     REFUSAL_NAMES_THE_BOUNDING_TERM,
+     INTEGRATE_MERGES_THE_VERIFIED_TREE,
+     FAILED_INTEGRATION_NEVER_REPORTS_DONE,
+     runtime({
+       id: 'I5.policy-document-load-is-hardened',
+       title: 'policy.yaml is read by a parser pinned to an exact version, and an alias, a document past the byte cap, and nesting past the depth limit are each refused by default and admitted only when that one setting is relaxed',
+       run: assertPolicyLoadIsHardened,
+     }),
+     compileError({
+       id: 'I5.transition-has-no-warn-and-continue',
+       title:
+         'StationTransition advances or refuses with a closed reason and the typed payload that reason names beside a message; there is no warned or degraded advance and no prose-only refusal',
+       fixture: 'i5/transition-has-no-warn-and-continue.ts',
+     }),
+     compileError({
+       id: 'I5.policy-refusal-is-explicit',
+       title: 'PolicyResolution and CapabilityResolution refuse with a reason and detail or succeed with the value; no downgrade marker',
+       fixture: 'i5/policy-refusal-is-explicit.ts',
+     }),
+     compileError({
+       id: 'I5.station-requires-declared-capabilities',
+       title: 'StationContract.requires accepts only keys of DriverCapabilities',
+       fixture: 'i5/station-requires-declared-capabilities.ts',
+     }),
+     compileError({
+       id: 'I5.adapter-set-declares-absent-controls',
+       title: 'AdapterSet slots are T | null, never optional, and unavailableControls() is required',
+       fixture: 'i5/adapter-set-declares-absent-controls.ts',
+     }),
+     compileError({
+       id: 'I5.check-result-declares-suite-count',
+       title: 'CheckResult.suiteCount is required: null is a declared unknown, omission is not representable',
+       fixture: 'i5/check-result-declares-suite-count.ts',
+     }),
+     compileOk({
+       id: 'I5.stubs-declare-unsafe',
+       title:
+         'StubVault, StubSandboxProvider, and StubDriver are each assignable to DeclaresUnsafe: the type shape, which a declare-only field would also satisfy; runtime existence is proved by I5.unsafe-component-refused-above-l1',
+       fixture: 'i5/stubs-declare-unsafe.ts',
+     }),
+     runtime({
+       id: 'I5.unsafe-component-refused-above-l1',
+       title:
+         'startRun with every stub wired is refused at L2 and L3, naming StubVault, StubSandboxProvider, StubDriver, its missing integrator, and its stand-in scanners in that order, before anything is recorded; at L1 the same graph is not refused as unsafe and carries the hello fixture through review to the integrate approval',
+       run: async () => {
+         await withLine('s1-hello-', async (rig) => {
+           const [api, core, sandbox, vault] = await Promise.all([
+             import('@olympus-ai/api'),
+             import('@olympus-ai/core'),
+             import('@olympus-ai/sandbox'),
+             import('@olympus-ai/vault'),
+           ]);
+           // The stub as it is, declaring the tools the rig grants and nothing else of its own, so it is still named StubDriver (D-R36a-07).
+           const stub = Object.assign(Object.create(new core.StubDriver()) as InstanceType<typeof core.StubDriver>, { declaredTools: () => RIG_TOOLS });
+           const stubSandbox = new sandbox.StubSandboxProvider();
+           const builder = doingTheWork(stub, stubSandbox);
+           const components = api.buildGraph({
+             vault: new vault.StubVault(rig.dirs.artifacts),
+             sandbox: stubSandbox,
+             driver: builder,
+             reviewer: builder,
+             workspaces: rig.workspaces,
+             scanners: api.STAND_IN_SCANNERS,
+           });
+ 
+           for (const level of [2, 3] as const) {
+             const outcome = await api.startRun(await rig.request(components, { requestedLevel: level }));
+             if (outcome.ok || outcome.reason !== 'unsafe-above-l1') {
+               const got = outcome.ok ? 'ok' : outcome.reason;
+               throw new Error(`I5: a run at L${String(level)} with every stub wired was not refused as unsafe-above-l1 (got ${got})`);
+             }
+             const names = outcome.unsafe.map((u) => u.component);
+             if (names.join(',') !== SKELETON_COMPONENTS.join(',')) {
+               throw new Error(`I5: the L${String(level)} refusal named [${names.join(', ')}]; expected [${SKELETON_COMPONENTS.join(', ')}]`);
+             }
+             for (const u of outcome.unsafe) {
+               if (u.cannotEnforce.length === 0) throw new Error(`I5: ${u.component} declares itself unsafe but names nothing it cannot enforce`);
+             }
+             let recorded = true;
+             try {
+               await components.vault.readRunState(rig.runId);
+             } catch {
+               recorded = false;
+             }
+             if (recorded) throw new Error(`I5: the L${String(level)} refusal left run state behind`);
+           }
+ 
+           const l1 = await api.startRun(await rig.request(components));
+           if (l1.ok || l1.reason !== 'refused' || l1.at !== 'integrate' || l1.transition.reason !== 'approval-required') {
+             const got = l1.ok ? 'a completed run' : l1.reason === 'refused' ? `${l1.at}: ${l1.transition.reason}` : l1.reason;
+             throw new Error(`I5: the hello fixture at L1 ended as ${got}, not at the integrate approval; a runtime that refuses everything does not satisfy this assertion`);
+           }
+         });
+       },
+     }),
+     runtime({
+       id: 'I5.stale-commit-is-refused-under-contention',
+       title:
+         'concurrent commitRunState calls from separate processes against one ifVersion leave exactly one winner holding the whole record; every loser is refused with a reason rather than silently applied, and a stale commit afterwards stores nothing',
+       run: async () => {
+         await withVaultDirs('p1-i5-contend-', async (dirs, base) => {
+           const runId = 'i5-contend';
+           const outcomes = await contendOnCommit(dirs, base, runId, '0', CONTENDERS);
+ 
+           const winners = outcomes.filter((o) => o.ok);
+           if (winners.length !== 1) {
+             const detail = outcomes.map((o) => `${o.tag}: ${o.ok ? `stored ${String(o.version)}` : `refused (${o.message})`}`);
+             throw new Error(
+               `I5: ${String(CONTENDERS)} processes committed run state from version 0 and ${String(winners.length)} succeeded; ` +
+                 'exactly one may. A lost update is a silent degrade of the only record task status lives in.' +
+                 `\n  ${detail.join('\n  ')}`,
+             );
+           }
+           const [winner] = winners;
+           if (winner === undefined) throw new Error('I5: the winner list has one entry and no entry in it');
+           if (winner.version !== '1') {
+             throw new Error(`I5: the winning commit stored version ${String(winner.version)}, expected 1`);
+           }
+           for (const loser of outcomes.filter((o) => !o.ok)) {
+             if (loser.message === '') {
+               throw new Error(`I5: the refused commit from ${loser.tag} carries no reason; a refusal that says nothing is a silent failure`);
+             }
+           }
+ 
+           // The record that landed must be one writer's whole state, not a
+           // blend: each child tags its own `tasks`, so the stored state names
+           // exactly one of them.
+           const { LocalVault } = await import('@olympus-ai/vault');
+           const vault = new LocalVault(dirs);
+           const stored = await vault.readRunState(runId as RunId);
+           if (stored.version !== '1') throw new Error(`I5: the stored state is at version ${stored.version}, expected 1`);
+           const tags = Object.keys(stored.tasks);
+           if (tags.length !== 1 || tags[0] !== winner.tag) {
+             throw new Error(`I5: the stored state carries tasks [${tags.join(', ')}]; expected only the winner's ${winner.tag}`);
+           }
+ 
+           // The same refusal, uncontended: a commit from a version that has
+           // already been superseded stores nothing at all.
+           let stale = true;
+           try {
+             await vault.commitRunState({ ...stored, version: '0' }, '0');
+           } catch {
+             stale = false;
+           }
+           if (stale) throw new Error('I5: a commit from the superseded version 0 was accepted');
+           const after = await vault.readRunState(runId as RunId);
+           if (after.version !== '1' || Object.keys(after.tasks).join(',') !== winner.tag) {
+             throw new Error(`I5: the refused stale commit changed the store to version ${after.version} with tasks [${Object.keys(after.tasks).join(', ')}]`);
+           }
+         });
+       },
+     }),
+     runtime({
+       id: 'I5.over-request-refused',
+       title:
+         'the real engine refuses a level above the global cap, the station cap, or the role ceiling with reason exceeds-cap, carries no level on the refusal, and grants a request at or below the tightest bound at exactly the level asked for',
+       run: async () => {
+         const { StrictPolicyEngine } = await import('@olympus-ai/core');
+         const engine = new StrictPolicyEngine();
+         const policy = engine.resolvePolicy(grantingDocument());
+ 
+         // Three bounds, three different values, so each refusal names the one
+         // that actually bit. `build` is capped below the role ceiling, which is
+         // itself below the global cap.
+         const overRequests: Array<{ readonly level: AutonomyLevel; readonly station: StationId; readonly bound: string }> = [
+           { level: 2, station: 'build', bound: `the ${String(BUILD_CAP)} cap on build` },
+           { level: 3, station: 'verify', bound: `the role ceiling of ${String(ROLE_CEILING)}` },
+         ];
+         for (const { level, station, bound } of overRequests) {
+           const outcome = engine.resolveAutonomy(level, station, GRANTED_ROLE, policy);
+           if (outcome.ok) {
+             throw new Error(
+               `I5: L${String(level)} at '${station}' was granted at L${String(outcome.level)} against ${bound}. ` +
+                 'An over-request must be refused; a downgrade returns a level the caller never asked for and did not ' +
+                 'agree to, while reporting success.',
+             );
+           }
+           if (outcome.reason !== 'exceeds-cap') {
+             throw new Error(`I5: L${String(level)} at '${station}' was refused as '${outcome.reason}'; expected 'exceeds-cap'`);
+           }
+           if (Object.hasOwn(outcome, 'level')) {
+             throw new Error(`I5: the refusal for L${String(level)} at '${station}' carries a level; there must be nothing on it to mistake for a grant`);
+           }
+           if (outcome.detail === '') {
+             throw new Error(`I5: the refusal for L${String(level)} at '${station}' carries no detail`);
+           }
+         }
+ 
+         // The global cap, which the fixture document sets to the maximum and
+         // so can never bite on its own. Lowered here, it must refuse a request
+         // the station cap and role ceiling would both have allowed.
+         const grounded = engine.resolvePolicy({ ...grantingDocument(), globalCap: 0, stationCaps: {} });
+         const global = engine.resolveAutonomy(1, 'verify', GRANTED_ROLE, grounded);
+         if (global.ok) {
+           throw new Error(`I5: L1 at 'verify' was granted at L${String(global.level)} under a global cap of L0`);
+         }
+         if (global.reason !== 'exceeds-cap') {
+           throw new Error(`I5: a request above the global cap was refused as '${global.reason}'; expected 'exceeds-cap'`);
+         }
+         if (!global.detail.includes('global L0')) {
+           throw new Error(`I5: the refusal does not name the bound that bit: ${global.detail}`);
+         }
+         if (!engine.resolveAutonomy(0, 'verify', GRANTED_ROLE, grounded).ok) {
+           throw new Error('I5: L0 under a global cap of L0 was refused; the cap is a ceiling, not an exclusion');
+         }
+ 
+         // The control: a request within every bound is granted, and granted at
+         // the level requested rather than raised or lowered to a cap. An engine
+         // that refused everything would satisfy the loop above.
+         for (const level of [0, 1] as const) {
+           const outcome = engine.resolveAutonomy(level, 'build', GRANTED_ROLE, policy);
+           if (!outcome.ok) {
+             throw new Error(`I5: L${String(level)} at 'build' is within every bound and was refused (${outcome.reason}: ${outcome.detail})`);
+           }
+           if (outcome.level !== level) {
+             throw new Error(`I5: L${String(level)} at 'build' resolved to L${String(outcome.level)}; a request inside the caps is granted as asked, never adjusted`);
+           }
+         }
+       },
+     }),
+     runtime({
+       id: 'I5.malformed-document-refused-at-resolve',
+       title:
+         'resolvePolicy refuses a value that does not validate as a PolicyDocument, even though the parameter type says it is one, so a caller that asserts past the compiler cannot resolve a grant out of a malformed document; a genuine document still resolves',
+       run: async () => {
+         const { StrictPolicyEngine } = await import('@olympus-ai/core');
+         const engine = new StrictPolicyEngine();
+         const document = grantingDocument();
+         const scope = document.roles[GRANTED_ROLE];
+         if (scope === undefined) throw new Error('I5: the fixture document defines no granted role');
+ 
+         // Each of these is what a caller produces by writing `value as
+         // PolicyDocument`. Without the guard, the first resolves a global cap
+         // of 99 and grants every level; the rest widen a scope the document
+         // never authorised.
+         const rogues: Array<{ readonly what: string; readonly value: unknown }> = [
+           { what: 'a global cap of 99', value: { ...document, globalCap: 99 } },
+           { what: 'a role ceiling of 99', value: { ...document, roles: { [GRANTED_ROLE]: { ...scope, autonomyCeiling: 99 } } } },
+           { what: 'a station id that is not one of the ten', value: { ...document, roles: { [GRANTED_ROLE]: { ...scope, stations: ['deploy'] } } } },
+           { what: 'an unknown top-level key', value: { ...document, backdoor: true } },
+         ];
+         for (const { what, value } of rogues) {
+           let refused = false;
+           try {
+             engine.resolvePolicy(value as never);
+           } catch {
+             refused = true;
+           }
+           if (!refused) {
+             throw new Error(
+               `I5: resolvePolicy accepted ${what}. The parameter type is a compiler claim, and a control that holds ` +
+                 'only while every caller remembers to validate first is not closed.',
+             );
+           }
+         }
+ 
+         // The control: a genuine document resolves. A guard that threw on
+         // everything would satisfy the loop above and break the engine.
+         const policy = engine.resolvePolicy(document);
+         if (policy.globalCap !== document.globalCap) {
+           throw new Error(`I5: a valid document resolved to globalCap ${String(policy.globalCap)}, expected ${String(document.globalCap)}`);
+         }
+       },
+     }),
+     runtime({
+       id: 'I5.malformed-autonomy-level-refused',
+       title:
+         'resolveAutonomy refuses a requested level that is not one of the four, rather than comparing it against the cap: NaN, a negative, and a fraction all survive a numeric comparison and would otherwise be answered with success carrying a level that is not a level',
+       run: async () => {
+         const { AUTONOMY_LEVELS, StrictPolicyEngine } = await import('@olympus-ai/core');
+         const engine = new StrictPolicyEngine();
+         const policy = engine.resolvePolicy(grantingDocument());
+ 
+         for (const [label, level] of [
+           ['NaN', Number.NaN], ['-1', -1], ['2.5', 2.5], ['4', 4],
+         ] as const) {
+           let refused = false;
+           try {
+             const outcome = engine.resolveAutonomy(level as never, 'verify', GRANTED_ROLE, policy);
+             if (outcome.ok) {
+               throw new Error(
+                 `I5: resolveAutonomy answered ${label} with success at level ${String(outcome.level)}. ` +
+                   'An unsupported input is a refusal, and success is the one answer a caller must never get for a ' +
+                   'level nobody can honour.',
+               );
+             }
+           } catch (error) {
+             if (error instanceof Error && error.message.startsWith('I5:')) throw error;
+             refused = true;
+           }
+           if (!refused) throw new Error(`I5: resolveAutonomy returned a refusal rather than refusing ${label} outright`);
+         }
+ 
+         // The control: every real level is still answered normally.
+         for (const level of AUTONOMY_LEVELS) {
+           const outcome = engine.resolveAutonomy(level, 'verify', GRANTED_ROLE, policy);
+           const allowed = level <= ROLE_CEILING;
+           if (outcome.ok !== allowed) {
+             throw new Error(`I5: level ${String(level)} at 'verify' was ${outcome.ok ? 'granted' : 'refused'}, expected the opposite`);
+           }
+         }
+       },
+     }),
+     runtime({
+       id: 'I5.sandbox-egress-allowlist-enforced',
+       title:
+         'a sandbox provisioned with egress mode allowlist reaches the one host it names and no other, by name and by address; ' +
+         'the direct route does not exist, so unsetting every proxy variable reaches nothing; an empty allow list is refused rather ' +
+         'than read as deny-all or allow-all; and deny-all is unchanged, with --network none, no proxy, and no network created',
+       run: async () => {
+         await withProvider('i5-egress-allowlist-', async (provider, dirs) => {
+           // An allowlist that names nothing is refused. It is not deny-all wearing the wrong
+           // name, and it is not permission to reach everything; either reading would be the
+           // silent degrade this invariant exists to refuse (D-P2-07, reversed by P10).
+           const empty = await refusalFrom(() => provider.provision(specFor(dirs, 'rw', { egress: { mode: 'allowlist', allow: [] } })));
+           if (empty.layer !== 'egress') {
+             throw new Error(`I5: an empty allowlist was refused at the ${empty.layer} layer, not the egress layer`);
+           }
+ 
+           // deny-all is untouched by the allowlist existing: no proxy is started beside a
+           // sandbox entitled to no egress, and no network is created for it.
+           await withSandbox(provider, specFor(dirs), async (handle) => {
+             const controls = provider.appliedControls(handle);
+             if (controls.egress.mode !== 'deny-all') {
+               throw new Error(`I5: a deny-all spec was applied as ${controls.egress.mode}`);
+             }
+             // `network: 'none'` is the type's guarantee once the mode is deny-all, so what is
+             // read here is what Docker was actually told and what the container actually got.
+             if (!controls.runArgs.join(' ').includes('--network none')) {
+               throw new Error(`I5: a deny-all sandbox was not started with --network none: ${controls.runArgs.join(' ')}`);
+             }
+             const interfaces = await provider.exec(handle, ['ls', '/sys/class/net']);
+             if (interfaces.stdout.trim().split(/\s+/).join(',') !== 'lo') {
+               throw new Error(`I5: a deny-all sandbox has interfaces [${interfaces.stdout.trim()}]; expected loopback alone`);
+             }
+           });
+ 
+           const name = originName();
+           const handle = await provider.provision(specFor(dirs, 'rw', { egress: { mode: 'allowlist', allow: [name] } }));
+           const { egress } = allowlistControls(provider, handle);
+           try {
+             await withOrigin(egress.proxy.outboundNetwork, name, async (origin) => {
+               // The grant. The body proves the origin answered, not the proxy on its behalf.
+               const reached = await provider.exec(handle, [
+                 'sh', '-c', `wget -T 8 -O - http://${origin.name}:${String(ORIGIN_PORT)}/ 2>&1`,
+               ]);
+               if (!reached.stdout.includes(ORIGIN_BODY)) {
+                 throw new Error(`I5: the allowlisted host was not reached: ${reached.stdout}${reached.stderr}`);
+               }
+ 
+               // Refused by name, and by address. The second is the one that matters: a refusal
+               // that only ever fires on a name is a DNS failure wearing an allowlist's clothes.
+               for (const host of [BLOCKED_NAME, BLOCKED_ADDRESS]) {
+                 const answer = await throughProxy(provider, handle, `GET http://${host}/ HTTP/1.0`);
+                 if (!answer.includes('403') || !answer.includes(host)) {
+                   throw new Error(`I5: ${host} is not on the allowlist and was not refused by name in the answer: ${answer}`);
+                 }
+               }
+ 
+               // The strongest form: the origin's own address, which the proxy demonstrably
+               // reaches, refused for the one reason under test — the address is not on the list.
+               const sameHost = await throughProxy(provider, handle, `GET http://${origin.address}:${String(ORIGIN_PORT)}/ HTTP/1.0`);
+               if (!sameHost.includes('403') || sameHost.includes(ORIGIN_BODY)) {
+                 throw new Error(`I5: a reachable host was allowed by address although only its name was granted: ${sameHost}`);
+               }
+ 
+               // There is nothing to bypass. The internal network carries no default route, so a
+               // process that unsets every proxy variable is left with no second path to take.
+               const routes = await provider.exec(handle, ['sh', '-c', 'ip route']);
+               if (routes.stdout.includes('default')) {
+                 throw new Error(`I5: the sandbox has a default route, so the proxy is a convention rather than the only way out: ${routes.stdout}`);
+               }
+               const bypass = await provider.exec(handle, [
+                 'sh', '-c',
+                 'unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY; ' +
+                   `wget -T 4 -O - http://${origin.address}:${String(ORIGIN_PORT)}/ 2>&1`,
+               ]);
+               if (bypass.exitCode === 0 || bypass.stdout.includes(ORIGIN_BODY)) {
+                 throw new Error(`I5: the allowlisted host was reached with every proxy variable unset: ${bypass.stdout}`);
+               }
+             });
+           } finally {
+             await provider.destroy(handle);
+           }
+ 
+           // The proxy is the sandbox's, and goes with it. One left running is a route off the
+           // host with no workload behind it and nobody watching it.
+           for (const [kind, leaked] of [
+             ['container', egress.proxy.name],
+             ['network', egress.proxy.internalNetwork],
+             ['network', egress.proxy.outboundNetwork],
+           ] as const) {
+             if (await dockerHas(kind, leaked)) throw new Error(`I5: the ${kind} ${leaked} outlived the sandbox it served`);
+           }
+         });
+       },
+     }),
+     STATION_MISSING_CAPABILITY_REFUSED,
+     TASK_ATTEMPTS_ARE_BOUNDED,
+     OVER_REQUEST_REFUSED_AT_ADMISSION,
+     UNSUPPORTED_STACK_IS_LOUD,
+     // P11: a provider with no probe is named, never trusted to observe the product from inside it.
+     HTTP_PROBE_ABSENT_IS_NAMED,
+     ADAPTER_REFUSAL_ENFORCED_AT_ADMISSION,
+     CHECK_COMMAND_HAS_A_GRAMMAR,
+     MISSING_CHECK_OR_SHRUNKEN_SUITE_REFUSES,
+     WORKSPACE_IS_WRITABLE_BY_THE_TASK,
+     // P13: what the relay cannot count, it charges or refuses; it never forwards it free.
+     MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE,
+     // R6: the same, under the openai-chat dialect (A-R6-01).
+     MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE_OPENAI_CHAT,
+     MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE_OPENAI_RESPONSES,
+     // R21: http and no credential are each a declaration, never an inference (A-R21-01, A-R21-02).
+     MODEL_RELAY_REFUSES_AN_UNDECLARED_LOCAL_ENDPOINT,
+     // I1a: what the walking skeleton's own declaration stood in for, each now refusing on its own.
+     UNSAFE_DECLARATION_SURVIVES_COMPOSITION,
+     ADAPTER_REFUSAL_REFUSES_L3_END_TO_END,
+     UNANALYSED_TESTS_ESCALATE_THE_APPROVAL,
+     external({
+       id: 'I5.unanalysed-tests-are-not-reported-clean',
+       title:
+         'an L2 run on the composed host over a repository with no vitest or jest stops at the integrate approval for the unanalysed suite, which escalates an exit that would otherwise advance; paid, one build and one review call',
+       level: 'runtime',
+       package: '@olympus-ai/api',
+       file: 'test/paid/line.paid.test.ts',
+     }),
+     // R36a: the shipped examples, unmodified, through the real driver to a merged pull request. Paid.
+     external({
+       id: 'I5.shipped-example-merges-on-the-real-driver',
+       title:
+         "the shipped examples, unmodified, drafting the spec from the README's intent, run on the composed host with the Claude Code driver in every seat through each gate a person holds at L1 — the drafted spec, the tests, and the merge — to a pull request merged into the base branch; paid (#145, #148 to #152, #154)",
+       level: 'runtime',
+       package: '@olympus-ai/api',
+       file: 'test/paid/examples.paid.test.ts',
+     }),
+     // R15: no default declaration, nothing to reproduce is refused, and a check that did not start is not a failure.
+     BASE_DECLARATION_HAS_NO_DEFAULT,
+     NOTHING_FAILING_ON_THE_BASE_IS_REFUSED,
+     UNSTARTED_BASE_CHECK_REFUSES,
+     SUITE_CHECK_RUNS_WHAT_IT_NAMES,
+   ],
+   pending: [],
+ };
+
+===== packages/conformance/src/registry/i7.ts =====
+diff --git a/packages/conformance/src/registry/i7.ts b/packages/conformance/src/registry/i7.ts
+index 6248d40..0f33b30 100644
+--- a/packages/conformance/src/registry/i7.ts
++++ b/packages/conformance/src/registry/i7.ts
+@@ -13,11 +13,12 @@ import { R19_ASSERTIONS } from './drafting.js';
+ import { R16_ASSERTIONS } from './bug-fix.js';
+ import { TELEMETRY_EXPORTS_NO_TEXT } from './telemetry.js';
+ import { R24_I7 } from './repo-instructions.js';
++import { R37_I7 } from './gate-retry.js';
+ 
+ /**
+  * The typed lint rules I7 depends on. The type system stops UntrustedText
+  * from reaching a string-typed slot; the first three stop the coercions the
+  * type system allows (`+`, template interpolation, String()), and the
+  * workspace's own sink rule stops JSON.stringify and widening to unknown, any,
+  * or object (R22, D-R22-09).
+  */
+@@ -40,95 +41,97 @@ const CAST_ALLOWLIST: readonly string[] = ['packages/triggers/src/github.ts'];
+ /** I7: Event payloads are data, never instructions. */
+ export const I7: InvariantEntry = {
+   title: INVARIANTS.I7,
+   assertions: [
+     // R24: the target repository's instructions as granted context.
+     ...R24_I7,
++    // R37: a build retry is told which check failed, never what it printed.
++    ...R37_I7,
+     // R22: the trigger framework, which registers the three entries M2 owed.
+     ...R22_I7,
+     // R13a: the nightly checks that call no model.
+     ...R13A_I7,
+     ...R8A_I7,
+     ...R8A_REVIEW_I7,
+     // R13b: the nightly reviewers.
+     ...R13B_I7,
+     // R20: the role compiler.
+     // R19: drafting at spec and test-design.
+     ...R19_ASSERTIONS.I7,
+     ...R16_ASSERTIONS.I7,
+     ...R20_I7,
+     // R12: only allowlisted typed fields leave in telemetry, and nothing reads it back.
+     TELEMETRY_EXPORTS_NO_TEXT,
+     compileError({
+       id: 'I7.untrusted-text-is-not-a-string',
+       title: 'UntrustedPayload.raw cannot reach a string-typed slot, a steer message, or a string method without a cast',
+       fixture: 'i7/untrusted-text-is-not-a-string.ts',
+     }),
+     runtime({
+       id: 'I7.no-cast-outside-extractor',
+       title: 'no package source casts a value typed UntrustedText or UntrustedPayload',
+       run: () => {
+         const hits: string[] = [];
+         for (const pkg of workspacePackages()) {
+           const { files, checker } = packageProgram(pkg);
+           for (const sf of files) {
+             for (const cast of castsFrom(sf, checker, UNTRUSTED_TYPES)) {
+               if (CAST_ALLOWLIST.includes(cast.file)) continue;
+               hits.push(`${cast.file}:${String(cast.line)} casts ${cast.from}: ${cast.text}`);
+             }
+           }
+         }
+         if (hits.length > 0) {
+           throw new Error(`I7: untrusted text is cast outside the trigger extractor\n  ${hits.join('\n  ')}`);
+         }
+       },
+     }),
+     castFixture({
+       id: 'I7.cast-scan-sees-through-unknown',
+       title: 'the cast scan reports the double cast `raw as unknown as string`, its angle-bracket form, and `as never`: the inner cast is from UntrustedText, and a plain string field is not reported',
+       fixture: 'i7/untrusted-text-double-cast.ts',
+       names: UNTRUSTED_TYPES,
+     }),
+     runtime({
+       id: 'I7.lint-rules-active',
+       title: 'the resolved ESLint configuration keeps restrict-plus-operands, restrict-template-expressions, no-base-to-string, and i7/no-untrusted-sink at error for every TypeScript file in every package',
+       run: async () => {
+         const files = workspacePackages()
+           .flatMap((pkg) => walkFiles(pkg.dir))
+           .filter((file) => !workspaceRelative(file).includes('/fixtures/types/'));
+         if (files.length === 0) throw new Error('I7: no TypeScript files found under packages/');
+         const eslint = workspaceEslint();
+         const failures: string[] = [];
+         for (const file of files) {
+           for (const rule of I7_LINT_RULES) {
+             const severity = await resolvedRuleSeverity(eslint, file, rule);
+             if (severity !== 'error') failures.push(`${workspaceRelative(file)}: ${rule} is ${severity}`);
+           }
+         }
+         if (failures.length > 0) {
+           throw new Error(`I7: a lint rule the invariant depends on is not active\n  ${failures.join('\n  ')}`);
+         }
+       },
+     }),
+     lintFixture({
+       id: 'I7.lint-rules-fire',
+       title: 'the three rules report concatenation, interpolation, and String() of UntrustedText',
+       fixture: 'i7/untrusted-text-coercion.ts',
+     }),
+     runtime({
+       id: 'I7.lint-rules-not-suppressed-inline',
+       title:
+         'no package source outside fixtures/ carries an eslint-disable or inline eslint configuration comment that names one of the four rules, or a bare disable that silences every rule',
+       run: () => {
+         // The ordinary lint run honours inline configuration, so a disable
+         // comment in a package source would silence a rule while the resolved
+         // configuration still reports it at error and the fixture still fires.
+         const hits = inlineSuppressions(I7_LINT_RULES, workspacePackages());
+         if (hits.length > 0) {
+           const detail = hits.map((h) => `${h.file}:${String(h.line)}: ${h.text}`).join('\n  ');
+           throw new Error(`I7: a lint rule the invariant depends on is suppressed inline\n  ${detail}`);
+         }
+       },
+     }),
+   ],
+   pending: [],
+ };
+
+===== packages/core/src/station/machine.ts =====
+diff --git a/packages/core/src/station/machine.ts b/packages/core/src/station/machine.ts
+index 7164a68..d4a0857 100644
+--- a/packages/core/src/station/machine.ts
++++ b/packages/core/src/station/machine.ts
+@@ -19,31 +19,32 @@ import {
+   CRITIC_CONTRACTS,
+   criticContractProblems,
+   DRAFT_ROLES,
+   DRAFT_STATIONS,
+   LOCKING_STATIONS,
+   M1_STATIONS,
+   REVIEW_FORBIDDEN_GRANTS,
+   seatTaskId,
+   STATION_CONTRACTS,
+   type ReviewForbiddenGrant,
+   type StationContractTable,
+ } from './contracts.js';
+ import type {
+   ContextGrant,
+   CriticContract,
+   DraftCondition,
+   DraftSeat,
+   DraftStation,
++  FailedCheck,
+   IndependenceGrade,
+   ParkCause,
+   RetryPart,
+   ReviewSeat,
+   ReviewSeatKind,
+   SeatIdentity,
+   StationContract,
+   StationRefusal,
+   StationTransition,
+   TamperedPath,
+ } from './types.js';
+ 
+ /** The station after `from` in station order; `learn` has none. */
+@@ -560,41 +561,53 @@ export function draftsRejected(station: DraftStation, contracts: StationContract
+ /**
+  * A drafter's retry as its request's variable suffix: the typed parts of
+  * what sent its last draft back, and nothing else (D-A-DS-02). Never in the
+  * stable prefix or a role. At `test-design` the locked-spec-alone rule
+  * admits these parts and no other: a person's notes there are refused, since
+  * an approver who has read the repository would otherwise be a channel
+  * around the black box, and a test drafter learns of the base only that its
+  * draft did not hold there, never which check, path, or exit code (A-R19-11).
+  */
+ export function retrySuffix(station: DraftStation, attempt: number, parts: readonly RetryPart[]): string {
+   const lines = [`attempt ${String(attempt)}`];
+   for (const part of parts) {
+     switch (part.kind) {
+       case 'critic-findings':
+         lines.push('[critic-findings]', ...part.findings.map((f) => `- ${f}`));
+         break;
+       case 'runtime-problems':
+         lines.push('[runtime-problems]', ...part.problems.map((p) => `- ${p.path}: ${p.code}`));
+         break;
+       case 'base-refusal':
+         lines.push('[base-refusal]', '- the draft did not hold over the repository; nothing more about the repository is told');
+         break;
+       case 'rejection-reason':
+         lines.push('[rejection-reason]', part.reason);
+         break;
+       case 'notes':
+         if (station !== 'spec') throw new Error(`station machine: a ${station} retry carries no notes; a rejection there carries a reason from a fixed set`);
+         lines.push('[approver-notes]', part.notes);
+         break;
+     }
+   }
+   return lines.join('\n');
+ }
+ 
++/**
++ * A build retry after a failed gate, as a part of its request's variable
++ * suffix: each failed check's id and the cause the gate derived, typed, and
++ * nothing else (R37). Never its exit code, and never a byte the check or its
++ * container printed: that text comes from code the builder wrote, so it could
++ * carry instructions into the builder's own next prompt (I7). The ids are the
++ * locked manifest's, which the builder already reads and cannot write (I3).
++ */
++export function gateRetrySuffix(failed: ReadonlyArray<Pick<FailedCheck, 'checkId' | 'cause'>>): string {
++  return ['[failed-checks]', ...failed.map((f) => `- ${f.checkId}: ${f.cause}`)].join('\n');
++}
++
+ /**
+  * The context a critic seat is given: the offered parts its contract grants,
+  * in the contract's order, and nothing else (R19). The contract is checked
+  * again here rather than trusted, as `grantedContext` checks a station's: a
+  * `test-design` critic granted anything beyond the locked spec, the draft,
+  * and the rubric throws before anything is assembled.
+  */
+
+=== BUNDLE END === c04d2f58c61e96e246146db35cb5b9e1
