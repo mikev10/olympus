@@ -38,6 +38,7 @@ import { R20_I5 } from './roles.js';
 import { R13A_I5 } from './nightly.js';
 import { R34_I5 } from './install.js';
 import { R36A_I5 } from './first-run.js';
+import { R37_I5 } from './gate-retry.js';
 import { R29_I5 } from './stacks.js';
 import { R8A_I5 } from './observe.js';
 import { R8B_I5 } from './observe-plan.js';
@@ -75,6 +76,8 @@ export const I5: InvariantEntry = {
     }),
     ...R19_ASSERTIONS.I5,
     ...R36A_I5,
+    // R37: a run parked on its gate says which check failed.
+    ...R37_I5,
     ...R16_ASSERTIONS.I5,
     ...R20_I5,
     // R22: the trigger framework.

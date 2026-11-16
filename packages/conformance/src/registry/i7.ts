@@ -13,6 +13,7 @@ import { R19_ASSERTIONS } from './drafting.js';
 import { R16_ASSERTIONS } from './bug-fix.js';
 import { TELEMETRY_EXPORTS_NO_TEXT } from './telemetry.js';
 import { R24_I7 } from './repo-instructions.js';
+import { R37_I7 } from './gate-retry.js';
 
 /**
  * The typed lint rules I7 depends on. The type system stops UntrustedText
@@ -43,6 +44,8 @@ export const I7: InvariantEntry = {
   assertions: [
     // R24: the target repository's instructions as granted context.
     ...R24_I7,
+    // R37: a build retry is told which check failed, never what it printed.
+    ...R37_I7,
     // R22: the trigger framework, which registers the three entries M2 owed.
     ...R22_I7,
     // R13a: the nightly checks that call no model.

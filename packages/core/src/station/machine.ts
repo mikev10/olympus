@@ -34,6 +34,7 @@ import type {
   DraftCondition,
   DraftSeat,
   DraftStation,
+  FailedCheck,
   IndependenceGrade,
   ParkCause,
   RetryPart,
@@ -589,6 +590,18 @@ export function retrySuffix(station: DraftStation, attempt: number, parts: reado
     }
   }
   return lines.join('\n');
+}
+
+/**
+ * A build retry after a failed gate, as a part of its request's variable
+ * suffix: each failed check's id and the cause the gate derived, typed, and
+ * nothing else (R37). Never its exit code, and never a byte the check or its
+ * container printed: that text comes from code the builder wrote, so it could
+ * carry instructions into the builder's own next prompt (I7). The ids are the
+ * locked manifest's, which the builder already reads and cannot write (I3).
+ */
+export function gateRetrySuffix(failed: ReadonlyArray<Pick<FailedCheck, 'checkId' | 'cause'>>): string {
+  return ['[failed-checks]', ...failed.map((f) => `- ${f.checkId}: ${f.cause}`)].join('\n');
 }
 
 /**

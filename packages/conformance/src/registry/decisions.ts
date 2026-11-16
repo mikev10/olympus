@@ -809,7 +809,7 @@ export const DECISION_TABLE: Readonly<Record<CauseKey, Row>> = {
         }
         // What `status` and `events` show: the stopped standing carries the last failure, read from the Vault.
         const { standing } = await runStanding(components.vault, rig.runId);
-        if (standing.standing !== 'stopped' || standing.lastFailure?.task !== HELLO_TASK || standing.lastFailure.failure.retries !== retries + 1
+        if (standing.standing !== 'stopped' || standing.lastFailure?.kind !== 'attempt-failed' || standing.lastFailure.task !== HELLO_TASK || standing.lastFailure.failure.retries !== retries + 1
           || standing.lastFailure.failure.layer !== 'invocation') {
           throw new Error(`R36a: the stopped standing does not show the last failure: ${JSON.stringify(standing)}`);
         }
