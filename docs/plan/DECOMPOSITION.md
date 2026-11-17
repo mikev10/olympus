@@ -633,6 +633,20 @@ order between them is settled before any of them is picked up.
 | R36a | The shipped example runs on the real driver ([#145](https://github.com/mikev10/olympus/issues/145), [#148](https://github.com/mikev10/olympus/issues/148) to [#152](https://github.com/mikev10/olympus/issues/152), [#154](https://github.com/mikev10/olympus/issues/154)) | M2 | P5, P6, P14, I1b, R17, R19, R34, R35 | — |
 | R36b | `init`, and a real feature from a fresh clone ([#134](https://github.com/mikev10/olympus/issues/134), [#136](https://github.com/mikev10/olympus/issues/136), [#139](https://github.com/mikev10/olympus/issues/139)) | M2 | R36a, R37, R18, R19, R35 | — |
 | R37 | A failed gate tells the retry, and the run, why ([#158](https://github.com/mikev10/olympus/issues/158), [#159](https://github.com/mikev10/olympus/issues/159)) | M2 | R36a, R19 | — |
+| R38 | Paid driver evidence that does not flake ([#165](https://github.com/mikev10/olympus/issues/165), [#88](https://github.com/mikev10/olympus/issues/88), [#85](https://github.com/mikev10/olympus/issues/85)) | M2 | P5, P12, R23, R26, R36a | — |
+| R39 | Tests that cannot pass by accident ([#117](https://github.com/mikev10/olympus/issues/117), [#82](https://github.com/mikev10/olympus/issues/82), [#74](https://github.com/mikev10/olympus/issues/74), [#19](https://github.com/mikev10/olympus/issues/19), [#48](https://github.com/mikev10/olympus/issues/48), [#93](https://github.com/mikev10/olympus/issues/93), [#65](https://github.com/mikev10/olympus/issues/65)) | M2 | P10, P11, R1, I1b | — |
+| R40 | Admission enforces the readiness ceiling ([#129](https://github.com/mikev10/olympus/issues/129), [#38](https://github.com/mikev10/olympus/issues/38)) | M2 | R1, P4, P14, R36b | — |
+| R41 | The enforcement record: order, completeness, and what it may hold ([#164](https://github.com/mikev10/olympus/issues/164), [#24](https://github.com/mikev10/olympus/issues/24), [#59](https://github.com/mikev10/olympus/issues/59), [#44](https://github.com/mikev10/olympus/issues/44)) | M2 | P1, P14, R2, R37 | — |
+| R42 | Getting-started docs and readable readiness ([#147](https://github.com/mikev10/olympus/issues/147), [#144](https://github.com/mikev10/olympus/issues/144), [#142](https://github.com/mikev10/olympus/issues/142), [#140](https://github.com/mikev10/olympus/issues/140), [#135](https://github.com/mikev10/olympus/issues/135), [#133](https://github.com/mikev10/olympus/issues/133), [#122](https://github.com/mikev10/olympus/issues/122)) | M2 | R35, R36b | — |
+| R43 | Readiness installs from manifests, with granted hosts ([#160](https://github.com/mikev10/olympus/issues/160), [#141](https://github.com/mikev10/olympus/issues/141)) | M2 | R1, R29, R34, R40 | — |
+| R44 | Drafting and judging findings from the benchmark ([#73](https://github.com/mikev10/olympus/issues/73), [#72](https://github.com/mikev10/olympus/issues/72), [#67](https://github.com/mikev10/olympus/issues/67), [#66](https://github.com/mikev10/olympus/issues/66), [#103](https://github.com/mikev10/olympus/issues/103)) | M2 | P7, R7, R8b, R19 | — |
+| R45 | Workspace repositories install ([#138](https://github.com/mikev10/olympus/issues/138)) | M2 | R34, R29 | — |
+| R46 | Release setup for the first v2 publish ([#115](https://github.com/mikev10/olympus/issues/115)) | M2 | R35, R36b | — |
+| R47 | Security scanning beyond TypeScript ([#120](https://github.com/mikev10/olympus/issues/120), [#97](https://github.com/mikev10/olympus/issues/97)) | M2 | R13a, R17, R29 | — |
+| R48 | Code-scanning alerts as a bug-fix intake source ([#50](https://github.com/mikev10/olympus/issues/50)) | M3 | R16, R22 | — |
+| R49 | The store authenticates its own history ([#96](https://github.com/mikev10/olympus/issues/96)) | M3 | R13a, R41 | — |
+| R50 | A runner the change cannot reach ([#42](https://github.com/mikev10/olympus/issues/42)) | M3 | R15, R29 | — |
+| R51 | Adapter sets after Python ([#113](https://github.com/mikev10/olympus/issues/113)) | M3 | R29, R47 | — |
 
 ### R1 — Readiness
 
@@ -2879,6 +2893,294 @@ reading the Vault by hand.
   is quoted.
 
 ---
+
+### The backlog after R37: every open issue has a home
+
+Placed on 2026-11-17, after R37 merged (#163). Each open issue is either
+named by a unit below, folded into an existing unit, or listed as a watch
+item with the condition that starts it. Each section restates its issues;
+the spec is written when the unit starts and verified against the code then,
+so where a section and the code differ, the code wins and the start-unit
+record says so.
+
+**Folded into existing units:**
+- [#37](https://github.com/mikev10/olympus/issues/37) (rolled yield is
+  build-only until review records attempts) joins R28, which already records
+  what happens at `review`.
+- [#71](https://github.com/mikev10/olympus/issues/71) (hard-coded output
+  passes the line) joins R25: a property check is the check that runs inputs
+  the builder never saw.
+- [#51](https://github.com/mikev10/olympus/issues/51) (webhook and chat
+  intake evidence) is input to R33's spec.
+- [#94](https://github.com/mikev10/olympus/issues/94) (ship-unit's paid-suite
+  exemption omits driver-codex) is maintainer tooling, fixed in the amendment
+  that automates the merge gate.
+
+**Watch item:** [#53](https://github.com/mikev10/olympus/issues/53) (split
+`docs/decisions.md` per unit) starts when a unit branch first conflicts on
+the file's tail. Until then it costs nothing.
+
+**Suggested order** after R36b: R38 and R39 first, because every merge pays
+for a paid run that an intermittent failure can turn red, and a test that
+passes by accident hides the failures the rest depend on. Then R40, R41,
+R42, R43, R44, R45, R46, R47. The M3 units R48 to R51 wait for M2.
+
+### R38 — Paid driver evidence that does not flake
+
+Issues [#165](https://github.com/mikev10/olympus/issues/165),
+[#88](https://github.com/mikev10/olympus/issues/88),
+[#85](https://github.com/mikev10/olympus/issues/85). `driver.subagents`
+failed again on #163 after D-R36a-16 removed the conflict between the
+message and the role's instructions: the child replied `child` without the
+role's token. D-R36a-16 says a recurrence means the role's instructions are
+not reaching the session. The other two are the same kind of gap: the
+`openai-chat` relay dialect forwards billing options the meter cannot count
+(the `openai-responses` dialect was fixed in #87), and the
+workspace-instruction assertion reads only the reply, not the system prompt
+the driver forwarded (D-R23-08).
+
+- Find whether the child session receives the role's instructions, from
+  what the driver forwards, not from the reply. If it does not, fix the
+  driver. If it does, the assertion observes the forwarded prompt rather
+  than the model's compliance.
+- The workspace-instruction assertion observes the forwarded system prompt.
+- The `openai-chat` dialect refuses or strips the billing options its meter
+  cannot count, as the `openai-responses` dialect does.
+
+**Out of scope:** retrying a paid assertion until it passes. A retry that
+hides a real defect is the failure this unit removes.
+
+**Why M2:** every merge pays for a driver run, and an intermittent failure
+spends another one and holds the merge.
+
+### R39 — Tests that cannot pass by accident
+
+Issues [#117](https://github.com/mikev10/olympus/issues/117),
+[#82](https://github.com/mikev10/olympus/issues/82),
+[#74](https://github.com/mikev10/olympus/issues/74),
+[#19](https://github.com/mikev10/olympus/issues/19),
+[#48](https://github.com/mikev10/olympus/issues/48),
+[#93](https://github.com/mikev10/olympus/issues/93),
+[#65](https://github.com/mikev10/olympus/issues/65). Three flakes, one leak,
+and three checks that can pass without judging anything:
+
+- **Flakes:** the readiness scan test sees the tree hash change after a scan
+  (#117); the readiness `tree.test.ts` git helper writes to a child's stdin
+  with no error handler and fails on `EPIPE` (#82); a sandbox relay test
+  compares every `model-relay-*` container on the host and fails when
+  another package's test runs beside it (#74). #74 takes the fix #14 and #56
+  already took: compare only the names this test created.
+- **Leak:** relay tests leave sandbox, relay, and upstream containers and
+  networks when teardown does not run (#19).
+- **Fail open:** line tests return early, and pass, when no evidence was
+  recorded (#48); conformance's `allText` turns a read error into an empty
+  string (#93); the I1 closed-operation check reads only own string names on
+  `LocalVault.prototype` (#65). Each becomes a refusal, and each fix is shown
+  failing against the old behaviour.
+
+**Out of scope:** new assertions beyond these seven issues.
+
+**Why M2:** I5 says fail closed, and a test that passes on an error is the
+test suite failing open.
+
+### R40 — Admission enforces the readiness ceiling
+
+Issues [#129](https://github.com/mikev10/olympus/issues/129),
+[#38](https://github.com/mikev10/olympus/issues/38). Readiness derives the
+highest autonomy level a repository supports, but admission does not refuse
+a run requested above it (#129, left open by R35 and R36a). And R1's
+negative fixtures accept an indeterminate probe as proof its check ran
+(#38, D-R2-10).
+
+- Admission refuses a run whose requested level exceeds the target's
+  derived ceiling, naming the probe that holds it. Subtractive only, as in
+  R1: it never grants what policy withheld.
+- An indeterminate probe is not proof a check ran; the fixtures that accept
+  one are refused.
+
+**Out of scope:** changing how the ceiling is derived (R43 changes how
+readiness installs, not what it concludes).
+
+**Why M2:** a ceiling that admission does not enforce is advice, and I5
+says refuse rather than warn.
+
+### R41 — The enforcement record: order, completeness, and what it may hold
+
+Issues [#164](https://github.com/mikev10/olympus/issues/164),
+[#24](https://github.com/mikev10/olympus/issues/24),
+[#59](https://github.com/mikev10/olympus/issues/59),
+[#44](https://github.com/mikev10/olympus/issues/44).
+
+- **Order** (#164, #24): a decision carries a wall-clock `decidedAt` and no
+  sequence, so readers that want the latest one trust the host clock
+  (R37's triage, D-R37-04). Decisions get a recording order per run that
+  every "latest" reader uses. This changes a Vault contract type, so the
+  unit opens with an amendment.
+- **Completeness** (#24, #59): a decision can be lost between its effect and
+  its record, and outcomes miss records no run state references (evidence
+  written before its commit, an orphaned admission). #59's recorded owner
+  was R10, which shipped without it (D-R18-06); this unit takes it.
+- **Content** (#44): a credential in a file name reaches the Vault through
+  the diff record (D-R17-08). A path the secret scanner flags is refused or
+  redacted before it reaches the record.
+
+**Out of scope:** authenticating the store's history against tampering
+(R49).
+
+**Why M2:** status, retries, and outcomes all read "the latest decision",
+and R2's numbers are only as complete as the record.
+
+### R42 — Getting-started docs and readable readiness
+
+Issues [#147](https://github.com/mikev10/olympus/issues/147),
+[#144](https://github.com/mikev10/olympus/issues/144),
+[#142](https://github.com/mikev10/olympus/issues/142),
+[#140](https://github.com/mikev10/olympus/issues/140),
+[#135](https://github.com/mikev10/olympus/issues/135),
+[#133](https://github.com/mikev10/olympus/issues/133),
+[#122](https://github.com/mikev10/olympus/issues/122). The getting-started
+gaps R35 and R36a left open.
+
+- The README states what works today rather than pointing at this file
+  (#122), says whether a readiness scan spends API credit (#140), gives a
+  PowerShell variant beside every bash block (#133), and documents
+  `FACTORY_GIT_TOKEN`'s permissions, the merge mechanism, and the example's
+  base branch (#135).
+- The cost estimate shows its breakdown, the models it priced, and how to
+  lower it (#144).
+- `readiness` prints a summary and what to fix, with the JSON behind a flag
+  (#142).
+- A free way to prove a setup before the first paid run (#147), if R36b's
+  `init` has not already delivered one; the start-unit record checks.
+
+**Out of scope:** new readiness probes, and changing the cap.
+
+**Why M2:** M2's claim is a real feature from a fresh clone, and these are
+what a first user reads before it.
+
+### R43 — Readiness installs from manifests, with granted hosts
+
+Issues [#160](https://github.com/mikev10/olympus/issues/160),
+[#141](https://github.com/mikev10/olympus/issues/141). Readiness should
+install from the manifests only, remove committed dependency trees, and stop
+trusting in-process suite reports (#160, D-R29-15). And its install reaches
+only `registry.npmjs.org`, so a repository needing Prisma's or next/font's
+hosts scores `L0` with no way to grant them (#141).
+
+- Readiness installs over manifests and the lockfile, as the runtime does
+  since R34, with committed dependency trees removed first.
+- A host the install needs is granted in policy, default deny (I4), and the
+  scan names the host it was refused.
+
+**Out of scope:** workspace repositories (R45).
+
+**Why M2:** a ceiling derived from an install the line would not perform is
+a ceiling about a different repository.
+
+### R44 — Drafting and judging findings from the benchmark
+
+Issues [#73](https://github.com/mikev10/olympus/issues/73),
+[#72](https://github.com/mikev10/olympus/issues/72),
+[#67](https://github.com/mikev10/olympus/issues/67),
+[#66](https://github.com/mikev10/olympus/issues/66),
+[#103](https://github.com/mikev10/olympus/issues/103). Found by R7's
+benchmark and R19's review:
+
+- R19's critic sends back sound drafts, five of six in R7's runs (#73).
+- P7 refuses a tightened assertion (`toBe` to `toStrictEqual`) as
+  assertion-weakened (#72).
+- A drafted check may name a path neither drafted nor in the base, which the
+  builder can then write (#67, D-R19-24). That path is refused: no artifact
+  the builder can write may judge it (I3).
+- No drafting assertion stops the process between persistence steps (#66,
+  D-R19-22).
+- A drafted observation plan can name only checks the spec states (#103).
+
+**Out of scope:** the benchmark corpus itself.
+
+**Why M2:** each one either refuses sound work, which costs a paid
+iteration, or lets the builder write its own judge.
+
+### R45 — Workspace repositories install
+
+Issue [#138](https://github.com/mikev10/olympus/issues/138). npm and pnpm
+workspace repositories are refused by the runtime install. The maintainer
+accepted that for R34 (D-R34-11) until workspace support is safe.
+
+- Install a workspace from its root lockfile, with each package's scripts
+  held to the same rules as a single package's.
+
+**Out of scope:** workspaces in other package managers.
+
+**Why M2:** a refused workspace cannot use the line at all, and R36b's
+fresh-clone claim should not exclude them.
+
+### R46 — Release setup for the first v2 publish
+
+Issue [#115](https://github.com/mikev10/olympus/issues/115), which absorbed
+#54. The CLI still carries v1's version, `4.5.16`, the other packages are
+`@olympus-ai/*` at `0.0.0`, and ownership of the `@olympus-ai` npm scope is
+unverified. R35 delivered the build and a CI-tested local install,
+not the publish.
+
+- Claim the scope before anything depends on it, set `5.0.0`, and publish from CI
+  with provenance.
+
+**Out of scope:** a release cadence.
+
+**Why M2:** a fresh clone is the only way to install v2 until this ships.
+
+### R47 — Security scanning beyond TypeScript
+
+Issues [#120](https://github.com/mikev10/olympus/issues/120),
+[#97](https://github.com/mikev10/olympus/issues/97). Python has no
+dependency audit, the follow-on to R13a and R29 (#120). And a security
+scanner declared with `rules: []` validates, because rules are not checked
+for effective content (#97).
+
+- A Python dependency audit, at the same gate as the TypeScript one.
+- A scanner whose rules have no effective content is refused at admission.
+
+**Out of scope:** scanners for languages without an adapter set.
+
+### R48 — Code-scanning alerts as a bug-fix intake source
+
+Issue [#50](https://github.com/mikev10/olympus/issues/50). R16 shipped
+without this source. An alert enters as an `UntrustedPayload` with only
+extracted fields reaching a template (I7), and the fix is judged by an
+acceptance check that fails on the base (R15), not by the scanner that
+raised it.
+
+**Why M3:** R16 and R22 already give the line a bug-fix intake and a
+trigger path; this is one more source.
+
+### R49 — The store authenticates its own history
+
+Issue [#96](https://github.com/mikev10/olympus/issues/96). The nightly
+integrity check cannot tell a rewritten history from the real one (D-R13a).
+
+**Why M3:** it needs R41's recording order first, and it guards against a
+host compromise rather than the builder.
+
+### R50 — A runner the change cannot reach
+
+Issue [#42](https://github.com/mikev10/olympus/issues/42), with its pending
+registry entry `I3.runner-process-loads-only-base-code` (D-R15-08, D-R29-15).
+A suite's runner process can load code the change wrote. Closing it needs a
+runner, and every input its process loads, provisioned outside the tree or
+authenticated and held to the base.
+
+**Why M3:** the registry already places it beside the L3 canary, which
+needs the same trusted runner.
+
+### R51 — Adapter sets after Python
+
+Issue [#113](https://github.com/mikev10/olympus/issues/113). R29 delivered
+Python; the issue's other stacks remain. Which stack is next is decided when
+the unit starts.
+
+**Why M3:** each stack is a full adapter set, and M2 needs only TypeScript
+and Python.
 
 ## Working Rules
 
