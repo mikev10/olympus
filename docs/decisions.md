@@ -10656,9 +10656,9 @@ Started on `v2` at f3f8878, after R37 (#163) and D-TOOLING-11 (#167). Issues
   `C:\Users\Mike\Projects\my-recipes` with `core.autocrlf=true`, an npm
   lockfile, `vitest`, and `origin/olympus-trial`.
 
-### D-R36b-03: open, waiting on the maintainer
+### D-R36b-03: the directories are `.factory/` and `~/.factory/`
 
-- **The spec names `.olympus/` and `~/.olympus/`; I10 forbids a Greek name
+- **The spec named `.olympus/` and `~/.olympus/`; I10 forbids a Greek name
   in any path in code.** `init` writes those paths, so the string would be
   in `packages/`, and the I10 scan fails on it. This is a contradiction
   between the unit and the spine, a stop condition (rule 6). Recommended:
@@ -10666,3 +10666,64 @@ Started on `v2` at f3f8878, after R37 (#163) and D-TOOLING-11 (#167). Issues
   matching `factory-host` and `FACTORY_*`; the entry in `DECOMPOSITION.md`
   is amended to say so. Rejected: exempting `.olympus` from the scan, which
   weakens an invariant's check.
+- **Resolved:** the maintainer chose `.factory/` and `~/.factory/` on
+  2026-11-17. `DECOMPOSITION.md`'s R36b entry is amended in this commit.
+  Reversal: an amendment naming other directories; any name the I10 scan
+  accepts works.
+
+### D-R36b-04: where `init` lives, what it writes, and how the host and CLI read it
+
+- **`init` is a function of `@olympus-ai/api`, run by the CLI's entry only.**
+  `initSetup` (`packages/api/src/init.ts`) detects the stack with
+  `buildAdapterSet` and writes the files. `cli.ts` stays types-only: the
+  `init` command calls a function on `CliIo`, and `main.ts` supplies it by a
+  dynamic import made only when the command is `init`, so no other command
+  loads runtime code. `@olympus-ai/api` moves from the CLI's
+  devDependencies to its dependencies. This narrows D-P9-07 to "every
+  command but `init`". Rejected: a second detector in the CLI (the spec
+  requires the one detector); a separate executable (the spec names
+  `olympus-ai init`). Reversal: move `initSetup` into its own package and
+  depend on that.
+- **What it writes comes from the shipped examples.** The api package
+  ships `setup/policy.yaml` and `setup/roles/`, byte-identical to
+  `examples/policy.yaml` and `examples/roles/`, and already ships
+  `rubrics/`, identical to `examples/rubrics/`; a test holds each pair
+  equal, so the copy cannot drift from the files R36a's tests admit. For a
+  Python stack, `init` replaces the policy's `installRegistries` with
+  `PYPI_REGISTRIES` and its `package.json` protected path with
+  `pyproject.toml`. Rejected: the compiler's default roles, which lack
+  R36a's builder line. Reversal: point `init` at another source.
+- **The manifest:** `unit` (required, 600000 ms), `secret-scan`
+  (`SECRET_SCAN_IMAGE`, `config: null`), and `static-analysis`
+  (`STATIC_ANALYSIS_IMAGE`, a `no-eval` rule in the stack's languages).
+  Admissible only beside drafted tests, which supply the check failing on
+  the base, so the README's first run drafts both. The graph is one build
+  task, `change`, and its review task, `change-review`.
+- **The environment file is `host.env` in the config directory**, mode
+  0600 where the host has modes. It holds a generated
+  `FACTORY_API_TOKEN` (32 random bytes, hex), port 7300, every path, the
+  merge target, and on a host with no uids `FACTORY_CONTAINER_UID/GID`
+  `1000`, a non-root user on a host that enforces no ownership, as the
+  conformance rigs use. It does not hold `ANTHROPIC_API_KEY` or
+  `FACTORY_GIT_TOKEN`: those are set by hand, the two values the
+  `my-recipes` run allows by hand.
+- **The merge target is never guessed.** `init --base-branch <branch>` is
+  required; the repository is read from the `origin` remote's GitHub URL,
+  and anything else is refused, naming the URL.
+- **The host reads the file with `--env-file <path>`**, parsed by
+  `util.parseEnv`. A name `HOST_VARIABLES` does not declare is refused, and
+  so is a name set both in the file and in the environment with another
+  value; the file and the environment are otherwise merged. Rejected:
+  reading a default path without being told (a file nobody named), and the
+  environment silently winning a conflict. Reversal: drop the conflict rule.
+- **The CLI takes `--env-file <path>` too**, reading only
+  `FACTORY_API_TOKEN`, `FACTORY_LISTEN_HOST`, and `FACTORY_LISTEN_PORT`
+  from it to build the URL and token. Order: `--url`/`--token`, then the
+  named file, then `FACTORY_API_URL`/`FACTORY_API_TOKEN`. A file named is
+  not a guessed server.
+- **The paid case starts from `init`'s output.** It runs `initSetup` over a
+  copy of `corpus/v1/repos/calc`'s product files (vitest 4, a hashed
+  lockfile) and drafts both spec and tests, replacing the examples paid
+  case as the spec says ("instead of `examples/`"); its registry id becomes
+  `I5.init-setup-merges-on-the-real-driver`. The shipped examples keep
+  their free admission assertion.
