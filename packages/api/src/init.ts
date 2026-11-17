@@ -239,3 +239,20 @@ export async function initSetup(request: InitRequest): Promise<InitOutcome> {
   await write(paths.graph, `${JSON.stringify(INIT_GRAPH, null, 2)}\n`);
   return { ok: true, repository, stack: set.stack, envFile: paths.env, manifest: paths.manifest, graph: paths.graph, written: files };
 }
+
+/** The client's executable name, exactly: the one spelling the name scan exempts. */
+const CLI = 'olympus-ai';
+
+/** What `factory-host init` prints: what it wrote, or why it refused, then the two commands that follow. */
+export function initReport(outcome: InitOutcome): string[] {
+  if (!outcome.ok) return [`init refused (${outcome.reason}): ${outcome.message}`];
+  return [
+    `stack: ${outcome.stack}`,
+    ...outcome.written.map((file) => `wrote ${file}`),
+    '',
+    'next, with ANTHROPIC_API_KEY and FACTORY_GIT_TOKEN set in the environment:',
+    `  factory-host --env-file ${outcome.envFile}`,
+    'then, in another terminal, from the repository:',
+    `  ${CLI} --env-file ${outcome.envFile} create --workspace ${outcome.repository} --base-commit <full sha of HEAD> --level 1 --draft-spec --draft-tests --intent "<what to change>" --manifest ${RUN_FILES_DIRECTORY}/verify.json --graph ${RUN_FILES_DIRECTORY}/graph.json`,
+  ];
+}

@@ -197,7 +197,7 @@ then starts `factory-host` and drives it with `olympus-ai`.
 ### Configure the host
 
 `factory-host` reads these variables and no others, from its environment and
-from the file `--env-file <path>` names; `olympus-ai init` writes that file
+from the file `--env-file <path>` names; `factory-host init` writes that file
 (see First run). [.env.example](.env.example) lists them with comments. A
 missing or invalid one stops the host before it listens, and the host prints
 every problem in one list.
@@ -287,12 +287,12 @@ A finding the change adds fails the run; one the base already had does not.
 
 ### First run
 
-`olympus-ai init` writes everything a first run needs, so no file is written
+`factory-host init` writes everything a first run needs, so no file is written
 by hand. Run it in your repository's working copy, naming the branch a passed
 run merges into (it is never guessed):
 
 ```
-olympus-ai init --base-branch <branch>
+factory-host init --base-branch <branch>
 ```
 
 It reads the repository's stack with the same detector a run uses: vitest or

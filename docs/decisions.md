@@ -10674,7 +10674,7 @@ Started on `v2` at f3f8878, after R37 (#163) and D-TOOLING-11 (#167). Issues
 ### D-R36b-04: where `init` lives, what it writes, and how the host and CLI read it
 
 - **`init` is a function of `@olympus-ai/api`, run by the CLI's entry only.**
-  `initSetup` (`packages/api/src/init.ts`) detects the stack with
+  (Superseded by D-R36b-07.) `initSetup` (`packages/api/src/init.ts`) detects the stack with
   `buildAdapterSet` and writes the files. `cli.ts` stays types-only: the
   `init` command calls a function on `CliIo`, and `main.ts` supplies it by a
   dynamic import made only when the command is `init`, so no other command
@@ -10757,3 +10757,20 @@ Started on `v2` at f3f8878, after R37 (#163) and D-TOOLING-11 (#167). Issues
   hand. `PATH` is the shell's, set by the install step the README gives,
   and the run's record lists it with the other commands typed. Reversal:
   call each executable by its installed path, and the README says so.
+
+### D-R36b-07: `init` is `factory-host init`, not `olympus-ai init`
+
+- **Surfaced:** `I9.api-runs-headless` refuses any workspace package as a
+  runtime dependency of the CLI
+  (`packages/conformance/src/registry/i9.ts`), and the first build of
+  D-R36b-04 made `@olympus-ai/api` one. The spec's `olympus-ai init` and
+  its "one detector" could not both hold without weakening that check, a
+  stop condition.
+- **Resolved:** the maintainer chose `factory-host init` on 2026-11-17. The
+  host's entry runs `initSetup` and prints `initReport`'s lines to stderr,
+  inside its existing exemption; the CLI is back to `v2`'s entry and
+  dependencies, keeping only `--env-file`. `DECOMPOSITION.md`'s R36b entry
+  says so. This supersedes D-R36b-04's first bullet.
+- **Rejected:** the CLI spawning `factory-host init` (a second failure
+  path for the same command), and relaxing the check (weakens I9's
+  assertion). Reversal: either of those, by amendment.

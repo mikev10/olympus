@@ -28,11 +28,9 @@
     "test": "vitest run"
   },
   "devDependencies": {
+    "@olympus-ai/api": "workspace:*",
     "@olympus-ai/core": "workspace:*",
     "@olympus-ai/sandbox": "workspace:*",
     "@olympus-ai/vault": "workspace:*"
-  },
-  "dependencies": {
-    "@olympus-ai/api": "workspace:*"
   }
 }
