@@ -342,10 +342,10 @@ everything the chain decided without them. Print:
   criteria pass after the fixes
 
 **Do not merge. Do not tag.** Step 7 of the loop is the maintainer's. When all
-four conditions hold, print the merge and tag commands, filled in — the squash
-merge with `--body "Gate-Change: acknowledged"` where the unit touched a gate
-path, then `git tag reviewed/<id> <the v2 squash commit> && git push origin
-reviewed/<id>` — and stop. When any is false, name it as the reason the unit is
+four conditions hold, print `Next: /merge-unit <id>` and stop. Only the
+maintainer types it: that command is the approval (D-TOOLING-11), and this
+skill never invokes it. The paid suites not having run yet is not a false
+condition here; `merge-unit` starts that run. When any is false, name it as the reason the unit is
 not ready to merge, and stop.
 
 ## Never
