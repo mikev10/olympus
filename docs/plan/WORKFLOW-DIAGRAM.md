@@ -63,10 +63,10 @@ who runs each step, and where one Claude session ends and the next begins.
  └──────────────┬───────────────┘
                 ▼
  ╔══════════════════════════════╗
- ║ MERGE AND TAG                ║  YOU
- ║  merge the PR                ║
- ║  git tag reviewed/P5         ║
- ║  git push --tags             ║
+ ║ /merge-unit P5               ║  YOU type it
+ ║  paid CI, merge the PR,      ║  (the approval)
+ ║  tag reviewed/P5, close the  ║
+ ║  unit's issues               ║
  ╚══════════════╤═══════════════╝
                 ▼
    land any amendments the unit surfaced  (only if any were raised)
@@ -82,8 +82,8 @@ who runs each step, and where one Claude session ends and the next begins.
    `CLAUDE.md` rule 6, a repository that is not `PUBLIC`, or a family that
    fails to count twice.
 2. Read the final report — the triage counts, every decision the unit made on
-   its own, and the gate state — then merge the PR and push the tag with the
-   commands it prints.
+   its own, and the gate state — then type `/merge-unit <id>`. It runs the
+   paid suites within the weekly cap, merges, tags, and names the next unit.
 
 ## Session boundaries
 

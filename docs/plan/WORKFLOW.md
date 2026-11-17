@@ -72,7 +72,12 @@ maintainer's.
    first, and the full acceptance criteria are rerun. A fix that would need a
    contract change, a gate-path change, or work past the out-of-scope list is
    not applied: it is recorded with an owning unit or filed as an issue.
-7. The maintainer merges the PR, then tags: `git tag reviewed/<id> <the v2
+7. The maintainer reads the triage report and types `/merge-unit <id>`.
+   That command is the approval (D-TOOLING-11): it re-checks the four
+   conditions below, runs the paid suites under a standing `run-driver`
+   authorization capped at $2 a week, reruns a listed intermittent paid
+   failure once, merges, tags, closes the issues the unit delivered, and names
+   the next unit. What it does is what follows. The PR is merged, then tagged: `git tag reviewed/<id> <the v2
    commit> && git push origin reviewed/<id>`. The tag is the diff base for the
    next review bundle, so it is pushed after the merge and never before, and it
    points at the squash commit on `v2` rather than at the branch tip that
@@ -83,8 +88,8 @@ maintainer's.
    triage is written and committed, every finding the triage accepted is fixed
    or recorded with an owning unit, and the unit's acceptance criteria still
    pass after those fixes. Any one of them false is reported as the reason the
-   unit is not ready to merge. When all four hold, the session prints the merge
-   and tag commands, filled in, and stops.
+   unit is not ready to merge. When all four hold, the session prints
+   `/merge-unit <id>` and stops; only the maintainer types it.
 
    **Where the unit changed a gate path, the squash body carries
    `Gate-Change: acknowledged` on its own line.** The guard has two modes: on a
