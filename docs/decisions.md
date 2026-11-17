@@ -10727,3 +10727,33 @@ Started on `v2` at f3f8878, after R37 (#163) and D-TOOLING-11 (#167). Issues
   case as the spec says ("instead of `examples/`"); its registry id becomes
   `I5.init-setup-merges-on-the-real-driver`. The shipped examples keep
   their free admission assertion.
+
+### D-R36b-05: the host's entry reads its arguments
+
+- **Surfaced:** `I9.api-never-touches-a-terminal` refuses `process.argv` in
+  every api file, the host's entry included (`TERMINAL_CHAINS`,
+  `packages/conformance/src/registry/i9.ts:23`), and `--env-file` is an
+  argument.
+- **Chosen:** the entry's exemption gains `process.argv.slice`, read once
+  and never written; the assertion's title names it. Any argument but
+  `--env-file <path>` is refused. The entry still exports nothing, so no
+  other module reads argv through it. The host test that the environment
+  reaches start-up once now matches
+  `checkStartup(await environment(process.argv.slice(2), process.env))`.
+- **Rejected:** naming the file in a `FACTORY_ENV_FILE` variable, which would
+  keep argv out but makes the user set a variable by hand, the thing the
+  `my-recipes` run forbids beyond the key and the token. Reversal: that
+  variable, declared in `HOST_VARIABLES`, and the exemption removed.
+- **Also:** an empty value in the file is unset, as in the environment, so a
+  copied `.env.example` leaves the secrets to the environment rather than
+  conflicting with them.
+
+### D-R36b-06: PATH is the install's, not a variable the line reads
+
+- The README's install puts the installed executables on `PATH` (bash
+  `export PATH=...`, now also PowerShell `$env:Path = ...`). The
+  `my-recipes` run forbids "setting any other variable" beyond the key and
+  the token. Read as: no variable the line or the host reads is set by
+  hand. `PATH` is the shell's, set by the install step the README gives,
+  and the run's record lists it with the other commands typed. Reversal:
+  call each executable by its installed path, and the README says so.

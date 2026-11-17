@@ -28,7 +28,7 @@ approvals:
   integrate:1: human-required
 
 # The seats a run fills, each a role file in the roles directory
-# (FACTORY_ROLES_DIR; examples/roles). A role acts only at its stations, writes
+# (FACTORY_ROLES_DIR). A role acts only at its stations, writes
 # only its globs, uses only its tools, and spends only its budget. Tool names
 # are the driver's own, case and all: the Claude Code driver declares Read,
 # Write, Edit, Bash, and the rest of its CLI's tools, and a run granting a
@@ -67,7 +67,7 @@ roles:
     repoInstructions: false
   # The four drafting seats, used only by a run that drafts its spec
   # (create --draft-spec) or its tests (--draft-tests). Delete them if no run
-  # drafts. A drafting run also needs FACTORY_RUBRICS_DIR (examples/rubrics).
+  # drafts. A drafting run also needs FACTORY_RUBRICS_DIR.
   # A drafter reads the repository before it writes its draft, so each
   # drafter gets twice the tokens of the other seats.
   spec-drafter:

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * The `factory-host` executable: the runtime as a service over the production
- * composition. Configured from its environment and nothing else, it touches
+ * composition. Configured from its environment, and from the one file
+ * `--env-file <path>` names, read through the same table (#134). It touches
  * no terminal (I9); a client finds it at the address it was told to listen on.
  *
  * Every variable it reads is declared in `HOST_VARIABLES` (`config.ts`), and
@@ -10,15 +11,18 @@
  * unreadable endpoint file, and a trees directory that cannot hold a symbolic
  * link stop the host before it listens, with one list and no stack trace (I5).
  *
- * Only this file in this package writes to a terminal (A-HS-01, A-HS-03), and
- * it writes two things to stderr: why the executable did not start, as the
- * CLI's own entry does, and the one line the service gives it per failed
- * attempt. Nothing it starts prints anything itself.
+ * Only this file in this package writes to a terminal or reads its arguments
+ * (A-HS-01, A-HS-03, D-R36b-05), and it writes three things to stderr: why
+ * the executable did not start, as the CLI's own entry does; one line once it
+ * listens, naming where and the repository it admits (#139); and the one line
+ * the service gives it per failed attempt. Nothing it starts prints anything
+ * itself.
  */
+import { readFile } from 'node:fs/promises';
 import { GitHubCheckReader } from '../checks.js';
 import { createApiServer } from '../http/server.js';
 import { GitHubBranchProtection, readinessScanner } from '../readiness-scan.js';
-import { checkStartup, HostRefusal } from './config.js';
+import { checkStartup, HostRefusal, mergeEnvFile } from './config.js';
 import { composeHost } from './compose.js';
 
 /** Thrown by start-up and caught once, below, where the list is printed. */
@@ -30,9 +34,25 @@ function message(error: unknown): string {
   return (error instanceof Error ? error.message : String(error)).replace(/^factory-host: /u, '');
 }
 
+/** The environment, merged with the file `--env-file` names; any other argument is refused. */
+async function environment(args: readonly string[], env: Readonly<Record<string, string | undefined>>): Promise<Readonly<Record<string, string | undefined>>> {
+  if (args.length === 0) return env;
+  const [flag, file, ...rest] = args;
+  if (flag !== '--env-file' || file === undefined || file === '' || rest.length > 0) refuse(['the only argument is --env-file <path>']);
+  let text: string;
+  try {
+    text = await readFile(file, 'utf8');
+  } catch (error) {
+    refuse([`--env-file ${file} could not be read: ${message(error)}`]);
+  }
+  const merged = mergeEnvFile(file, text, env);
+  if (!merged.ok) refuse(merged.problems);
+  return merged.env;
+}
+
 async function start(): Promise<void> {
   // The environment, the endpoint file, and the symlink probe, all into one list before anything is composed.
-  const startup = await checkStartup(process.env);
+  const startup = await checkStartup(await environment(process.argv.slice(2), process.env));
   if (!startup.ok) refuse(startup.problems);
   const config = startup.settings;
   const { endpoint } = startup;
@@ -77,6 +97,9 @@ async function start(): Promise<void> {
     refuse([message(error)]);
   }
   await server.listen(config.port, config.listenHost);
+  // One line once listening, so a started host is not mistaken for a hung one (#139). No secret is in it.
+  process.stderr.write(`factory-host: listening on http://${config.listenHost}:${String(config.port)}, admitting runs from ${config.repository}; stop with Ctrl+C
+`);
 
   process.on('SIGTERM', () => {
     void server.close();

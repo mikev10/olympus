@@ -4,16 +4,27 @@
  * no default URL: a CLI that guessed one could reach a server nobody chose.
  *
  * The CLI imports types from `@olympus-ai/api` and no code; `import type` is
- * erased, so nothing of the runtime runs in this process (D-P9-07).
+ * erased, so nothing of the runtime runs in this process (D-P9-07). The one
+ * exception is `init`, which needs no server and writes the setup a host
+ * starts from: it calls `io.init`, which the executable's entry loads only
+ * for that command (D-R36b-04).
  */
-import { parseArgs } from 'node:util';
-import type { ApproveBody, CreateRunBody, ErrorBody, RejectBody, TelemetryExport } from '@olympus-ai/api';
+import { readFile } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
+import { parseArgs, parseEnv } from 'node:util';
+import type { ApproveBody, CreateRunBody, ErrorBody, InitOutcome, InitRequest, RejectBody, TelemetryExport } from '@olympus-ai/api';
 
 export interface CliIo {
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly fetch: typeof fetch;
   out(line: string): void;
   err(line: string): void;
+  /** `init`'s setup, run locally; absent, `init` is refused. */
+  readonly init?: (request: InitRequest) => Promise<InitOutcome>;
+  /** The home directory, under which `init` writes its configuration by default. */
+  readonly home?: string;
+  /** Whether this host has uids; on one with none, `init` writes the container user. */
+  readonly hostHasUids?: boolean;
 }
 
 /** 0: done. 1: the server refused or failed. 2: the command line was wrong, or no server was reached. */
@@ -45,6 +56,14 @@ export interface Command {
  * accepted without being documented, or documented without being accepted.
  */
 export const COMMANDS: readonly Command[] = [
+  {
+    name: 'init', args: '', summary: 'write the setup a first run needs, for the repository here; needs no server',
+    flags: {
+      'base-branch': { type: 'string', value: '<branch>', help: 'required: the branch a passed run merges into' },
+      repository: { type: 'string', value: '<path>', help: 'the repository; default the current directory' },
+      'config-dir': { type: 'string', value: '<abs path>', help: 'where the policy, roles, rubrics, and host.env go; default ~/.factory' },
+    },
+  },
   {
     name: 'create', args: '', summary: 'admit a run; a refusal names what to fix',
     flags: {
@@ -105,6 +124,7 @@ export const COMMANDS: readonly Command[] = [
 export const GLOBAL_FLAGS: Readonly<Record<string, Flag>> = {
   url: { type: 'string', value: '<api url>', help: 'the API\'s address (or FACTORY_API_URL)' },
   token: { type: 'string', value: '<token>', help: 'the API\'s token (or FACTORY_API_TOKEN)' },
+  'env-file': { type: 'string', value: '<path>', help: 'the host.env init wrote: the API\'s address and token are read from it' },
   help: { type: 'boolean', help: 'print this help' },
 };
 
@@ -128,7 +148,7 @@ const USAGE = [
   ...COMMANDS.map((c) => `  ${c.name.padEnd(width)}  ${c.summary}`),
   '',
   `${COMMAND} <command> --help prints one line per flag`,
-  'every command needs --url <api url> (or FACTORY_API_URL) and --token <token> (or FACTORY_API_TOKEN)',
+  'every command but init needs --url <api url> (or FACTORY_API_URL) and --token <token> (or FACTORY_API_TOKEN), or --env-file <host.env>',
 ].join('\n');
 
 /** The parser's options for one command, from the table. */
@@ -158,9 +178,26 @@ interface Target {
   readonly token: string;
 }
 
-function target(values: { url?: string | undefined; token?: string | undefined }, env: CliIo['env']): Target {
-  const url = values.url ?? env.FACTORY_API_URL;
-  const token = values.token ?? env.FACTORY_API_TOKEN;
+/** The address and token from the host's environment file: what the host listens on, and the token it checks. */
+async function fromEnvFile(file: string): Promise<{ url: string; token: string }> {
+  let values: Record<string, string>;
+  try {
+    values = parseEnv(await readFile(file, 'utf8')) as Record<string, string>;
+  } catch {
+    throw new UsageError(`--env-file ${file} could not be read`);
+  }
+  const port = values.FACTORY_LISTEN_PORT;
+  const token = values.FACTORY_API_TOKEN;
+  if (port === undefined || port === '' || token === undefined || token === '') throw new UsageError(`--env-file ${file} sets no FACTORY_LISTEN_PORT or no FACTORY_API_TOKEN`);
+  const host = values.FACTORY_LISTEN_HOST === undefined || values.FACTORY_LISTEN_HOST === '' ? '127.0.0.1' : values.FACTORY_LISTEN_HOST;
+  return { url: `http://${host.includes(':') ? `[${host}]` : host}:${port}`, token };
+}
+
+/** Flags first, then the file named, then the environment: a file named is not a guessed server. */
+async function target(values: { url?: string | undefined; token?: string | undefined; envFile?: string | undefined }, env: CliIo['env']): Promise<Target> {
+  const file = values.envFile === undefined ? null : await fromEnvFile(values.envFile);
+  const url = values.url ?? file?.url ?? env.FACTORY_API_URL;
+  const token = values.token ?? file?.token ?? env.FACTORY_API_TOKEN;
   if (url === undefined || url === '') throw new UsageError('no API URL: pass --url or set FACTORY_API_URL');
   if (token === undefined || token === '') throw new UsageError('no token: pass --token or set FACTORY_API_TOKEN');
   let parsed: URL;
@@ -467,13 +504,35 @@ async function telemetry(io: CliIo, t: Target, args: string[]): Promise<ExitCode
   return code;
 }
 
+/** `init`: the setup written locally, then the two commands that use it. */
+async function init(io: CliIo, own: string[]): Promise<ExitCode> {
+  const { values, positionals } = parseOwn('init', own);
+  if (positionals.length > 0) throw new UsageError(`init takes no arguments, not '${positionals.join(' ')}'`);
+  const baseBranch = required(str(values, 'base-branch'), '--base-branch');
+  if (io.init === undefined || io.home === undefined) throw new UsageError('init is not available in this process');
+  const configDirectory = resolve(str(values, 'config-dir') ?? join(io.home, '.factory'));
+  const outcome = await io.init({ repository: resolve(str(values, 'repository') ?? '.'), configDirectory, baseBranch, hostHasUids: io.hostHasUids ?? true });
+  if (!outcome.ok) {
+    io.err(`init refused (${outcome.reason}): ${outcome.message}`);
+    return 1;
+  }
+  io.out(`stack: ${outcome.stack}`);
+  for (const file of outcome.written) io.out(`wrote ${file}`);
+  io.out('');
+  io.out('next, with ANTHROPIC_API_KEY and FACTORY_GIT_TOKEN set in the environment:');
+  io.out(`  factory-host --env-file ${outcome.envFile}`);
+  io.out('then, in another terminal, from the repository:');
+  io.out(`  ${COMMAND} --env-file ${outcome.envFile} create --workspace ${outcome.repository} --base-commit <full sha of HEAD> --level 1 --draft-spec --draft-tests --intent "<what to change>" --manifest .factory/verify.json --graph .factory/graph.json`);
+  return 0;
+}
+
 export async function runCli(argv: readonly string[], io: CliIo): Promise<ExitCode> {
   try {
     const { values, positionals } = parseArgs({
       args: [...argv],
       strict: false,
       allowPositionals: true,
-      options: { url: { type: 'string' }, token: { type: 'string' }, help: { type: 'boolean' } },
+      options: { url: { type: 'string' }, token: { type: 'string' }, 'env-file': { type: 'string' }, help: { type: 'boolean' } },
     });
     const [command] = positionals;
     if (command === undefined) {
@@ -487,9 +546,15 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<ExitCo
       io.out(commandHelp(row));
       return 0;
     }
-    const t = target({ url: typeof values.url === 'string' ? values.url : undefined, token: typeof values.token === 'string' ? values.token : undefined }, io.env);
     // What remains once the global options are taken out: the command's own arguments.
     const own = stripGlobals(argv).slice(1);
+    // init needs no server: it runs before a URL or token is asked for.
+    if (command === 'init') return await init(io, own);
+    const t = await target({
+      url: typeof values.url === 'string' ? values.url : undefined,
+      token: typeof values.token === 'string' ? values.token : undefined,
+      envFile: typeof values['env-file'] === 'string' ? values['env-file'] : undefined,
+    }, io.env);
     switch (command) {
       case 'create':
         return await create(io, t, own);
@@ -557,11 +622,11 @@ function stripGlobals(argv: readonly string[]): string[] {
   const out: string[] = [];
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i] ?? '';
-    if (arg === '--url' || arg === '--token') {
+    if (arg === '--url' || arg === '--token' || arg === '--env-file') {
       i += 1;
       continue;
     }
-    if (arg.startsWith('--url=') || arg.startsWith('--token=')) continue;
+    if (arg.startsWith('--url=') || arg.startsWith('--token=') || arg.startsWith('--env-file=')) continue;
     out.push(arg);
   }
   return out;

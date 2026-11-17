@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
-import { checkStartup, HOST_VARIABLES, readHostConfig, refusalText } from '../src/host/config.js';
+import { checkStartup, HOST_VARIABLES, mergeEnvFile, readHostConfig, refusalText, type HostFacts } from '../src/host/config.js';
 import { probeSymlinks } from '../src/host/symlinks.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -17,6 +17,9 @@ const MAIN = join(ROOT, 'packages', 'api', 'src', 'host', 'main.ts');
 
 /** How a table entry is written in the docs: a prefix family as `NAME*`. */
 const documented = (v: (typeof HOST_VARIABLES)[number]): string => (v.prefix === true ? `${v.name}*` : v.name);
+
+/** A host with uids, as Linux and macOS are: the container user is optional there, so these tests are the same on every OS. */
+const HAS_UIDS: HostFacts = { uids: true };
 
 const FULL: Record<string, string> = {
   FACTORY_API_TOKEN: 'x'.repeat(32), FACTORY_LISTEN_PORT: '7300', FACTORY_POLICY_FILE: '/p.yaml', FACTORY_ROLES_DIR: '/roles',
@@ -47,7 +50,7 @@ describe('the configuration table and the docs', () => {
   test('the host reads only names the table declares', () => {
     const read = new Set<string>();
     const env = new Proxy(FULL, { get: (target, key) => { if (typeof key === 'string') read.add(key); return target[key as string]; } });
-    const result = readHostConfig(env);
+    const result = readHostConfig(env, HAS_UIDS);
     expect(result.ok).toBe(true);
     if (result.ok) result.settings.webhookSecret('FACTORY_WEBHOOK_GITHUB');
     expect(read.size).toBeGreaterThan(0);
@@ -59,11 +62,11 @@ describe('the configuration table and the docs', () => {
   test('main.ts touches the environment once, handing it to readHostConfig', async () => {
     const source = await readFile(MAIN, 'utf8');
     expect(source.match(/process\.env/gu)).toHaveLength(1);
-    expect(source).toContain('checkStartup(process.env)');
+    expect(source).toContain('checkStartup(await environment(process.argv.slice(2), process.env))');
   });
 
   test('a webhook secret is read only under the webhook prefix', () => {
-    const result = readHostConfig({ ...FULL, FACTORY_WEBHOOK_GITHUB: 's' });
+    const result = readHostConfig({ ...FULL, FACTORY_WEBHOOK_GITHUB: 's' }, HAS_UIDS);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.settings.webhookSecret('FACTORY_WEBHOOK_GITHUB')).toBe('s');
@@ -73,7 +76,7 @@ describe('the configuration table and the docs', () => {
 
 describe('start-up refusal (I5)', () => {
   test('an empty environment is refused with every required variable in one list', () => {
-    const result = readHostConfig({});
+    const result = readHostConfig({}, HAS_UIDS);
     expect(result.ok).toBe(false);
     if (result.ok) return;
     const required = HOST_VARIABLES.filter((v) => v.required).map((v) => v.name);
@@ -83,7 +86,7 @@ describe('start-up refusal (I5)', () => {
 
   test('invalid values are listed beside missing ones, not one at a time', () => {
     const { FACTORY_GIT_TOKEN: _token, ...rest } = FULL;
-    const result = readHostConfig({ ...rest, FACTORY_LISTEN_PORT: 'eighty', FACTORY_CONTAINER_UID: '1000', FACTORY_CODEX_SEATS: 'reviewer', FACTORY_ENDPOINT_KEY: 'k' });
+    const result = readHostConfig({ ...rest, FACTORY_LISTEN_PORT: 'eighty', FACTORY_CONTAINER_UID: '1000', FACTORY_CODEX_SEATS: 'reviewer', FACTORY_ENDPOINT_KEY: 'k' }, HAS_UIDS);
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.problems).toHaveLength(5);
@@ -95,7 +98,7 @@ describe('start-up refusal (I5)', () => {
   });
 
   test('the refusal names each problem and where the docs are, and never prints a value', () => {
-    const result = readHostConfig({ FACTORY_API_TOKEN: 'secret-token-value' });
+    const result = readHostConfig({ FACTORY_API_TOKEN: 'secret-token-value' }, HAS_UIDS);
     expect(result.ok).toBe(false);
     const text = refusalText(result.ok ? [] : result.problems);
     expect(text).toMatch(/^not started; \d+ configuration problems:/u);
@@ -142,7 +145,7 @@ describe('every start-up problem in one list (review: codex-5)', () => {
       const result = await checkStartup({
         ...rest, FACTORY_API_TOKEN: 'short', FACTORY_TREES: join(blocker, 'trees'),
         FACTORY_ENDPOINT_CONFIG: join(dir, 'no-such-endpoint.json'), FACTORY_ENDPOINT_KEY: 'k',
-      });
+      }, undefined, HAS_UIDS);
       expect(result.ok).toBe(false);
       if (result.ok) return;
       const text = result.problems.join('\n');
@@ -159,11 +162,40 @@ describe('every start-up problem in one list (review: codex-5)', () => {
   test('a configuration with every check passing is returned with its settings', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'r35-startup-'));
     try {
-      const result = await checkStartup({ ...FULL, FACTORY_TREES: join(dir, 'trees') });
+      const result = await checkStartup({ ...FULL, FACTORY_TREES: join(dir, 'trees') }, undefined, HAS_UIDS);
       expect(result.ok).toBe(true);
       if (result.ok) expect(result.settings.trees).toBe(join(dir, 'trees'));
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('the environment file (#134)', () => {
+  test('its values join the environment, and a name the host does not read is refused', () => {
+    const merged = mergeEnvFile('host.env', 'FACTORY_LISTEN_PORT=7300\n# a comment\nFACTORY_REPOSITORY=C:\\Users\\me\\repo\n', { ANTHROPIC_API_KEY: 'k' });
+    expect(merged).toEqual({ ok: true, env: { ANTHROPIC_API_KEY: 'k', FACTORY_LISTEN_PORT: '7300', FACTORY_REPOSITORY: 'C:\\Users\\me\\repo' } });
+    const misspelt = mergeEnvFile('host.env', 'FACTORY_LISTEN_PROT=7300\n', {});
+    expect(misspelt).toEqual({ ok: false, problems: ['host.env sets FACTORY_LISTEN_PROT, which the host does not read'] });
+  });
+
+  test('a name set in the file and the environment with different values is refused; the same value is not', () => {
+    expect(mergeEnvFile('host.env', 'FACTORY_LISTEN_PORT=7300\n', { FACTORY_LISTEN_PORT: '8000' }).ok).toBe(false);
+    expect(mergeEnvFile('host.env', 'FACTORY_LISTEN_PORT=7300\n', { FACTORY_LISTEN_PORT: '7300' }).ok).toBe(true);
+    // An empty value is unset: a copied .env.example leaves the key to the environment.
+    expect(mergeEnvFile('host.env', 'ANTHROPIC_API_KEY=\n', { ANTHROPIC_API_KEY: 'k' })).toEqual({ ok: true, env: { ANTHROPIC_API_KEY: 'k' } });
+  });
+
+  test('on a host with no uids, the container user joins the start-up list when unset', () => {
+    const without = readHostConfig(FULL, { uids: false });
+    expect(without.ok).toBe(false);
+    if (!without.ok) expect(without.problems).toEqual([expect.stringContaining('FACTORY_CONTAINER_UID and FACTORY_CONTAINER_GID are not set')]);
+    expect(readHostConfig({ ...FULL, FACTORY_CONTAINER_UID: '1000', FACTORY_CONTAINER_GID: '1000' }, { uids: false }).ok).toBe(true);
+  });
+
+  test('main.ts reads --env-file and prints one line once it listens, naming the address and the repository (#139)', async () => {
+    const source = await readFile(MAIN, 'utf8');
+    expect(source).toContain("flag !== '--env-file'");
+    expect(source).toMatch(/await server\.listen\([^)]*\);\n[^\n]*\n\s*process\.stderr\.write\(`factory-host: listening on http:\/\/\$\{config\.listenHost\}:\$\{String\(config\.port\)\}, admitting runs from \$\{config\.repository\}/u);
   });
 });

@@ -8,7 +8,8 @@
   "types": "./src/index.ts",
   "files": [
     "dist",
-    "rubrics"
+    "rubrics",
+    "setup"
   ],
   "publishConfig": {
     "access": "public",

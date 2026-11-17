@@ -45,7 +45,7 @@ async function userRepository(dir: string, edit?: (dir: string) => Promise<void>
  * the example pins are the ones checked and the tools it grants are checked
  * against what that driver declares.
  */
-async function exampleGraph(dirs: { store: string; artifacts: string }, base: string): Promise<BuiltGraph> {
+export async function exampleGraph(dirs: { store: string; artifacts: string }, base: string): Promise<BuiltGraph> {
   const [{ buildGraph, localWorkspaceStore, SCANNERS }, { StubSandboxProvider }, { LocalVault }, { ClaudeCodeDriver }] = await Promise.all([
     api(), import('@olympus-ai/sandbox'), import('@olympus-ai/vault'), import('@olympus-ai/driver-claude-code'),
   ]);

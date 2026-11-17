@@ -11,6 +11,7 @@
  */
 import { WEBHOOK_SECRET_PREFIX } from '@olympus-ai/core';
 import { readFile } from 'node:fs/promises';
+import { parseEnv } from 'node:util';
 import { MIN_TOKEN_LENGTH } from '../http/server.js';
 import { containerUser, parseCodexSeats, parseEndpointFile, type HostCodex, type HostEndpoint } from './compose.js';
 import { probeSymlinks, type MakeLink } from './symlinks.js';
@@ -90,12 +91,23 @@ function declared(name: string): HostVariable | undefined {
   return HOST_VARIABLES.find((v) => (v.prefix === true ? name.startsWith(v.name) && name.length > v.name.length : v.name === name));
 }
 
+/** What start-up knows of the machine it runs on, beside its environment. */
+export interface HostFacts {
+  /** Whether the process has a uid to run sandboxes as; native Windows has none. */
+  readonly uids: boolean;
+}
+
+/** This process's own facts. */
+export function hostFacts(): HostFacts {
+  return { uids: process.getuid !== undefined && process.getgid !== undefined };
+}
+
 /**
  * Reads and checks the host's environment, collecting every problem rather
  * than stopping at the first. Nothing outside the table is read: asking for
  * an undeclared name is a programming error and throws.
  */
-export function readHostConfig(env: Readonly<Record<string, string | undefined>>): HostConfigResult {
+export function readHostConfig(env: Readonly<Record<string, string | undefined>>, facts: HostFacts = hostFacts()): HostConfigResult {
   const problems: string[] = [];
   const get = (name: string): string => {
     if (declared(name) === undefined) throw new Error(`factory-host: ${name} is read but not declared in HOST_VARIABLES`);
@@ -133,6 +145,10 @@ export function readHostConfig(env: Readonly<Record<string, string | undefined>>
   const modelKey = required('ANTHROPIC_API_KEY');
   const git = { repository: required('FACTORY_GIT_REPOSITORY'), baseBranch: required('FACTORY_GIT_BASE_BRANCH'), token: required('FACTORY_GIT_TOKEN') };
   const user = checked(() => containerUser({ FACTORY_CONTAINER_UID: get('FACTORY_CONTAINER_UID'), FACTORY_CONTAINER_GID: get('FACTORY_CONTAINER_GID') }), undefined);
+  // On a host with no uids there is none to derive, so the pair is required here, in this list, not at composition (#136).
+  if (!facts.uids && get('FACTORY_CONTAINER_UID') === '' && get('FACTORY_CONTAINER_GID') === '') {
+    problems.push('FACTORY_CONTAINER_UID and FACTORY_CONTAINER_GID are not set, and this host has no uids to run sandboxes as: set both, such as 1000 and 1000 (init writes them)');
+  }
   const endpointFile = get('FACTORY_ENDPOINT_CONFIG');
   const endpointKey = get('FACTORY_ENDPOINT_KEY');
   // A key with no file is half a configuration. A file with no key is the file's to allow: only one declaring scheme 'none' does.
@@ -189,8 +205,8 @@ export type StartupResult =
  * can hold a symbolic link. A check whose input is unset is skipped, since the
  * missing variable is already listed (I5, review: codex-5).
  */
-export async function checkStartup(env: Readonly<Record<string, string | undefined>>, makeLink?: MakeLink): Promise<StartupResult> {
-  const read = readHostConfig(env);
+export async function checkStartup(env: Readonly<Record<string, string | undefined>>, makeLink?: MakeLink, facts: HostFacts = hostFacts()): Promise<StartupResult> {
+  const read = readHostConfig(env, facts);
   const problems = read.ok ? [] : [...read.problems];
   const source = read.ok ? read.settings.endpoint : read.endpoint;
   let endpoint: HostEndpoint | null = null;
@@ -208,4 +224,36 @@ export async function checkStartup(env: Readonly<Record<string, string | undefin
   }
   if (!read.ok || problems.length > 0) return { ok: false, problems };
   return { ok: true, settings: read.settings, endpoint };
+}
+
+/**
+ * The environment file named by `--env-file` (#134), merged with the
+ * process's environment. Every name in the file must be one the table
+ * declares: a misspelt name is refused rather than ignored. A name set in
+ * both with different values is refused rather than resolved by a rule the
+ * reader would have to remember (I5). The file's values are checked with the
+ * rest by `checkStartup`, in the same list.
+ */
+export function mergeEnvFile(
+  file: string,
+  text: string,
+  env: Readonly<Record<string, string | undefined>>,
+): { readonly ok: true; readonly env: Readonly<Record<string, string | undefined>> } | { readonly ok: false; readonly problems: readonly string[] } {
+  const problems: string[] = [];
+  let values: Record<string, string>;
+  try {
+    values = parseEnv(text) as Record<string, string>;
+  } catch (error) {
+    return { ok: false, problems: [`${file} could not be read as an environment file: ${error instanceof Error ? error.message : String(error)}`] };
+  }
+  const set: Record<string, string> = {};
+  for (const [name, value] of Object.entries(values)) {
+    if (declared(name) === undefined) problems.push(`${file} sets ${name}, which the host does not read`);
+    // An empty value is unset, as it is in the environment: a copied .env.example leaves the secrets to it.
+    else if (value === '') continue;
+    else if (env[name] !== undefined && env[name] !== '' && env[name] !== value) problems.push(`${name} is set both in ${file} and in the environment, with different values`);
+    else set[name] = value;
+  }
+  if (problems.length > 0) return { ok: false, problems };
+  return { ok: true, env: { ...env, ...set } };
 }

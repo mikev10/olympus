@@ -249,10 +249,11 @@ importers:
         version: 4.1.11(@types/node@22.20.1)(vite@8.2.2(@types/node@22.20.1)(yaml@2.9.0))
 
   packages/cli:
-    devDependencies:
+    dependencies:
       '@olympus-ai/api':
         specifier: workspace:*
         version: link:../api
+    devDependencies:
       '@olympus-ai/core':
         specifier: workspace:*
         version: link:../core
