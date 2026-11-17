@@ -60,6 +60,7 @@ import {
   grantClears,
   isDraftStation,
   gatedIterations,
+  gateRetrySuffix,
   grantedContext,
   locksHeldLeaving,
   M1_STATIONS,
@@ -126,7 +127,7 @@ import { recordDecision, recordEgress, stationDecider } from './decisions.js';
 import { requiredShortfall } from './gate.js';
 import type { EgressPolicy, RelayMeter, SandboxHandle, SandboxSpec, Teardown } from '@olympus-ai/sandbox';
 import { splitFrontMatter } from '@olympus-ai/compiler';
-import type { AdmissionRecord, AdmittedArtifact, AttemptFailure, BaseRunRecord, RepoInstructionFile, CallTiming, DiffEntry, EvidenceBundle, IntegrationOpened, IntegrationRecord, UnstartedCheck, UsageReading, UsageRecord, Vault } from '@olympus-ai/vault';
+import type { AdmissionRecord, AdmittedArtifact, AttemptFailure, BaseRunRecord, RepoInstructionFile, CallTiming, DiffEntry, EnforcementDecision, EvidenceBundle, IntegrationOpened, IntegrationRecord, UnstartedCheck, UsageReading, UsageRecord, Vault } from '@olympus-ai/vault';
 import { draftFloorOf, draftStation, isDrafted, lockApproved, testDraftOf, type DraftingContext } from './drafting.js';
 import type { RunRequirements } from './spec-parts.js';
 import { imageFor, type BuiltGraph } from './graph.js';
@@ -214,6 +215,8 @@ export interface LineContext {
   readonly onCommit?: (state: RunState) => void;
   /** Told of every failed attempt after its record is stored: how the host logs one (D-R36a-06). It cannot change what is recorded. */
   readonly onAttemptFailed?: (task: TaskId, failure: AttemptFailure) => void;
+  /** Told of every failed gate after its decision is stored (R37, #158). It cannot change what is recorded. */
+  readonly onGateFailed?: (task: TaskId, failure: GateFailure) => void;
   /**
    * Asked before each build task runs, for input a declared source brought for
    * it. Whatever it returns narrows the run before it reaches a model, through
@@ -741,7 +744,7 @@ export function attemptFailure(error: unknown, retries: number): AttemptFailure 
   const layer = typeof named.layer === 'string' && named.layer !== '' ? named.layer : 'error';
   const source = named.name === 'DriverRefusal' ? 'driver' : named.name === 'SandboxRefusal' ? 'sandbox' : 'runtime';
   const text = (error instanceof Error ? error.message : String(error)).trim();
-  return { source, layer: source === 'runtime' ? 'error' : layer, retries, untrustedDetail: text.length > FAILURE_DETAIL_LIMIT ? `${text.slice(0, FAILURE_DETAIL_LIMIT)}…` : text };
+  return { source, layer: source === 'runtime' ? 'error' : layer, retries, untrustedDetail: trimmed(text) };
 }
 
 /**
@@ -771,6 +774,59 @@ export async function spendRetry(ctx: LineContext, task: Task, error: unknown): 
 
 function decode(bytes: Uint8Array): string {
   return new TextDecoder().decode(bytes);
+}
+
+function trimmed(text: string): string {
+  const t = text.trim();
+  return t.length > FAILURE_DETAIL_LIMIT ? `${t.slice(0, FAILURE_DETAIL_LIMIT)}…` : t;
+}
+
+/**
+ * One check a failed gate named, as `status` and `events` show it (R37). For
+ * a check that did not start, `untrustedReason` is the reason its evidence
+ * recorded, which can quote a container's error: trimmed, shown, and never
+ * prompted (I7). Null for every other cause.
+ */
+export interface GateFailedCheck {
+  readonly checkId: string;
+  readonly cause: FailedCheck['cause'];
+  readonly untrustedReason: string | null;
+}
+
+/** A failed gate as `status` and `events` show it: each failed check, in the gate's order (R37, #158). */
+export interface GateFailure {
+  readonly failed: readonly GateFailedCheck[];
+}
+
+/** The gate's failures joined with the reasons the evidence holds for the checks that did not start. */
+export function gateFailure(failed: readonly FailedCheck[], unstarted: readonly UnstartedCheck[]): GateFailure {
+  return {
+    failed: failed.map((f) => {
+      const reason = f.cause === 'no-result' ? unstarted.find((u) => u.checkId === f.checkId)?.reason : undefined;
+      return { checkId: f.checkId, cause: f.cause, untrustedReason: reason === undefined ? null : trimmed(reason) };
+    }),
+  };
+}
+
+/**
+ * What the task's next build is told of its last verify: the checks its gate
+ * failed, by id and cause, read from the decision the gate recorded, so a
+ * resume in another process tells the same (R37, D-R37-03). Nothing when the
+ * task's latest verify outcome is a conflict, which no gate judged (D-R4-03),
+ * or when no gate has failed it.
+ */
+async function gateRetry(ctx: LineContext, task: Task): Promise<string | undefined> {
+  const { vault } = ctx.components;
+  let latest: EnforcementDecision | null = null;
+  for (const ref of await vault.readDecisions(ctx.run.id)) {
+    const d = JSON.parse(decode(await vault.read(ref))) as EnforcementDecision;
+    if (d.taskId !== task.id) continue;
+    const gate = d.decision.cause === 'station-refused' && d.decision.refusal.reason === 'gate-failed';
+    if (!gate && d.decision.cause !== 'task-conflict') continue;
+    if (latest === null || d.decidedAt >= latest.decidedAt) latest = d;
+  }
+  if (latest?.decision.cause !== 'station-refused' || latest.decision.refusal.reason !== 'gate-failed') return undefined;
+  return gateRetrySuffix(latest.decision.refusal.failed);
 }
 
 export interface ReadArtifacts {
@@ -1421,6 +1477,8 @@ async function build(ctx: LineContext, task: Task): Promise<StationRefusal | und
   // Read before the iteration is spent: context that changed under the check costs no budget.
   if (drifted.length > 0) return recordTamper(ctx, 'build', task, drifted, { phase: 'context' }, null);
 
+  // Read before the attempt is counted: a gated iteration behind this one is one a gate may have failed (R37).
+  const gatedBefore = gatedIterations(attemptsOf(ctx.state, task)) > 0;
   const started = await startAttempt(ctx, task);
   if (started !== undefined) return started;
   // A fresh pair for every invocation, a replayed one included: the tree the task is handed is
@@ -1442,7 +1500,9 @@ async function build(ctx: LineContext, task: Task): Promise<StationRefusal | und
     'acceptance-tests': tests.text,
     'task-graph': JSON.stringify(ctx.graph.tasks.map(({ id, station, role, dependsOn }) => ({ id, station, role, dependsOn }))),
   };
-  const ran = await runTask(ctx, task, driver, pinnedRole(ctx, task.role), joinParts(grantedContext(STATION_CONTRACTS.build, withInstructions(offered, instructions))), work, { inputs });
+  // The checks a failed gate named, by id and cause, in the suffix and never the prefix or the role; never their output (I7, R37).
+  const suffix = gatedBefore ? await gateRetry(ctx, task) : undefined;
+  const ran = await runTask(ctx, task, driver, pinnedRole(ctx, task.role), joinParts(grantedContext(STATION_CONTRACTS.build, withInstructions(offered, instructions))), work, { inputs, ...(suffix === undefined ? {} : { suffix }) });
   if (!ran.ok) return spendRetry(ctx, task, ran.error);
   // I2: a result is recorded only as the contract shapes it. A key it does not name, `status`
   // among them, is a driver speaking outside the contract; it is not recorded, and the run stops.
@@ -1725,6 +1785,7 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
       { vault, runId: ctx.run.id, taskId: task.id, station: 'verify' },
       { cause: 'station-refused', decidedBy: 'line', refusal: { ok: false, reason: 'gate-failed', failed, message: `the gate failed on ${failed.map((f) => `${f.checkId} (${f.cause})`).join(', ')}` } },
     );
+    ctx.onGateFailed?.(task.id, gateFailure(failed, unstarted));
   }
   // The station machine returns this park to the line on its next step; it is recorded here, first.
   if (status === 'parked') await park(ctx, task, { evidence: ref }, 'iterations-exhausted');

@@ -10,6 +10,7 @@
 import type { ApprovalKey, AutonomyLevel, CandidateId, RejectionReason, RunId, RunState, RunTemplateId, TaskId } from '@olympus-ai/core';
 import type { AttemptFailure, CandidateDismissal, CandidateRecord, DismissalCause } from '@olympus-ai/vault';
 import type { DeliveryOutcome } from '../intake.js';
+import type { GateFailure } from '../line.js';
 import type { WorstCaseCost } from '../cost.js';
 import type { RequestedArtifacts, RunOutcome, RunStanding } from '../run.js';
 
@@ -96,6 +97,8 @@ export type RunEvent =
   | { readonly event: 'standing'; readonly data: RunStanding }
   /** A failed attempt, as its record holds it; `untrustedDetail` is the CLI's or a container's text, data only (I7, #149). */
   | { readonly event: 'attempt-failed'; readonly data: { readonly task: TaskId; readonly failure: AttemptFailure } }
+  /** A failed gate, as its decision records it; a check that did not start carries its evidence's `untrustedReason`, data only (I7, R37). */
+  | { readonly event: 'gate-failed'; readonly data: { readonly task: TaskId; readonly failure: GateFailure } }
   | { readonly event: 'end'; readonly data: DriveEnd | null };
 
 export type ErrorCode =

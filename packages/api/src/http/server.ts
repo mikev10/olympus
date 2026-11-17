@@ -380,6 +380,9 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
         publish(entry, { event: 'attempt-failed', data: { task, failure } });
         options.log?.(attemptLine(runId, task, failure));
       },
+      onGateFailed: (task, failure) => {
+        publish(entry, { event: 'gate-failed', data: { task, failure } });
+      },
     };
     entry.drive = start(hooks)
       .then((outcome): DriveEnd => ({ kind: 'outcome', outcome }), (error: unknown): DriveEnd => ({ kind: 'error', message: describe(error) }))

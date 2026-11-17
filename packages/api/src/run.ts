@@ -82,7 +82,7 @@ import { repoInstructionsProblem } from '@olympus-ai/vault';
 import { readUsage, unsettledCalls, worstCaseCost, type WorstCaseCost } from './cost.js';
 import { estimateCost, type CostEstimate, type EstimateCell } from './outcomes.js';
 import { problemCodes, recordDecision } from './decisions.js';
-import { integrateEscalations, readIntegration, runLine, type LineArtifacts, type LineContext } from './line.js';
+import { gateFailure, integrateEscalations, readIntegration, runLine, type GateFailure, type LineArtifacts, type LineContext } from './line.js';
 import { draftFloorOf, lockedArtifacts, NOT_DRAFTING, seatDriver, settleArtifactRoot, settleBase, type DraftingContext, type DraftingDrivers } from './drafting.js';
 import { readRubrics, rubricsProblems, type ReadRubric } from './rubrics.js';
 import { parsePlan } from './observation-plan.js';
@@ -254,6 +254,8 @@ export interface DriveHooks {
   readonly onCommit?: (state: RunState) => void;
   /** Told of every failed attempt, after its record is stored (#149). */
   readonly onAttemptFailed?: NonNullable<LineContext['onAttemptFailed']>;
+  /** Told of every failed gate, after its decision is stored (R37, #158). */
+  readonly onGateFailed?: NonNullable<LineContext['onGateFailed']>;
   /** Input a declared source brought for a build task, which narrows the run first (D-R10-06). The HTTP service never sets it. */
   readonly inputFor?: NonNullable<LineContext['inputFor']>;
 }
@@ -1876,8 +1878,8 @@ export interface DraftStanding {
 export type RunStanding =
   | { readonly standing: 'passed' }
   /**
-   * `lastFailure` is the last failed attempt of the task a retry park
-   * stopped, read from the Vault, or null for any other stop (#149).
+   * `lastFailure` is the last failed attempt or failed gate of the task a park
+   * stopped, read from the Vault, or null for any other stop (#149, R37).
    */
   | { readonly standing: 'stopped'; readonly refusal: StationRefusal; readonly lastFailure: LastFailure | null }
   | { readonly standing: 'awaiting-approval'; readonly key: ApprovalKey; readonly escalations: readonly string[]; readonly draft: DraftStanding | null }
@@ -1908,30 +1910,50 @@ async function draftStanding(vault: Vault, state: RunState, station: DraftStatio
   };
 }
 
-/** A failed attempt as `status` and `events` show it. `untrustedDetail` is the CLI's or a container's text: shown, never prompted (I7). */
-export interface LastFailure {
-  readonly task: TaskId;
-  readonly station: StationId | null;
-  readonly decidedAt: string;
-  readonly failure: AttemptFailure;
-}
+/**
+ * The last failure of a parked task as `status` shows it: a failed attempt,
+ * whose `untrustedDetail` is the CLI's or a container's text, or a failed
+ * gate, whose checks that did not start carry the reason their evidence
+ * recorded as `untrustedReason`. Either text is shown, never prompted (I7).
+ */
+export type LastFailure =
+  | { readonly kind: 'attempt-failed'; readonly task: TaskId; readonly station: StationId | null; readonly decidedAt: string; readonly failure: AttemptFailure }
+  | ({ readonly kind: 'gate-failed'; readonly task: TaskId; readonly station: StationId | null; readonly decidedAt: string } & GateFailure);
 
-/** The last recorded failed attempt of the task `refusal` parked for its retries, or null. */
-async function lastFailureOf(vault: Vault, runId: RunId, refusal: StationRefusal): Promise<LastFailure | null> {
-  if (refusal.reason !== 'parked' || refusal.cause !== 'retries-exhausted') return null;
-  let last: LastFailure | null = null;
-  for (const ref of await vault.readDecisions(runId)) {
+/**
+ * The latest failed attempt or failed gate of the task `refusal` parked,
+ * whatever it parked on, or null (#149, R37). A gate's checks that did not
+ * start take their reasons from the task's latest evidence, which the line
+ * writes in the same verify, before the decision.
+ */
+async function lastFailureOf(vault: Vault, state: RunState, refusal: StationRefusal): Promise<LastFailure | null> {
+  if (refusal.reason !== 'parked' || refusal.task === null) return null;
+  let last: EnforcementDecision | null = null;
+  for (const ref of await vault.readDecisions(state.runId)) {
     const d = JSON.parse(new TextDecoder().decode(await vault.read(ref))) as EnforcementDecision;
-    if (d.decision.cause !== 'attempt-failed' || d.taskId !== refusal.task) continue;
-    if (last === null || d.decidedAt >= last.decidedAt) last = { task: d.taskId, station: d.station, decidedAt: d.decidedAt, failure: d.decision.failure };
+    if (d.taskId !== refusal.task) continue;
+    const gate = d.decision.cause === 'station-refused' && d.decision.refusal.reason === 'gate-failed';
+    if (!gate && d.decision.cause !== 'attempt-failed') continue;
+    if (last === null || d.decidedAt >= last.decidedAt) last = d;
   }
-  return last;
+  if (last === null) return null;
+  const at = { task: refusal.task, station: last.station, decidedAt: last.decidedAt };
+  if (last.decision.cause === 'attempt-failed') return { kind: 'attempt-failed', ...at, failure: last.decision.failure };
+  if (last.decision.cause !== 'station-refused' || last.decision.refusal.reason !== 'gate-failed') return null;
+  let unstarted: EvidenceBundle['unstarted'] = [];
+  for (const ref of [...state.evidenceRefs].reverse()) {
+    const bundle = await readVaultJson<EvidenceBundle>(vault, ref);
+    if (bundle.taskId !== refusal.task) continue;
+    unstarted = bundle.unstarted;
+    break;
+  }
+  return { kind: 'gate-failed', ...at, ...gateFailure(last.decision.refusal.failed, unstarted) };
 }
 
 export async function runStanding(vault: Vault, runId: RunId): Promise<{ state: RunState; standing: RunStanding; source: StandingSource }> {
   const read = await standingOf(vault, runId);
   if (read.standing.standing !== 'stopped') return { ...read, standing: read.standing };
-  return { ...read, standing: { ...read.standing, lastFailure: await lastFailureOf(vault, runId, read.standing.refusal) } };
+  return { ...read, standing: { ...read.standing, lastFailure: await lastFailureOf(vault, read.state, read.standing.refusal) } };
 }
 
 type BareStanding = Exclude<RunStanding, { standing: 'stopped' }> | { readonly standing: 'stopped'; readonly refusal: StationRefusal };
