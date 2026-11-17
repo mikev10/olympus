@@ -10568,3 +10568,101 @@ Started on `v2` at 1a34231, after R29 (#153). Issues #158, #159.
 ### D-R37-04: review triage
 
 Both families counted, with no reruns. codex-2 is fixed (cdf8029): the server's `gate-failed` publish is asserted over HTTP. codex-1, decisions ordered by wall-clock `decidedAt` with no recording sequence, is a known limit across every "latest decision" reader and is filed as #164. It needs a Vault contract change, so it goes to an amendment. gemini-1 does not hold: a refusal at verify re-verifies the same change and never starts a build. gemini-2 is rejected as a tradeoff: branding one `untrusted*` field would make it an outlier, and the reversal is one amendment branding them all. Full record: `docs/reviews/2026-11-16-R37-gate-failure-told-triage.md`.
+
+## R36b: `init`, and a real feature from a fresh clone
+
+Started on `v2` at f3f8878, after R37 (#163) and D-TOOLING-11 (#167). Issues
+#134, #136, #139.
+
+### D-R36b-01: boundary, verified
+
+- **Deliverables:**
+  - `olympus-ai init`: writes, never over an existing file, a policy at L1,
+    the roles, the rubrics, and the host's environment file into a config
+    directory outside the repository (default under the home directory), and
+    a verification manifest and a task graph for the detected stack into a
+    directory of the repository.
+  - The manifest comes from `buildAdapterSet` (P8, R29): `unit`,
+    `secret-scan`, and `static-analysis`, each image the one admission
+    declares. An `unsupported` or ambiguous stack is refused, naming what the
+    detector found.
+  - `factory-host --env-file <path>` reads that file through
+    `HOST_VARIABLES`; on a host with no uids it refuses a missing
+    `FACTORY_CONTAINER_UID/GID` in its start-up list; once listening it
+    prints one line, the address and the repository it admits.
+  - The README's "First run" becomes `init`, start the host, one `create
+    --draft-spec --draft-tests`, approve; bash and PowerShell commands.
+  - Free assertions: `init` on a TypeScript fixture writes files admission
+    accepts; it refuses an unsupported stack and an existing file; the host
+    refuses a missing uid/gid where required. Each fails with its check
+    deleted (I8).
+  - The R36a paid case starts from `init`'s output.
+  - `docs/proof/r36/my-recipes.md`: the end-to-end run on `my-recipes` from
+    a fresh clone, merged into `olympus-trial`.
+- **Out of scope (verbatim):** stacks beyond those adapter sets already
+  ship; idea intake, plan review, and briefings (order step 2); a hosted
+  runtime; any change to what a drafted spec or test must satisfy.
+- **Acceptance:** `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm
+  conformance` pass with the new assertions registered; each new assertion
+  shown failing with its check deleted; the paid case passes under
+  `run-driver` at merge; the committed `my-recipes` record shows a merged PR
+  with no hand-written file.
+- **Invariants:** I1 and I3 (policy, roles, and rubrics are written outside
+  any tree a model can write); I4 (the policy grants only tools the Claude
+  Code driver declares); I5 (unsupported stack, existing file, missing
+  uid/gid, an undeclared or conflicting variable in the env file: each
+  refused); I8 (each refusal has an assertion); I9 (the host's start-up line
+  is written by the executable, never by `core` or the service); I10 (see
+  D-R36b-03).
+- **Pending registry entries owed:** none name R36b.
+- **Gate paths:** `packages/conformance/`, and the host's start-up checks
+  (`packages/api/src/host/`).
+
+### D-R36b-02: assumptions, each verified
+
+- Every dependency is merged and tagged: `reviewed/R36a`, `reviewed/R37`,
+  `reviewed/R18`, `reviewed/R19`, `reviewed/R35`, and `reviewed/R29`
+  (`git tag -l`).
+- The one detector is `buildAdapterSet` (`packages/adapters/src/detect.ts`);
+  `stack` is `unsupported` when no framework is found, and both frameworks
+  declared leaves `test` null with the reason in `reasons`.
+- A verification manifest read beside a drafted acceptance manifest is not
+  held alone to a check failing on the base (`packages/api/src/validate.ts`,
+  `parseManifest` with `alone: false`, and `mergedCheckProblems`), so
+  `unit` + `secret-scan` + `static-analysis` is admissible with
+  `--draft-tests`. `corpus/v1/repos/calc/verify-drafted.json` is that shape.
+- A graph needs a review task over every build task
+  (`validate.ts`, `unreviewed`), so "a one-task graph" is one build task
+  and the review task that covers it.
+- The host reads only `process.env`, through `readHostConfig`
+  (`packages/api/src/host/main.ts`, `config.ts`); a missing uid/gid on
+  Windows is refused only when `localWorkspaceStore` throws inside
+  `composeHost`, after the start-up list (`workspace.ts:65-71`), which is
+  #136. Nothing is printed once the server listens (#139).
+  `util.parseEnv` exists in the Node the README requires (checked on
+  v24.19.0; added in 21.7).
+- The CLI imports only types from `@olympus-ai/api` (D-P9-07,
+  `packages/cli/src/cli.ts:6-10`) and has no runtime dependencies
+  (`packages/cli/package.json`).
+- The api package ships the rubrics (`packages/api/rubrics`, identical to
+  `examples/rubrics`); `examples/roles` differs from the compiler's shipped
+  roles by the R36a line in `builder.md`.
+- `I10.no-greek-names-in-code` scans string literals and file paths in
+  every package (`packages/conformance/src/registry/i10.ts`), and
+  `GREEK_NAMES` begins with `olympus`
+  (`packages/conformance/src/kit/scan.ts:220`); only `@olympus-ai/` and the
+  exact string `olympus-ai` are exempt.
+- Docker 29.8.0 runs on this machine; `my-recipes` is checked out at
+  `C:\Users\Mike\Projects\my-recipes` with `core.autocrlf=true`, an npm
+  lockfile, `vitest`, and `origin/olympus-trial`.
+
+### D-R36b-03: open, waiting on the maintainer
+
+- **The spec names `.olympus/` and `~/.olympus/`; I10 forbids a Greek name
+  in any path in code.** `init` writes those paths, so the string would be
+  in `packages/`, and the I10 scan fails on it. This is a contradiction
+  between the unit and the spine, a stop condition (rule 6). Recommended:
+  `.factory/` in the repository and `~/.factory/` for the config directory,
+  matching `factory-host` and `FACTORY_*`; the entry in `DECOMPOSITION.md`
+  is amended to say so. Rejected: exempting `.olympus` from the scan, which
+  weakens an invariant's check.
