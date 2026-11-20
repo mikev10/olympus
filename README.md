@@ -337,7 +337,7 @@ not read it yet: a run is still admitted at the level policy allows.
 
 Work is cut into units that a contributor can finish and verify alone, without
 running the whole factory. [CONTRIBUTING.md](CONTRIBUTING.md) has the rule
-every unit follows, the units that are open, and how to write a conformance
+every unit follows, how to send a small fix, and how to write a conformance
 suite with the kit. The units themselves are defined in
 [docs/plan](docs/plan): the spine, the decomposition, and a spec for each unit
 that needs one. Decisions made while building each unit are recorded in
