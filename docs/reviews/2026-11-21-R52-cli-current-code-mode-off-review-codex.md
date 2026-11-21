@@ -1,3 +1,19 @@
+# External review of R52, codex, 2026-11-21
+
+The external review of R52: the Claude Code driver's CLI pin moved to 2.1.330, and Code Mode switched off on every exec. The triage is `2026-11-21-R52-cli-current-code-mode-off-triage.md`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex. It ran as a headless `codex exec` under a read-only sandbox, with recorded approval policy `never`. The run had an empty scratch working directory and a scratch config home holding only `auth.json`, and its environment held `CODEX_HOME` alone. The pre-run listing of both is the manifest's `cleanRoom`.
+- **Cross-family agreement:** codex-1 and codex-2 were raised by codex alone. Codex's item 7 asks whether a granted operation can start another authenticated execution path. Gemini raised that concern too (gemini-2). Gemini's 1 and 3 are its own.
+- **Date:** 2026-11-21
+- **Bundle:** `2026-11-21-R52-cli-current-code-mode-off-review-bundle.txt`, SHA-256 `bfb2e5b95bfea1fac6ed0fc405693d6b614bc9ac62d12087e6a68b1a31edc47d`. Base `reviewed/R37`, head `f6837cc` (the unit's code commit). It holds the 10 files changed in that range: the R52 driver and test changes and their changeset, plus maintainer tooling and docs commits that landed after R37. Excluded: `docs/decisions.md`, `docs/reviews/`, `docs/plan/`, `pnpm-lock.yaml`. Prompt: `2026-11-21-R52-cli-current-code-mode-off-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer reported no prior context and no lookups. That is a self-report and cannot be verified.
+- **Coverage, and any gap:** items 1 and 2 are answered (findings 1 and 2), and so are 3 and 4 (no fail-open, no casts that matter), 6 (sound mechanisms), and 7 (the framing). Item 5 gets no separate answer; finding 2 covers it in effect.
+- **Citations:** line numbers are positions in the bundle's new-side diffs, not in the repository, so treat them as hints.
+
+---
+
 BASE: reviewed/R37
 HEAD: f6837cc
 packages/drivers/claude-code/test/invariants.test.ts

@@ -1,3 +1,19 @@
+# External review of R52, gemini, 2026-11-21
+
+The external review of R52: the Claude Code driver's CLI pin moved to 2.1.330, and Code Mode switched off on every exec. The triage is `2026-11-21-R52-cli-current-code-mode-off-triage.md`.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini. It ran as a direct `generateContent` API call to `gemini-3.1-pro-preview`, with no tools offered. `cleanRoom` is `null`, because an API call loads no local configuration.
+- **Cross-family agreement:** gemini-2's concern, a second authenticated CLI started from a granted command tool, is the one codex raised under item 7. gemini-1 and gemini-3 were raised by gemini alone.
+- **Date:** 2026-11-21
+- **Bundle:** `2026-11-21-R52-cli-current-code-mode-off-review-bundle.txt`, SHA-256 `bfb2e5b95bfea1fac6ed0fc405693d6b614bc9ac62d12087e6a68b1a31edc47d`. Base `reviewed/R37`, head `f6837cc` (the unit's code commit). It holds the 10 files changed in that range: the R52 driver and test changes and their changeset, plus maintainer tooling and docs commits that landed after R37. Excluded: `docs/decisions.md`, `docs/reviews/`, `docs/plan/`, `pnpm-lock.yaml`. Prompt: `2026-11-21-R52-cli-current-code-mode-off-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer reported none. That is a self-report and cannot be verified.
+- **Coverage, and any gap:** items 1, 2, 6 and 7 are answered. Items 3 (fail-open), 4 (language escape hatches) and 5 (configuration) get no separate answer.
+- **Citations:** line numbers are positions in the bundle's new-side diffs, not in the repository, so treat them as hints.
+
+---
+
 BASE: reviewed/R37
 HEAD: f6837cc
 packages/drivers/claude-code/test/invariants.test.ts

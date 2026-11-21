@@ -10700,3 +10700,7 @@ Started on `v2` at 44725bf. Issues #170, #172.
   other release would run and report the pin. That is R53's ground,
   because R53 records the image by content, and it is noted in the PR
   body.
+
+### D-R52-04: review triage
+
+Both families counted, with no reruns. gemini-1 is fixed (13eee68): `expectOff` asserts that `--tools` is present before reading its value. codex-1 and codex-2 are a known limit: no test observes whether Code Mode is on, because the CLI's init line shows the same tools whatever the switch says (D-R52-02). The switch therefore rests on the vendor's documented precedence. Owner: R53, the next unit to change the CLI image, which re-verifies the pin. gemini-2's premise does not hold: the container holds a placeholder, not the key. Its residue is that the relay does not inspect an Anthropic request's `tools`, so a task granted `Bash` could reach ungranted server-side tools. That is relay work, filed as #189. gemini-3 is rejected: the argv check catches an inline settings argument naming the variable. Full record: `docs/reviews/2026-11-21-R52-cli-current-code-mode-off-triage.md`.
