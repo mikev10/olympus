@@ -53,6 +53,10 @@ the source of truth for what is done and what is next.
 
 ## How the line works
 
+<p align="center"><img src="docs/brand/how-it-works.svg" alt="One task moving through Olympus. Olympus locks the tests and hands the task to an agent, which writes the code and claims it is done. Olympus runs the checks itself in a fresh sandbox, and a reviewer from a different model family reviews the change. The gate reads the locked tests, the claim, the check results, and the review verdict from the Vault, and either merges the work or sends it back." width="100%"></p>
+
+Agents write the code; Olympus runs the checks, keeps the evidence in the Vault, and decides at the gate. The picture is simplified to six steps. The full line is below.
+
 Work moves through ten stations, in order:
 
 | # | Station | What happens |
