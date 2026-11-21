@@ -647,6 +647,10 @@ order between them is settled before any of them is picked up.
 | R49 | The store authenticates its own history ([#96](https://github.com/mikev10/olympus/issues/96)) | M3 | R13a, R41 | — |
 | R50 | A runner the change cannot reach ([#42](https://github.com/mikev10/olympus/issues/42)) | M3 | R15, R29 | — |
 | R51 | Adapter sets after Python ([#113](https://github.com/mikev10/olympus/issues/113)) | M3 | R29, R47 | — |
+| R52 | The driver's CLI is current, and Code Mode is off ([#170](https://github.com/mikev10/olympus/issues/170), [#172](https://github.com/mikev10/olympus/issues/172)) | M2 | P5, R36a | — |
+| R53 | Harness integrity: the agent CLI by content, the image in evidence ([#169](https://github.com/mikev10/olympus/issues/169)) (opens with a contract amendment) | M2 | P5, R26, R9, R52 | — |
+| R54 | The `deep` tier's model, chosen by the benchmark ([#171](https://github.com/mikev10/olympus/issues/171)) | M2 | R7, R14, P13, R52 | — |
+| R55 | An operator can read a draft, and the host refuses a rejected key ([#175](https://github.com/mikev10/olympus/issues/175), [#176](https://github.com/mikev10/olympus/issues/176)) | M2 | R19, R36b | — |
 
 ### R1 — Readiness
 
@@ -3181,6 +3185,125 @@ the unit starts.
 
 **Why M3:** each stack is a full adapter set, and M2 needs only TypeScript
 and Python.
+
+---
+
+### The backlog after R51: issues filed since R38
+
+Placed on 2026-11-21. Every issue opened after the R38 to R51 amendment
+(#166) is named by a unit below, or listed as an amendment or a tooling
+change, with the reason it is not a unit. The same rule holds as for that
+amendment: each section restates its issues, the spec is written when the
+unit starts and verified against the code then, and where a section and the
+code differ, the code wins.
+
+**Not units:**
+- [#174](https://github.com/mikev10/olympus/issues/174) (a sent-back draft's
+  retry gets only problem codes) is an **amendment**. Carrying the
+  validator's message changes `DraftSendBack`, a core type, which R36b's decision record
+  recorded as contract work rather than unit work. It lands after R36b
+  merges and before the next unit starts.
+- [#173](https://github.com/mikev10/olympus/issues/173) (Gemini 4 on the
+  direct Gemini API) is **maintainer tooling** in `scripts/review-runner/`,
+  recorded as a D-TOOLING decision, not product code.
+
+**Suggested order:** R52 can start now, beside R36b: it works in
+`packages/drivers/claude-code`, which R36b does not touch, and #170 carries
+security fixes. R39 can also run beside R36b; its packages overlap R36b's
+only in `packages/conformance/src/registry/`. R38 waits for R52, because both
+change `packages/drivers/claude-code`. After R36b merges: the #174
+amendment, then R53, R54, R55, then R40 onward as the R38 to R51 amendment
+orders them.
+
+### R52 — The driver's CLI is current, and Code Mode is off
+
+Issues [#170](https://github.com/mikev10/olympus/issues/170),
+[#172](https://github.com/mikev10/olympus/issues/172). The driver pins
+Claude Code `2.1.310` (`packages/drivers/claude-code/src/image.ts:26`).
+Releases `2.1.321` and `2.1.325` fix permission-boundary bugs in the CLI: a
+read-only command run outside the CLI's sandbox, deny rules bypassed by a
+copy into a directory, compound commands run without asking, and MCP OAuth
+secrets sent to another host on a redirect. Olympus's boundary is its own
+sandbox, not the CLI's checks, so none of these is a hole in that boundary;
+the CLI's checks are a second layer, and running a version with known
+bypasses is a degradation nobody chose. The pin also predates
+`claude-fable-5-2`, the same break #152 fixed for `claude-opus-5-5`.
+`2.1.323` added Code Mode, an opt-in in which the model writes JavaScript
+that calls its tools. Default deny says a capability policy did not grant is
+unavailable, so a path to the tools that policy never named is switched off
+explicitly rather than left to a default a later CLI could change.
+
+- `CLI_VERSION` moves to at least `2.1.325`, with the Dockerfile and the
+  driver tests that assert it
+- the paid per-tier assertion passes: one minimal call per tier through the
+  driver's own image
+- the driver's CLI settings disable Code Mode, and an assertion fails when
+  Code Mode is enabled in the effective settings or the disabling setting is
+  deleted. The setting's name is verified against the release pinned
+
+**Out of scope:** pinning the CLI's bytes (R53), and changing any tier's
+model (R54).
+
+**Why M2:** security fixes in the one third-party program inside the
+sandbox, and R53 and R54 build on the version it pins.
+
+### R53 — Harness integrity: the agent CLI by content, the image in evidence
+
+Issue [#169](https://github.com/mikev10/olympus/issues/169), carried over
+from #91, which proposed it and was never merged. A version number names a
+release, not its contents: each driver's image installs the CLI by name and
+checks it only against hashes the same registry supplies, and `ensureImage`
+accepts any image the daemon holds under the tag. The unit pins the CLI and
+its platform packages by `sha512` in a lockfile the image installs from,
+refuses an image whose content ID differs from the one recorded at build,
+and records that ID in the evidence beside `driverProvenanceId`, collected
+by the runtime. A later version bump is then a reviewed lockfile diff.
+
+**Contract amendment first:** the image ID needs a home, either a new field
+on `EvidenceBundle` and `UsageRecord`, or folded into `provenanceId()`. #169
+recommends the field, because R9 compares the provenance string and should
+not have to parse an image ID out of it. Confirmed before the build. The
+paid driver jobs rerun because the images change, so the pull request takes
+`gate-change`.
+
+**Why after R52:** the lockfile pins the version R52 moves to, so the bump
+is not done twice.
+
+### R54 — The `deep` tier's model, chosen by the benchmark
+
+Issue [#171](https://github.com/mikev10/olympus/issues/171). Anthropic
+reports (2026-11-09) that Claude Fable 5.2 at high effort scores within 0.2
+points of Opus 5.5 on its coding benchmark at about half the cost per task.
+That is the vendor's number. The unit runs R7's benchmark with each model in
+the `deep` seats, on the same tasks and repetitions, and compares the
+false-done rate, iterations, parks, and cost from the evidence. The tier map
+(`driver.ts`) changes only if the candidate is no worse on false-done and
+costs less; the result is committed under `docs/benchmark/` either way.
+
+Fable is in the `claude` family. A reviewer may never share the author's
+model family, because a model judging its own family shares its blind
+spots, so this changes which model builds, not who reviews.
+
+**Out of scope:** effort level per tier or per station. R14 placed the tier
+per station; an effort setting beside it is its own amendment.
+
+### R55 — An operator can read a draft, and the host refuses a rejected key
+
+Issues [#175](https://github.com/mikev10/olympus/issues/175),
+[#176](https://github.com/mikev10/olympus/issues/176). Both found in R36b's
+real run. The README tells the operator to approve a draft having read it,
+and no command prints one: `status` names its hash and failed checks. And
+the host starts with an API key the provider rejects, so a run is admitted
+and every attempt fails 401 until it parks.
+
+- a CLI command prints a draft's files and questions for a run and station,
+  read through the API, never from the store directly
+- start-up makes one authenticated request that spends nothing and refuses
+  to listen when the provider rejects the key, beside the other start-up
+  refusals. Missing or rejected, the host fails closed
+
+**Why after R36b:** both touch `packages/api` and `packages/cli`, which
+R36b is changing.
 
 ## Working Rules
 
