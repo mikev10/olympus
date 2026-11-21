@@ -10803,3 +10803,20 @@ Started on `v2` at f3f8878, after R37 (#163) and D-TOOLING-11 (#167). Issues
 - **The proof:** repeated from a fresh clone at the fixing commit, as the
   unit requires.
 - **Reverse:** revert the role text and the test.
+
+### D-R36b-09: a port the host cannot listen on is a refusal
+
+- **Found:** in the repeated run a second `factory-host` was started while
+  one already listened. `server.listen` rejected with `EADDRINUSE`, which
+  is not a `HostRefusal`, so `main.ts` rethrew it as a stack trace, against
+  the start-up contract of one list and no stack trace.
+- **Chosen:** `listenProblem` (`host/config.ts`) turns the listen failure
+  into one problem line naming the address, and for `EADDRINUSE` says a host
+  may already be running and names `FACTORY_LISTEN_PORT`. `main.ts` refuses
+  with it. Tested in `test/host-config.test.ts`. Run against the real busy
+  port, the host printed the one-line refusal and exited 1.
+- **Also:** the `host.env` comment said the two secrets "are not kept here",
+  which read as a refusal. The host reads them from the file through the
+  same table (`mergeEnvFile`), so the comment now says `init` writes no
+  secret and they may be set in the environment or added to the file.
+- **Reverse:** remove the try around `listen` and restore the comment.

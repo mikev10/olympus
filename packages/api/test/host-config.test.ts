@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
-import { checkStartup, HOST_VARIABLES, mergeEnvFile, readHostConfig, refusalText, type HostFacts } from '../src/host/config.js';
+import { checkStartup, HOST_VARIABLES, listenProblem, mergeEnvFile, readHostConfig, refusalText, type HostFacts } from '../src/host/config.js';
 import { probeSymlinks } from '../src/host/symlinks.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -196,6 +196,16 @@ describe('the environment file (#134)', () => {
   test('main.ts reads --env-file and prints one line once it listens, naming the address and the repository (#139)', async () => {
     const source = await readFile(MAIN, 'utf8');
     expect(source).toContain("flag !== '--env-file'");
-    expect(source).toMatch(/await server\.listen\([^)]*\);\n[^\n]*\n\s*process\.stderr\.write\(`factory-host: listening on http:\/\/\$\{config\.listenHost\}:\$\{String\(config\.port\)\}, admitting runs from \$\{config\.repository\}/u);
+    expect(source).toMatch(/await server\.listen\([^)]*\);\n\s*\} catch \(error\) \{\n\s*refuse\(\[listenProblem\(config\.listenHost, config\.port, error\)\]\);\n\s*\}\n[^\n]*\n\s*process\.stderr\.write\(`factory-host: listening on http:\/\/\$\{config\.listenHost\}:\$\{String\(config\.port\)\}, admitting runs from \$\{config\.repository\}/u);
+  });
+
+  test('a port that cannot be listened on is a refusal naming the port, not a stack trace', () => {
+    const inUse = Object.assign(new Error('listen EADDRINUSE: address already in use 127.0.0.1:7300'), { code: 'EADDRINUSE' });
+    expect(listenProblem('127.0.0.1', 7300, inUse)).toBe(
+      '127.0.0.1:7300 is already in use, perhaps by a host already running: stop it, or set FACTORY_LISTEN_PORT to another port',
+    );
+    expect(listenProblem('127.0.0.1', 7300, new Error('listen EACCES: permission denied'))).toBe(
+      '127.0.0.1:7300 could not be listened on: listen EACCES: permission denied',
+    );
   });
 });

@@ -207,7 +207,7 @@ export async function initSetup(request: InitRequest): Promise<InitOutcome> {
   const envText = [
     `# The host's configuration, written by init for ${repository}.`,
     '# Start the host with: factory-host --env-file <this file>',
-    '# ANTHROPIC_API_KEY and FACTORY_GIT_TOKEN are not kept here: set them in the environment.',
+    '# init writes no secret: set ANTHROPIC_API_KEY and FACTORY_GIT_TOKEN in the environment, or add them to this file.',
     ...env.map(([name, value]) => `${name}=${value}`),
     '',
   ].join('\n');

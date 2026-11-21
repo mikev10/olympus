@@ -30,7 +30,7 @@ import { GitHubCheckReader } from '../checks.js';
 import { createApiServer } from '../http/server.js';
 import { GitHubBranchProtection, readinessScanner } from '../readiness-scan.js';
 import { CONFIG_DIRECTORY_NAME, initReport, initSetup } from '../init.js';
-import { checkStartup, hostFacts, HostRefusal, mergeEnvFile } from './config.js';
+import { checkStartup, hostFacts, HostRefusal, listenProblem, mergeEnvFile } from './config.js';
 import { composeHost } from './compose.js';
 
 /** Thrown by start-up and caught once, below, where the list is printed. */
@@ -132,7 +132,11 @@ async function start(): Promise<void> {
   } catch (error) {
     refuse([message(error)]);
   }
-  await server.listen(config.port, config.listenHost);
+  try {
+    await server.listen(config.port, config.listenHost);
+  } catch (error) {
+    refuse([listenProblem(config.listenHost, config.port, error)]);
+  }
   // One line once listening, so a started host is not mistaken for a hung one (#139). No secret is in it.
   process.stderr.write(`factory-host: listening on http://${config.listenHost}:${String(config.port)}, admitting runs from ${config.repository}; stop with Ctrl+C\n`);
 

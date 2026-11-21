@@ -257,3 +257,12 @@ export function mergeEnvFile(
   if (problems.length > 0) return { ok: false, problems };
   return { ok: true, env: { ...env, ...set } };
 }
+
+/** Why the host could not listen, as one line of the refusal list rather than a stack trace (I5). */
+export function listenProblem(host: string, port: number, error: unknown): string {
+  const at = `${host}:${String(port)}`;
+  if ((error as { code?: unknown } | null)?.code === 'EADDRINUSE') {
+    return `${at} is already in use, perhaps by a host already running: stop it, or set FACTORY_LISTEN_PORT to another port`;
+  }
+  return `${at} could not be listened on: ${error instanceof Error ? error.message : String(error)}`;
+}
