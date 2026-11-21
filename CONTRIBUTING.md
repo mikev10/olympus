@@ -10,6 +10,10 @@ how to prove your unit holds the invariants.
 Most outside pull requests are small: a documentation gap, a wrong sentence,
 a bug with a known cause. Those do not need a unit.
 
+Not sure something is a bug, or have an idea that is not an issue yet? Ask in
+[Discussions](https://github.com/mikev10/olympus/discussions) first: Q&A for
+questions, Ideas for proposals. An idea that gathers support becomes an issue.
+
 1. **Start from an issue.** Pick an open one, or open one first so the fix
    has a record. Put `Closes #<number>` in the pull request description.
 2. **Target `v2`.** It is the default branch. `main` is the frozen v1 and
