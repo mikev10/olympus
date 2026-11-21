@@ -10854,3 +10854,28 @@ Started on `v2` at f3f8878, after R37 (#163) and D-TOOLING-11 (#167). Issues
   dependency changes the lockfile. That path is judged by the install's
   registry policy and the dependency audit, not by the source scanners.
 - **Reverse:** restore `copyTree` in `scanTree` and delete the test.
+
+### D-R36b-11: the runtime names where a test draft's test files go
+
+- **Found:** in the fourth `my-recipes` run (`d26fb760`), all three
+  `test-design` attempts wrote the test file to
+  `.drafts/<run>/src/lib/recipe-scale.test.ts`. A test draft's tests are
+  read from the locked spec's `testDirectory` at the tree's root
+  (`readTestDraft`), so the file was discarded every time. Each draft came
+  back `missing` at `src/lib` and `unreferenced` at the check's `tests`.
+  The line the runtime adds to the drafter's message
+  (`draftDestination`, #151) said "write the draft under `.drafts/<run>/`"
+  and named only the manifest. The send-back carries codes only (#174), so
+  the drafter could not tell what was wrong.
+- **Chosen:** at `test-design`, `draftDestination` names the manifest's
+  path, and names the test files under the locked `testDirectory` "from the
+  root of your working directory, not under `.drafts/`". The spec line is
+  unchanged. The test-drafter role says the same, with an example path.
+  Tested in `test/draft-destination.test.ts` and `test/init.test.ts`. Both
+  fail without the change.
+- **Rejected:** reading tests from under `.drafts/` as well. The tests are
+  bound to the paths the manifest names and the base run executes, and a
+  second place to read from is a second set of paths to judge. Also
+  rejected: carrying the validator's messages. That is #174, an amendment.
+- **Reverse:** restore the one-line `draftDestination` and the role
+  paragraph.

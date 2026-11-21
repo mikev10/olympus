@@ -30,6 +30,10 @@ describe('what init copies', () => {
     const parsed = parseManifest(JSON.parse(block?.[1] ?? ''), { alone: false });
     expect(parsed).toMatchObject({ ok: true });
     for (const field of ['id', 'kind', 'required', 'onBase', 'timeoutMs', 'tests']) expect(role, field).toContain(`\`${field}\``);
+    // Tests are read from the test directory at the tree's root; one written under `.drafts/` is discarded (D-R36b-11).
+    expect(role).toMatch(/root of your working directory, not under `\.drafts\/`/u);
+    const example = JSON.parse(block?.[1] ?? '') as { checks: Array<{ tests?: string[] }> };
+    expect(example.checks[0]?.tests?.[0]).not.toMatch(/^\.drafts\//u);
   });
 
   test('the policy, the roles, and the rubrics are the shipped examples, byte for byte', async () => {

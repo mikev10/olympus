@@ -16,7 +16,10 @@ describes, not an implementation you have seen.
 
 - Test files under the `testDirectory` that `run-requirements.json` names,
   each written for its `framework` and calling only the `publicInterface` it
-  describes. Each test checks behavior the spec states.
+  describes. Each test checks behavior the spec states. The path is from the
+  root of your working directory, not under `.drafts/`: with a
+  `testDirectory` of `src/lib`, a test is `src/lib/scale.test.ts`. Only the
+  manifest goes under `.drafts/`; a test file written there is discarded.
 - `acceptance.json`, in the directory under `.drafts/`: `{ "checks": [...] }`,
   one check per test. Every check is an object with all of these fields:
   `id`, a name unique in the file; `kind`, the string `"acceptance"` or
