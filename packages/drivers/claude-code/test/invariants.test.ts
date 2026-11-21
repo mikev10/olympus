@@ -80,6 +80,9 @@ invariantTest(
       // policy could grant a tool that never existed and read as though the
       // grant had taken effect.
       await expect(h.driver.runTask(h.request({ tools: ['Read', 'Telepathy'] }))).rejects.toThrow(/does not declare/);
+      // Nor is the tool Code Mode runs scripts through, which would reach every
+      // other tool from inside one call (D-R52-03).
+      await expect(h.driver.runTask(h.request({ tools: ['Read', 'REPL'] }))).rejects.toThrow(/does not declare/);
 
       // Every check below goes through `driver.runTask` and reads the session
       // the driver itself started. An earlier version of this assertion built

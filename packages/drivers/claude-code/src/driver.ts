@@ -210,6 +210,13 @@ const CLI_ENVIRONMENT: Readonly<Record<string, string>> = {
   // this, a session granted `ToolSearch` silently comes up without it, which the
   // driver refuses (I4.driver-tool-inventory-validated; D-P12-10).
   ENABLE_TOOL_SEARCH: 'true',
+  // Code Mode lets the model write a script that calls its tools: a route to
+  // them that no grant names, so it is switched off here rather than left to a
+  // default (I4). Off by default is not denied, and the default has already
+  // moved once: from 2.1.329, turning off non-essential traffic no longer keeps
+  // it off. A `0` in the environment holds against a `1` in any settings file,
+  // the `--settings` file included (D-R52-03).
+  CLAUDE_CODE_EXPERIMENTAL_CODE_MODE: '0',
 };
 
 /** Every exec's environment: the settings above and the placeholder. No value in it is secret. */
