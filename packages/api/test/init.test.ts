@@ -21,6 +21,17 @@ async function sameDirectory(a: string, b: string): Promise<void> {
 }
 
 describe('what init copies', () => {
+  // The drafted manifest is held to a manifest's shape and the retry is told only codes, so the
+  // role is the one place the drafter learns every field; its example must be one the runtime accepts.
+  test("the test drafter's example acceptance.json is a manifest the runtime accepts", async () => {
+    const role = await readFile(join(SETUP_DIRECTORY, 'roles', 'test-drafter.md'), 'utf8');
+    const block = /```json\n([\s\S]*?)```/u.exec(role);
+    expect(block, 'the role shows an acceptance.json').not.toBeNull();
+    const parsed = parseManifest(JSON.parse(block?.[1] ?? ''), { alone: false });
+    expect(parsed).toMatchObject({ ok: true });
+    for (const field of ['id', 'kind', 'required', 'onBase', 'timeoutMs', 'tests']) expect(role, field).toContain(`\`${field}\``);
+  });
+
   test('the policy, the roles, and the rubrics are the shipped examples, byte for byte', async () => {
     expect(await readFile(join(SETUP_DIRECTORY, 'policy.yaml'), 'utf8')).toBe(await readFile(join(EXAMPLES, 'policy.yaml'), 'utf8'));
     await sameDirectory(join(SETUP_DIRECTORY, 'roles'), join(EXAMPLES, 'roles'));

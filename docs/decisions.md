@@ -10774,3 +10774,32 @@ Started on `v2` at f3f8878, after R37 (#163) and D-TOOLING-11 (#167). Issues
 - **Rejected:** the CLI spawning `factory-host init` (a second failure
   path for the same command), and relaxing the check (weakens I9's
   assertion). Reversal: either of those, by amendment.
+
+### D-R36b-08: the test drafter's role names every field of a check
+
+- **Found:** the first real run on my-recipes (run `ed031f3a`) stopped at
+  `test-design`. All three test drafts failed `shape`: their
+  `acceptance.json` checks held only `tests` and `onBase`, without `id`,
+  `kind`, `required`, or `timeoutMs`. A draft with shape problems can be
+  rejected, never approved (`packages/api/src/run.ts:1765`), so the run was
+  cancelled. The role text `init` ships said "an `acceptance` check names
+  its test files in `tests`" and never listed the fields
+  `checkProblems` (`packages/api/src/validate.ts:438`) requires. A retry is
+  told only the problem codes (#174), so the drafter had no way to learn
+  them.
+- **Chosen:** `setup/roles/test-drafter.md` and `examples/roles/test-drafter.md`,
+  which stay byte-identical, list every field and the kind-specific rules,
+  and show a one-check `acceptance.json`. `test/init.test.ts` parses that
+  example with `parseManifest(..., { alone: false })`, the parser drafting
+  applies (`drafting.ts:630`), and requires the role to name each field.
+  Dropping `timeoutMs` from the example fails it.
+- **Rejected:** carrying the validator's messages in a send-back. It is the
+  stronger fix for any shape problem, but it changes `DraftSendBack`, a core
+  type, so it is an amendment (#174), not unit work. Not fixing the role and
+  relying on #174 would leave every first run from `init` to luck.
+- **Also found:** no command prints a draft before approval (#175), and the
+  host starts with a key the provider rejects (#176). Both are outside
+  R36b's deliverables.
+- **The proof:** repeated from a fresh clone at the fixing commit, as the
+  unit requires.
+- **Reverse:** revert the role text and the test.
