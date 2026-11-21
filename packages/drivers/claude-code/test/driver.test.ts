@@ -490,7 +490,11 @@ describe('Code Mode is off in every session the driver starts (I4, #172)', () =>
       expect(call.env?.[SWITCH], `the ${SWITCH} setting of: ${call.cmd.join(' ').slice(0, 120)}`).toBe('0');
       // Nothing on the argv turns it back on: no setting names it, and the tool it runs scripts through is never granted.
       expect(call.cmd.some((arg) => arg.includes(SWITCH))).toBe(false);
-      expect(call.cmd[call.cmd.indexOf('--tools') + 1]?.split(',')).not.toContain('REPL');
+      // `--tools` must be present before its value means anything: without it,
+      // `indexOf` is -1 and the check below would read `cmd[0]` and pass (gemini-1).
+      const tools = call.cmd.indexOf('--tools');
+      expect(tools, 'the session carries --tools').toBeGreaterThanOrEqual(0);
+      expect(call.cmd[tools + 1]?.split(',')).not.toContain('REPL');
     }
   }
 
