@@ -348,6 +348,11 @@ suite with the kit. The units themselves are defined in
 that needs one. Decisions made while building each unit are recorded in
 [docs/decisions.md](docs/decisions.md).
 
+Questions, ideas, and things you built with Olympus go in
+[Discussions](https://github.com/mikev10/olympus/discussions). Issues are
+for work with a known shape; a discussion is the place to start when it does
+not have one yet.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
