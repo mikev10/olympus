@@ -2,8 +2,29 @@
 
 Olympus is built one unit at a time. A unit is a piece of the runtime that one
 person can finish and verify alone, without running the rest of the factory.
-This document is the rule every unit follows, the units that are open, and
+This document is how to send a small fix, the rule every unit follows, and
 how to prove your unit holds the invariants.
+
+## Small fixes
+
+Most outside pull requests are small: a documentation gap, a wrong sentence,
+a bug with a known cause. Those do not need a unit.
+
+1. **Start from an issue.** Pick an open one, or open one first so the fix
+   has a record. Put `Closes #<number>` in the pull request description.
+2. **Target `v2`.** It is the default branch. `main` is the frozen v1 and
+   takes no changes.
+3. **Check every claim against the code.** A sentence in the docs is a claim
+   about what the runtime does. Cite the file and line that shows it is true,
+   in the pull request description, and re-read the code on `v2` rather than
+   an older checkout: the line moves fast.
+4. **Keep it to the issue.** Anything else you notice becomes a new issue.
+5. **Say what you ran.** A docs-only change can say no code changed. A code
+   change runs the four CI commands (see Pull requests) and says so.
+
+A change to documentation alone needs no changeset and no five-part rule. A
+change to a package needs a changeset (`pnpm changeset`), and a change to a
+protected path needs the `gate-change` label, which a maintainer adds.
 
 Read [README.md](README.md) first. It states the mission, the claim, the ten
 invariants, and the open-source boundary. Everything a contributor needs is in
@@ -15,8 +36,9 @@ The planning documents are three kinds of file. The spine
 vocabulary, and the dependency graph between units. The decomposition
 ([DECOMPOSITION.md](docs/plan/DECOMPOSITION.md)) is every unit with its scope,
 deliverables, out-of-scope list, conformance obligations, and acceptance
-criteria; the table below is a summary of it. A unit that needs more than an
-entry has its own spec beside them (`F2-contracts.md`, `S1-skeleton.md`).
+criteria, and the source of truth for what is done and what is next. A unit
+that needs more than an entry has its own spec beside them
+(`F2-contracts.md`, `S1-skeleton.md`).
 
 ## The five-part rule
 
@@ -41,24 +63,12 @@ against them, not against what they imagine the unit should do.
 
 ## Units
 
-Phase 0 (contracts, conformance) is done and Phase 1 (the walking skeleton)
-is next; both are maintainer work. Phase 2 is contributor-shaped. Each unit
-below depends only on the contracts and on the units in its "after" column,
-so the four with no sibling dependency can start in parallel once the
-skeleton lands.
-
-| Unit | Package | After | Notes |
-|---|---|---|---|
-| P1 | `vault` | skeleton | Locked artifacts, evidence, run state with optimistic concurrency. |
-| P2 | `sandbox` | skeleton | Local Docker provider. Enforces the single-rw-mount rule (I1). |
-| P3 | policy engine (`core`) | skeleton | Resolves autonomy and capabilities; default deny, fail closed. |
-| P4 | station machine (`core`) | P1, P3 | The ten station contracts and the transitions between them. |
-| P5 | `drivers/claude-code` | P2, P10 | The first driver. Runs inside the sandbox, so it needs P10's egress. |
-| P6 | verification + evidence (`integrity`) | P1, P2, P8 | Runs pinned checks in a fresh sandbox; derives status (I2). |
-| P7 | tamper detection (`integrity`) | P8 | **Best first issue.** Assertion weakening, skip markers, suite shrink. |
-| P8 | `adapters` | skeleton | TypeScript stack: enumerate suites, parse assertions, coverage. |
-| P9 | `api` + `cli` | P4 | The runtime as a service; the CLI as its client (I9). |
-| P10 | `sandbox` egress | P2 | The filtering proxy an `allowlist` needs. Found by P5. |
+Every unit, done and to come, is in
+[DECOMPOSITION.md](docs/plan/DECOMPOSITION.md). The Phase 2 units that were
+open to contributors (P1–P10) have all shipped, and the units now in progress
+are maintainer work. To help with one, open an issue that names it rather
+than a pull request: a unit is reviewed against its spec before its code
+merges, and that review is easier to plan before the code exists.
 
 Each unit's pending assertions are listed in the registry report
 (`pnpm conformance`) under the unit's id. Those are part of the unit's
@@ -229,6 +239,14 @@ type, so omitting one is a compile error.
   having proved nothing about the substrate everything else's safety rests on,
   which is the failure I5 exists to refuse. Any daemon serving Linux
   containers on a local socket or pipe works.
+- **CI on a fork.** A first-time contributor's workflow run waits until a
+  maintainer approves it, so a pull request with no checks yet is expected.
+  The CI job and the protected-paths `guard` must pass before `v2` takes a
+  merge, and every merge is a squash.
+- **The paid driver tests are the maintainer's.** The drivers' tests that
+  call a real model run only under the `run-driver` label, which a
+  maintainer adds, and a fork's run has no credential for them. The driver
+  tests that call no model still run on every pull request.
 - Record any decision the unit's description did not settle in
   `docs/decisions.md`: what was unclear, what you chose, why, and how to
   reverse it.
