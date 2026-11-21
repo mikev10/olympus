@@ -10820,3 +10820,37 @@ Started on `v2` at f3f8878, after R37 (#163) and D-TOOLING-11 (#167). Issues
   same table (`mergeEnvFile`), so the comment now says `init` writes no
   secret and they may be set in the environment or added to the file.
 - **Reverse:** remove the try around `listen` and restore the comment.
+
+### D-R36b-10: a security check's copy of the tree leaves out its dependency trees (gate change)
+
+- **Found:** the third `my-recipes` run (`f8a4c6a4`) was refused at
+  `test-design` with a base mismatch: `static-analysis` did not finish. Its
+  sandbox ran past the check's 180000 ms wall clock and was destroyed. The
+  base run's tree held 45,265 files, 45,122 of them under `node_modules`.
+  Every check runs over the runtime's install (R34), `scanTree` copied the
+  whole installed tree, and Semgrep runs with `--no-git-ignore`, so it
+  scanned every installed package. The secret scan took 55 s over the same
+  tree. The drafted test did what it declared: it failed on the base. The
+  stand-in scanners skip `node_modules`, so the conformance suite never met
+  this.
+- **Chosen:** `scanTree` (`scan.ts`) copies the tree with every directory
+  that `isDependencyTree` names left out (`node_modules`, `.venv`,
+  `site-packages`, `__pycache__`), at any depth and in any case. A task's
+  writes to a dependency tree are escalated and never carried into the tree
+  the checks judge (D-R15-05). So what a dependency tree holds is the
+  runtime's install of the lockfile, never bytes the change wrote, and
+  leaving it out of the scan hides nothing the change made. The scanner's
+  in-tree ignore files are still set aside (D-R17-03). Tested in
+  `test/scan.test.ts`, which fails without the filter.
+- **Assumptions, verified:** the base and `verify` scans both go through
+  `scanTree` (`line.ts` `runSecurity`); the carry rule drops dependency
+  paths (`workspace.ts` `inDependencyTree`); the base run's file counts
+  above were read from the run's tree.
+- **Rejected:** raising the check's timeout in what `init` writes. Scan
+  time would still grow with every installed package, on every run, for no
+  finding a change could cause. Also rejected: a `.semgrepignore`. The
+  runtime sets that file aside, by design.
+- **Not covered by this check, as before:** a change that adds a
+  dependency changes the lockfile. That path is judged by the install's
+  registry policy and the dependency audit, not by the source scanners.
+- **Reverse:** restore `copyTree` in `scanTree` and delete the test.

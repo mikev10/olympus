@@ -4,13 +4,12 @@
  * The line runs every security check through it, at the base and at
  * `verify`, and records the egress it returns.
  */
-import { mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
-import { join, relative } from 'node:path';
-import type { SecurityScanner } from '@olympus-ai/adapters';
+import { cp, mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { basename, dirname, join, relative } from 'node:path';
+import { isDependencyTree, type SecurityScanner } from '@olympus-ai/adapters';
 import type { CheckResult, SecurityCheckSpec } from '@olympus-ai/integrity';
 import type { EgressLog, SandboxHandle, SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
 import { renderFindings } from './security.js';
-import { copyTree } from './workspace.js';
 
 /** Where a security check's rules are mounted in its sandbox, beside the tree at `/workspace` and outside it. */
 export const SCAN_CONFIG = '/scanner-rules';
@@ -72,6 +71,23 @@ async function setAsideNamed(root: string, names: readonly string[]): Promise<st
 }
 
 /**
+ * A copy of `tree` without its dependency trees, at any depth and in any case
+ * (D-R36b-10). Every check runs over the runtime's install of the lockfile,
+ * and a task's writes there are escalated and never carried into the tree the
+ * checks judge (D-R15-05), so what a dependency tree holds is the install's,
+ * not the change's; scanning it scanned tens of thousands of files no change
+ * wrote, past the check's wall clock. A link is copied as a link.
+ */
+async function copyScanned(source: string, target: string): Promise<void> {
+  await rm(target, { recursive: true, force: true });
+  await mkdir(dirname(target), { recursive: true, mode: 0o700 });
+  await cp(source, target, {
+    recursive: true, errorOnExist: true, force: false, verbatimSymlinks: true,
+    filter: (path) => path === source || !isDependencyTree(basename(path)),
+  });
+}
+
+/**
  * Runs the check's scanner over a copy of `tree` with every file the scanner
  * reads from a tree whatever it is told set aside under another name, its
  * bytes still scanned (D-R17-03, D-R17-07), with the locked
@@ -91,7 +107,7 @@ export async function scanTree(options: ScanOptions): Promise<ScanOutcome> {
   await rm(scratch.dir, { recursive: true, force: true });
   await mkdir(scratch.config, { recursive: true });
   try {
-    await copyTree(options.tree, scratch.tree);
+    await copyScanned(options.tree, scratch.tree);
     const clash = await setAsideNamed(scratch.tree, scanner.inTreeConfig);
     if (clash !== undefined) {
       const name = relative(scratch.tree, clash).replace(/\\/g, '/');
