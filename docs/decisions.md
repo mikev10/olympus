@@ -10568,3 +10568,139 @@ Started on `v2` at 1a34231, after R29 (#153). Issues #158, #159.
 ### D-R37-04: review triage
 
 Both families counted, with no reruns. codex-2 is fixed (cdf8029): the server's `gate-failed` publish is asserted over HTTP. codex-1, decisions ordered by wall-clock `decidedAt` with no recording sequence, is a known limit across every "latest decision" reader and is filed as #164. It needs a Vault contract change, so it goes to an amendment. gemini-1 does not hold: a refusal at verify re-verifies the same change and never starts a build. gemini-2 is rejected as a tradeoff: branding one `untrusted*` field would make it an outlier, and the reversal is one amendment branding them all. Full record: `docs/reviews/2026-11-16-R37-gate-failure-told-triage.md`.
+
+## R52: The driver's CLI is current, and Code Mode is off
+
+Started on `v2` at 44725bf. Issues #170, #172.
+
+### D-R52-01: boundary, verified
+
+- **Deliverables:**
+  - `CLI_VERSION` moves from 2.1.310 to 2.1.330
+    (`packages/drivers/claude-code/src/image.ts`). The Dockerfile takes the
+    version as a build argument and carries no literal of it, so the
+    constant is its only source. The driver test fixture that names the
+    version moves with it.
+  - Every exec the driver hands the CLI sets
+    `CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=0`: the task run, the MCP
+    inspection, and every model setting built on top of them.
+  - A free assertion that fails when Code Mode is enabled in the driver's
+    effective CLI settings, or when the disabling setting is deleted.
+  - The paid per-tier assertion (`I5.every-tier-model-callable-by-the-pinned-cli`)
+    passes through the driver's own image at the new pin.
+  - A changeset for `@olympus-ai/driver-claude-code`.
+- **Out of scope (verbatim):** pinning the CLI's bytes (R53), and changing
+  any tier's model (R54).
+- **Acceptance:** `pnpm -r typecheck`, `pnpm -r lint`, `pnpm -r test` pass.
+  The Code Mode assertion is shown failing with the setting deleted and
+  with it set to `1`, and passing with it at `0`. The paid driver suite,
+  `I5.every-tier-model-callable-by-the-pinned-cli` and
+  `I4.driver-tool-inventory-validated` among it, runs in CI under
+  `run-driver` at merge, as for every unit.
+- **Invariants:** I4 (Code Mode is a route to the tools that policy never
+  named, so it is switched off explicitly instead of being left off by
+  default); I5 (a tier whose model the pin cannot call fails at the
+  assertion rather than parking a seat); I8 (the switch has an assertion
+  that fails when it is deleted).
+- **Pending registry entries owed:** none name R52. No registry entry is
+  added and the baseline is unchanged (D-R52-03).
+- **Gate paths touched:** none. `packages/drivers/claude-code/src/` and
+  `test/` match no pattern in `.github/protected-paths.txt`, and no
+  `types.ts` changes. The paid driver run is started by `run-driver`, not by
+  `gate-change`.
+
+### D-R52-02: assumptions, each verified
+
+- P5 and R36a are merged: `reviewed/P5` and `reviewed/R36a` are both
+  ancestors of 44725bf (`git merge-base --is-ancestor`).
+- The pin is `CLI_VERSION = '2.1.310'` (`image.ts:26`). It is the one
+  source of the version. The image tag hashes it (`image.ts:43`), the build
+  passes it as `--build-arg` (`image.ts:114`), the Dockerfile installs
+  `@anthropic-ai/claude-code@${CLI_VERSION}` from that argument, and the
+  driver reports it in `provenanceId()` and `ModelIdentity.version`
+  (`driver.ts:364`, `driver.ts:413`). A grep for `2.1.310` outside
+  `docs/` finds only `image.ts:26`, the fixture at `test/driver.test.ts:107`,
+  and the R36a changeset, which records what that release shipped and stays
+  as written.
+- npm lists 2.1.321 through 2.1.330. `latest` is 2.1.330, and `stable` is
+  2.1.323, below the 2.1.325 floor (`npm view @anthropic-ai/claude-code`).
+- Code Mode's switch is the environment variable
+  `CLAUDE_CODE_EXPERIMENTAL_CODE_MODE`, `1` on and `0` off. The vendor's
+  page (`https://code.claude.com/docs/en/code-mode`) says a `0` in either
+  the environment or a settings file keeps it off even where the other says
+  `1`, and that it is how an administrator turns it off. The 2.1.325 binary
+  defines the same name (`CLAUDE_CODE_EXPERIMENTAL_CODE_MODE`, found in the
+  `@anthropic-ai/claude-code-linux-x64@2.1.325` executable), and its embedded
+  2.1.323 release note links that page as the way to turn it off.
+- The off-by-default is weaker in the release pinned. The 2.1.329 release
+  note reads: "Changed Code Mode to also start when telemetry, nonessential
+  traffic or feature flags are turned off". Before 2.1.329, the driver's
+  `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` (`driver.ts:203`) kept Code
+  Mode off as a side effect. From 2.1.329 on, it does not. This is the
+  default changing under the line that #172 predicted.
+- The 2.1.330 image offers every tool the driver declares. The image was
+  built locally from `image/Dockerfile` with the pinned base and
+  `CLI_VERSION=2.1.330`, with no network and no key. Granting all 22 of
+  `DECLARED_TOOLS` printed an init line listing exactly those 22 and
+  `claude_code_version: "2.1.330"`. That is the free half of
+  `I4.driver-tool-inventory-validated`. The paid run repeats it through
+  `runTask`.
+- Code Mode's state does not show in the init line. With `REPL` granted
+  and `CLAUDE_CODE_EXPERIMENTAL_CODE_MODE` unset, `0`, or `1`, and also with
+  the opt-in caveats planted in the CLI's home, the 2.1.330 session listed
+  `["Read"]` and nothing else in every case. The binary gates the feature
+  behind a check (`isCodeModeExperimentEnabled`) that an offline container
+  does not pass. So no free test can observe Code Mode on and then off,
+  and the assertion is over the configuration the driver hands the CLI
+  (D-R52-03).
+- `REPL`, the tool Code Mode runs scripts through, is not in
+  `DECLARED_TOOLS` (`src/tools.ts:19-42`). A grant naming it is refused
+  before the task starts (`driver.ts:563`). That is a second layer, and it
+  is independent of the switch.
+
+### D-R52-03: choices
+
+- **Version: 2.1.330, not 2.1.325.** 2.1.325 is the floor #170 names.
+  2.1.330 carries every fix to that point, plus the later ones. 2.1.327
+  refuses a WebFetch URL over 2,000 characters before any prompt. 2.1.328
+  fixes the deny and ask paths that Code Mode scripts take. Code Mode
+  changes between those releases, so the switch is tested against the
+  release that runs. Rejected: 2.1.325, which would ship a known-older
+  CLI for no gain the assertions measure. Rejected: `stable` (2.1.323),
+  which is below the floor. Reverse by changing `CLI_VERSION`. The tag
+  is derived from it, so the image rebuilds.
+- **Where the switch lives: the exec environment.** Chosen:
+  `CLI_ENVIRONMENT` in `driver.ts`, which every exec inherits, the MCP
+  inspection included. A `0` there holds against a `1` in any settings
+  file, the `--settings` file the driver passes included, by the
+  vendor's stated precedence. Rejected: a key in the `--settings` file.
+  The driver passes that file only when `emitArtifacts` wrote one
+  (`driver.ts:763`), so most sessions would carry no switch. Rejected:
+  an `ENV` line in the Dockerfile. `docker exec` env and the driver's
+  own env win over it, so it would be a default rather than a decision.
+  It would also hide the setting from the driver's unit tests. Reverse by
+  deleting the entry. The assertion then fails, which is the point.
+- **The assertion: free, in `test/driver.test.ts`, with no new registry
+  id.** It records every exec the driver makes for a task, both with and
+  without MCP inspection, and requires
+  `CLAUDE_CODE_EXPERIMENTAL_CODE_MODE === '0'` in each one. It also
+  requires that no argv element turns Code Mode on. It fails with the
+  entry deleted and with it set to `1`. Rejected: a new registered
+  invariant id. Adding one edits `packages/conformance/`, which is a
+  protected gate path that this unit does not declare. Registering the
+  property is a gate change of its own. It can go in an amendment if the
+  maintainer wants Code Mode in the I4 count. Rejected: a paid
+  behavioural assertion. The init line does not show Code Mode's state
+  (D-R52-02), so a paid run would pass whether the switch was there or not.
+  That is the failure I8 forbids. The paid
+  `I4.driver-tool-inventory-validated` gains one line: a grant naming
+  `REPL` is refused before the task starts. That costs no model call.
+- **Noticed, not done:** the driver does not compare the init line's
+  `claude_code_version` with `CLI_VERSION`. An image that installed some
+  other release would run and report the pin. That is R53's ground,
+  because R53 records the image by content, and it is noted in the PR
+  body.
+
+### D-R52-04: review triage
+
+Both families counted, with no reruns. gemini-1 is fixed (13eee68): `expectOff` asserts that `--tools` is present before reading its value. codex-1 and codex-2 are a known limit: no test observes whether Code Mode is on, because the CLI's init line shows the same tools whatever the switch says (D-R52-02). The switch therefore rests on the vendor's documented precedence. Owner: R53, the next unit to change the CLI image, which re-verifies the pin. gemini-2's premise does not hold: the container holds a placeholder, not the key. Its residue is that the relay does not inspect an Anthropic request's `tools`, so a task granted `Bash` could reach ungranted server-side tools. That is relay work, filed as #189. gemini-3 is rejected: the argv check catches an inline settings argument naming the variable. Full record: `docs/reviews/2026-11-21-R52-cli-current-code-mode-off-triage.md`.
