@@ -1,0 +1,97 @@
+The code under review is in the file
+`2026-11-21-R36b-init-real-feature-review-bundle.txt` (SHA-256 9279e735ea5d2c05e45645635d916232930b13de8b2076aa7c96d7a7ea861ef2) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing the setup command and host start-up of a software factory runtime, plus four fixes to its pipeline, in a TypeScript project. You have the source and nothing else — no design documents,
+no author reasoning, no prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The runtime carries a change from a one-line intent to a merged pull request through a fixed line of stations: models draft a spec and acceptance tests, a person approves them, they are hashed and locked, a model builds the change in a sandbox, and the runtime verifies, scans, reviews, and opens the pull request. This unit adds `factory-host init` (packages/api/src/init.ts), which detects a repository's stack and writes the setup a first run needs: a policy, role prompts, rubrics, and the host's environment file in a config directory outside the repository, and a verification manifest and a task graph under the repository's `.factory/`. The host and the CLI read that environment file with `--env-file`. The host refuses to start where a container user is required and missing, or where its port cannot be bound. A real run on a real application produced four fixes:
+- the test drafter's role names every field of a check;
+- a security scan's copy of the tree leaves out dependency directories (packages/api/src/scan.ts);
+- the line that tells the test drafter where to write names the test directory at the tree's root (packages/api/src/drafting.ts);
+- the token budgets of the seats that read the repository are raised, with the dollar budgets unchanged (setup/policy.yaml, examples/policy.yaml).
+
+It must hold against a capable, motivated party trying to get a change merged that the line's checks should have stopped, or to run a model with more access than the policy grants. Assume no deceptive intent — only that the easiest path gets taken.
+
+That party controls the contents of the repository the line works on (every file and directory name in it, including what a model wrote during an earlier station), what a model returns or writes during a run, and the intent text. It does not control the components the runtime is wired with — the Vault, the sandbox provider, the security scanners' images, and the model drivers are runtime-selected and trusted, even where a function takes one as an argument. It does not control the operator who runs `init` and starts the host, or the config directory outside the repository that `init` writes, or code running inside the runtime's own process.
+
+The invariants at stake:
+
+- No agent writes to the Vault, the runtime's append-only record of a run, at any level, in any repository, in any role.
+- The runtime derives a task's status; a model never reports it.
+- An agent may not be judged by an artifact it can write. Specs and acceptance tests are hashed and locked before the build, and the policy, roles, and rubrics a run is judged by sit outside any tree a model can write.
+- Default deny: a capability not granted in policy is unavailable.
+- Fail closed: a missing check, missing capability, unsupported stack, or shrunken test suite is a refusal. Never degrade silently, never warn and continue.
+- The runtime is a service and the CLI is a client: nothing in the core assumes a terminal, and the CLI takes no runtime package as a dependency.
+- Every capability claim maps to an executable assertion that fails when the capability is deleted.
+
+The mechanisms that matter most:
+
+- What `init` writes, where, and its refusal to overwrite any existing file or to write a manifest for an unsupported or ambiguous stack (packages/api/src/init.ts).
+- The security scan's copy of the tree, which now leaves out directories named as dependency trees (`node_modules`, `.venv`, `site-packages`, `__pycache__`, matched case-insensitively), and the scanner run over that copy (packages/api/src/scan.ts).
+- The host's start-up checks: reading `--env-file`, the container user required on Windows, a port it cannot bind (packages/api/src/host/config.ts, host/main.ts), and the CLI's own `--env-file` (packages/cli/src/cli.ts).
+- The conformance entries that assert these and fail when the check is deleted (packages/conformance/src/registry/init.ts and the changed entries).
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+Stacks beyond those adapter sets already ship; idea intake, plan review, and briefings (order step 2); a hosted runtime; any change to what a drafted spec or test must satisfy.
+
+"Adapter sets" are the per-stack check configurations the runtime already ships, for Node.js and Python. "Order step 2" names later planned work. Absent work listed here is not a defect.
+
+The bundle also includes a written record of the real run (docs/proof/r36/), a README, and changesets. Review them for claims the code does not back.
+
+THE QUESTION
+
+How would a party who controls the repository's contents and the model's output get code merged that a security scan or an acceptance check should have caught, write to anything the run is judged by, or start a run with more access than the policy grants, using what this unit added or changed? In particular: can a model or a repository place code the scanner never sees, can `init` be made to write or overwrite something a model can later change, and can the host or CLI start in a state the start-up checks should have refused?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.
