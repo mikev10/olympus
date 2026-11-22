@@ -1,4 +1,5 @@
-import { mkdir, readdir, readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { compileError, external, runtime } from '../kit/assert.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
@@ -8,6 +9,7 @@ import { DIR_NAMES, ESCAPE_MECHANISM, linkTo, refusalFrom, specFor, withProvider
 import { CODEX_EXECUTES_INSIDE_THE_SANDBOX } from './codex.js';
 import { OPENAI_COMPATIBLE_EXECUTES_INSIDE_THE_SANDBOX } from './openai-compatible.js';
 import { R20_I1 } from './roles.js';
+import { vaultSurfaceProblems } from './vault-surface.js';
 
 /** The thirty-eight named, audited operations the Vault contract declares (the eight intake operations are R22's, A-R22-04; `recordUsage` is P13's, A-P13-03; `recordDecision` and `readDecisions` are P14's, A-P14-01; `readUsage` is I1a's, A-I1a-05; `recordIntegration` and `readIntegration` are I1b's, A-I1b-01; `listRuns` is R2's, A-R2-02; `recordBaseRun` and `readBaseRun` are R15's, D-A-BF-01; `recordIntent`, `recordRubric`, `recordDraft`, `recordCriticResult`, `recordDraftLock`, and `readLocks` are R19's, A-R19-07; `recordNightly`, `readNightly`, and `listObjects` are R13a's, A-R13a-02 and A-R13a-05; `recordObservation` and `readObservations` are R8a's, D-R8a-03; `dismissCandidate` is R16's, A-R16-05). Nothing else may be reachable on an instance. */
 const NAMED_OPERATIONS: readonly string[] = [
@@ -48,20 +50,25 @@ export const I1: InvariantEntry = {
     runtime({
       id: 'I1.vault-implementation-exposes-only-named-operations',
       title:
-        'the filesystem Vault carries exactly the thirty-five named operations at run time: no generic write, no delete, and no helper left reachable on the prototype for a caller to mutate the store past them',
+        'the filesystem Vault carries exactly the thirty-five named operations at run time: no generic write, no delete, and no helper left reachable on a constructed instance or anywhere on its prototype chain for a caller to mutate the store past them',
       run: async () => {
         const { LocalVault } = await import('@olympus-ai/vault');
-        const reachable = Object.getOwnPropertyNames(LocalVault.prototype).filter((name) => name !== 'constructor');
-        const extra = reachable.filter((name) => !NAMED_OPERATIONS.includes(name));
-        if (extra.length > 0) {
-          throw new Error(
-            `I1: the Vault exposes [${extra.join(', ')}] beyond its named operations. The type-level fixture cannot ` +
-              'see these: a TypeScript `private` method is public at run time, so an internal helper is a write path ' +
-              'the contract does not declare. Use a module-level function or a `#private` method.',
-          );
+        // A constructed instance, not the class prototype: an instance field, a symbol key, an inherited helper, or an
+        // accessor under an allowed name is reachable from what callers hold, and a prototype's own names miss each (#65).
+        const root = await mkdtemp(join(tmpdir(), 'i1-vault-surface-'));
+        try {
+          const vault = new LocalVault({ store: join(root, 'store'), artifacts: join(root, 'artifacts') });
+          const problems = vaultSurfaceProblems(vault, NAMED_OPERATIONS);
+          if (problems.length > 0) {
+            throw new Error(
+              `I1: the Vault exposes more than its named operations, or less: ${problems.join('; ')}. The type-level ` +
+                'fixture cannot see these: a TypeScript `private` method is public at run time, so an internal helper is a ' +
+                'write path the contract does not declare. Use a module-level function or a `#private` method.',
+            );
+          }
+        } finally {
+          await rm(root, { recursive: true, force: true });
         }
-        const missing = NAMED_OPERATIONS.filter((name) => !reachable.includes(name));
-        if (missing.length > 0) throw new Error(`I1: the Vault is missing the named operations [${missing.join(', ')}]`);
       },
     }),
     runtime({
