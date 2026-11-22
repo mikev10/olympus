@@ -10707,7 +10707,7 @@ Both families counted, with no reruns. gemini-1 is fixed (13eee68): `expectOff` 
 
 ## R39: Tests that cannot pass by accident
 
-Started on `v2` at fe0be42. Issues #117, #82, #74, #19, #48, #93, #65.
+Started on `v2` at fe0be42 and rebased onto 7931508 (R52, #188, and the R56 amendment, #190) before shipping; neither touches a package R39 changes. Issues #117, #82, #74, #19, #48, #93, #65.
 
 ### D-R39-01: boundary, verified
 
