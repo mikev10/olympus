@@ -8,13 +8,14 @@
  * needs Docker provisions real sandboxes under every egress policy the line
  * grants and tries the remote from each.
  */
-import { readdir, readFile, writeFile } from 'node:fs/promises';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { GraphParts, RunOutcome } from '@olympus-ai/api';
 import type { Policy, RoleId, VaultRef } from '@olympus-ai/core';
 import type { MeterReading, SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
 import type { IntegrationRecord } from '@olympus-ai/vault';
 import { runtime } from '../kit/assert.js';
+import { allText } from './all-text.js';
 import { MERGED_AT, withFakeGitHub, type FakeGitHub } from '../kit/fake-github.js';
 import { HELLO_TASK, linePolicy, refusalOf, stubDriver, withLine, writeManifest, type LineRig, type RigOptions } from './line.js';
 import { specFor, throughProxy, withProvider, withSandbox } from './local-sandbox.js';
@@ -266,14 +267,6 @@ export const FAILED_INTEGRATION_NEVER_REPORTS_DONE = runtime({
   },
 });
 
-/** Every file under `dir`, read as text. */
-async function allText(dir: string): Promise<string> {
-  let out = '';
-  for (const entry of await readdir(dir, { recursive: true, withFileTypes: true })) {
-    if (entry.isFile()) out += await readFile(join(entry.parentPath, entry.name), 'utf8').catch(() => '');
-  }
-  return out;
-}
 
 export const MERGE_TOKEN_REACHES_NO_SANDBOX = runtime({
   id: 'I4.merge-credential-reaches-no-sandbox',

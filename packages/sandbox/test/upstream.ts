@@ -287,11 +287,12 @@ https.createServer({ key: process.env.UPSTREAM_KEY, cert: process.env.UPSTREAM_C
 `;
 
 /** Starts the upstream on `network` and returns its address there. The sandbox is never on that network. */
-export async function startUpstream(name: string, network: string, certificate: Certificate, expected: string): Promise<string> {
+/** `labels` are `--label` arguments, so a run that dies before its teardown leaves an upstream its owner can be found by (#19). */
+export async function startUpstream(name: string, network: string, certificate: Certificate, expected: string, labels: readonly string[] = []): Promise<string> {
   await run(
     'docker',
     [
-      'run', '--detach', '--init', '--name', name,
+      'run', '--detach', '--init', '--name', name, ...labels,
       '--network', network, '--network-alias', UPSTREAM_HOST,
       '--env', 'UPSTREAM_KEY', '--env', 'UPSTREAM_CERT', '--env', 'UPSTREAM_EXPECTED',
       EGRESS_PROXY_IMAGE, 'node', '--eval', UPSTREAM_SOURCE,

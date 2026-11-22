@@ -12,13 +12,14 @@
  */
 import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { readFileSync, readlinkSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { mkdir, mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { hostname, tmpdir, uptime } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { afterEach, beforeAll, beforeEach, describe, expect, test } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'vitest';
 import {
   EGRESS_PROXY_IMAGE,
   LOCAL_UPSTREAM_ALIAS,
@@ -37,7 +38,7 @@ import {
   type SandboxSpec,
 } from '../src/index.js';
 import { createSandboxNetwork } from '../src/local/docker.js';
-import { startRelay, stopRelay } from '../src/local/relay.js';
+import { relayNames, startRelay, stopRelay } from '../src/local/relay.js';
 import { TEST_IMAGE } from './image.js';
 import {
   PROCESS_DUMP,
@@ -93,7 +94,32 @@ let provider: LocalDockerProvider;
 let base: string;
 let workspace: string;
 const live: SandboxHandle[] = [];
+/** The provider each live handle came from, when it was not `provider`: a handle is destroyed by the provider that issued it. */
+const issuers = new Map<SandboxHandle, LocalDockerProvider>();
 const upstreams: string[] = [];
+
+/**
+ * Where a pid means one process: this host, this boot, and this PID namespace. A pid read in any other scope
+ * names nothing here, so an owner from one is never judged by this process (codex-1, gemini-1): a runner in
+ * another container on the same hostname and daemon is alive whatever `process.kill` answers here. On Linux the
+ * boot and the namespace are the kernel's own, and a read that fails throws rather than letting two namespaces
+ * look alike; elsewhere there are no PID namespaces, and the boot is the minute the host started.
+ */
+function processScope(): string {
+  if (process.platform !== 'linux') return `${hostname()}|boot-${String(Math.round((Date.now() - uptime() * 1000) / 60_000))}|host`;
+  return `${hostname()}|${readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim()}|${readlinkSync('/proc/self/ns/pid')}`;
+}
+const SCOPE = processScope();
+
+/**
+ * Every Docker object this file creates carries one label naming the process's scope, its pid, and this run (#19,
+ * D-R39-05). A run killed before its teardown is found by it, and only by it: a neighbour's objects carry
+ * another owner, and a name prefix would not tell the two apart (#74).
+ */
+const OWNER_KEY = 'sandbox-test.owner';
+const OWNER = `${SCOPE}/${String(process.pid)}/${randomUUID()}`;
+const LABELS = { [OWNER_KEY]: OWNER };
+const LABEL_ARGS = ['--label', `${OWNER_KEY}=${OWNER}`];
 
 function specFor(overrides: Partial<SandboxSpec> = {}): SandboxSpec {
   return {
@@ -110,6 +136,7 @@ function specFor(overrides: Partial<SandboxSpec> = {}): SandboxSpec {
 async function provisioned(spec: SandboxSpec = specFor(), using: LocalDockerProvider = provider): Promise<SandboxHandle> {
   const handle = await using.provision(spec);
   live.push(handle);
+  if (using !== provider) issuers.set(handle, using);
   return handle;
 }
 
@@ -123,7 +150,7 @@ function relayFor(handle: SandboxHandle, using: LocalDockerProvider = provider):
 async function withUpstream(relay: AppliedRelay): Promise<{ name: string; address: string }> {
   const name = `relay-upstream-${randomUUID()}`;
   upstreams.push(name);
-  const address = await startUpstream(name, relay.outboundNetwork, certificate, secret);
+  const address = await startUpstream(name, relay.outboundNetwork, certificate, secret, LABEL_ARGS);
   return { name, address };
 }
 
@@ -183,30 +210,119 @@ async function engineHostListener(): Promise<{ port: number; addresses: string[]
   const port = 20_000 + Math.floor(Math.random() * 10_000);
   const name = `engine-host-listener-${randomUUID()}`;
   const server = `require('node:net').createServer((s) => s.end('hi')).listen(${String(port)}, '0.0.0.0')`;
-  await run('docker', ['run', '--detach', '--rm', '--name', name, '--network', 'host', EGRESS_PROXY_IMAGE, 'node', '--eval', server]);
+  await run('docker', ['run', '--detach', '--rm', '--name', name, ...LABEL_ARGS, '--network', 'host', EGRESS_PROXY_IMAGE, 'node', '--eval', server]);
   const list = "console.log(Object.values(require('node:os').networkInterfaces()).flat().filter((i) => i.family === 'IPv4').map((i) => i.address).join(' '))";
-  const { stdout } = await run('docker', ['run', '--rm', '--network', 'host', EGRESS_PROXY_IMAGE, 'node', '--eval', list]);
+  const { stdout } = await run('docker', ['run', '--rm', ...LABEL_ARGS, '--network', 'host', EGRESS_PROXY_IMAGE, 'node', '--eval', list]);
   return {
     port,
     addresses: stdout.trim().split(/\s+/u).filter((a) => a !== ''),
-    stop: async () => { await run('docker', ['rm', '--force', name]).catch(() => undefined); },
+    stop: () => removeDocker(['rm', '--force', name]),
   };
 }
 
 /** A `docker` that cannot be run, for a teardown that has to go on without one. */
-const NO_DOCKER = { executable: join(tmpdir(), `no-docker-${randomUUID()}`), image: EGRESS_PROXY_IMAGE, timeoutMs: 10_000 };
+const NO_DOCKER = { executable: join(tmpdir(), `no-docker-${randomUUID()}`), image: EGRESS_PROXY_IMAGE, timeoutMs: 10_000, labels: [] };
 
-/** Removes the upstreams first: a network with one still attached cannot be removed with its sandbox. */
-async function removeUpstreams(): Promise<void> {
-  while (upstreams.length > 0) {
-    const name = upstreams.pop();
-    if (name === undefined) continue;
-    await run('docker', ['rm', '--force', '--volumes', name]).catch(() => undefined);
+/** Runs a Docker removal. Only Docker's own answer that the object is gone is taken as success (#19). */
+async function removeDocker(args: string[]): Promise<void> {
+  try {
+    await run('docker', args);
+  } catch (error) {
+    if (!/No such (container|network)|not found/u.test(stderrOf(error))) throw error;
   }
 }
 
+/** Removes the upstreams first: a network with one still attached cannot be removed with its sandbox. Every removal is tried, and every failure reported. */
+async function removeUpstreams(): Promise<void> {
+  const failures: unknown[] = [];
+  while (upstreams.length > 0) {
+    const name = upstreams.pop();
+    if (name === undefined) continue;
+    await removeDocker(['rm', '--force', '--volumes', name]).catch((error: unknown) => failures.push(error));
+  }
+  if (failures.length > 0) throw new AggregateError(failures, `relay tests: ${String(failures.length)} upstream removals failed`);
+}
+
+/** Every container, then every network, that carries the owner label, whichever run owns it. */
+async function labelled(): Promise<Array<{ kind: 'container' | 'network'; id: string; owner: string }>> {
+  const format = `{{.ID}} {{.Label "${OWNER_KEY}"}}`;
+  const rows = async (kind: 'container' | 'network', args: string[]) =>
+    (await run('docker', [...args, '--filter', `label=${OWNER_KEY}`, '--format', format])).stdout
+      .split(/\r?\n/u)
+      .filter((line) => line.trim() !== '')
+      .map((line) => {
+        const [id = '', owner = ''] = line.trim().split(' ');
+        return { kind, id, owner };
+      });
+  return [...(await rows('container', ['ps', '--all'])), ...(await rows('network', ['network', 'ls']))];
+}
+
+/**
+ * Whether an owner names a process in this process's scope that has exited. An owner from another host, boot, or
+ * PID namespace, or one still running, is never swept: a leftover is the safe failure, a live run's objects removed
+ * is not. A reused pid keeps a dead run's objects in place for the same reason (codex-5).
+ */
+function ownerIsGone(owner: string): boolean {
+  const [scope, pid] = owner.split('/');
+  const id = Number(pid);
+  if (scope !== SCOPE || !Number.isSafeInteger(id) || id <= 0) return false;
+  try {
+    process.kill(id, 0);
+    return false;
+  } catch (error) {
+    return (error as { code?: unknown }).code === 'ESRCH';
+  }
+}
+
+/** Removes every labelled object whose owner `which` selects, containers before networks, and fails naming each it could not remove. */
+async function sweep(which: (owner: string) => boolean): Promise<void> {
+  const failures: unknown[] = [];
+  for (const object of await labelled()) {
+    if (!which(object.owner)) continue;
+    const args = object.kind === 'container' ? ['rm', '--force', '--volumes', object.id] : ['network', 'rm', object.id];
+    await removeDocker(args).catch((error: unknown) => failures.push(error));
+  }
+  if (failures.length > 0) throw new AggregateError(failures, `relay tests: ${String(failures.length)} labelled objects could not be removed`);
+}
+
 beforeAll(async () => {
+  // What an earlier run on this host left when its process died before its teardown (#19).
+  await sweep(ownerIsGone);
   certificate = await makeCertificate();
+});
+
+/**
+ * This run's objects still on the daemon. A container Docker is already removing on its own — `--rm`, and exited —
+ * is not one: the daemon removes it after the call that ran it returns.
+ */
+async function ownLeftovers(): Promise<string[]> {
+  const left: string[] = [];
+  for (const object of (await labelled()).filter((o) => o.owner === OWNER)) {
+    if (object.kind === 'container') {
+      const shown = await run('docker', ['inspect', '--type', 'container', '--format', '{{.HostConfig.AutoRemove}} {{.State.Status}}', object.id]).then(
+        ({ stdout }) => stdout.trim(),
+        (error: unknown) => {
+          if (stderrOf(error).includes('No such container')) return 'gone';
+          throw error;
+        },
+      );
+      if (shown === 'gone' || /^true (exited|dead|removing)$/u.test(shown)) continue;
+    }
+    left.push(`${object.kind} ${object.id}`);
+  }
+  return left;
+}
+
+afterAll(async () => {
+  // What this run left past its per-test teardown is recorded before anything removes it, so a teardown that reported
+  // success and left a container fails here rather than being cleaned up into a pass (codex-4). Then everything of
+  // this run is removed, and nothing may remain.
+  const leftBehind = await ownLeftovers();
+  await sweep((owner) => owner === OWNER);
+  const remaining = await ownLeftovers();
+  if (leftBehind.length > 0 || remaining.length > 0) {
+    throw new Error(`relay tests: teardown left ${leftBehind.join(', ') || 'nothing'}; after the sweep, ${remaining.join(', ') || 'nothing'} remained`);
+  }
 });
 
 beforeEach(async () => {
@@ -214,17 +330,25 @@ beforeEach(async () => {
   base = await mkdtemp(join(tmpdir(), 'relay-'));
   workspace = join(base, 'workspace');
   await mkdir(workspace, { recursive: true });
-  provider = await LocalDockerProvider.create({ vaultPaths: [], credentials: { [CREDENTIAL]: secret }, relayTrust: certificate.cert });
+  provider = await LocalDockerProvider.create({ vaultPaths: [], credentials: { [CREDENTIAL]: secret }, relayTrust: certificate.cert, labels: LABELS });
 });
 
 afterEach(async () => {
-  await removeUpstreams();
+  // Every step is tried and every failure reported: a teardown that did not finish fails the test (#19).
+  const failures: unknown[] = [];
+  await removeUpstreams().catch((error: unknown) => failures.push(error));
   while (live.length > 0) {
     const handle = live.pop();
     if (handle === undefined) continue;
-    await provider.destroy(handle).catch(() => undefined);
+    const issuer = issuers.get(handle) ?? provider;
+    issuers.delete(handle);
+    await issuer.destroy(handle).catch((error: unknown) => {
+      // A sandbox the test already ended had its objects removed then; only that refusal is not a failure.
+      if (!(error instanceof SandboxRefusal && error.layer === 'lifetime')) failures.push(error);
+    });
   }
   await rm(base, { recursive: true, force: true });
+  if (failures.length > 0) throw new AggregateError(failures, `relay tests: teardown failed ${String(failures.length)} times`);
 });
 
 describe('the relay forwards its grant, with its own credential, to its own upstream', () => {
@@ -303,13 +427,13 @@ describe('the relay forwards its grant, with its own credential, to its own upst
   });
 
   test("the upstream's certificate is verified: a relay that does not trust it forwards nothing", async () => {
-    const untrusting = await LocalDockerProvider.create({ vaultPaths: [], credentials: { [CREDENTIAL]: secret } });
+    const untrusting = await LocalDockerProvider.create({ vaultPaths: [], credentials: { [CREDENTIAL]: secret }, labels: LABELS });
     const handle = await untrusting.provision(specFor());
     try {
       const relay = relayFor(handle, untrusting);
       const name = `relay-upstream-${randomUUID()}`;
       upstreams.push(name);
-      await startUpstream(name, relay.outboundNetwork, certificate, secret);
+      await startUpstream(name, relay.outboundNetwork, certificate, secret, LABEL_ARGS);
 
       const response = await toRelay(handle, rawRequest('GET', '/v1/messages'), untrusting);
       expect(statusOf(response)).toBe(502);
@@ -497,19 +621,53 @@ describe('the relay is the only route to its upstream', () => {
     // The control: the same probe from a plain internal network reaches the listener, so its silence above is the network's.
     const plain = `plain-internal-${randomUUID()}`;
     const listener = await engineHostListener();
-    await run('docker', ['network', 'create', '--internal', '--driver', 'bridge', plain]);
+    await run('docker', ['network', 'create', '--internal', '--driver', 'bridge', ...LABEL_ARGS, plain]);
     try {
       const { stdout: gateway } = await run('docker', ['network', 'inspect', '--format', '{{(index .IPAM.Config 0).Gateway}}', plain]);
-      const { stdout } = await run('docker', ['run', '--rm', '--network', plain, TEST_IMAGE, 'sh', '-c', `nc -z -w 2 ${gateway.trim()} ${String(listener.port)} && echo reached`]);
+      const { stdout } = await run('docker', ['run', '--rm', ...LABEL_ARGS, '--network', plain, TEST_IMAGE, 'sh', '-c', `nc -z -w 2 ${gateway.trim()} ${String(listener.port)} && echo reached`]);
       expect(stdout).toContain('reached');
     } finally {
       await listener.stop();
-      await run('docker', ['network', 'rm', plain]).catch(() => undefined);
+      await removeDocker(['network', 'rm', plain]);
     }
   });
 });
 
+describe('the sweep removes only what an owner it can prove dead left', () => {
+  // codex-1, gemini-1: a pid is a process only in the scope it was read in.
+  test('an owner whose pid has exited here is gone; one still running, or from another scope, is not', () => {
+    const dead = 2 ** 22 + 12_345;
+    expect(() => process.kill(dead, 0)).toThrow();
+    expect(ownerIsGone(`${SCOPE}/${String(dead)}/run`)).toBe(true);
+    expect(ownerIsGone(`${SCOPE}/${String(process.pid)}/run`)).toBe(false);
+    for (const scope of [`${hostname()}|another-boot|host`, `${hostname()}|${SCOPE.split('|')[1] ?? ''}|pid:[1]`, `elsewhere|${SCOPE.split('|').slice(1).join('|')}`]) {
+      expect(ownerIsGone(`${scope}/${String(dead)}/run`), scope).toBe(false);
+    }
+    expect(ownerIsGone(`${hostname()}/${String(dead)}/run`), 'the owner form before R39 triage').toBe(false);
+    expect(ownerIsGone('not an owner')).toBe(false);
+  });
+});
+
 describe('the relay lives and dies with its sandbox', () => {
+  // #19: what a run leaves when its teardown never runs is found by its label, so every object carries it.
+  test("every container and network a provision creates carries the provider's labels", async () => {
+    for (const spec of [specFor(), specFor({ egress: { mode: 'allowlist', allow: ['example.com'] } })]) {
+      const handle = await provisioned(spec);
+      const controls = provider.appliedControls(handle);
+      const relay = relayFor(handle);
+      const containers = [controls.containerId, relay.name, ...(controls.egress.mode === 'allowlist' ? [controls.egress.proxy.name] : [])];
+      const networks = [relay.internalNetwork, relay.outboundNetwork];
+      for (const name of containers) {
+        const { stdout } = await run('docker', ['inspect', '--type', 'container', '--format', `{{index .Config.Labels "${OWNER_KEY}"}}`, name]);
+        expect(stdout.trim(), name).toBe(OWNER);
+      }
+      for (const name of networks) {
+        const { stdout } = await run('docker', ['network', 'inspect', '--format', `{{index .Labels "${OWNER_KEY}"}}`, name]);
+        expect(stdout.trim(), name).toBe(OWNER);
+      }
+    }
+  });
+
   test('under deny-all the relay and both its networks are destroyed with the sandbox', async () => {
     const handle = await provisioned();
     const relay = relayFor(handle);
@@ -539,15 +697,18 @@ describe('the relay lives and dies with its sandbox', () => {
   });
 
   test('a provision that fails after the relay started leaves no relay behind', async () => {
-    const before = await run('docker', ['ps', '--all', '--format', '{{.Names}}']);
-    const relaysBefore = before.stdout.split(/\r?\n/).filter((n) => n.startsWith('model-relay-'));
-
     // An image with no shell starts and exits, so the provision is refused after the relay is up.
     const refused = await refusal(() => provider.provision(specFor({ image: EGRESS_PROXY_IMAGE.replace(/@.*/u, '@sha256:' + '0'.repeat(64)) })));
     expect(refused.layer).toBe('image');
 
-    const after = await run('docker', ['ps', '--all', '--format', '{{.Names}}']);
-    expect(after.stdout.split(/\r?\n/).filter((n) => n.startsWith('model-relay-'))).toStrictEqual(relaysBefore);
+    // Checked by the names this provision chose, not by comparing every relay on the daemon: a concurrent suite's
+    // relay is not this provision leaking (#74, as #14 was fixed).
+    const id = /^sandbox-(.+)$/u.exec(refused.sandbox ?? '')?.[1];
+    expect(id).toBeDefined();
+    const names = relayNames(id ?? '');
+    expect(await containerExists(names.container)).toBe(false);
+    expect(await networkExists(names.internal)).toBe(false);
+    expect(await networkExists(names.outbound)).toBe(false);
   });
 
   test('a teardown whose docker fails attempts every step and reports each thing it left behind', async () => {
@@ -584,7 +745,7 @@ describe('a relay that cannot be applied exactly is refused (I5)', () => {
     expect(refused.message).toContain('nobody-gave-me-this');
     expect(refused.message).not.toContain(secret);
 
-    const bare = await LocalDockerProvider.create({ vaultPaths: [] });
+    const bare = await LocalDockerProvider.create({ vaultPaths: [], labels: LABELS });
     expect((await refusal(() => bare.provision(specFor()))).layer).toBe('relay');
   });
 
@@ -751,6 +912,12 @@ describe('a relay that cannot be applied exactly is refused (I5)', () => {
     expect((await refusal(() => LocalDockerProvider.create({ vaultPaths: [], credentials: { 'Not A Name': 'x' } }))).layer).toBe('relay');
   });
 
+  test('a provider given a label Docker would reject or reserve, or a value with a control character, refuses to be built (#19)', async () => {
+    for (const labels of [{ 'Upper.Case': 'x' }, { 'trailing-.dot': 'x' }, { 'com.docker.compose.project': 'x' }, { 'run.owner': 'a\nb' }]) {
+      expect((await refusal(() => LocalDockerProvider.create({ vaultPaths: [], labels }))).layer, JSON.stringify(labels)).toBe('labels');
+    }
+  });
+
   test('the stub provider, which runs commands on the host, refuses every relay', async () => {
     const stub = new StubSandboxProvider();
     expect((await refusal(() => stub.provision(specFor()))).layer).toBe('relay');
@@ -767,7 +934,7 @@ describe('a relay that cannot be applied exactly is refused (I5)', () => {
     // Without it, the refusals below could be an image or a daemon that runs nothing (external review, codex-4).
     const control = `relay-start-control-${randomUUID()}`;
     upstreams.push(control);
-    await run('docker', ['run', '--detach', '--name', control, ...flagsFor(valid), EGRESS_PROXY_IMAGE, 'node', '--eval', RELAY_SOURCE]);
+    await run('docker', ['run', '--detach', '--name', control, ...LABEL_ARGS, ...flagsFor(valid), EGRESS_PROXY_IMAGE, 'node', '--eval', RELAY_SOURCE]);
     await new Promise((resolve) => setTimeout(resolve, 2_000));
     expect((await run('docker', ['inspect', '--format', '{{.State.Running}}', control])).stdout.trim()).toBe('true');
 
@@ -786,7 +953,7 @@ describe('a relay that cannot be applied exactly is refused (I5)', () => {
       [{ ...valid, RELAY_METER: JSON.stringify({ ...TEST_METER, prices: { m: { ...TEST_METER.prices[TEST_MODEL], outputPerMTok: -1 } } }) }, 'no price table'],
     ];
     for (const [env, named] of attempts) {
-      const outcome = await run('docker', ['run', '--rm', ...flagsFor(env), EGRESS_PROXY_IMAGE, 'node', '--eval', RELAY_SOURCE]).then(
+      const outcome = await run('docker', ['run', '--rm', ...LABEL_ARGS, ...flagsFor(env), EGRESS_PROXY_IMAGE, 'node', '--eval', RELAY_SOURCE]).then(
         () => ({ code: 0, stderr: '' }),
         (error: unknown) => ({ code: (error as { code?: unknown }).code, stderr: stderrOf(error) }),
       );

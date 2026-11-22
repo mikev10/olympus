@@ -32,10 +32,15 @@ afterEach(async () => {
 
 function git(input: Buffer | string | readonly [], ...args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
+    // A stdin write that fails means git did not read the bytes it was given, so the call is refused rather than
+    // left to surface as an unhandled stream error (#82). Every command given input here reads all of it.
+    let written: Error | undefined;
     const child = execFile('git', ['-C', repo, '-c', 'user.email=readiness@example.invalid', '-c', 'user.name=readiness', ...args], (error, stdout) => {
       if (error !== null) reject(new Error(error.message, { cause: error }));
+      else if (written !== undefined) reject(new Error(`git ${args[0] ?? ''} did not take its input: ${written.message}`, { cause: written }));
       else resolve(stdout.trim());
     });
+    child.stdin?.on('error', (error) => { written = error; });
     child.stdin?.end(Array.isArray(input) ? undefined : input);
   });
 }
@@ -53,7 +58,8 @@ async function write(node: Node): Promise<{ mode: string; type: string; oid: str
 
 async function commitOf(entries: ReadonlyArray<readonly [Buffer | string, Node]>): Promise<string> {
   const { oid } = await write({ tree: entries.map(([name, node]) => [typeof name === 'string' ? Buffer.from(name) : name, node] as const) });
-  return git('', 'commit-tree', oid, '-m', 'fixture');
+  // `-m` gives the message, so commit-tree reads no stdin and is given none.
+  return git([], 'commit-tree', oid, '-m', 'fixture');
 }
 
 /** Everything under `base` outside the repository and the destination: where an escaping write would land. */
