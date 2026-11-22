@@ -729,6 +729,36 @@ export const BASE_REFUSAL_CARRIES_NOTHING_OF_THE_BASE: LocalAssertion = runtime(
   },
 });
 
+export const RETRY_IS_TOLD_ITS_OWN_SHAPE_MISTAKES: LocalAssertion = runtime({
+  id: 'I3.retry-is-told-its-own-shape-mistakes',
+  title:
+    'a test draft whose manifest does not hold to a manifest\'s shape is sent back by the runtime with the validator\'s message for each problem, recorded and told to the next attempt beside its path and code, so the retry can correct the field it is told about; a message comes only from a validator that read the draft alone (A-R36b-01)',
+  run: async () => {
+    await withLine('r36b-shape-', async (rig) => {
+      // Attempt 1 names a check kind there is none of; attempt 2 is right.
+      const unknownKind = (id: string): Record<string, string> => ({
+        ...helloTests(id),
+        [`.drafts/${id}/acceptance.json`]: JSON.stringify({
+          checks: [{ id: 'drafted-hello', kind: 'not-a-real-kind', onBase: 'fails', command: ['node', 'checks/hello.check.cjs'], required: true, timeoutMs: 10_000 }],
+        }),
+      });
+      const r = await drafting(rig, { tests: (attempt, id) => (attempt === 1 ? unknownKind(id) : helloTests(id)) });
+      awaiting(await admitAndDrive(r, { artifacts: artifactsFor(true, true) }), 'spec:1', 'a drafted spec');
+      const spec = lastAttempt(await rig.state(), 'spec');
+      if (spec.sha256 === null) throw new Error('R36b: no spec draft');
+      awaiting(await approveAndResume(rig, r, 'spec:1', spec.sha256), 'test-design:1', 'drafted tests');
+      const [first] = (await rig.state()).drafts['test-design']?.attempts ?? [];
+      const back = first?.sentBack;
+      if (back?.by !== 'runtime') throw new Error(`R36b: a test draft with an unknown check kind was not sent back by the runtime: ${JSON.stringify(back)}`);
+      const kind = back.problems.find((p) => p.code === 'not-a-kind');
+      if (kind?.message?.includes('must be one of') !== true) throw new Error(`R36b: the send-back does not keep the validator's message: ${JSON.stringify(back.problems)}`);
+      const [, retry] = r.drivers.testDrafter.requests;
+      if (retry === undefined) throw new Error('R36b: the test drafter was not called again');
+      if (!retry.variableSuffix.includes(`${kind.path}: not-a-kind — ${kind.message}`)) throw new Error(`R36b: the retry was not told the validator's message: ${JSON.stringify(retry.variableSuffix)}`);
+    });
+  },
+});
+
 /** Runs a drafted spec to its gate with `seats`, and returns the conditions the line recorded as failed. */
 async function specConditions(rig: LineRig, seats: Seats): Promise<{ failed: readonly DraftCondition[]; r: DraftingRig }> {
   const r = await drafting(rig, seats);
@@ -1174,7 +1204,7 @@ export const DRAFTED_PLAN_WITH_THE_TESTS: LocalAssertion = runtime({
 });
 
 export const R19_ASSERTIONS = {
-  I3: [DRAFTED_SPEC_LOCKS_NOTHING_UNTIL_APPROVED, DRAFTED_TESTS_LOCK_AND_RUN, SUPPLIED_ARTIFACTS_SEAT_NO_DRAFTER, APPROVAL_BINDS_THE_DRAFT, LOCKED_DRAFT_IS_THE_BYTES_READ, TEST_DRAFTER_IS_BLACK_BOX, BASE_REFUSAL_CARRIES_NOTHING_OF_THE_BASE],
+  I3: [DRAFTED_SPEC_LOCKS_NOTHING_UNTIL_APPROVED, DRAFTED_TESTS_LOCK_AND_RUN, SUPPLIED_ARTIFACTS_SEAT_NO_DRAFTER, APPROVAL_BINDS_THE_DRAFT, LOCKED_DRAFT_IS_THE_BYTES_READ, TEST_DRAFTER_IS_BLACK_BOX, BASE_REFUSAL_CARRIES_NOTHING_OF_THE_BASE, RETRY_IS_TOLD_ITS_OWN_SHAPE_MISTAKES],
   I4: [DRAFTED_EXIT_FLOOR, DRAFTED_FLOOR_CONDITIONS, DRAFT_OUTSIDE_THE_GRANT_GOES_BACK],
   I5: [SPEC_LESS_RUN_NEEDS_AN_INTENT, CRITIC_FINDING_SENDS_BACK, LAST_ATTEMPT_GOES_TO_A_PERSON, WORST_CASE_COVERS_DRAFTING, DRAFT_LOCK_SURVIVES_A_STOP],
   I6: [CRITIC_OF_DRAFTER_FAMILY_IS_ADVISORY, TEST_DRAFTER_OF_BUILDER_FAMILY],

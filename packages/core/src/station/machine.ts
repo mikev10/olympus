@@ -558,6 +558,13 @@ export function draftsRejected(station: DraftStation, contracts: StationContract
   };
 }
 
+/** The most of a validator's message one retry line carries: a message can quote the drafter's own value (A-R36b-01). */
+export const RETRY_MESSAGE_LIMIT = 300;
+
+function retryMessage(message: string): string {
+  return message.length <= RETRY_MESSAGE_LIMIT ? message : `${message.slice(0, RETRY_MESSAGE_LIMIT - 1)}…`;
+}
+
 /**
  * A drafter's retry as its request's variable suffix: the typed parts of
  * what sent its last draft back, and nothing else (D-A-DS-02). Never in the
@@ -575,7 +582,7 @@ export function retrySuffix(station: DraftStation, attempt: number, parts: reado
         lines.push('[critic-findings]', ...part.findings.map((f) => `- ${f}`));
         break;
       case 'runtime-problems':
-        lines.push('[runtime-problems]', ...part.problems.map((p) => `- ${p.path}: ${p.code}`));
+        lines.push('[runtime-problems]', ...part.problems.map((p) => `- ${p.path}: ${p.code}${p.message === undefined ? '' : ` — ${retryMessage(p.message)}`}`));
         break;
       case 'base-refusal':
         lines.push('[base-refusal]', '- the draft did not hold over the repository; nothing more about the repository is told');

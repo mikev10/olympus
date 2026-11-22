@@ -3210,7 +3210,7 @@ code differ, the code wins.
   retry gets only problem codes) is an **amendment**. Carrying the
   validator's message changes `DraftSendBack`, a core type, which R36b's decision record
   recorded as contract work rather than unit work. It lands after R36b
-  merges and before the next unit starts.
+  merges and before the next unit starts. Landed as A-R36b-01.
 - [#173](https://github.com/mikev10/olympus/issues/173) (Gemini 4 on the
   direct Gemini API) is **maintainer tooling** in `scripts/review-runner/`,
   recorded as a D-TOOLING decision, not product code.
