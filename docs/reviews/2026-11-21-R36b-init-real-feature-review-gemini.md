@@ -1,3 +1,19 @@
+# External review of R36b, gemini, 2026-11-21
+
+Gemini reviewed R36b: `factory-host init`, the host's and CLI's `--env-file`, the start-up refusals, and four fixes found by a real run on my-recipes. The triage is `2026-11-21-R36b-init-real-feature-triage.md`.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini. A direct `generateContent` API call to `gemini-3.1-pro-preview`, offering no tools. `cleanRoom` is `null` because an API call loads no local configuration.
+- **Cross-family agreement:** gemini-1 pairs with codex-1 (the scan's name-based filter), and gemini-2 with codex-4 (the token-budget claim). Gemini raised nothing alone.
+- **Date:** 2026-11-21
+- **Bundle:** `2026-11-21-R36b-init-real-feature-review-bundle.txt`, SHA-256 `9279e735ea5d2c05e45645635d916232930b13de8b2076aa7c96d7a7ea861ef2`, base `7931508` (`origin/v2` at the time, after `reviewed/R52`), head `7b70ccd` (the unit branch after `v2` was merged in). It held every new file whole and every modified file as a function-context diff: 40 files, with `docs/decisions.md`, `docs/plan/`, `docs/reviews/` and `pnpm-lock.yaml` left out by construction. Prompt: `2026-11-21-R36b-init-real-feature-review-prompt.txt`.
+- **Prior context and lookups:** it reports none. This is a self-report, not independently verifiable.
+- **Coverage, and any gap:** item 1: gemini-1. Item 5: gemini-2. Item 6: answered, three mechanisms assessed sound. Items 2, 3, 4 and 7 came back empty: it said nothing about tautological checks, failing open, language escape hatches, or whether the framing was right.
+- **Citations:** line numbers are positions on the new side of the bundle's diffs, not repository lines. Each was located by construct during triage.
+
+---
+
 BASE: 7931508
 HEAD: 7b70ccd
 packages/conformance/src/registry/init.ts

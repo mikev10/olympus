@@ -1,3 +1,19 @@
+# External review of R36b, codex, 2026-11-21
+
+Codex reviewed R36b: `factory-host init`, the host's and CLI's `--env-file`, the start-up refusals, and four fixes found by a real run on my-recipes. The triage is `2026-11-21-R36b-init-real-feature-triage.md`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex. A headless `codex exec` run under a read-only sandbox, with recorded approval policy `never`, in an empty scratch working directory and a scratch config home holding only `auth.json`, with an environment of `CODEX_HOME` alone. The pre-run listing of both is the manifest's `cleanRoom`.
+- **Cross-family agreement:** codex-1 pairs with gemini-1 (the scan's name-based filter), and codex-4 with gemini-2 (the token-budget claim). codex-2 (a dangling link passes init's check) and codex-3 (no assertion of the configuration-directory refusal) were raised by Codex alone.
+- **Date:** 2026-11-21
+- **Bundle:** `2026-11-21-R36b-init-real-feature-review-bundle.txt`, SHA-256 `9279e735ea5d2c05e45645635d916232930b13de8b2076aa7c96d7a7ea861ef2`, base `7931508` (`origin/v2` at the time, after `reviewed/R52`), head `7b70ccd` (the unit branch after `v2` was merged in). It held every new file whole and every modified file as a function-context diff: 40 files, with `docs/decisions.md`, `docs/plan/`, `docs/reviews/` and `pnpm-lock.yaml` left out by construction. Prompt: `2026-11-21-R36b-init-real-feature-review-prompt.txt`.
+- **Prior context and lookups:** it reports none, and says local command execution was denied, so it ran nothing. This is a self-report, not independently verifiable.
+- **Coverage, and any gap:** item 1: codex-1 and codex-2. Item 2: none found, stated. Item 3: covered in its assessment. Item 4: casts, `unknown` and predicates assessed, none exploitable. Item 5: codex-3 and codex-4. Item 6: answered, six mechanisms assessed sound. Item 7: answered, it says the framing should separate scanner coverage, admission and merge permission.
+- **Citations:** line numbers are positions on the new side of the bundle's diffs, not repository lines. Each was located by construct during triage.
+
+---
+
 BASE: 7931508
 HEAD: 7b70ccd
 packages/conformance/src/registry/init.ts
