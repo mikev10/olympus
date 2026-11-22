@@ -5,7 +5,7 @@
  */
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, readlink, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, sep } from 'node:path';
 import { promisify } from 'node:util';
@@ -110,8 +110,10 @@ export const PROTECTED: BranchProtectionChecker = {
 };
 
 /**
- * Every entry under `root`, `.git` included: each file with its content hash, each directory as itself. What
- * "byte-identical" is checked against, kept per path so a difference names the paths that changed (#117).
+ * Every entry under `root`, `.git` included: each file by its content hash, each directory as itself, and each
+ * symlink by the target it names, never by what it points at, so a link replaced by a file holding its target's
+ * bytes is a change (gemini-5). What "byte-identical" is checked against, kept per path so a difference names the
+ * paths that changed (#117). Any other entry type is refused rather than read.
  */
 export async function treeSnapshot(root: string): Promise<Readonly<Record<string, string>>> {
   const entries: Array<readonly [string, string]> = [];
@@ -122,7 +124,9 @@ export async function treeSnapshot(root: string): Promise<Readonly<Record<string
       if (entry.isDirectory()) {
         entries.push([`${at}/`, 'directory']);
         await walk(path);
-      } else entries.push([at, createHash('sha256').update(await readFile(path)).digest('hex')]);
+      } else if (entry.isSymbolicLink()) entries.push([at, `symlink to ${await readlink(path)}`]);
+      else if (entry.isFile()) entries.push([at, `file ${createHash('sha256').update(await readFile(path)).digest('hex')}`]);
+      else throw new Error(`treeSnapshot: ${at} is neither a file, a directory, nor a symlink`);
     }
   };
   await walk(root);
