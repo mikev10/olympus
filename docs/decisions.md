@@ -10704,3 +10704,202 @@ Started on `v2` at 44725bf. Issues #170, #172.
 ### D-R52-04: review triage
 
 Both families counted, with no reruns. gemini-1 is fixed (13eee68): `expectOff` asserts that `--tools` is present before reading its value. codex-1 and codex-2 are a known limit: no test observes whether Code Mode is on, because the CLI's init line shows the same tools whatever the switch says (D-R52-02). The switch therefore rests on the vendor's documented precedence. Owner: R53, the next unit to change the CLI image, which re-verifies the pin. gemini-2's premise does not hold: the container holds a placeholder, not the key. Its residue is that the relay does not inspect an Anthropic request's `tools`, so a task granted `Bash` could reach ungranted server-side tools. That is relay work, filed as #189. gemini-3 is rejected: the argv check catches an inline settings argument naming the variable. Full record: `docs/reviews/2026-11-21-R52-cli-current-code-mode-off-triage.md`.
+
+## R38: Paid driver evidence that does not flake
+
+Started on `v2` at 7931508, after CI run 44971207646 on that commit passed.
+Issues #165, #88, #85.
+
+### D-R38-01: boundary, verified
+
+- **Deliverables:**
+  - `driver.subagents` observes the system prompt the child session sent,
+    not the model's reply. The child runs through the real CLI, in the real
+    image, behind the real relay. The relay forwards to a recording endpoint
+    on the host (A-R21-01) instead of the API. The assertion requires the
+    child's role instructions in that request's `system` blocks, and the
+    parent's role instructions absent from them. It keeps its checks on the
+    child's own `TaskResult`, contract version, granted tools (from the init
+    line), and declared capability. The `PLUM-6620`-in-the-reply check is
+    removed (D-R38-03).
+  - `I3.workspace-instructions-not-loaded` observes the forwarded requests.
+    The same task, under the same task id and in the same container, runs
+    over an empty workspace and then over the planted one, with no tools and
+    with `Skill`. Every request the planted run sent must be byte-identical
+    to the empty run's. The control reruns the planted `Skill` invocation
+    without `--setting-sources ''` and requires the planted tokens in what it
+    sent, as well as the init-line listings it checks today (D-R38-04).
+  - The `openai-chat` relay dialect refuses, unsent, a request naming a
+    `service_tier` other than absent, `null`, or `default`, a request
+    carrying `web_search_options`, and a request asking for audio (D-R38-05).
+    `I5.model-relay-fails-closed-on-unmetered-usage-openai-chat` gains those
+    cases.
+  - Changesets for `@olympus-ai/sandbox`, `@olympus-ai/driver-claude-code`,
+    and `@olympus-ai/conformance`.
+- **Out of scope (verbatim):** retrying a paid assertion until it passes. A
+  retry that hides a real defect is the failure this unit removes.
+- **Acceptance:** `pnpm -r typecheck`, `pnpm -r lint`, and `pnpm -r test`
+  pass. Run locally with Docker and no API key: `driver.subagents` in
+  `packages/drivers/claude-code/test/claims.test.ts` and
+  `I3.workspace-instructions-not-loaded` in `test/invariants.test.ts`.
+  Each is shown failing against the old behaviour: the role instructions
+  dropped from the child's argv, and `--setting-sources ''` removed from the
+  driver's invocation. The openai-chat assertion runs in
+  `pnpm --filter @olympus-ai/conformance test` and is shown failing with the
+  new refusal removed. The paid driver suite runs in CI under `run-driver`
+  at merge, as for every unit.
+- **Invariants:** I3 (a seat runs under its role alone, and the assertion
+  now reads what the session actually sent); I5 (a cost the meter cannot
+  count is refused, and an assertion's verdict no longer depends on whether
+  the model complied); I8 (both driver assertions fail when the capability
+  is deleted, and no longer fail when it is present).
+- **Pending registry entries owed:** none name R38 (a search of
+  `packages/conformance/src` for `R38` finds nothing). The baseline is
+  unchanged.
+- **Gate paths touched:** `packages/conformance/`. The registry titles of
+  `driver.subagents`, `I3.workspace-instructions-not-loaded`, and the
+  openai-chat I5 assertion change with what they prove, and reconciliation
+  requires the report's name to match the registry's title
+  (`packages/conformance/src/kit/reconcile.ts:167`). The relay source is in
+  `packages/sandbox/src/local/relay.ts`, which matches no protected pattern.
+  No `types.ts` changes. The R38 entry in `DECOMPOSITION.md` had no
+  gate-paths line. It follows from its third deliverable, which names a
+  registry assertion, so it is added in the unit's first commit, as the
+  neighbouring entries carry one. The pull request takes `gate-change`, and
+  the squash body carries `Gate-Change: acknowledged`.
+
+### D-R38-02: assumptions, each verified
+
+- The dependencies have shipped. The tags `reviewed/P5`, `reviewed/P12`,
+  `reviewed/R23`, `reviewed/R26`, `reviewed/R36a`, and `reviewed/R52` all
+  exist. R52 was the unit R38 waited on (`DECOMPOSITION.md`, the backlog
+  after R51). R56 also changes `packages/sandbox`, but it has not started,
+  so the two do not run side by side.
+- The role reaches the child as an argv element. `#invocationFor` passes
+  `--append-system-prompt` with `role.instructions` followed by the stable
+  prefix (`packages/drivers/claude-code/src/driver.ts:748`), and
+  `spawnSubagent` runs `#runTask(req, role)` with the child's role
+  (`driver.ts:443`).
+- That argv reaches the request the CLI sends. Spike, no key and no model:
+  the pinned image (`factory-claude-code:2.1.330-…`) ran `claude --print`
+  with the driver's flags and `ANTHROPIC_BASE_URL` set to a host endpoint
+  that records bodies and answers with a minimal SSE message. The CLI made
+  one `POST /v1/messages?beta=true`. Its `system` was three text blocks, and
+  the appended token was in them. The CLI accepted the canned stream and
+  printed `init`, `assistant`, and `result` lines. So the CLI delivers the
+  role every time, and #165's intermittent failure is the model sometimes
+  not complying. That is the branch where the deliverable says to observe
+  the forwarded prompt.
+- The forwarded bodies are deterministic. In the same spike, three sessions
+  under one `--session-id` ran: an empty directory, a planted directory with
+  `--setting-sources ''`, and the planted directory with default sources.
+  The first two differed only in the working-directory path, which the
+  driver fixes at `/workspace`. The third carried the `CLAUDE.md` and
+  `.claude/rules` tokens. Under the same task id, and so the same session id
+  (`sessionIdFor`, `driver.ts:980`), in the same container, the bodies are
+  expected byte-identical. The test run is what confirms it.
+- A request names its session. `metadata.user_id` is a JSON string carrying
+  `session_id` (spike). Requests are attributed to a session by that value,
+  not by their order.
+- The driver allows a task id to be reused. `#sessions.set` overwrites
+  (`driver.ts:494`), and nothing refuses a second run.
+- The relay can forward to a host endpoint today, with no contract change.
+  `RelaySpec.upstream` accepts `LocalUpstream` (`packages/sandbox/src/types.ts:58`,
+  `:98`), the `none` scheme with `credential: null` is allowed only local
+  (A-R21-02), and `LocalDockerProvider.create` takes `dockerHostPorts`
+  (`packages/conformance/src/registry/local-endpoint.ts:166`). The relay
+  strips the query before matching a granted path (`relay.ts:641`), so
+  `/v1/messages?beta=true` matches `/v1/messages`.
+- The openai-chat dialect checks only the model and the ceiling, then
+  forwards. `responsesUnmeterable` runs only when `responses` is set
+  (`relay.ts:592`), and nothing inspects an openai-chat body beyond
+  `openaiCeiling` (`relay.ts:487`).
+- The openai-compatible driver sends none of the fields to be refused. A
+  grep of `packages/drivers/openai-compatible/src` for `service_tier`,
+  `modalities`, `web_search_options`, and `audio` finds nothing, so no
+  driver request changes behaviour.
+- The paid driver step runs the whole package suite
+  (`.github/workflows/ci.yml:162`), and the free step runs
+  `test/driver.test.ts` only (`ci.yml:168`). The assertions stay in their
+  registered files, so the registry's `file` fields are unchanged and the
+  run report that reconciles them is still written by the paid step.
+
+### D-R38-03: `driver.subagents` runs against a recording endpoint, not the API
+
+**Ambiguous:** whether the claim keeps a real model call beside the new
+observation.
+
+**Options, each checked against the code:**
+1. Keep the paid call and drop only the token check. Rejected. The model's
+   reply then proves nothing about the role, and the call spends money for
+   evidence the claim does not use.
+2. Keep the paid call and add a recording relay beside it. Rejected. The
+   relay has one upstream per sandbox (`RelaySpec.upstream`), so the
+   recording would need a second sandbox. The claim's subject, a child
+   session under the parent's grants, is decided before the model answers.
+3. Run the child through the real CLI and relay to a recording host
+   endpoint. **Chosen.** The role's delivery is read from the request, and
+   the grants are read from the CLI's init line, which comes before any
+   turn. Deleting either breaks the assertion, and nothing in it depends on
+   the model complying.
+
+The recording sandboxes are kept out of `meteredSessions`. That control
+compares the relay with the CLI on real API usage, and a canned answer's
+usage would let it pass on traffic that never reached the API.
+
+**Reverse:** restore the token check and `withDriver` in
+`test/claims.test.ts`. The recording harness can stay.
+
+### D-R38-04: the workspace-instruction assertion compares whole requests
+
+**Ambiguous:** #85 says to observe the system blocks. `CLAUDE.md` content
+arrives in the first user message as a `<system-reminder>`, not in `system`
+(spike: the `CLAUDE.md` token was in the default-sources body, and the
+memory section is a `messages` text block). A check over `system` alone
+would miss the commonest plant.
+
+**Chosen:** byte-identical requests, empty workspace against planted, under
+one task id, the shape `I3.openai-compatible-workspace-instructions-not-loaded`
+already takes. It also closes #85's second hole, the fixed plant list. The
+comparison does not depend on knowing which file names the CLI reads: any
+path by which content from the planted tree enters the request shows up as
+a difference. The control makes the comparison mean something. Without
+`--setting-sources ''` the planted tokens must appear in what the CLI sent,
+so a recorder blind to them would fail.
+
+**Rejected:** a token search over `system` blocks, for the reason above,
+and normalising the session id out of two different task ids' bodies, which
+edits the evidence before it is compared.
+
+**Known limit:** the CLI writes the date into its prompt. Two runs either
+side of midnight UTC would differ, and the assertion would fail closed, not
+pass. This is not retried. A failure names the differing line.
+
+**Reverse:** restore the reply check in `test/invariants.test.ts`.
+
+### D-R38-05: what the openai-chat dialect refuses
+
+**Ambiguous:** #88 names `service_tier` and `web_search_options`. The
+deliverable says "the billing options its meter cannot count", which is
+wider than two fields.
+
+**Options:**
+1. Refuse the two #88 names. Rejected as incomplete. Audio is billed at its
+   own rates while being reported inside `prompt_tokens` and
+   `completion_tokens`, and the meter charges one input and one output price
+   per model (`ModelPrice`), so an audio call is undercounted.
+2. Strip the fields and forward. Rejected. Silently changing a request is a
+   degrade, and the responses dialect refuses (`responsesUnmeterable`).
+3. **Chosen:** refuse, unsent, a `service_tier` other than absent, `null`,
+   or `default`; any `web_search_options`; an `audio` parameter; a
+   `modalities` list naming anything but `text`; and an `input_audio`
+   content part in any message. Each is answered 400 with the
+   `unmeterable` reason the responses dialect uses.
+
+**Not covered, adjacent:** a request that omits `service_tier` is served at
+the project's default tier, and the response's own `service_tier` is not
+read. That is a response-side check, which neither dialect has. It goes in
+the PR body as an issue, not a commit.
+
+**Reverse:** delete `chatUnmeterable` in `relay.ts` and its cases in
+`local-relay.ts`.

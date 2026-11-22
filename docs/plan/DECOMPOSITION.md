@@ -2955,6 +2955,10 @@ the driver forwarded (D-R23-08).
 **Out of scope:** retrying a paid assertion until it passes. A retry that
 hides a real defect is the failure this unit removes.
 
+**Gate paths:** `packages/conformance/` is protected, so the pull request
+carries the `gate-change` label and the squash body carries
+`Gate-Change: acknowledged`.
+
 **Why M2:** every merge pays for a driver run, and an intermittent failure
 spends another one and holds the merge.
 
