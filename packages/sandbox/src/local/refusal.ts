@@ -29,6 +29,8 @@ export type RefusalLayer =
   | 'user'
   /** A relay request this provider cannot apply: an unheld credential, an upstream that is not an https origin, an empty grant, an upstream host the allowlist also names, or a relay that did not come up. */
   | 'relay'
+  /** A Docker label this provider was asked to put on what it creates is not one it can apply as given (#19). */
+  | 'labels'
   /** A probe request this provider cannot send: a port, a wait, or an exchange it cannot read, or `detach` with `stdin`. */
   | 'probe'
   /** A command printed more than the provider's output cap; the sandbox was ended and nothing it printed is returned (D-P8-15). */

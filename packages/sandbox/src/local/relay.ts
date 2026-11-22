@@ -771,6 +771,8 @@ export interface RelayOptions {
   readonly executable: string;
   readonly image: string;
   readonly timeoutMs: number;
+  /** The `--label` arguments every network and container made here carries (#19). */
+  readonly labels: readonly string[];
 }
 
 /** A path prefix as the relay matches it: `/`, then segments with no dot segment and no encoding, no trailing slash. */
@@ -1113,8 +1115,8 @@ export async function startRelay(
   const outbound = shared?.outbound ?? names.outbound;
   try {
     if (shared === undefined) {
-      await createSandboxNetwork(run, names.internal, created);
-      await run(['network', 'create', '--driver', 'bridge', names.outbound]);
+      await createSandboxNetwork(run, names.internal, created, options.labels);
+      await run(['network', 'create', '--driver', 'bridge', ...options.labels, names.outbound]);
       created.push(names.outbound);
     }
 
@@ -1124,6 +1126,7 @@ export async function startRelay(
     const runArgs = [
       'run', '--detach', '--init',
       '--name', names.container,
+      ...options.labels,
       '--network', internal,
       '--network-alias', RELAY_ALIAS,
       // A-R21-01: the route to the Docker host, given to this container and to no sandbox.

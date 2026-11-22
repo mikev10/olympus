@@ -22,6 +22,7 @@ import { mountArgument, mountTable, resolveMounts, type ResolvedMount } from './
 import { canCreateIn } from './ownership.js';
 import { checkProbeRequest, probeRunArgs, readProbeOutput } from './probe.js';
 import { EGRESS_PROXY_IMAGE, PROXY_ALIAS, PROXY_PORT, readEgress, startProxy, stopProxy, type AppliedProxy, type ProxyOptions } from './proxy.js';
+import { labelArgs } from './labels.js';
 import { refuse, SandboxRefusal, withLeftovers } from './refusal.js';
 import {
   CREDENTIAL_NAME,
@@ -96,6 +97,15 @@ export interface LocalDockerOptions {
    * not a positive integer is refused at construction.
    */
   readonly maxOutputBytes?: number;
+  /**
+   * Docker labels put on every container and network this provider creates:
+   * the sandbox, its egress proxy, its relay, and their networks (#19). What
+   * a run leaves when its teardown never ran is found by them, not by a name
+   * prefix a neighbour shares. A key outside Docker's lower-case reverse-DNS
+   * form, under a prefix Docker reserves, or a value with a control character
+   * is refused at construction. Absent means no labels.
+   */
+  readonly labels?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -342,8 +352,8 @@ function environmentPassthrough(env: Readonly<Record<string, string>> | undefine
   return { flags, values };
 }
 
-function runArgsFor(spec: SandboxSpec, mounts: readonly ResolvedMount[], name: string, egress: AppliedEgress): string[] {
-  const args = ['run', '--detach', '--init', '--name', name, '--network', egress.network, '--user', `${String(spec.user.uid)}:${String(spec.user.gid)}`];
+function runArgsFor(spec: SandboxSpec, mounts: readonly ResolvedMount[], name: string, egress: AppliedEgress, labels: readonly string[]): string[] {
+  const args = ['run', '--detach', '--init', '--name', name, ...labels, '--network', egress.network, '--user', `${String(spec.user.uid)}:${String(spec.user.gid)}`];
   // Every exec inherits it: a command runs in the workspace, never in whatever directory the image left set.
   args.push('--workdir', spec.mounts.workspace.target);
   const relay = relayOf(egress);
@@ -404,6 +414,7 @@ export class LocalDockerProvider implements SandboxProvider {
   readonly #hostPorts: ReadonlySet<number>;
   /** Passed to `dockerCli` only when policy set one: the default lives there alone, where a test runs it (codex-2). */
   readonly #outputCap: { readonly maxOutputBytes?: number };
+  readonly #labels: readonly string[];
   readonly #sandboxes = new Map<SandboxHandle, Sandbox>();
 
   private constructor(
@@ -415,6 +426,7 @@ export class LocalDockerProvider implements SandboxProvider {
     relayTrust: string | undefined,
     hostPorts: ReadonlySet<number>,
     maxOutputBytes: number | undefined,
+    labels: readonly string[],
   ) {
     this.#executable = executable;
     this.#vaultPaths = vaultPaths;
@@ -424,16 +436,17 @@ export class LocalDockerProvider implements SandboxProvider {
     this.#relayTrust = relayTrust;
     this.#hostPorts = hostPorts;
     this.#outputCap = maxOutputBytes === undefined ? {} : { maxOutputBytes };
+    this.#labels = labels;
   }
 
   /** The relay runs on the proxy's image: both are Node source handed to `node --eval`. */
   get #relayOptions(): RelayOptions {
-    return { executable: this.#executable, image: this.#proxyImage, timeoutMs: LIFECYCLE_TIMEOUT_MS };
+    return { executable: this.#executable, image: this.#proxyImage, timeoutMs: LIFECYCLE_TIMEOUT_MS, labels: this.#labels };
   }
 
   /** The options the proxy's own lifecycle commands run under. */
   get #proxyOptions(): ProxyOptions {
-    return { executable: this.#executable, image: this.#proxyImage, timeoutMs: LIFECYCLE_TIMEOUT_MS };
+    return { executable: this.#executable, image: this.#proxyImage, timeoutMs: LIFECYCLE_TIMEOUT_MS, labels: this.#labels };
   }
 
   /**
@@ -444,6 +457,7 @@ export class LocalDockerProvider implements SandboxProvider {
    * guess, and every assertion built on it would be asserting the guess.
    */
   static async create(options: LocalDockerOptions): Promise<LocalDockerProvider> {
+    const labels = labelArgs(options.labels);
     const executable = options.executable ?? 'docker';
     const daemon = await probeDaemon(executable);
     const credentials = heldCredentials(options.credentials);
@@ -454,7 +468,7 @@ export class LocalDockerProvider implements SandboxProvider {
     if (maxOutputBytes !== undefined && (!Number.isSafeInteger(maxOutputBytes) || maxOutputBytes <= 0)) {
       refuse('limits', `maxOutputBytes must be a positive integer; ${String(maxOutputBytes)} bounds nothing`);
     }
-    return new LocalDockerProvider(executable, vaultPaths, daemon, options.proxyImage ?? EGRESS_PROXY_IMAGE, credentials, trust, hostPorts, maxOutputBytes);
+    return new LocalDockerProvider(executable, vaultPaths, daemon, options.proxyImage ?? EGRESS_PROXY_IMAGE, credentials, trust, hostPorts, maxOutputBytes, labels);
   }
 
   /** What the probe established about the daemon behind this provider. */
@@ -575,7 +589,7 @@ export class LocalDockerProvider implements SandboxProvider {
   }
 
   async #start(spec: SandboxSpec, mounts: readonly ResolvedMount[], name: string, egress: AppliedEgress): Promise<SandboxHandle> {
-    const args = runArgsFor(spec, mounts, name, egress);
+    const args = runArgsFor(spec, mounts, name, egress, this.#labels);
     const started = await dockerCli(this.#executable, args, { timeoutMs: LIFECYCLE_TIMEOUT_MS });
     if (started.exitCode !== 0) {
       refuse('image', `docker run exited ${String(started.exitCode)} for image ${spec.image}: ${started.stderr.trim() || started.stdout.trim()}`);
