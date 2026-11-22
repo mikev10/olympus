@@ -10899,7 +10899,33 @@ wider than two fields.
 **Not covered, adjacent:** a request that omits `service_tier` is served at
 the project's default tier, and the response's own `service_tier` is not
 read. That is a response-side check, which neither dialect has. It goes in
-the PR body as an issue, not a commit.
+the PR body as an issue, not a commit. *(Corrected at triage, D-R38-06: both
+families' review made this codex-1, and the openai-chat half is now fixed.
+The openai-responses half is #208.)*
 
 **Reverse:** delete `chatUnmeterable` in `relay.ts` and its cases in
 `local-relay.ts`.
+
+### D-R38-06: review triage
+
+Both families counted, with no reruns. Fixed, each shown failing against the
+old behaviour first:
+- codex-1 (09fb028): openai-chat reads the tier an answer reports and stops
+  forwarding after any but `default`. Requiring or injecting the field was
+  rejected (it breaks keyless local endpoints, or edits forwarded bytes).
+- gemini-3 (09fb028): openai-chat allow-lists `function` and `custom` tools.
+- gemini-1 (8480bc4): the parent's role is looked for in the whole request.
+- gemini-2 (5c790c4): a messages request naming no session fails the
+  recording harness.
+
+Filed: codex-2 as #205, codex-3 as #206, the openai-responses half of codex-1
+as #208. Rejected: gemini-4, because the throw fails closed by design.
+
+Found while fixing: 09fb028 put the relay source past the Windows
+command-line limit (`spawn ENAMETOOLONG`). 1c6ce73 moves the explanation out
+of the embedded source, to 30246 characters. The ceiling is #207.
+
+**Reverse:** revert the four fix commits. 1c6ce73 is comment-only inside the
+source.
+
+Full record: `docs/reviews/2026-11-22-R38-driver-evidence-does-not-flake-triage.md`.

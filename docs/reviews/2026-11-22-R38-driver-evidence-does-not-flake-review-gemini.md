@@ -1,3 +1,19 @@
+# External review of R38, gemini, 2026-11-22
+
+The Gemini family's review of R38 (the openai-chat relay's unmeterable-request refusals, and the two driver assertions moved onto a recording endpoint). Triage: `2026-11-22-R38-driver-evidence-does-not-flake-triage.md`.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini. A direct `generateContent` API call to `gemini-3.1-pro-preview`, offering no tools. `cleanRoom` is `null` because an API call loads no local configuration. Outcome `counted`: 19276 input tokens against a floor of 13654, and all four bundle markers echoed.
+- **Cross-family agreement:** gemini-3 targets the openai-chat guard, as codex-1 and codex-2 do, through a different hole (tools rather than tier or model). gemini-1, gemini-2, and gemini-4 were raised by Gemini alone.
+- **Date:** 2026-11-22
+- **Bundle:** `2026-11-22-R38-driver-evidence-does-not-flake-review-bundle.txt`, SHA-256 `0878085aef378fb7722d1cddd63fd6ff23439c1daace78fabe9be4ae6114f7ca`, base `reviewed/R52` (7931508 on `v2` is its descendant through the R56 amendment), head `8314a7d` (the unit branch before review). It held 8 files: the changeset, three conformance registry files, the driver's three test files, and the relay source, each changed file as a function-context diff. `docs/decisions.md`, `docs/plan/`, and `docs/reviews/` were excluded. Prompt: `2026-11-22-R38-driver-evidence-does-not-flake-review-prompt.txt`.
+- **Prior context and lookups:** it reported no prior context and no lookups. Self-reported; not independently verifiable.
+- **Coverage, and any gap:** findings are filed under items 1, 3, and 5. Items 2 (tautological checks), 4 (language escape hatches), 6 (which mechanisms are sound), and 7 (whether the framing is right) came back empty. Silence on them is not endorsement.
+- **Citations:** line numbers refer to the bundle's new-side positions, not the repository, and are hints.
+
+---
+
 BASE: reviewed/R52
 HEAD: 8314a7d
 packages/sandbox/src/local/relay.ts

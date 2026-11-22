@@ -1,3 +1,19 @@
+# External review of R38, codex, 2026-11-22
+
+The Codex family's review of R38 (the openai-chat relay's unmeterable-request refusals, and the two driver assertions moved onto a recording endpoint). Triage: `2026-11-22-R38-driver-evidence-does-not-flake-triage.md`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex. A headless `codex exec` run under a read-only sandbox, with recorded approval policy `never`, in an empty scratch working directory and a scratch config home holding only `auth.json`, with an environment of `CODEX_HOME` alone. The pre-run listing of both is the manifest's `cleanRoom`. Outcome `counted`: 32298 input tokens against a floor of 13654, and all four bundle markers echoed.
+- **Cross-family agreement:** codex-1 and codex-2 describe what the openai-chat guard lets through, the mechanism gemini-3 also targets (a different hole in it). codex-3 was raised by Codex alone.
+- **Date:** 2026-11-22
+- **Bundle:** `2026-11-22-R38-driver-evidence-does-not-flake-review-bundle.txt`, SHA-256 `0878085aef378fb7722d1cddd63fd6ff23439c1daace78fabe9be4ae6114f7ca`, base `reviewed/R52` (7931508 on `v2` is its descendant through the R56 amendment), head `8314a7d` (the unit branch before review). It held 8 files: the changeset, three conformance registry files, the driver's three test files, and the relay source, each changed file as a function-context diff. `docs/decisions.md`, `docs/plan/`, and `docs/reviews/` were excluded. Prompt: `2026-11-22-R38-driver-evidence-does-not-flake-review-prompt.txt`.
+- **Prior context and lookups:** it reported no prior context, and that it looked up OpenAI's official documentation on service tiers and web search. Self-reported; not independently verifiable.
+- **Coverage, and any gap:** items 1, 5, 6, and 7 answered with content. For items 2, 3, and 4 it stated it found none.
+- **Citations:** line numbers refer to the bundle's new-side positions, not the repository, and are hints.
+
+---
+
 BASE: reviewed/R52
 HEAD: 8314a7d
 packages/sandbox/src/local/relay.ts
