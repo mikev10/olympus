@@ -7,8 +7,8 @@
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { cp, mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { cp, mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import type { InitOutcome, RunRequest } from '@olympus-ai/api';
 import { runtime } from '../kit/assert.js';
 import { commitFixture } from '../kit/git.js';
@@ -43,12 +43,21 @@ async function init(repository: string, configDirectory: string, hostHasUids = t
 export const INIT_SETUP_ADMITTED: LocalAssertion = runtime({
   id: 'I5.init-setup-admitted',
   title:
-    "init on a TypeScript repository with vitest writes a policy, roles, rubrics, a host environment file the host's start-up checks accept, and a manifest and graph under .factory/ that admission accepts for a run drafting its spec and tests, with the Claude Code driver in every seat: the only answer left is the cost to approve; and the policy, roles, and rubrics are outside the repository (R36b)",
+    "init on a TypeScript repository with vitest writes a policy, roles, rubrics, a host environment file the host's start-up checks accept, and a manifest and graph under .factory/ that admission accepts for a run drafting its spec and tests, with the Claude Code driver in every seat: the only answer left is the cost to approve; and the policy, roles, and rubrics are outside the repository, a configuration directory equal to, inside, or containing it being refused with nothing written (R36b)",
   run: async () => {
     const { checkStartup, loadPolicyFile, mergeEnvFile, startRun } = await api();
     await withVaultDirs('r36b-init-', async (dirs, base) => {
       await vitestRepository(dirs.artifacts);
       const baseCommit = asClone(dirs.artifacts);
+      // Outside means outside: a configuration directory equal to, inside, or containing the
+      // repository is refused, and nothing is written (R36b review, codex-3).
+      for (const [where, overlapping] of [['equal to', dirs.artifacts], ['inside', join(dirs.artifacts, 'cfg')], ['containing', dirname(dirs.artifacts)]] as const) {
+        const refusedOverlap = await init(dirs.artifacts, overlapping, false);
+        if (refusedOverlap.ok || refusedOverlap.reason !== 'config-inside-repository') {
+          throw new Error(`R36b: a configuration directory ${where} the repository was answered ${JSON.stringify(refusedOverlap)}, not refused`);
+        }
+        if (existsSync(join(overlapping, 'policy.yaml')) || existsSync(join(dirs.artifacts, '.factory'))) throw new Error(`R36b: init refused a configuration directory ${where} the repository but wrote files`);
+      }
       const config = join(base, 'config');
       const outcome = await init(dirs.artifacts, config, false);
       if (!outcome.ok) throw new Error(`R36b: init refused a vitest repository: ${JSON.stringify(outcome)}`);
@@ -114,7 +123,7 @@ export const INIT_REFUSES_UNSUPPORTED_STACK: LocalAssertion = runtime({
 export const INIT_REFUSES_TO_OVERWRITE: LocalAssertion = runtime({
   id: 'I5.init-refuses-to-overwrite',
   title:
-    "init refuses when any file it would write exists — a .factory/graph.json in the repository — naming it, and writes nothing else: no policy, no environment file, and the existing file keeps its bytes (I5, R36b)",
+    "init refuses when any file it would write exists — a .factory/graph.json in the repository, or a link there that points nowhere — naming it, and writes nothing else: no policy, no environment file, and the existing file keeps its bytes (I5, R36b)",
   run: async () => {
     await withVaultDirs('r36b-exists-', async (dirs, base) => {
       await vitestRepository(dirs.artifacts);
@@ -130,6 +139,20 @@ export const INIT_REFUSES_TO_OVERWRITE: LocalAssertion = runtime({
         throw new Error('R36b: init refused but wrote other files');
       }
       if ((await readFile(join(dirs.artifacts, '.factory', 'graph.json'), 'utf8')) !== 'mine\n') throw new Error('R36b: init overwrote the existing graph.json');
+    });
+    // A link is something there, even one that points nowhere: it is refused before the first
+    // write, not found by the last one after the rest are written (R36b review, codex-2).
+    await withVaultDirs('r36b-dangling-', async (dirs, base) => {
+      await vitestRepository(dirs.artifacts);
+      asClone(dirs.artifacts);
+      await mkdir(join(dirs.artifacts, '.factory'), { recursive: true });
+      await symlink(join(base, 'nowhere.json'), join(dirs.artifacts, '.factory', 'graph.json'), 'file');
+      const config = join(base, 'config');
+      const outcome = await init(dirs.artifacts, config);
+      if (outcome.ok || outcome.reason !== 'exists' || !outcome.message.includes('graph.json')) {
+        throw new Error(`R36b: a dangling graph.json link was answered ${JSON.stringify(outcome)}, not refused`);
+      }
+      if (existsSync(join(config, 'policy.yaml')) || existsSync(join(config, 'host.env'))) throw new Error('R36b: init refused a dangling link but wrote other files');
     });
   },
 });
