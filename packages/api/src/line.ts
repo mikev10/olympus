@@ -593,7 +593,7 @@ export async function runOnBase(
   // `verify` is judged against (D-A-SC-02). One that produces none refuses the exit (D-R17-01).
   for (const [index, check] of on.checks.entries()) {
     if (!isSecurityCheck(check)) continue;
-    const scanned = await runSecurity(ctx, tree, on.draft === null ? 'base' : `base.${on.draft}`, index, check, null);
+    const scanned = await runSecurity(ctx, tree, installed.ok ? installed.trees : [], on.draft === null ? 'base' : `base.${on.draft}`, index, check, null);
     if (scanned.ok) checks.push(scanned.result);
     else unstarted.push({ checkId: check.id, reason: scanned.reason });
   }
@@ -609,7 +609,7 @@ export async function runOnBase(
  * what its sandbox's proxy decided, whatever the scan did (D-P14-04).
  */
 async function runSecurity(
-  ctx: LineContext, tree: string, label: string, index: number, check: SecurityCheckSpec, taskId: TaskId | null,
+  ctx: LineContext, tree: string, installed: readonly string[], label: string, index: number, check: SecurityCheckSpec, taskId: TaskId | null,
 ): Promise<{ ok: true; result: CheckResult } | { ok: false; at: 'provision' | 'exec'; reason: string }> {
   const { sandbox, vault, workspaces, profile } = ctx.components;
   const scanned = await scanTree({
@@ -620,6 +620,7 @@ async function runSecurity(
     scanner: scannerFor(check.kind, ctx.components.scanners),
     limits: profile === null ? null : profile.limits,
     user: workspaces.user,
+    installed,
   });
   if (scanned.ok || scanned.at === 'exec') {
     await recordEgress({ vault, runId: ctx.run.id, taskId, station: ctx.state.station }, scanned.egress);
@@ -1667,7 +1668,7 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
   // the provider and produces no result, recorded in `unstarted` like any other (codex-7).
   for (const [index, check] of specs.entries()) {
     if (isSecurityCheck(check)) {
-      const scanned = await runSecurity(ctx, tree, diffSha256, index, check, task.id);
+      const scanned = await runSecurity(ctx, tree, installed.ok ? installed.trees : [], diffSha256, index, check, task.id);
       if (scanned.ok) results.push(scanned.result);
       else if (scanned.at === 'provision') return spendRetry(ctx, task, scanned.reason);
       else {

@@ -394,7 +394,8 @@ export class NightlyJobs {
     const check: SecurityCheckSpec = { id: `nightly-${selected.kind}`, kind: selected.kind, required: true, timeoutMs: NIGHTLY_STEP_TIMEOUT_MS, image: scanner.image, config: selected.config };
     const scanned = await scanTree({
       sandbox: this.#options.sandbox, tree, scratch: { dir: scratch, tree: join(scratch, 'tree'), config: join(scratch, 'config') },
-      check, scanner, limits: this.#options.limits, user: this.#options.workspaces.user,
+      // Nightly installs nothing into the tree it scans, so nothing in it is the install's and all of it is scanned.
+      check, scanner, limits: this.#options.limits, user: this.#options.workspaces.user, installed: [],
     });
     if (!scanned.ok) return { ok: false, reason: scanned.reason, egress: scanned.at === 'exec' ? scanned.egress : null };
     if (scanned.result.findings === null) return { ok: false, reason: `the scanner exited ${String(scanned.result.exitCode)} without a whole report`, egress: scanned.egress };

@@ -1,0 +1,115 @@
+# R36b my-recipes run, commands typed (PowerShell)
+git clone --branch unit/r36b https://github.com/mikev10/olympus.git olympus-r36b-run
+pnpm install
+node scripts/local-release.ts $HOME\olympus
+$env:Path = "$HOME\olympus\node_modules\.bin;$env:Path"
+cd %USERPROFILE%\Projects\my-recipes
+factory-host init --base-branch olympus-trial
+cd %USERPROFILE%\Projects\my-recipes
+git fetch origin
+git switch olympus-trial
+git rev-parse HEAD   # 4f663a3bf14a3ee5f507ce0b6537df1af4d2bb55
+olympus-ai --env-file $HOME\.factory\host.env create --workspace %USERPROFILE%\Projects\my-recipes --base-commit 4f663a3bf14a3ee5f507ce0b6537df1af4d2bb55 --level 1 --draft-spec --draft-tests --intent "Scale a recipe's ingredient amounts by a chosen number of servings." --manifest .factory/verify.json --graph .factory/graph.json
+#  -> worst-case cost $42, at most 51 driver calls; nothing started
+# same create command with --approve-cost 42
+#  -> runId c72be87d-d8f9-4e64-b248-3b99271cd6e4, admission bbe0d3adbcf4eaac607b5b5fdd68e75817d6ea2bff733ff773d08e6c5655f201
+#  -> run c72be87d ended at spec: spec.drafter got 401 "Invalid API key" on all 3 attempts; parked, retries exhausted. No model reached.
+# second run, after the maintainer restarted the host with a valid key:
+# same create (cost $42) then --approve-cost 42
+#  -> runId ed031f3a-9c38-4350-8fa0-d60c33947d7a, admission e04de3f77f61aa47c260e49e5903d1f0670ee0c894a8813bcddbf41cd5b07eab
+# spec:1 draft a59a5e70... had 3 open questions (UI); maintainer chose to send back with answers:
+olympus-ai --env-file $HOME\.factory\host.env reject ed031f3a-9c38-4350-8fa0-d60c33947d7a spec:1 --draft a59a5e704e5b59c0f1fb1a4f774a5d7fc84dbf6c48c7a6f9040f245db62dc9cb --notes "Build the user-facing control too, not only the math function. Answers to the open questions: (1) Keep both: the target-servings input sits beside the existing quick-scale buttons (1/2x, 1x, 2x, 3x); it does not replace them. (2) They are mutually exclusive: typing a valid target number of servings deselects the active quick-scale button, and clicking a quick-scale button clears the target-servings input. (3) A plain number input field is fine; no stepper is required."
+# spec:1 attempt 2 (1b70443b...) had no open questions; maintainer approved:
+olympus-ai --env-file $HOME\.factory\host.env approve ed031f3a-9c38-4350-8fa0-d60c33947d7a spec:1 --draft 1b70443bfe7c70bbefbaeef521f8ac857c42434c3b46b28376905f7206e97ef1
+# test-design: 3 drafts all failed shape (acceptance.json checks lacked id/kind/required/timeoutMs); approval refused by design. Cancelled:
+olympus-ai --env-file $HOME\.factory\host.env cancel ed031f3a-9c38-4350-8fa0-d60c33947d7a
+
+# ===== Attempt 2, from a fresh clone at 4996835 (after D-R36b-08) =====
+# (attempt-1 dirs renamed to *.r36b-attempt1)
+git clone --branch unit/r36b https://github.com/mikev10/olympus.git olympus-r36b-run   # 4996835
+pnpm install
+node scripts/local-release.ts $HOME\olympus
+$env:Path = "$HOME\olympus\node_modules\.bin;$env:Path"
+cd %USERPROFILE%\Projects\my-recipes   # on olympus-trial @ 4f663a3
+factory-host init --base-branch olympus-trial   # stack: vitest@4
+# maintainer added the two keys to host.env; host started from it:
+factory-host --env-file $HOME\.factory\host.env
+olympus-ai --env-file $HOME\.factory\host.env create --workspace %USERPROFILE%\Projects\my-recipes --base-commit 4f663a3bf14a3ee5f507ce0b6537df1af4d2bb55 --level 1 --draft-spec --draft-tests --intent "Scale a recipe's ingredient amounts by a chosen number of servings." --manifest .factory/verify.json --graph .factory/graph.json
+#  -> worst-case cost $42, at most 51 driver calls; nothing started
+# same create with --approve-cost 42
+#  -> runId f8a4c6a4-eb91-45c0-8712-78169a9753db, admission e6f46bf4156261f6e731f7a62e062aaa6993c22ff11ca8a894845c24f71ab90c
+# spec:1 attempt 1 (9b33924d...) had open questions (UI, ratio bound); sent back with the answers given in attempt 1 plus "any ratio 1-1000":
+olympus-ai --env-file $HOME\.factory\host.env reject f8a4c6a4-eb91-45c0-8712-78169a9753db spec:1 --draft 9b33924d125af8a0454ad858800137c5adb0b4d6f1a2fdaaf3425250761e95c7 --notes "Build the user-facing control on the recipe detail page too, not only the math. Answers to the open questions: (1) Keep both: a target-servings input sits beside the existing quick-scale buttons (1/4x, 1/2x, 1x, 2x, 3x); it does not replace them. They are mutually exclusive: typing a valid target number of servings deselects the active quick-scale button, and clicking a quick-scale button clears the target-servings input. Use a plain number input field, no stepper. Disable the input when the recipe has no servings count. (2) Any ratio between two valid serving counts (whole numbers 1 to 1000) is acceptable; do not clamp the factor to the quick-scale range of 1/4x to 3x."
+# spec:1 attempt 2 (838331c9...) needed jsdom/testing-library (package.json is protected); sent back:
+olympus-ai --env-file $HOME\.factory\host.env reject f8a4c6a4-eb91-45c0-8712-78169a9753db spec:1 --draft 838331c923a725755be80b61c2d74d4f603daaf0a1534adfed30de209c165576 --notes "Keep everything else in this draft (the control, its accessible name, mutual exclusivity, aria-pressed, disabled when servings is null, any ratio 1-1000, live effect, the out-of-scope list). Change only how it is tested: the acceptance tests must run in the repository's existing vitest setup (environment node, include src/**/*.test.ts) with no new dependencies and no change to package.json, which is a protected path. So put the scaling and selection rules (which control is active, what input is valid, the active scale factor) in a pure, dependency-free module under src/lib, name its exports in run-requirements.json, set testDirectory to src/lib, and require IngredientsPanel to delegate to that module rather than reimplement the rules."
+
+# spec attempt 3 approved
+olympus-ai --env-file $HOME\.factory\host.env approve f8a4c6a4-eb91-45c0-8712-78169a9753db spec:1 --draft 4cc134a9d249932ab5525f5692357f1cc08ae56106e5cbb1e45fc4dcae901343
+
+# test-design base run refused: static-analysis exceeded 180000ms (semgrep scanned 45122 node_modules files); cancelled
+olympus-ai --env-file $HOME\.factory\host.env cancel f8a4c6a4-eb91-45c0-8712-78169a9753db
+
+# ===== Attempt 3, from a fresh clone at 1c2f836 (after D-R36b-10) =====
+# (attempt-2 dirs renamed to *.r36b-attempt2; the two key lines carried into the new host.env unread)
+git clone --branch unit/r36b https://github.com/mikev10/olympus.git olympus-r36b-run   # 1c2f836
+pnpm install
+node scripts/local-release.ts $HOME\olympus
+cd %USERPROFILE%\Projects\my-recipes   # on olympus-trial @ 4f663a3
+factory-host init --base-branch olympus-trial
+factory-host --env-file $HOME\.factory\host.env
+olympus-ai --env-file $HOME\.factory\host.env create --workspace %USERPROFILE%\Projects\my-recipes --base-commit 4f663a3bf14a3ee5f507ce0b6537df1af4d2bb55 --level 1 --draft-spec --draft-tests --intent "Scale a recipe's ingredient amounts by a chosen number of servings." --manifest .factory/verify.json --graph .factory/graph.json
+#  -> worst-case cost $42, at most 51 driver calls; nothing started
+# same create with --approve-cost 42
+#  -> runId d26fb760-fe45-4e71-98bf-2e4ba5ba7e85, admission a31a6041833590806a1b4fa9ccc1d5ca519a6bb6099982ccab6ed1033a36cfcf
+
+# spec:1 attempt 1 (1d4da2c3...) asked again whether to keep the 1/4x-3x buttons; sent back with the earlier answers combined:
+olympus-ai --env-file $HOME\.factory\host.env reject d26fb760-fe45-4e71-98bf-2e4ba5ba7e85 spec:1 --draft 1d4da2c32619cac02c087b1c2c49a8e1c8eed15116e4c2756a62a3dddd115d19 --notes "The maintainer answered this in earlier runs; use these answers. (1) Keep both: a target-servings number input sits beside the existing quick-scale buttons (1/4x, 1/2x, 1x, 2x, 3x); it does not replace them. They are mutually exclusive: typing a valid target number of servings deselects the active quick-scale button, and clicking a quick-scale button clears the target-servings input. Show which control is active with an accessible state (aria-pressed on the buttons). Use a plain number input field with an accessible name, no stepper. Disable the input when the recipe has no servings count. Invalid input (not a whole number 1 to 1000) has no effect. (2) Any ratio between two valid serving counts is acceptable; do not clamp the factor to the 1/4x-3x range. (3) Build the user-facing control on the recipe detail page too, not only the math. Keep the rules testable: put the scaling and selection rules (which control is active, what input is valid, the active scale factor) in a pure, dependency-free module under src/lib, name its exports in run-requirements.json, keep testDirectory src/lib, and require IngredientsPanel to delegate to that module rather than reimplement the rules. The acceptance tests must run in the existing vitest setup (environment node) with no new dependencies and no change to package.json, which is a protected path. Keep the rest of this draft (display-only, grocery list unchanged, no persistence, no new request, the out-of-scope list)."
+
+# spec:1 attempt 2 (038ad367...) approved:
+olympus-ai --env-file $HOME\.factory\host.env approve d26fb760-fe45-4e71-98bf-2e4ba5ba7e85 spec:1 --draft 038ad367b8e8c0960611df11af561ef812645529a0bbed7fe78ffdae15aa0f1b
+
+# test-design: 3 attempts all wrote the test under .drafts/<run>/src/lib/ (runtime line said "write the draft under .drafts/"); missing+unreferenced each time; cost so far $1.05. Cancelled:
+olympus-ai --env-file $HOME\.factory\host.env cancel d26fb760-fe45-4e71-98bf-2e4ba5ba7e85
+
+# ===== Attempt 4, from a fresh clone at 966f756 (after D-R36b-11) =====
+# (attempt-3 dirs renamed to *.r36b-attempt3; the two key lines carried into the new host.env unread)
+git clone --branch unit/r36b https://github.com/mikev10/olympus.git olympus-r36b-run   # 966f756
+pnpm install
+node scripts/local-release.ts $HOME\olympus
+cd %USERPROFILE%\Projects\my-recipes   # on olympus-trial @ 4f663a3
+factory-host init --base-branch olympus-trial
+factory-host --env-file $HOME\.factory\host.env
+olympus-ai --env-file $HOME\.factory\host.env create --workspace %USERPROFILE%\Projects\my-recipes --base-commit 4f663a3bf14a3ee5f507ce0b6537df1af4d2bb55 --level 1 --draft-spec --draft-tests --intent "Scale a recipe's ingredient amounts by a chosen number of servings." --manifest .factory/verify.json --graph .factory/graph.json
+#  -> worst-case cost $42, at most 51 driver calls; nothing started
+# same create with --approve-cost 42
+#  -> runId 7c2fe8a8-d106-4d85-b15b-f05a046f188d, admission 75f9be2dcaf2d222a022569d1a1dc8c3008d9a7bcbd0905277e49a2912c904c5
+
+# spec:1 attempt 1 (ec04dcc2...) asked the same two questions; sent back with the same combined notes as attempt 3 run d26fb760:
+olympus-ai ... reject 7c2fe8a8-d106-4d85-b15b-f05a046f188d spec:1 --draft ec04dcc295b6a9b430a82a071f857ea70003302d83141f5030388cbc3d4835be --notes "<same notes>"
+attempt 4: approve 7c2fe8a8 spec:1 --draft 2228e096... (user: approve)
+attempt 4: approve 7c2fe8a8 test-design:1 --draft 67592fc7... (user: approve)
+# build: task change parked, retries-exhausted (3 attempts), each "402 model-relay: the budget of 200000 tokens (maxTokens) is spent"
+#  build: 3 calls, 593,227 cache-read tokens, 6,976 output, $0.29; run total $1.04
+olympus-ai ... cancel 7c2fe8a8-d106-4d85-b15b-f05a046f188d
+
+# ===== Attempt 5, from a fresh clone at 4e63718 (after D-R36b-12) =====
+# (attempt-4 dirs renamed to *.r36b-attempt4; the 3 drafted test files left untracked in my-recipes/src/lib moved to my-recipes/.factory.r36b-attempt4/stray/; key lines carried unread)
+git clone --branch unit/r36b https://github.com/mikev10/olympus.git olympus-r36b-run   # 4e63718
+pnpm install
+node scripts/local-release.ts $HOME\olympus
+cd %USERPROFILE%\Projects\my-recipes   # on olympus-trial @ 4f663a3
+factory-host init --base-branch olympus-trial   # policy: builder/reviewer/drafters maxTokens 1000000
+factory-host --env-file $HOME\.factory\host.env
+olympus-ai ... create (same as attempt 4)   #  -> worst-case cost $42, at most 51 driver calls; nothing started
+# same create with --approve-cost 42
+#  -> runId 0a2de797-8dbf-44ba-8148-0d93a7112e5b
+# spec:1 attempt 1 (6b55e057...) assumed the input replaces the buttons and asked about null servings; sent back with the same combined notes as attempt 3:
+olympus-ai ... reject 0a2de797-8dbf-44ba-8148-0d93a7112e5b spec:1 --draft 6b55e0579923be895ff8c5d09cdcafa57c0ec757f2a406018f75bb665e6cbc5f --notes "<same notes>"
+# spec:1 attempt 2 (3ce3fdad...) clean; presented to maintainer
+attempt 5: approve 0a2de797 spec:1 --draft 3ce3fdad... (user: approve)
+# test-design:1 attempt 1 (bdeff659...) 4 checks in src/lib, base run 1eb70235...: 4 fail as intended, secret-scan + static-analysis pass; presented
+attempt 5: approve 0a2de797 test-design:1 --draft bdeff659... (user: approve)
+# build passed (change, change-review, change-review.security). integrate:1 awaiting approval.
+#  PR mikev10/my-recipes#20 (factory/0a2de797-8dbf-44ba-8148-0d93a7112e5b @ 4d44773) -> olympus-trial; 2 files, drafted tests not included
+#  cost $1.23: spec.drafter $0.59, test drafter $0.15, build $0.28 (302,512 cache reads, 12,415 out; would have exceeded 200k), review $0.13, security review $0.08
+attempt 5: approve 0a2de797 integrate:1 (user: do what you recommend = approve)

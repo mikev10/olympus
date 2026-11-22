@@ -32,8 +32,8 @@ const TERMINAL_CHAINS = /^process\.(stdin|stdout|stderr|exit|exitCode|argv)(\.|$
  */
 /**
  * An executable entry that may report its own refusal (A-HS-01): one file,
- * and only these uses, which write a line to stderr and set a non-zero exit.
- * stdin, stdout, argv, exit, isTTY, console, and every terminal module stay
+ * and only these uses, which read its arguments, write a line to stderr, and
+ * set a non-zero exit. stdin, stdout, exit, isTTY, console, and every terminal module stay
  * refused there too, and the file may export nothing, so no other module can
  * call through it.
  */
@@ -44,7 +44,8 @@ interface EntryExemption {
 
 const HOST_ENTRY: EntryExemption = {
   file: 'packages/api/src/host/main.ts',
-  uses: new Set(['process.stderr.write', 'process.exitCode', 'Process.stderr', 'Process.exitCode']),
+  // argv: the one argument, `--env-file <path>`, read and never written (D-R36b-05).
+  uses: new Set(['process.stderr.write', 'process.exitCode', 'process.argv.slice', 'Process.stderr', 'Process.exitCode', 'Process.argv']),
 };
 
 function exports(sf: ts.SourceFile): boolean {
@@ -128,7 +129,7 @@ export const I9: InvariantEntry = {
     }),
     runtime({
       id: 'I9.api-never-touches-a-terminal',
-      title: 'no file in api imports a terminal module or touches process streams, argv, exit, isTTY, or console, by spelling or by binding, and every .ts under its src is in the scanned program; the one exception is the host executable\'s entry, which exports nothing and may only write to stderr (its refusal, and each failed-attempt line the service hands it) and set its exit code (A-HS-01, A-HS-03)',
+      title: 'no file in api imports a terminal module or touches process streams, argv, exit, isTTY, or console, by spelling or by binding, and every .ts under its src is in the scanned program; the one exception is the host executable\'s entry, which exports nothing and may only read its arguments (--env-file), write to stderr (its refusal, the line it prints once listening, and each failed-attempt line the service hands it), and set its exit code (A-HS-01, A-HS-03, D-R36b-05)',
       run: () => {
         assertNeverTouchesATerminal('@olympus-ai/api', HOST_ENTRY);
       },

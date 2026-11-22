@@ -258,6 +258,8 @@ async function realScan(provider: SandboxProvider, base: string, tree: string, c
     scanner: scannerFor(check.kind, SCANNERS),
     limits: { cpus: 1, memoryMb: 1024, pids: 256 },
     user: USER,
+    // These trees are fixtures, never installed into: every file in them is scanned.
+    installed: [],
   });
   if (!outcome.ok) throw new Error(`R17: the scan did not run: ${outcome.reason}`);
   return outcome.result.findings;

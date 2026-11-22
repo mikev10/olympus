@@ -16,15 +16,31 @@ describes, not an implementation you have seen.
 
 - Test files under the `testDirectory` that `run-requirements.json` names,
   each written for its `framework` and calling only the `publicInterface` it
-  describes. Each test checks behavior the spec states.
+  describes. Each test checks behavior the spec states. The path is from the
+  root of your working directory, not under `.drafts/`: with a
+  `testDirectory` of `src/lib`, a test is `src/lib/scale.test.ts`. Only the
+  manifest goes under `.drafts/`; a test file written there is discarded.
 - `acceptance.json`, in the directory under `.drafts/`: `{ "checks": [...] }`,
-  one check per test. An `acceptance` check names its test files in `tests`;
-  a `behavioral` check runs a pinned `command` that names its test file. Each check declares
-  `onBase`: `"fails"` where the behavior is absent before the change, which is
-  what reproduces it, and `"passes"` where the test guards something that
-  holds already. At least one required check declares `"fails"`. For each
+  one check per test. Every check is an object with all of these fields:
+  `id`, a name unique in the file; `kind`, the string `"acceptance"` or
+  `"behavioral"`; `required`, a boolean; `onBase`; and `timeoutMs`, a positive
+  whole number of milliseconds. A check of kind `"acceptance"` names its test
+  files in `tests` and has no `command`: the runtime runs the framework
+  itself. A check of kind `"behavioral"` has no `tests` and runs a pinned
+  `command`, an array of strings, that names its test file. `onBase` is
+  `"fails"` where the behavior is absent before the change, which is what
+  reproduces it, and `"passes"` where the test guards something that holds
+  already. At least one required check declares `"fails"`. For each
   authorization rule `security.json` names, write a test in which a caller the
-  rule refuses is refused, and name the rule in that check's `deniesRule`.
+  rule refuses is refused, and name the rule in that check's `deniesRule`. A
+  file of one check:
+
+  ```json
+  { "checks": [
+    { "id": "scales-by-servings", "kind": "acceptance", "tests": ["src/lib/scale.test.ts"],
+      "required": true, "onBase": "fails", "timeoutMs": 600000 }
+  ] }
+  ```
 - `observation.json`, in the same directory, when the run observes its
   change once merged: `{ "works": [...], "regressed": [...], "rollback":
   { "regressed": [...], "consecutive": n } }`. Each check is `{ "app",

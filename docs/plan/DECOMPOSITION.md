@@ -2715,15 +2715,22 @@ the PR.
 
 #### R36b — `init`, and a real feature from a fresh clone
 
-- **`olympus-ai init` writes a working setup.** Run in a repository, it
+- **`factory-host init` writes a working setup.** Run in a repository, it
   writes, refusing to overwrite any file that exists:
   - outside the repository, in a config directory it names (default
-    `~/.olympus/`): a policy at L1 with tool names the wired driver declares
+    `~/.factory/`): a policy at L1 with tool names the wired driver declares
     and per-role budgets sized for a small change, the roles, the rubrics,
     and the host's environment file;
-  - in the repository, under `.olympus/`: a verification manifest and a
+  - in the repository, under `.factory/`: a verification manifest and a
     one-task graph for the detected stack. Policy, roles, and rubrics stay
     outside the tree a model can write (I1, I3).
+  - Both directories are named `factory`: the project's own name is a
+    Greek name, which I10 keeps out of every path in code (D-R36b-03,
+    maintainer, 2026-11-17).
+  - `init` is a command of the host's executable, not the CLI's: the
+    detector is runtime code, and the CLI takes no runtime package as a
+    dependency (I9, `I9.api-runs-headless`; D-R36b-07, maintainer,
+    2026-11-17).
 - **The stack comes from the one detector.** The manifest is generated from
   the stack R18 records and the adapter set that stack resolves to (P8,
   R29), with `secret-scan` and `static-analysis` pinned. An unsupported or
@@ -2738,7 +2745,7 @@ the PR.
   listens and which repository it admits. The README gives the command for
   bash and PowerShell.
 - **No hand-written file.** With `init`'s output, the first run is one
-  `create --draft-spec --draft-tests --intent "..."` naming `.olympus/`'s
+  `create --draft-spec --draft-tests --intent "..."` naming `.factory/`'s
   manifest and graph. The README's "First run" becomes `init`, start the
   host, that `create`, approve.
 - **Free assertions:** `init` on a TypeScript fixture writes files admission
@@ -2750,7 +2757,7 @@ the PR.
   this has happened and its record is committed. From a fresh clone of
   Olympus at the unit branch's head, on the maintainer's Windows machine,
   in the default `core.autocrlf=true` checkout of `my-recipes`:
-  `olympus-ai init`, start the host, one `create` at L1 with
+  `factory-host init`, start the host, one `create` at L1 with
   `--draft-spec --draft-tests` and the intent *scale a recipe's ingredient
   amounts by a chosen number of servings*, gates passed with `approve`, to
   a PR merged into `my-recipes`' `olympus-trial` branch, never its default

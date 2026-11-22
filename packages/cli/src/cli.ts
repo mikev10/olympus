@@ -4,9 +4,12 @@
  * no default URL: a CLI that guessed one could reach a server nobody chose.
  *
  * The CLI imports types from `@olympus-ai/api` and no code; `import type` is
- * erased, so nothing of the runtime runs in this process (D-P9-07).
+ * erased, so nothing of the runtime runs in this process (D-P9-07). The
+ * setup a first run needs is written by `factory-host init`, not here
+ * (D-R36b-07).
  */
-import { parseArgs } from 'node:util';
+import { readFile } from 'node:fs/promises';
+import { parseArgs, parseEnv } from 'node:util';
 import type { ApproveBody, CreateRunBody, ErrorBody, RejectBody, TelemetryExport } from '@olympus-ai/api';
 
 export interface CliIo {
@@ -105,6 +108,7 @@ export const COMMANDS: readonly Command[] = [
 export const GLOBAL_FLAGS: Readonly<Record<string, Flag>> = {
   url: { type: 'string', value: '<api url>', help: 'the API\'s address (or FACTORY_API_URL)' },
   token: { type: 'string', value: '<token>', help: 'the API\'s token (or FACTORY_API_TOKEN)' },
+  'env-file': { type: 'string', value: '<path>', help: 'the host.env factory-host init wrote: the API\'s address and token are read from it' },
   help: { type: 'boolean', help: 'print this help' },
 };
 
@@ -128,7 +132,7 @@ const USAGE = [
   ...COMMANDS.map((c) => `  ${c.name.padEnd(width)}  ${c.summary}`),
   '',
   `${COMMAND} <command> --help prints one line per flag`,
-  'every command needs --url <api url> (or FACTORY_API_URL) and --token <token> (or FACTORY_API_TOKEN)',
+  'every command needs --url <api url> (or FACTORY_API_URL) and --token <token> (or FACTORY_API_TOKEN), or --env-file <host.env>',
 ].join('\n');
 
 /** The parser's options for one command, from the table. */
@@ -158,9 +162,26 @@ interface Target {
   readonly token: string;
 }
 
-function target(values: { url?: string | undefined; token?: string | undefined }, env: CliIo['env']): Target {
-  const url = values.url ?? env.FACTORY_API_URL;
-  const token = values.token ?? env.FACTORY_API_TOKEN;
+/** The address and token from the host's environment file: what the host listens on, and the token it checks. */
+async function fromEnvFile(file: string): Promise<{ url: string; token: string }> {
+  let values: Record<string, string>;
+  try {
+    values = parseEnv(await readFile(file, 'utf8')) as Record<string, string>;
+  } catch {
+    throw new UsageError(`--env-file ${file} could not be read`);
+  }
+  const port = values.FACTORY_LISTEN_PORT;
+  const token = values.FACTORY_API_TOKEN;
+  if (port === undefined || port === '' || token === undefined || token === '') throw new UsageError(`--env-file ${file} sets no FACTORY_LISTEN_PORT or no FACTORY_API_TOKEN`);
+  const host = values.FACTORY_LISTEN_HOST === undefined || values.FACTORY_LISTEN_HOST === '' ? '127.0.0.1' : values.FACTORY_LISTEN_HOST;
+  return { url: `http://${host.includes(':') ? `[${host}]` : host}:${port}`, token };
+}
+
+/** Flags first, then the file named, then the environment: a file named is not a guessed server. */
+async function target(values: { url?: string | undefined; token?: string | undefined; envFile?: string | undefined }, env: CliIo['env']): Promise<Target> {
+  const file = values.envFile === undefined ? null : await fromEnvFile(values.envFile);
+  const url = values.url ?? file?.url ?? env.FACTORY_API_URL;
+  const token = values.token ?? file?.token ?? env.FACTORY_API_TOKEN;
   if (url === undefined || url === '') throw new UsageError('no API URL: pass --url or set FACTORY_API_URL');
   if (token === undefined || token === '') throw new UsageError('no token: pass --token or set FACTORY_API_TOKEN');
   let parsed: URL;
@@ -473,7 +494,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<ExitCo
       args: [...argv],
       strict: false,
       allowPositionals: true,
-      options: { url: { type: 'string' }, token: { type: 'string' }, help: { type: 'boolean' } },
+      options: { url: { type: 'string' }, token: { type: 'string' }, 'env-file': { type: 'string' }, help: { type: 'boolean' } },
     });
     const [command] = positionals;
     if (command === undefined) {
@@ -487,9 +508,13 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<ExitCo
       io.out(commandHelp(row));
       return 0;
     }
-    const t = target({ url: typeof values.url === 'string' ? values.url : undefined, token: typeof values.token === 'string' ? values.token : undefined }, io.env);
     // What remains once the global options are taken out: the command's own arguments.
     const own = stripGlobals(argv).slice(1);
+    const t = await target({
+      url: typeof values.url === 'string' ? values.url : undefined,
+      token: typeof values.token === 'string' ? values.token : undefined,
+      envFile: typeof values['env-file'] === 'string' ? values['env-file'] : undefined,
+    }, io.env);
     switch (command) {
       case 'create':
         return await create(io, t, own);
@@ -557,11 +582,11 @@ function stripGlobals(argv: readonly string[]): string[] {
   const out: string[] = [];
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i] ?? '';
-    if (arg === '--url' || arg === '--token') {
+    if (arg === '--url' || arg === '--token' || arg === '--env-file') {
       i += 1;
       continue;
     }
-    if (arg.startsWith('--url=') || arg.startsWith('--token=')) continue;
+    if (arg.startsWith('--url=') || arg.startsWith('--token=') || arg.startsWith('--env-file=')) continue;
     out.push(arg);
   }
   return out;
