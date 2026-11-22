@@ -267,6 +267,8 @@ export interface ProxyOptions {
   readonly executable: string;
   readonly image: string;
   readonly timeoutMs: number;
+  /** The `--label` arguments every network and container made here carries (#19). */
+  readonly labels: readonly string[];
 }
 
 /** A readiness probe, run inside the proxy container: the port is open or it is not. */
@@ -318,13 +320,14 @@ export async function startProxy(id: string, hosts: readonly string[], options: 
   };
 
   try {
-    await createSandboxNetwork(run, names.internal, created);
-    await run(['network', 'create', '--driver', 'bridge', names.outbound]);
+    await createSandboxNetwork(run, names.internal, created, options.labels);
+    await run(['network', 'create', '--driver', 'bridge', ...options.labels, names.outbound]);
     created.push(names.outbound);
 
     const runArgs = [
       'run', '--detach', '--init',
       '--name', names.container,
+      ...options.labels,
       '--network', names.internal,
       '--network-alias', PROXY_ALIAS,
       '--env', `EGRESS_ALLOW=${hosts.join(',')}`,

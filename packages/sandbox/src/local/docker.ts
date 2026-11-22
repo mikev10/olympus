@@ -246,8 +246,8 @@ export const ISOLATED_GATEWAY = 'com.docker.network.bridge.gateway_mode_ipv4=iso
  * into `created` before the check, so a caller's cleanup removes a network
  * that was made but refused.
  */
-export async function createSandboxNetwork(run: (args: string[]) => Promise<string>, name: string, created: string[]): Promise<void> {
-  await run(['network', 'create', '--internal', '--driver', 'bridge', '--opt', ISOLATED_GATEWAY, name]);
+export async function createSandboxNetwork(run: (args: string[]) => Promise<string>, name: string, created: string[], labels: readonly string[] = []): Promise<void> {
+  await run(['network', 'create', '--internal', '--driver', 'bridge', '--opt', ISOLATED_GATEWAY, ...labels, name]);
   created.push(name);
   const shown = await run([
     'network', 'inspect', '--format',

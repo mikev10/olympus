@@ -10705,6 +10705,561 @@ Started on `v2` at 44725bf. Issues #170, #172.
 
 Both families counted, with no reruns. gemini-1 is fixed (13eee68): `expectOff` asserts that `--tools` is present before reading its value. codex-1 and codex-2 are a known limit: no test observes whether Code Mode is on, because the CLI's init line shows the same tools whatever the switch says (D-R52-02). The switch therefore rests on the vendor's documented precedence. Owner: R53, the next unit to change the CLI image, which re-verifies the pin. gemini-2's premise does not hold: the container holds a placeholder, not the key. Its residue is that the relay does not inspect an Anthropic request's `tools`, so a task granted `Bash` could reach ungranted server-side tools. That is relay work, filed as #189. gemini-3 is rejected: the argv check catches an inline settings argument naming the variable. Full record: `docs/reviews/2026-11-21-R52-cli-current-code-mode-off-triage.md`.
 
+## R39: Tests that cannot pass by accident
+
+Started on `v2` at fe0be42 and rebased onto 7931508 (R52, #188, and the R56 amendment, #190) before shipping; neither touches a package R39 changes. Issues #117, #82, #74, #19, #48, #93, #65.
+
+### D-R39-01: boundary, verified
+
+- **Deliverables:**
+  - The readiness scan test's fixture repositories start no background git
+    process, and a changed tree names the paths that changed (#117).
+  - The readiness `tree.test.ts` git helper writes no stdin to a command
+    that does not read it, and a failed stdin write rejects the call rather
+    than escaping as an unhandled error (#82).
+  - The relay test's failed-provision check reads only the relay names its
+    own refused provision chose, from the refusal's `sandbox` (#74).
+  - The local provider puts caller-given Docker labels on every container
+    and network it creates; the relay tests label everything they create
+    with their own run, remove it after the file, sweep what a dead run
+    left, and fail on any removal that fails (#19).
+  - `line.test.ts` throws where it returned early on a missing evidence
+    reference or driver request (#48).
+  - Conformance's `allText` propagates a read error (#93).
+  - The I1 closed-operation check reads a constructed `LocalVault` and its
+    whole prototype chain by `Reflect.ownKeys`, and requires each allowed
+    name to be a plain method (#65).
+- **Out of scope (verbatim):** new assertions beyond these seven issues.
+- **Acceptance:** `pnpm -r typecheck`, `pnpm -r lint`, `pnpm -r test` pass;
+  each fail-open fix (#48, #93, #65) is shown failing against the old
+  behaviour and passing with the fix; the flakes' mechanisms are reproduced
+  where they can be, and recorded where they cannot.
+- **Invariants:** I5 (fail closed: a test that passes on an error, a missing
+  record, or an unreadable file is the suite failing open); I1 (the closed
+  operation check is one of its assertions; the mount layer's assertion is
+  untouched); I8 (each fix has a negative test or a recorded demonstration);
+  I10 (the label key carries no Greek name).
+- **Pending registry entries owed:** none name R39. The baseline is
+  unchanged.
+- **Gate paths touched, all declared by the entry's issues:**
+  `packages/conformance/` (#93, #65). No `vitest.config`, manifest, or
+  `types.ts` changes (D-R39-05). The PR needs the `gate-change` label and the
+  squash body `Gate-Change: acknowledged`.
+
+### D-R39-02: assumptions, each verified
+
+- Dependencies shipped: `reviewed/P10`, `reviewed/P11`, `reviewed/R1`,
+  `reviewed/I1b` tags exist; `origin/v2` is fe0be42.
+- The scan reads the checkout only through `rev-parse`, `ls-tree`, and
+  `cat-file --batch` (`packages/readiness/src/tree.ts:32,58,73`) and runs
+  every probe in a copy under its own `mkdtemp` (`scan.ts:120-124`). None of
+  those writes into `.git`.
+- `treeHash` hashes `.git` too (`packages/readiness/test/repo.ts:111`), and
+  the fixture is made by `git commit` (`repo.ts:51`).
+- `git commit` starts `git maintenance run --auto --quiet --detach` and
+  returns before it ends: `GIT_TRACE=1 git commit` on git 2.49 shows the
+  spawn. With `-c maintenance.auto=false` the trace shows none. Thirty local
+  trials of commit-then-list-`.git` did not catch a change, so the race is a
+  verified writer, not a reproduced failure (D-R39-03).
+- `commitOf` sends `''` to `commit-tree ... -m`, which does not read stdin
+  (`tree.test.ts:56`), and the helper has no stdin error listener
+  (`tree.test.ts:39`). Reproduced: a 4 MiB write to `commit-tree -m` with no
+  listener ends the process with an unhandled `write EPIPE`.
+- `SandboxRefusal` carries `sandbox`, the container name of a failed start
+  (`packages/sandbox/src/local/refusal.ts:48`); `provision` rethrows with it
+  (`provider.ts:506`); the relay is named `relayNames(id)` with the same id
+  (`relay.ts:1017`, `provider.ts:524`). `egress.test.ts:483` is #14's fix.
+- The relay test's teardown swallows every removal failure
+  (`relay.test.ts:177,225`); nothing the provider creates carries a label
+  (no `--label` in `packages/sandbox/src`); the only creation sites are
+  `provider.ts:346`, `proxy.ts:321-326`, `relay.ts:1116-1125`, and
+  `createSandboxNetwork` (`docker.ts:249`). The probe's container is `--rm`.
+- `LocalDockerOptions` is the sandbox package's own type in `provider.ts`,
+  not a core contract and not a `types.ts`, so an optional field is package
+  work with a changeset.
+- `line.test.ts` has eight early returns on `undefined`, at lines 185, 216,
+  288, 319, 439, 455, 605, 633.
+- `allText` catches every read error into `''` (`integration.ts:273`), and
+  its one caller asserts the store does not hold the merge token
+  (`integration.ts:290`): an unreadable file passes that negative check.
+- The I1 check reads `Object.getOwnPropertyNames(LocalVault.prototype)`
+  (`i1.ts:54`); `LocalVault`'s constructor does no I/O
+  (`packages/vault/src/local/vault.ts:812-823`), so an instance can be built
+  over two empty directories.
+
+### D-R39-03: #117 is fixed by removing the writer, and a recurrence names its file
+
+- **Ambiguous:** the failure was seen once in CI and is not reproduced here.
+  The scan itself writes nothing into the checkout; the one writer verified
+  is git's detached maintenance, which `git commit` starts and does not wait
+  for. A lock or log it holds while `before` is hashed is gone when `after`
+  is.
+- **Options:** (A) the fixture's git runs with `maintenance.auto=false` and
+  `gc.auto=0`, and `treeHash` is replaced by a per-path snapshot so a
+  failure prints which paths were added, removed, or changed; (B) drop
+  `.git` from the hash; (C) wait or retry until the hash settles.
+- **Chosen: A.** It removes the one writer found and keeps the property
+  whole. B weakens "the scan changes nothing" exactly where a scan that ran
+  git against the source would write. C hides a writer rather than naming
+  it, which is what the issue asks not to do.
+- **Residual:** if the cause is something else, the next failure lists the
+  path, which is the diagnosis the issue asked for.
+- **Reverse:** drop the two `-c` flags and return to the single hash.
+
+### D-R39-04: #82 rejects a failed stdin write rather than ignoring EPIPE
+
+- **Options:** (A) `commitOf` passes no input to `commit-tree -m`, and the
+  helper rejects on any stdin error; (B) swallow EPIPE.
+- **Chosen: A.** Every remaining stdin consumer (`hash-object --stdin`,
+  `mktree`) reads all its input, so a failed write means the object was not
+  built from the bytes given. B would let that pass.
+- **Reverse:** remove the listener and the `[]`.
+
+### D-R39-05: #19 labels every Docker object, and the relay tests sweep by owner
+
+- **Ambiguous:** a teardown that never runs (a killed worker, a timed-out
+  hook) cannot be fixed inside that teardown. Something later has to find
+  what it left, and nothing the provider creates is findable but by name
+  prefix.
+- **Options:** (A) `LocalDockerOptions.labels`, validated and put on every
+  container and network the provider creates; the relay tests label their
+  provider, upstreams, and own networks with an owner value naming host,
+  process, and run; `afterAll` removes everything with this run's value and
+  fails if any removal fails; `beforeAll` removes what a dead process on
+  this host left; (B) a ledger file of names each test writes; (C) sweep by
+  `model-relay-*`/`sandbox-*` name.
+  (D) A vitest `globalSetup`, as the issue suggests.
+- **Chosen: A.** B misses a provision interrupted before it returns, which
+  has already created the relay. C removes a concurrent suite's live
+  objects, which is #74's failure. D needs a `vitest.config` change, a gate
+  path this unit does not declare; `beforeAll`/`afterAll` in the file reach
+  the same objects. The owner's process is checked with `process.kill(pid,
+  0)`: a reused pid leaves a leftover in place, never removes a live run's.
+- **Label rules:** a key must match Docker's lower-case reverse-DNS form and
+  must not use the `com.docker.`, `io.docker.`, or `org.dockerproject.`
+  prefixes; a value may not hold a control character. Anything else refuses
+  at `create`, before a daemon is asked to make anything.
+- **Reverse:** drop the option and the sweep; teardown failures still fail.
+
+### D-R39-06: the fail-open fixes are each proved against the old code
+
+- #48: a helper throws naming the missing record. Shown by making the line
+  record no evidence and running old and new tests (D-R39-07 records the
+  run).
+- #93: `allText` takes its reader as a parameter defaulting to `readFile`, so
+  a test gives it one that fails; the old body returned `''` for it.
+- #65: the check becomes an exported function over an instance; its test
+  hands it classes the old prototype read passes (an instance field, a
+  symbol-keyed method, an inherited helper, a getter under an allowed name)
+  and each is refused.
+
+### D-R39-07: what each fix was shown doing, against the old behaviour
+
+- **#48:** with `packages/api/src/line.ts:2019` changed to record no
+  evidence reference, the old `line.test.ts` (from `HEAD` before the fix)
+  and the new one were run side by side. The two tests the issue names, "a
+  required check that cannot be started has no result and fails the gate"
+  and "a unit check ... records the count", passed in the old file and
+  failed in the new one with `no evidence reference was recorded`. The
+  mutation was reverted; the new file passes 47 of 47.
+- **#93:** `test/fail-closed.test.ts` hands `allText` a reader that fails
+  for one file; it rejects with the read error. The old body caught every
+  error into `''`, so the same reader resolved.
+- **#65:** the same file hands `vaultSurfaceProblems` four classes whose
+  prototype's own string names are exactly the allowed ones, asserted in
+  each test with the old read, so the old check passed each: an instance
+  field, a symbol-keyed method, an inherited helper, and a getter under an
+  allowed name. Each is refused. The real `LocalVault` passes the new check.
+- **#74:** the test now reads `relayNames` of the id in the refusal's
+  `sandbox`, so a relay another suite creates mid-test is not compared at
+  all. The race itself was not staged; the old comparison's dependence on
+  every `model-relay-*` on the daemon is read from the code.
+- **#19:** a network labelled with this host and a pid that does not exist,
+  and one labelled with a running process's pid, were created; a run of the
+  relay file removed the first and left the second. A provision with the
+  provider's labels shows them on the sandbox, relay, proxy, and both
+  networks, under deny-all and under an allowlist. Four malformed labels
+  refuse `create` at the `labels` layer.
+- **#82:** reproduced as described in D-R39-02; after the fix,
+  `commit-tree` is given no stdin, and a stdin error rejects the call.
+- **#117:** not reproduced (D-R39-03). The writer found is removed, and the
+  comparison is per path, so a recurrence names the file.
+
+### D-R39-08: review triage
+
+Both families counted on their first run, with no reruns. Eleven findings; every one holds, three of them raised by both families.
+Eight mechanisms were fixed, each shown failing against the old code: the sweep judges a pid only in its own host, boot, and PID
+namespace (codex-1, gemini-1, 388a020); `afterAll` records leftovers before it sweeps (codex-4, 388a020); the Vault surface
+check reads static members and refuses a Proxy (codex-2, gemini-2, gemini-3, 742603f); `allText` refuses an entry that is neither
+a file nor a directory (codex-6, gemini-4, 8c02a46); probe containers carry the labels (codex-3, 6052bf9); the tree snapshot
+records a symlink by its target (gemini-5, 19d7c18). codex-5 (a reused pid keeps a dead run's objects) and the other half of
+gemini-1 (another hostname's leftovers are never swept) are rejected as tradeoffs: both fail toward a leftover, never toward
+removing a live run's objects. D-R39-05's "a reused pid ... never removes a live run's" held for pid reuse and not for PID
+namespaces; codex-1 is that correction. Full record: `docs/reviews/2026-11-21-R39-tests-cannot-pass-by-accident-triage.md`.
+
+## R36b: `init`, and a real feature from a fresh clone
+
+Started on `v2` at f3f8878, after R37 (#163) and D-TOOLING-11 (#167). Issues
+#134, #136, #139.
+
+### D-R36b-01: boundary, verified
+
+- **Deliverables:**
+  - `olympus-ai init`: writes, never over an existing file, a policy at L1,
+    the roles, the rubrics, and the host's environment file into a config
+    directory outside the repository (default under the home directory), and
+    a verification manifest and a task graph for the detected stack into a
+    directory of the repository.
+  - The manifest comes from `buildAdapterSet` (P8, R29): `unit`,
+    `secret-scan`, and `static-analysis`, each image the one admission
+    declares. An `unsupported` or ambiguous stack is refused, naming what the
+    detector found.
+  - `factory-host --env-file <path>` reads that file through
+    `HOST_VARIABLES`; on a host with no uids it refuses a missing
+    `FACTORY_CONTAINER_UID/GID` in its start-up list; once listening it
+    prints one line, the address and the repository it admits.
+  - The README's "First run" becomes `init`, start the host, one `create
+    --draft-spec --draft-tests`, approve; bash and PowerShell commands.
+  - Free assertions: `init` on a TypeScript fixture writes files admission
+    accepts; it refuses an unsupported stack and an existing file; the host
+    refuses a missing uid/gid where required. Each fails with its check
+    deleted (I8).
+  - The R36a paid case starts from `init`'s output.
+  - `docs/proof/r36/my-recipes.md`: the end-to-end run on `my-recipes` from
+    a fresh clone, merged into `olympus-trial`.
+- **Out of scope (verbatim):** stacks beyond those adapter sets already
+  ship; idea intake, plan review, and briefings (order step 2); a hosted
+  runtime; any change to what a drafted spec or test must satisfy.
+- **Acceptance:** `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm
+  conformance` pass with the new assertions registered; each new assertion
+  shown failing with its check deleted; the paid case passes under
+  `run-driver` at merge; the committed `my-recipes` record shows a merged PR
+  with no hand-written file.
+- **Invariants:** I1 and I3 (policy, roles, and rubrics are written outside
+  any tree a model can write); I4 (the policy grants only tools the Claude
+  Code driver declares); I5 (unsupported stack, existing file, missing
+  uid/gid, an undeclared or conflicting variable in the env file: each
+  refused); I8 (each refusal has an assertion); I9 (the host's start-up line
+  is written by the executable, never by `core` or the service); I10 (see
+  D-R36b-03).
+- **Pending registry entries owed:** none name R36b.
+- **Gate paths:** `packages/conformance/`, and the host's start-up checks
+  (`packages/api/src/host/`).
+
+### D-R36b-02: assumptions, each verified
+
+- Every dependency is merged and tagged: `reviewed/R36a`, `reviewed/R37`,
+  `reviewed/R18`, `reviewed/R19`, `reviewed/R35`, and `reviewed/R29`
+  (`git tag -l`).
+- The one detector is `buildAdapterSet` (`packages/adapters/src/detect.ts`);
+  `stack` is `unsupported` when no framework is found, and both frameworks
+  declared leaves `test` null with the reason in `reasons`.
+- A verification manifest read beside a drafted acceptance manifest is not
+  held alone to a check failing on the base (`packages/api/src/validate.ts`,
+  `parseManifest` with `alone: false`, and `mergedCheckProblems`), so
+  `unit` + `secret-scan` + `static-analysis` is admissible with
+  `--draft-tests`. `corpus/v1/repos/calc/verify-drafted.json` is that shape.
+- A graph needs a review task over every build task
+  (`validate.ts`, `unreviewed`), so "a one-task graph" is one build task
+  and the review task that covers it.
+- The host reads only `process.env`, through `readHostConfig`
+  (`packages/api/src/host/main.ts`, `config.ts`); a missing uid/gid on
+  Windows is refused only when `localWorkspaceStore` throws inside
+  `composeHost`, after the start-up list (`workspace.ts:65-71`), which is
+  #136. Nothing is printed once the server listens (#139).
+  `util.parseEnv` exists in the Node the README requires (checked on
+  v24.19.0; added in 21.7).
+- The CLI imports only types from `@olympus-ai/api` (D-P9-07,
+  `packages/cli/src/cli.ts:6-10`) and has no runtime dependencies
+  (`packages/cli/package.json`).
+- The api package ships the rubrics (`packages/api/rubrics`, identical to
+  `examples/rubrics`); `examples/roles` differs from the compiler's shipped
+  roles by the R36a line in `builder.md`.
+- `I10.no-greek-names-in-code` scans string literals and file paths in
+  every package (`packages/conformance/src/registry/i10.ts`), and
+  `GREEK_NAMES` begins with `olympus`
+  (`packages/conformance/src/kit/scan.ts:220`); only `@olympus-ai/` and the
+  exact string `olympus-ai` are exempt.
+- Docker 29.8.0 runs on this machine; `my-recipes` is checked out at
+  `C:\Users\Mike\Projects\my-recipes` with `core.autocrlf=true`, an npm
+  lockfile, `vitest`, and `origin/olympus-trial`.
+
+### D-R36b-03: the directories are `.factory/` and `~/.factory/`
+
+- **The spec named `.olympus/` and `~/.olympus/`; I10 forbids a Greek name
+  in any path in code.** `init` writes those paths, so the string would be
+  in `packages/`, and the I10 scan fails on it. This is a contradiction
+  between the unit and the spine, a stop condition (rule 6). Recommended:
+  `.factory/` in the repository and `~/.factory/` for the config directory,
+  matching `factory-host` and `FACTORY_*`; the entry in `DECOMPOSITION.md`
+  is amended to say so. Rejected: exempting `.olympus` from the scan, which
+  weakens an invariant's check.
+- **Resolved:** the maintainer chose `.factory/` and `~/.factory/` on
+  2026-11-17. `DECOMPOSITION.md`'s R36b entry is amended in this commit.
+  Reversal: an amendment naming other directories; any name the I10 scan
+  accepts works.
+
+### D-R36b-04: where `init` lives, what it writes, and how the host and CLI read it
+
+- **`init` is a function of `@olympus-ai/api`, run by the CLI's entry only.**
+  (Superseded by D-R36b-07.) `initSetup` (`packages/api/src/init.ts`) detects the stack with
+  `buildAdapterSet` and writes the files. `cli.ts` stays types-only: the
+  `init` command calls a function on `CliIo`, and `main.ts` supplies it by a
+  dynamic import made only when the command is `init`, so no other command
+  loads runtime code. `@olympus-ai/api` moves from the CLI's
+  devDependencies to its dependencies. This narrows D-P9-07 to "every
+  command but `init`". Rejected: a second detector in the CLI (the spec
+  requires the one detector); a separate executable (the spec names
+  `olympus-ai init`). Reversal: move `initSetup` into its own package and
+  depend on that.
+- **What it writes comes from the shipped examples.** The api package
+  ships `setup/policy.yaml` and `setup/roles/`, byte-identical to
+  `examples/policy.yaml` and `examples/roles/`, and already ships
+  `rubrics/`, identical to `examples/rubrics/`; a test holds each pair
+  equal, so the copy cannot drift from the files R36a's tests admit. For a
+  Python stack, `init` replaces the policy's `installRegistries` with
+  `PYPI_REGISTRIES` and its `package.json` protected path with
+  `pyproject.toml`. Rejected: the compiler's default roles, which lack
+  R36a's builder line. Reversal: point `init` at another source.
+- **The manifest:** `unit` (required, 600000 ms), `secret-scan`
+  (`SECRET_SCAN_IMAGE`, `config: null`), and `static-analysis`
+  (`STATIC_ANALYSIS_IMAGE`, a `no-eval` rule in the stack's languages).
+  Admissible only beside drafted tests, which supply the check failing on
+  the base, so the README's first run drafts both. The graph is one build
+  task, `change`, and its review task, `change-review`.
+- **The environment file is `host.env` in the config directory**, mode
+  0600 where the host has modes. It holds a generated
+  `FACTORY_API_TOKEN` (32 random bytes, hex), port 7300, every path, the
+  merge target, and on a host with no uids `FACTORY_CONTAINER_UID/GID`
+  `1000`, a non-root user on a host that enforces no ownership, as the
+  conformance rigs use. It does not hold `ANTHROPIC_API_KEY` or
+  `FACTORY_GIT_TOKEN`: those are set by hand, the two values the
+  `my-recipes` run allows by hand.
+- **The merge target is never guessed.** `init --base-branch <branch>` is
+  required; the repository is read from the `origin` remote's GitHub URL,
+  and anything else is refused, naming the URL.
+- **The host reads the file with `--env-file <path>`**, parsed by
+  `util.parseEnv`. A name `HOST_VARIABLES` does not declare is refused, and
+  so is a name set both in the file and in the environment with another
+  value; the file and the environment are otherwise merged. Rejected:
+  reading a default path without being told (a file nobody named), and the
+  environment silently winning a conflict. Reversal: drop the conflict rule.
+- **The CLI takes `--env-file <path>` too**, reading only
+  `FACTORY_API_TOKEN`, `FACTORY_LISTEN_HOST`, and `FACTORY_LISTEN_PORT`
+  from it to build the URL and token. Order: `--url`/`--token`, then the
+  named file, then `FACTORY_API_URL`/`FACTORY_API_TOKEN`. A file named is
+  not a guessed server.
+- **The paid case starts from `init`'s output.** It runs `initSetup` over a
+  copy of `corpus/v1/repos/calc`'s product files (vitest 4, a hashed
+  lockfile) and drafts both spec and tests, replacing the examples paid
+  case as the spec says ("instead of `examples/`"); its registry id becomes
+  `I5.init-setup-merges-on-the-real-driver`. The shipped examples keep
+  their free admission assertion.
+
+### D-R36b-05: the host's entry reads its arguments
+
+- **Surfaced:** `I9.api-never-touches-a-terminal` refuses `process.argv` in
+  every api file, the host's entry included (`TERMINAL_CHAINS`,
+  `packages/conformance/src/registry/i9.ts:23`), and `--env-file` is an
+  argument.
+- **Chosen:** the entry's exemption gains `process.argv.slice`, read once
+  and never written; the assertion's title names it. Any argument but
+  `--env-file <path>` is refused. The entry still exports nothing, so no
+  other module reads argv through it. The host test that the environment
+  reaches start-up once now matches
+  `checkStartup(await environment(process.argv.slice(2), process.env))`.
+- **Rejected:** naming the file in a `FACTORY_ENV_FILE` variable, which would
+  keep argv out but makes the user set a variable by hand, the thing the
+  `my-recipes` run forbids beyond the key and the token. Reversal: that
+  variable, declared in `HOST_VARIABLES`, and the exemption removed.
+- **Also:** an empty value in the file is unset, as in the environment, so a
+  copied `.env.example` leaves the secrets to the environment rather than
+  conflicting with them.
+
+### D-R36b-06: PATH is the install's, not a variable the line reads
+
+- The README's install puts the installed executables on `PATH` (bash
+  `export PATH=...`, now also PowerShell `$env:Path = ...`). The
+  `my-recipes` run forbids "setting any other variable" beyond the key and
+  the token. Read as: no variable the line or the host reads is set by
+  hand. `PATH` is the shell's, set by the install step the README gives,
+  and the run's record lists it with the other commands typed. Reversal:
+  call each executable by its installed path, and the README says so.
+
+### D-R36b-07: `init` is `factory-host init`, not `olympus-ai init`
+
+- **Surfaced:** `I9.api-runs-headless` refuses any workspace package as a
+  runtime dependency of the CLI
+  (`packages/conformance/src/registry/i9.ts`), and the first build of
+  D-R36b-04 made `@olympus-ai/api` one. The spec's `olympus-ai init` and
+  its "one detector" could not both hold without weakening that check, a
+  stop condition.
+- **Resolved:** the maintainer chose `factory-host init` on 2026-11-17. The
+  host's entry runs `initSetup` and prints `initReport`'s lines to stderr,
+  inside its existing exemption; the CLI is back to `v2`'s entry and
+  dependencies, keeping only `--env-file`. `DECOMPOSITION.md`'s R36b entry
+  says so. This supersedes D-R36b-04's first bullet.
+- **Rejected:** the CLI spawning `factory-host init` (a second failure
+  path for the same command), and relaxing the check (weakens I9's
+  assertion). Reversal: either of those, by amendment.
+
+### D-R36b-08: the test drafter's role names every field of a check
+
+- **Found:** the first real run on my-recipes (run `ed031f3a`) stopped at
+  `test-design`. All three test drafts failed `shape`: their
+  `acceptance.json` checks held only `tests` and `onBase`, without `id`,
+  `kind`, `required`, or `timeoutMs`. A draft with shape problems can be
+  rejected, never approved (`packages/api/src/run.ts:1765`), so the run was
+  cancelled. The role text `init` ships said "an `acceptance` check names
+  its test files in `tests`" and never listed the fields
+  `checkProblems` (`packages/api/src/validate.ts:438`) requires. A retry is
+  told only the problem codes (#174), so the drafter had no way to learn
+  them.
+- **Chosen:** `setup/roles/test-drafter.md` and `examples/roles/test-drafter.md`,
+  which stay byte-identical, list every field and the kind-specific rules,
+  and show a one-check `acceptance.json`. `test/init.test.ts` parses that
+  example with `parseManifest(..., { alone: false })`, the parser drafting
+  applies (`drafting.ts:630`), and requires the role to name each field.
+  Dropping `timeoutMs` from the example fails it.
+- **Rejected:** carrying the validator's messages in a send-back. It is the
+  stronger fix for any shape problem, but it changes `DraftSendBack`, a core
+  type, so it is an amendment (#174), not unit work. Not fixing the role and
+  relying on #174 would leave every first run from `init` to luck.
+- **Also found:** no command prints a draft before approval (#175), and the
+  host starts with a key the provider rejects (#176). Both are outside
+  R36b's deliverables.
+- **The proof:** repeated from a fresh clone at the fixing commit, as the
+  unit requires.
+- **Reverse:** revert the role text and the test.
+
+### D-R36b-09: a port the host cannot listen on is a refusal
+
+- **Found:** in the repeated run a second `factory-host` was started while
+  one already listened. `server.listen` rejected with `EADDRINUSE`, which
+  is not a `HostRefusal`, so `main.ts` rethrew it as a stack trace, against
+  the start-up contract of one list and no stack trace.
+- **Chosen:** `listenProblem` (`host/config.ts`) turns the listen failure
+  into one problem line naming the address, and for `EADDRINUSE` says a host
+  may already be running and names `FACTORY_LISTEN_PORT`. `main.ts` refuses
+  with it. Tested in `test/host-config.test.ts`. Run against the real busy
+  port, the host printed the one-line refusal and exited 1.
+- **Also:** the `host.env` comment said the two secrets "are not kept here",
+  which read as a refusal. The host reads them from the file through the
+  same table (`mergeEnvFile`), so the comment now says `init` writes no
+  secret and they may be set in the environment or added to the file.
+- **Reverse:** remove the try around `listen` and restore the comment.
+
+### D-R36b-10: a security check's copy of the tree leaves out its dependency trees (gate change)
+
+- **Found:** the third `my-recipes` run (`f8a4c6a4`) was refused at
+  `test-design` with a base mismatch: `static-analysis` did not finish. Its
+  sandbox ran past the check's 180000 ms wall clock and was destroyed. The
+  base run's tree held 45,265 files, 45,122 of them under `node_modules`.
+  Every check runs over the runtime's install (R34), `scanTree` copied the
+  whole installed tree, and Semgrep runs with `--no-git-ignore`, so it
+  scanned every installed package. The secret scan took 55 s over the same
+  tree. The drafted test did what it declared: it failed on the base. The
+  stand-in scanners skip `node_modules`, so the conformance suite never met
+  this.
+- **Chosen:** `scanTree` (`scan.ts`) copies the tree with every directory
+  that `isDependencyTree` names left out (`node_modules`, `.venv`,
+  `site-packages`, `__pycache__`), at any depth and in any case. A task's
+  writes to a dependency tree are escalated and never carried into the tree
+  the checks judge (D-R15-05). So what a dependency tree holds is the
+  runtime's install of the lockfile, never bytes the change wrote, and
+  leaving it out of the scan hides nothing the change made. The scanner's
+  in-tree ignore files are still set aside (D-R17-03). Tested in
+  `test/scan.test.ts`, which fails without the filter.
+- **Assumptions, verified:** the base and `verify` scans both go through
+  `scanTree` (`line.ts` `runSecurity`); the carry rule drops dependency
+  paths (`workspace.ts` `inDependencyTree`); the base run's file counts
+  above were read from the run's tree.
+- **Rejected:** raising the check's timeout in what `init` writes. Scan
+  time would still grow with every installed package, on every run, for no
+  finding a change could cause. Also rejected: a `.semgrepignore`. The
+  runtime sets that file aside, by design.
+- **Not covered by this check, as before:** a change that adds a
+  dependency changes the lockfile. That path is judged by the install's
+  registry policy and the dependency audit, not by the source scanners.
+- **Reverse:** restore `copyTree` in `scanTree` and delete the test.
+- **Amended by the external review (codex-1, gemini-1):** a name is not
+  provenance. The first version left out every entry named like a
+  dependency tree, at any depth, file or directory. A regular file named
+  `node_modules`, or a `.venv` or `__pycache__` directory in a Node.js
+  tree the install never touches, then reached neither scanner. Now
+  `installInto` returns the trees it put in the tree (`trees`), and
+  `scanTree` leaves out exactly those paths and nothing else. The install
+  removes every tree of its stack's names before it puts its own in, so
+  every path it returns is the install's. Nightly installs nothing, so it
+  passes an empty list and scans everything. Tested in
+  `test/scan.test.ts`, which fails on the name-based filter.
+
+### D-R36b-11: the runtime names where a test draft's test files go
+
+- **Found:** in the fourth `my-recipes` run (`d26fb760`), all three
+  `test-design` attempts wrote the test file to
+  `.drafts/<run>/src/lib/recipe-scale.test.ts`. A test draft's tests are
+  read from the locked spec's `testDirectory` at the tree's root
+  (`readTestDraft`), so the file was discarded every time. Each draft came
+  back `missing` at `src/lib` and `unreferenced` at the check's `tests`.
+  The line the runtime adds to the drafter's message
+  (`draftDestination`, #151) said "write the draft under `.drafts/<run>/`"
+  and named only the manifest. The send-back carries codes only (#174), so
+  the drafter could not tell what was wrong.
+- **Chosen:** at `test-design`, `draftDestination` names the manifest's
+  path, and names the test files under the locked `testDirectory` "from the
+  root of your working directory, not under `.drafts/`". The spec line is
+  unchanged. The test-drafter role says the same, with an example path.
+  Tested in `test/draft-destination.test.ts` and `test/init.test.ts`. Both
+  fail without the change.
+- **Rejected:** reading tests from under `.drafts/` as well. The tests are
+  bound to the paths the manifest names and the base run executes, and a
+  second place to read from is a second set of paths to judge. Also
+  rejected: carrying the validator's messages. That is #174, an amendment.
+- **Reverse:** restore the one-line `draftDestination` and the role
+  paragraph.
+
+### D-R36b-12: a seat that reads the repository is bound by its dollars, not its tokens
+
+- **Found:** in the `my-recipes` run `7c2fe8a8` (#192), the build task
+  parked after three attempts. The relay refused each one with "the budget
+  of 200000 tokens (maxTokens) is spent". Across them the build read
+  593,227 cache-read tokens and wrote 6,976 output tokens, at $0.29 in
+  total. The policy `init` writes gives `builder` and `reviewer` 200,000
+  tokens, and cache reads count against that limit. The drafters had
+  400,000, and the spec drafter also ran out on one of its two calls.
+  200,000 cache-read tokens cost about $0.10 against a `maxCostUsd` of $1,
+  so the token bound ended the work long before the dollar bound would
+  have.
+- **Chosen:** `builder`, `reviewer`, `spec-drafter` and `test-drafter` get
+  `maxTokens: 1000000` in `setup/policy.yaml` and `examples/policy.yaml`,
+  which stay byte-identical. The critics, which read only the draft, keep
+  200,000. `maxCostUsd` is unchanged, and the worst-case cost a run must
+  approve is summed from `maxCostUsd` alone (`cost.ts`, `worstCaseCost`).
+  So the $42 approval and every per-task dollar ceiling stay the same; only
+  the token limit, which bound first, is raised. Tested in
+  `test/init.test.ts`, which fails at 200,000.
+- **Rejected:**
+  - 400,000 for the builder. That is the drafters' figure, and a drafter
+    ran out at it in this run.
+  - Not counting cache reads against `maxTokens`. That changes how the
+    relay meters a budget, and a bound that ignores most of a model's
+    reading is weaker. It is out of R36b's scope.
+  - Retrying a spent-budget refusal less, filed as #193. It changes when
+    the line parks a task.
+- **Reverse:** restore 200,000 and 400,000 in both policies.
+- **Corrected by the external review (codex-4, gemini-2):** the title's
+  claim does not hold. The relay checks the token bound before the dollar
+  bound, and a cache read on the standard tier costs $0.20 per million
+  tokens, so a purely read-heavy task meets 1,000,000 tokens at about
+  $0.20, well before `maxCostUsd` 1. What 1,000,000 buys is room to read
+  a small repository and still write the change: the passing build read
+  302,512. The policy comment, the test's name, and the changeset now say
+  that, and the number stands. Making the dollar bound bind first would
+  take about 5,000,000 tokens at today's prices, a figure that moves with
+  every price change. That is #197's territory (measure before
+  tuning), not this unit's.
+
 ## R38: Paid driver evidence that does not flake
 
 Started on `v2` at 7931508, after CI run 44971207646 on that commit passed.

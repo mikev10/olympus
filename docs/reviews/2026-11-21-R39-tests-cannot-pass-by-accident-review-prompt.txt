@@ -1,0 +1,96 @@
+The code under review is in the file
+`2026-11-21-R39-tests-cannot-pass-by-accident-review-bundle.txt` (SHA-256 82809a1161cc0c2188a1c8b7e49a861f6ad31eb634590bd12181e3596504533a) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing changes to the test suites and conformance checks of a TypeScript project, and one small addition to its local Docker sandbox provider. You have the source and nothing else — no design documents,
+no author reasoning, no prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The project is a runtime that carries software work through a fixed series of stations, with agents running inside Docker sandboxes and a filesystem store (the Vault) that agents must never write to. This change targets tests that could pass without judging anything, and tests that fail intermittently. Specifically: test helpers that returned early, and passed, when an expected record was missing; a file reader that counted an unreadable file as empty inside a negative check ("the store does not hold the token"); a check of the Vault's run-time surface that read only the class prototype's own string-named properties; a readiness-scan test whose "the scan changed nothing" comparison could be disturbed by a background git process; a git test helper whose stdin write could raise an unhandled EPIPE; and relay tests that compared every relay container on the Docker host and left containers and networks behind when their teardown did not run. To find leftovers, the local Docker provider gains an optional `labels` option that it puts on every container and network it creates, and the relay tests label, sweep, and tear down by an owner label.
+
+It must hold against a capable, motivated party trying to make these tests and checks pass while the property each one guards does not hold, or to leave Docker objects behind, or to remove objects another run still owns, without any test failing. Assume no deceptive intent — only
+that the easiest path gets taken.
+
+That party controls the product code the tests exercise (a regression in the line, the Vault, or the sandbox provider is exactly what a test must catch), the timing of other test suites running beside these on the same Docker daemon, and when any test process is killed. It does not
+control the components the runtime is wired with — the Vault, the sandbox
+provider, and the drivers are runtime-selected and trusted, even where a
+function takes one as an argument — and it does not control code running inside
+the runtime's own process. It does not control the Docker daemon, the git binary, or the test framework.
+
+The invariants at stake:
+
+Fail closed. A missing required check, an absent driver capability, an unsupported stack, or a shrunken suite enumeration is a refusal — never a silent degrade, never a warning that lets the run continue. A test that passes on an error, a missing record, or an unreadable file is the suite failing open.
+
+No agent writes to the Vault. Any autonomy level, any repo, any role, any trigger. One of the checks for this is that the filesystem Vault exposes, at run time, exactly its named operations and nothing a caller could use to mutate the store past them.
+
+Every capability claim maps to an executable assertion that fails when the capability is deleted.
+
+Product names from Greek mythology never appear in code — not in type names, file paths, config keys, label keys, or policy fields.
+
+The mechanisms that matter most:
+
+- `vaultSurfaceProblems` in `packages/conformance/src/registry/vault-surface.ts`, and the I1 check in `i1.ts` that runs it over a constructed `LocalVault`.
+- `allText` in `packages/conformance/src/registry/all-text.ts` and its caller in `integration.ts`.
+- The `labels` option: validation in `packages/sandbox/src/local/labels.ts` and its use at every Docker creation site in `provider.ts`, `proxy.ts`, `relay.ts`, and `docker.ts`.
+- The relay test's owner label, `sweep`, `ownerIsGone`, `afterEach`, and `afterAll` in `packages/sandbox/test/relay.test.ts`, and the `first` helper in `packages/api/test/line.test.ts`.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+New assertions beyond these seven issues.
+
+The seven issues are the ones described under CONTEXT YOU NEED: the readiness tree comparison, the git helper's stdin, the relay comparison and the relay leak, the line tests' early returns, the unreadable-file reader, and the Vault surface check. Assertions this change does not add, for properties outside those, are not defects.
+
+THE QUESTION
+
+For each changed test or check: what regression in the code it guards would it still pass, and what failure — an error, an absent file, an empty listing, a killed process, a neighbour's objects on the same daemon — would it read as success? For the sweep: how would it leave a dead run's objects in place, or remove objects a live run still owns?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.

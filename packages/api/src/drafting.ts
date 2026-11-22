@@ -131,9 +131,12 @@ export function specDraftPaths(runId: string): {
  * the run's drafts, and the files the station reads from it. Runtime text
  * only: the run id is the runtime's, and nothing a model wrote is in it.
  */
-export function draftDestination(ctx: Pick<LineContext, 'run' | 'drafting'>, station: DraftStation): string {
-  const files = station === 'spec' ? specDraftFiles(ctx) : [manifestDraftPath(ctx.run.id)];
-  return `[drafts] write the draft under ${DRAFT_DIR}/${ctx.run.id}/: ${files.join(', ')}`;
+export function draftDestination(ctx: Pick<LineContext, 'run' | 'drafting' | 'requirements'>, station: DraftStation): string {
+  if (station === 'spec') return `[drafts] write the draft under ${DRAFT_DIR}/${ctx.run.id}/: ${specDraftFiles(ctx).join(', ')}`;
+  // A test draft is read from two places; naming only the manifest's sent a real drafter's tests under `.drafts/`,
+  // where they were discarded on every attempt (D-R36b-11). The directory is the locked spec's.
+  const tests = ctx.requirements === null ? 'the test directory run-requirements.json names' : `${ctx.requirements.testDirectory}/`;
+  return `[drafts] write the manifest at ${manifestDraftPath(ctx.run.id)}; write each test file under ${tests}, a path from the root of your working directory, not under ${DRAFT_DIR}/`;
 }
 
 /** The files a spec draft holds: four, and a bug fix's two more (A-R16-03). */

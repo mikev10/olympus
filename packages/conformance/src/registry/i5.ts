@@ -39,6 +39,7 @@ import { R13A_I5 } from './nightly.js';
 import { R34_I5 } from './install.js';
 import { R36A_I5 } from './first-run.js';
 import { R37_I5 } from './gate-retry.js';
+import { R36B_I5 } from './init.js';
 import { R29_I5 } from './stacks.js';
 import { R8A_I5 } from './observe.js';
 import { R8B_I5 } from './observe-plan.js';
@@ -78,6 +79,7 @@ export const I5: InvariantEntry = {
     ...R36A_I5,
     // R37: a run parked on its gate says which check failed.
     ...R37_I5,
+    ...R36B_I5,
     ...R16_ASSERTIONS.I5,
     ...R20_I5,
     // R22: the trigger framework.
@@ -531,14 +533,14 @@ export const I5: InvariantEntry = {
       package: '@olympus-ai/api',
       file: 'test/paid/line.paid.test.ts',
     }),
-    // R36a: the shipped examples, unmodified, through the real driver to a merged pull request. Paid.
+    // R36a, extended by R36b: init's output, nothing written by hand, through the real driver to a merged pull request. Paid.
     external({
-      id: 'I5.shipped-example-merges-on-the-real-driver',
+      id: 'I5.init-setup-merges-on-the-real-driver',
       title:
-        "the shipped examples, unmodified, drafting the spec from the README's intent, run on the composed host with the Claude Code driver in every seat through each gate a person holds at L1 — the drafted spec, the tests, and the merge — to a pull request merged into the base branch; paid (#145, #148 to #152, #154)",
+        "init's output on a TypeScript repository with vitest, with no file written by hand, drafting the spec and the tests from the README's intent, runs on the composed host with the Claude Code driver in every seat through each gate a person holds at L1 — the drafted spec, the drafted tests, and the merge — to a pull request merged into the base branch; paid (R36a, R36b)",
       level: 'runtime',
       package: '@olympus-ai/api',
-      file: 'test/paid/examples.paid.test.ts',
+      file: 'test/paid/init.paid.test.ts',
     }),
     // R15: no default declaration, nothing to reproduce is refused, and a check that did not start is not a failure.
     BASE_DECLARATION_HAS_NO_DEFAULT,

@@ -217,10 +217,12 @@ export function readProbeOutput(stdout: string, sent: number): ProbeResult {
  * provider also removes it by name if its call is still running when the
  * sandbox ends, so none outlives its sandbox.
  */
-export function probeRunArgs(name: string, sandboxContainer: string, image: string): string[] {
+/** `labels` are the provider's `--label` arguments: a probe still running when its owner is killed is found by them (codex-3). */
+export function probeRunArgs(name: string, sandboxContainer: string, image: string, labels: readonly string[]): string[] {
   return [
     'run', '--rm', '--interactive',
     '--name', name,
+    ...labels,
     '--network', `container:${sandboxContainer}`,
     '--env', `PROBE_BODY_LIMIT=${String(PROBE_BODY_LIMIT_BYTES)}`,
     '--env', `PROBE_RESPONSE_MS=${String(PROBE_RESPONSE_MS)}`,

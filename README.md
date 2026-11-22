@@ -187,14 +187,24 @@ node scripts/local-release.ts ~/olympus
 export PATH="$HOME/olympus/node_modules/.bin:$PATH"
 ```
 
+In PowerShell:
+
+```
+pnpm install
+node scripts/local-release.ts $HOME\olympus
+$env:Path = "$HOME\olympus\node_modules\.bin;$env:Path"
+```
+
 This is the path CI tests: it installs the same tarballs npm would publish,
 then starts `factory-host` and drives it with `olympus-ai`.
 
 ### Configure the host
 
-`factory-host` reads these variables and no others. [.env.example](.env.example)
-lists them with comments. A missing or invalid one stops the host before it
-listens, and the host prints every problem in one list.
+`factory-host` reads these variables and no others, from its environment and
+from the file `--env-file <path>` names; `factory-host init` writes that file
+(see First run). [.env.example](.env.example) lists them with comments. A
+missing or invalid one stops the host before it listens, and the host prints
+every problem in one list.
 
 | Variable | Required | Secret | Purpose |
 |---|---|---|---|
@@ -212,7 +222,7 @@ listens, and the host prints every problem in one list.
 | `FACTORY_GIT_REPOSITORY` | yes | no | The GitHub repository a passed run merges into, as `owner/name`. |
 | `FACTORY_GIT_BASE_BRANCH` | yes | no | The branch a passed run merges into. |
 | `FACTORY_GIT_TOKEN` | yes | yes | The token that merges, held by the host and given to no sandbox. |
-| `FACTORY_CONTAINER_UID` | no | no | The uid sandboxes run as. Both or neither with the gid; required on a host with no uids, such as native Windows. |
+| `FACTORY_CONTAINER_UID` | no | no | The uid sandboxes run as. Both or neither with the gid. Required on a host with no uids, such as native Windows, where the host refuses to start without it; any non-root uid works there, and `init` writes `1000`. |
 | `FACTORY_CONTAINER_GID` | no | no | The gid sandboxes run as. |
 | `FACTORY_ENDPOINT_CONFIG` | no | no | A JSON file naming an OpenAI-compatible endpoint and the seats it fills. |
 | `FACTORY_ENDPOINT_KEY` | no | yes | That endpoint's credential. Not set for an endpoint declaring scheme `none`. |
@@ -222,7 +232,8 @@ listens, and the host prints every problem in one list.
 | `FACTORY_WEBHOOK_*` | no | yes | Each webhook subscription's secret, by the full name the policy gives it. Unset, that subscription verifies no delivery. |
 
 The command line needs only the API's address and token: `--url` and
-`--token`, or `FACTORY_API_URL` and `FACTORY_API_TOKEN`.
+`--token`, `FACTORY_API_URL` and `FACTORY_API_TOKEN`, or `--env-file`
+naming the host's file, from which it reads both.
 
 ### Configure policy
 
@@ -280,53 +291,104 @@ A finding the change adds fails the run; one the base already had does not.
 
 ### First run
 
-The host admits runs from the working copy `FACTORY_REPOSITORY` names.
-`create --workspace` must name that same path, as an absolute path: the Vault
-locks every artifact against it, and the paths `create` is given are
-relative to it. Copy [examples/run/](examples/run) into the working copy
-(here under `run/`), and start the host with the variables above.
+`factory-host init` writes everything a first run needs, so no file is written
+by hand. Run it in your repository's working copy, naming the branch a passed
+run merges into (it is never guessed):
+
+```
+factory-host init --base-branch <branch>
+```
+
+It reads the repository's stack with the same detector a run uses: vitest or
+jest declared in `package.json`, or pytest. A repository with none, or with
+two, is refused, naming what was found. It refuses to overwrite any file that
+exists, and then writes nothing at all. It writes:
+
+- in `~/.factory/` (another directory with `--config-dir`), outside the
+  repository and every tree a model can write: `policy.yaml`, the
+  [example policy](examples/policy.yaml), at L1, where a person approves the
+  spec, the acceptance tests, and the merge; `roles/` and `rubrics/`, the
+  examples' own; `host.env`, every variable the host needs except the two
+  secrets below, with a generated API token, and on native Windows
+  `FACTORY_CONTAINER_UID` and `FACTORY_CONTAINER_GID` as `1000`; and the
+  empty `vault/` and `trees/` directories `host.env` names.
+- in the repository, `.factory/verify.json`, the checks the runtime runs
+  (the stack's tests, `secret-scan`, and `static-analysis`), and
+  `.factory/graph.json`, one build task and its review. You need not commit
+  them.
+
+It ends by printing the next two commands. Start the host with the model key
+and the git token set in its environment. In bash:
+
+```
+export ANTHROPIC_API_KEY=<key> FACTORY_GIT_TOKEN=<token>
+factory-host --env-file ~/.factory/host.env
+```
+
+In PowerShell:
+
+```
+$env:ANTHROPIC_API_KEY = "<key>"; $env:FACTORY_GIT_TOKEN = "<token>"
+factory-host --env-file $HOME\.factory\host.env
+```
+
+`factory-host --env-file` reads the file through the same table as its
+environment: a name the host does not read is refused, and so is one set in
+both with different values. Once it listens it prints one line, and stays in
+the foreground until Ctrl+C:
+
+```
+factory-host: listening on http://127.0.0.1:7300, admitting runs from /path/to/repo; stop with Ctrl+C
+```
+
+In another terminal, from the repository, start the run with the `create`
+command `init` printed, which has your workspace filled in, with your intent
+in place of `<what to change>`. Its shape:
+
+```
+olympus-ai --env-file ~/.factory/host.env create --workspace /path/to/repo --base-commit <full sha of HEAD> \
+  --level 1 --draft-spec --draft-tests --intent "<what to change>" --manifest .factory/verify.json --graph .factory/graph.json
+```
+
+`git rev-parse HEAD` prints the full sha in either shell. Every command takes
+`--env-file`, which gives it the host's address and token; `--url` and
+`--token`, or `FACTORY_API_URL` and `FACTORY_API_TOKEN`, do the same.
+
+The first `create` starts nothing. It checks everything it can refuse a run
+for, the manifest and the tool grants included, and then prints the run's
+worst-case cost: the most it could spend, in US dollars, if every task used
+every call and every retry its role's `budget` allows. Approve that exact
+figure by running the same command again with `--approve-cost <usd>`.
+
+Then follow it with `olympus-ai status <run id>` or `events <run id>`. When
+`status` shows the run awaiting approval, pass the gate with
+`olympus-ai approve <run id> <station>:1`; at `spec` and `test-design`, which
+were drafted, add `--draft <hash>` with the draft's hash as `status` names it,
+having read the draft first. `olympus-ai report <run id>` prints what it cost
+and what was decided. Every command prints its flags with
+`olympus-ai <command> --help`.
 
 A run is built over the tree of `--base-commit` as git stores it, never over
 the working copy: nothing uncommitted, untracked, or ignored there (a `.env`,
 `node_modules/`, a build output) reaches a model, and uncommitted changes do
 not matter to a run. The one exception is the run's own files, the ones
-`create` names: they join that tree with the bytes `create` read. You need
-not commit them; if you do, commit them as they stand, since a committed run
-file whose bytes differ from the working copy's (on a `core.autocrlf=true`
-checkout its line endings do) is refused. A secret that is committed is in
-the tree; keep it out of every model's tree with the policy's
-`sensitivePaths`.
-
-The smallest run drafts its spec from an intent, at L1. It still needs the
-acceptance tests, the manifest, and the graph; a drafted spec has no security
-part to supply:
-
-```
-olympus-ai create --workspace /abs/path/to/repo --base-commit $(git -C /abs/path/to/repo rev-parse HEAD) \
-  --level 1 --draft-spec --intent "Add hello.txt at the repository root, containing exactly the line hello." \
-  --tests run/acceptance.md --manifest run/verify.json --graph run/graph.json
-```
-
-The first `create` starts nothing. It checks everything it can refuse a run
-for, the manifest and the tool grants included, and then prints the run's
-worst-case cost: the
-most it could spend, in US dollars, if every task used every call and every
-retry its role's `budget` allows. Approve that exact figure by running the
-same command again with `--approve-cost <usd>`. With the spec supplied
-instead, replace `--draft-spec --intent ...` with `--spec run/spec.md
---security-part run/security.json`.
-
-Then follow it with `olympus-ai status <run id>` or `events <run id>`, and
-pass each gate the policy holds for a person with
-`olympus-ai approve <run id> <station>:1`. `olympus-ai report <run id>`
-prints what it cost and what was decided. Every command prints its flags with
-`olympus-ai <command> --help`.
+`create` names: they join that tree with the bytes `create` read. If you
+commit them, commit them as they stand, since a committed run file whose
+bytes differ from the working copy's (on a `core.autocrlf=true` checkout its
+line endings do) is refused. A secret that is committed is in the tree; keep
+it out of every model's tree with the policy's `sensitivePaths`.
 
 When a model or sandbox call fails, the run retries it, and the failure is
 recorded with the error's first 400 characters: `events` shows each one as it
 happens, and a run stopped by its retries shows the last under
 `lastFailure` in `status`. That text is the CLI's or the container's own
 output, shown as it was written.
+
+To write the run files by hand instead, [examples/run/](examples/run) holds a
+set for one small change: a spec, the acceptance tests, a verification
+manifest with a check that fails on the base, the spec's security part, and
+the task graph. Copy it into the working copy and name its files to `create`
+with `--spec`, `--tests`, `--security-part`, `--manifest`, and `--graph`.
 
 ### Readiness
 

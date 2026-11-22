@@ -9,6 +9,7 @@
  * test here is an HTTP server and alpine has none.
  */
 import { execFile, spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -77,6 +78,10 @@ function get(path: string, readyWithinMs = 10_000): ProbeRequest {
   return { port: 8080, readyWithinMs, exchanges: [{ method: 'GET', path }] };
 }
 
+/** A label the provider puts on what it creates, a probe included (codex-3). */
+const PROBE_LABEL = 'sandbox-test.probe-run';
+const PROBE_LABELS = { [PROBE_LABEL]: randomUUID() };
+
 async function probeContainers(): Promise<string[]> {
   const { stdout } = await run('docker', ['ps', '--all', '--filter', 'name=probe-', '--format', '{{.Names}}']);
   return stdout.split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== '');
@@ -93,7 +98,7 @@ async function refusal(body: () => unknown): Promise<SandboxRefusal> {
 }
 
 beforeAll(async () => {
-  provider = await LocalDockerProvider.create({ vaultPaths: [] });
+  provider = await LocalDockerProvider.create({ vaultPaths: [], labels: PROBE_LABELS });
 });
 
 beforeEach(async () => {
@@ -151,6 +156,9 @@ describe('probe', () => {
     expect(capDrop).toBe('["ALL"]');
     expect(securityOpt).toBe('["no-new-privileges"]');
     expect(user).toBe('65534:65534');
+    // A probe still running when its owner is killed is found by the provider's labels, as every other container is.
+    const { stdout: label } = await run('docker', ['inspect', '--format', `{{index .Config.Labels "${PROBE_LABEL}"}}`, probe]);
+    expect(label.trim()).toBe(PROBE_LABELS[PROBE_LABEL]);
     // Asked inside the probe, with a path it must have as a control, so a failed exec cannot read as absence.
     const { stdout: seen } = await run('docker', ['exec', probe, 'node', '--eval', MARKER_CHECK]);
     expect(JSON.parse(seen)).toEqual({ marker: false, control: true });
