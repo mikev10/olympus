@@ -1,0 +1,445 @@
+{
+  "runId": "0a2de797-8dbf-44ba-8148-0d93a7112e5b",
+  "requestedLevel": 1,
+  "template": null,
+  "candidate": null,
+  "standing": {
+    "standing": "passed"
+  },
+  "standingSource": "records",
+  "cost": {
+    "run": {
+      "calls": 6,
+      "unmetered": 0,
+      "lost": 0,
+      "bound": "exact",
+      "metered": {
+        "calls": 6,
+        "inputTokens": 128,
+        "outputTokens": 51774,
+        "cacheReadTokens": 1202138,
+        "cacheWriteTokens": 150016,
+        "costUsd": 1.2342625999999997,
+        "exhausted": 0,
+        "unreadable": 0
+      }
+    },
+    "byStation": {
+      "spec": {
+        "calls": 2,
+        "unmetered": 0,
+        "lost": 0,
+        "bound": "exact",
+        "metered": {
+          "calls": 2,
+          "inputTokens": 70,
+          "outputTokens": 28433,
+          "cacheReadTokens": 693916,
+          "cacheWriteTokens": 66811,
+          "costUsd": 0.5902806999999999,
+          "exhausted": 0,
+          "unreadable": 0
+        }
+      },
+      "test-design": {
+        "calls": 1,
+        "unmetered": 0,
+        "lost": 0,
+        "bound": "exact",
+        "metered": {
+          "calls": 1,
+          "inputTokens": 20,
+          "outputTokens": 7041,
+          "cacheReadTokens": 158970,
+          "cacheWriteTokens": 20378,
+          "costUsd": 0.153189,
+          "exhausted": 0,
+          "unreadable": 0
+        }
+      },
+      "build": {
+        "calls": 1,
+        "unmetered": 0,
+        "lost": 0,
+        "bound": "exact",
+        "metered": {
+          "calls": 1,
+          "inputTokens": 26,
+          "outputTokens": 12415,
+          "cacheReadTokens": 302512,
+          "cacheWriteTokens": 38057,
+          "costUsd": 0.27984689999999995,
+          "exhausted": 0,
+          "unreadable": 0
+        }
+      },
+      "review": {
+        "calls": 2,
+        "unmetered": 0,
+        "lost": 0,
+        "bound": "exact",
+        "metered": {
+          "calls": 2,
+          "inputTokens": 12,
+          "outputTokens": 3885,
+          "cacheReadTokens": 46740,
+          "cacheWriteTokens": 24770,
+          "costUsd": 0.21094599999999997,
+          "exhausted": 0,
+          "unreadable": 0
+        }
+      }
+    },
+    "byTask": {
+      "spec.drafter": {
+        "calls": 2,
+        "unmetered": 0,
+        "lost": 0,
+        "bound": "exact",
+        "metered": {
+          "calls": 2,
+          "inputTokens": 70,
+          "outputTokens": 28433,
+          "cacheReadTokens": 693916,
+          "cacheWriteTokens": 66811,
+          "costUsd": 0.5902806999999999,
+          "exhausted": 0,
+          "unreadable": 0
+        }
+      },
+      "test-design.drafter": {
+        "calls": 1,
+        "unmetered": 0,
+        "lost": 0,
+        "bound": "exact",
+        "metered": {
+          "calls": 1,
+          "inputTokens": 20,
+          "outputTokens": 7041,
+          "cacheReadTokens": 158970,
+          "cacheWriteTokens": 20378,
+          "costUsd": 0.153189,
+          "exhausted": 0,
+          "unreadable": 0
+        }
+      },
+      "change": {
+        "calls": 1,
+        "unmetered": 0,
+        "lost": 0,
+        "bound": "exact",
+        "metered": {
+          "calls": 1,
+          "inputTokens": 26,
+          "outputTokens": 12415,
+          "cacheReadTokens": 302512,
+          "cacheWriteTokens": 38057,
+          "costUsd": 0.27984689999999995,
+          "exhausted": 0,
+          "unreadable": 0
+        }
+      },
+      "change-review": {
+        "calls": 1,
+        "unmetered": 0,
+        "lost": 0,
+        "bound": "exact",
+        "metered": {
+          "calls": 1,
+          "inputTokens": 8,
+          "outputTokens": 2560,
+          "cacheReadTokens": 37762,
+          "cacheWriteTokens": 14498,
+          "costUsd": 0.13127439999999999,
+          "exhausted": 0,
+          "unreadable": 0
+        }
+      },
+      "change-review.security": {
+        "calls": 1,
+        "unmetered": 0,
+        "lost": 0,
+        "bound": "exact",
+        "metered": {
+          "calls": 1,
+          "inputTokens": 4,
+          "outputTokens": 1325,
+          "cacheReadTokens": 8978,
+          "cacheWriteTokens": 10272,
+          "costUsd": 0.0796716,
+          "exhausted": 0,
+          "unreadable": 0
+        }
+      }
+    }
+  },
+  "cacheHitRate": 0.8889699042063711,
+  "calls": [
+    {
+      "taskId": "spec.drafter",
+      "station": "spec",
+      "attempt": 1,
+      "model": {
+        "provider": "anthropic",
+        "family": "claude",
+        "model": "claude-sonnet-5",
+        "version": "2.1.310"
+      }
+    },
+    {
+      "taskId": "spec.drafter",
+      "station": "spec",
+      "attempt": 2,
+      "model": {
+        "provider": "anthropic",
+        "family": "claude",
+        "model": "claude-sonnet-5",
+        "version": "2.1.310"
+      }
+    },
+    {
+      "taskId": "test-design.drafter",
+      "station": "test-design",
+      "attempt": 1,
+      "model": {
+        "provider": "anthropic",
+        "family": "claude",
+        "model": "claude-sonnet-5",
+        "version": "2.1.310"
+      }
+    },
+    {
+      "taskId": "change",
+      "station": "build",
+      "attempt": 1,
+      "model": {
+        "provider": "anthropic",
+        "family": "claude",
+        "model": "claude-sonnet-5",
+        "version": "2.1.310"
+      }
+    },
+    {
+      "taskId": "change-review",
+      "station": "review",
+      "attempt": 1,
+      "model": {
+        "provider": "anthropic",
+        "family": "claude",
+        "model": "claude-opus-5-5",
+        "version": "2.1.310"
+      }
+    },
+    {
+      "taskId": "change-review.security",
+      "station": "review",
+      "attempt": 1,
+      "model": {
+        "provider": "anthropic",
+        "family": "claude",
+        "model": "claude-opus-5-5",
+        "version": "2.1.310"
+      }
+    }
+  ],
+  "tasks": [
+    {
+      "taskId": "spec.drafter",
+      "station": "spec",
+      "status": "verifying",
+      "attempts": {
+        "iterations": 2,
+        "retries": 0,
+        "starts": 2,
+        "conflicts": []
+      }
+    },
+    {
+      "taskId": "test-design.drafter",
+      "station": "test-design",
+      "status": "verifying",
+      "attempts": {
+        "iterations": 1,
+        "retries": 0,
+        "starts": 1,
+        "conflicts": []
+      }
+    },
+    {
+      "taskId": "change",
+      "station": "build",
+      "status": "passed",
+      "attempts": {
+        "iterations": 1,
+        "retries": 0,
+        "starts": 1,
+        "conflicts": []
+      }
+    },
+    {
+      "taskId": "change-review",
+      "station": "review",
+      "status": "passed",
+      "attempts": {
+        "iterations": 1,
+        "retries": 0,
+        "starts": 1,
+        "conflicts": []
+      }
+    },
+    {
+      "taskId": "change-review.security",
+      "station": "review",
+      "status": "passed",
+      "attempts": {
+        "iterations": 1,
+        "retries": 0,
+        "starts": 1,
+        "conflicts": []
+      }
+    }
+  ],
+  "stations": [
+    {
+      "station": "intake",
+      "gate": "passed",
+      "attempts": {
+        "iterations": 0,
+        "retries": 0,
+        "starts": 0,
+        "conflicts": []
+      },
+      "approvals": 0,
+      "refusals": {}
+    },
+    {
+      "station": "spec",
+      "gate": "passed",
+      "attempts": {
+        "iterations": 2,
+        "retries": 0,
+        "starts": 2,
+        "conflicts": []
+      },
+      "approvals": 1,
+      "refusals": {
+        "approval-required": 2
+      }
+    },
+    {
+      "station": "test-design",
+      "gate": "passed",
+      "attempts": {
+        "iterations": 1,
+        "retries": 0,
+        "starts": 1,
+        "conflicts": []
+      },
+      "approvals": 1,
+      "refusals": {
+        "approval-required": 1
+      }
+    },
+    {
+      "station": "plan",
+      "gate": "passed",
+      "attempts": {
+        "iterations": 0,
+        "retries": 0,
+        "starts": 0,
+        "conflicts": []
+      },
+      "approvals": 0,
+      "refusals": {}
+    },
+    {
+      "station": "build",
+      "gate": "passed",
+      "attempts": {
+        "iterations": 1,
+        "retries": 0,
+        "starts": 1,
+        "conflicts": []
+      },
+      "approvals": 0,
+      "refusals": {}
+    },
+    {
+      "station": "verify",
+      "gate": "passed",
+      "attempts": {
+        "iterations": 0,
+        "retries": 0,
+        "starts": 0,
+        "conflicts": []
+      },
+      "approvals": 0,
+      "refusals": {}
+    },
+    {
+      "station": "review",
+      "gate": "passed",
+      "attempts": {
+        "iterations": 2,
+        "retries": 0,
+        "starts": 2,
+        "conflicts": []
+      },
+      "approvals": 0,
+      "refusals": {}
+    },
+    {
+      "station": "integrate",
+      "gate": "passed",
+      "attempts": {
+        "iterations": 0,
+        "retries": 0,
+        "starts": 0,
+        "conflicts": []
+      },
+      "approvals": 1,
+      "refusals": {
+        "approval-required": 1
+      }
+    }
+  ],
+  "mismatches": [],
+  "decisions": {
+    "egress-connection": 15,
+    "approval-rejected": 1,
+    "station-refused": 4,
+    "approval-granted": 3
+  },
+  "refusals": {
+    "approval-required": 4
+  },
+  "parks": {},
+  "integration": [
+    {
+      "runId": "0a2de797-8dbf-44ba-8148-0d93a7112e5b",
+      "kind": "merged",
+      "repository": "mikev10/my-recipes",
+      "baseBranch": "olympus-trial",
+      "baseCommit": "4f663a3bf14a3ee5f507ce0b6537df1af4d2bb55",
+      "branch": "factory/0a2de797-8dbf-44ba-8148-0d93a7112e5b",
+      "commit": "4d44773d93774e2ed4c5dce99072a9509bfdb440",
+      "pullRequest": 20,
+      "url": "https://github.com/mikev10/my-recipes/pull/20",
+      "collectedBy": "runtime",
+      "mergeCommit": "4fddd5cf7f36b1ae90bc7b013388cb684c69034f",
+      "mergedAt": "2026-11-22T01:50:15Z"
+    },
+    {
+      "runId": "0a2de797-8dbf-44ba-8148-0d93a7112e5b",
+      "kind": "opened",
+      "repository": "mikev10/my-recipes",
+      "baseBranch": "olympus-trial",
+      "baseCommit": "4f663a3bf14a3ee5f507ce0b6537df1af4d2bb55",
+      "branch": "factory/0a2de797-8dbf-44ba-8148-0d93a7112e5b",
+      "commit": "4d44773d93774e2ed4c5dce99072a9509bfdb440",
+      "pullRequest": 20,
+      "url": "https://github.com/mikev10/my-recipes/pull/20",
+      "collectedBy": "runtime"
+    }
+  ]
+}
