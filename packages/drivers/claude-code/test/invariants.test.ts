@@ -20,7 +20,7 @@ import { invariantTest } from '@olympus-ai/conformance/vitest';
 import type { TaskId } from '@olympus-ai/core';
 import { relayOf } from '@olympus-ai/sandbox';
 import { DECLARED_TOOLS, DriverRefusal, ClaudeCodeDriver, KEY_PLACEHOLDER, KEY_VARIABLE, MODEL_RELAY, parseStream, sessionIdFor } from '../src/index.js';
-import { PROBE_ROLE, PROCESS_DUMP, WORKDIR, credential, dockerOut, exportContains, meteredSessions, withDriver, workspaceContains } from './harness.js';
+import { PROBE_ROLE, PROCESS_DUMP, WORKDIR, credential, dockerOut, exportContains, meteredSessions, withDriver, withRecordingDriver, workspaceContains } from './harness.js';
 
 /**
  * A marker only a process inside the container can write, and only into the
@@ -249,22 +249,47 @@ const SKILL_PROMPT =
 invariantTest(
   'I3.workspace-instructions-not-loaded',
   'a CLAUDE.md, a rules file, an agent definition named for the role, and a skill under .claude/skills and .agents/skills, planted in the workspace, ' +
-    "reach none of the session's instructions with no tools or with Skill granted, while the same session without --setting-sources '' lists the .claude/skills plant: " +
+    'leave every request the session sends byte-identical to the same task over an empty workspace, with no tools or with Skill granted, and are listed by none of its init lines, ' +
+    "while the same session without --setting-sources '' sends the CLAUDE.md, rules, and .claude/skills tokens and lists the skill and the agent definition: " +
     'the task runs under its role alone, so the agent cannot rewrite what instructs the next seat through the tree it hands on',
   async () => {
-    await withDriver(async (h) => {
+    // Against a recording endpoint rather than the API: what the session was
+    // instructed with is read from the requests the CLI sent, not from whether
+    // a model mentioned a token, and the comparison needs no list of the file
+    // names the CLI reads (#85, D-R38-04).
+    await withRecordingDriver(async (h) => {
+      // Once with no tools, and once with Skill, the one grant under which the CLI lists skills at all (D-A-WI-01).
+      const grants = [['i3-none', []], ['i3-skill', ['Skill']]] as const;
+      const sent = async (): Promise<Map<string, readonly string[]>> => {
+        const bodies = new Map<string, readonly string[]>();
+        for (const [taskId, tools] of grants) {
+          const before = h.requestsFor(taskId as TaskId).length;
+          await h.driver.runTask(h.request({ taskId: taskId as TaskId, tools: [...tools], variableSuffix: SKILL_PROMPT }));
+          const requests = h.requestsFor(taskId as TaskId).slice(before).map((r) => r.body);
+          // A session that sent nothing would compare equal to another that sent nothing.
+          expect(requests.length, `${taskId}: the session sent no request the endpoint could attribute to it`).toBeGreaterThan(0);
+          bodies.set(taskId, requests);
+        }
+        return bodies;
+      };
+
+      // The same tasks, under the same task ids and so the same session ids, in
+      // the same container, first over the empty workspace and then over the planted one.
+      const empty = await sent();
       for (const { path, body } of PLANTED) {
         await mkdir(dirname(join(h.workspaceDir, path)), { recursive: true });
         await writeFile(join(h.workspaceDir, path), body);
       }
-      // Once with no tools, and once with Skill, the one grant under which the CLI lists skills at all (D-A-WI-01).
-      for (const [taskId, tools] of [['i3-planted', []], ['i3-planted-skill', ['Skill']]] as const) {
-        const result = await h.driver.runTask(h.request({ taskId: taskId as TaskId, tools: [...tools], variableSuffix: SKILL_PROMPT }));
-        // The session answered, so its silence on the tokens is the instructions' and not a session that never ran.
-        expect(result.claim.narrative, taskId).toContain('READY');
-        for (const { path, token } of PLANTED) expect(result.claim.narrative, `${taskId}: ${path} was loaded`).not.toContain(token);
-        // The CLI's own account of the skills and agents it listed, which does not depend on the model mentioning them.
-        // The agent definition is the one plant besides the skills that the init line can show (codex-1).
+      const planted = await sent();
+      for (const [taskId] of grants) {
+        const was = empty.get(taskId) ?? [];
+        const is = planted.get(taskId) ?? [];
+        expect(is.length, `${taskId}: the planted workspace changed how many requests the session sent`).toBe(was.length);
+        for (const [i, body] of is.entries()) {
+          expect(body === was[i], `${taskId}: request ${String(i)} differs from the empty workspace's: ${firstDifference(was[i] ?? '', body)}`).toBe(true);
+        }
+        // The CLI's own account of the skills and agents it listed. The agent
+        // definition is the one plant besides the skills that the init line can show (codex-1).
         const session = h.driver.sessionFor(taskId as TaskId);
         expect(session?.agents, `${taskId}: the workspace agent definition was listed`).not.toContain(PROBE_ROLE.role);
         const listed = session?.skills;
@@ -274,21 +299,41 @@ invariantTest(
       }
 
       // The control: the driver's own Skill invocation, in the same sandbox, without `--setting-sources ''`
-      // and under a session id of its own. It must see the plant, or the silence above proves nothing (I5).
-      const invocation = h.execs.filter((e) => e.cmd.includes(sessionIdFor('i3-planted-skill' as TaskId))).at(-1);
+      // and under a session id of its own. What it sends must carry the plants, or the equality above
+      // could be a recorder that sees none of them (I5).
+      const invocation = h.execs.filter((e) => e.cmd.includes(sessionIdFor('i3-skill' as TaskId))).at(-1);
       if (invocation?.env === undefined) throw new Error("the driver's Skill invocation was not recorded with its environment, so there is nothing to rerun as the control");
       const flag = invocation.cmd.indexOf('--setting-sources');
       expect(invocation.cmd[flag + 1]).toBe('');
+      const controlSession = randomUUID();
       const cmd = invocation.cmd
         .filter((_, i) => i !== flag && i !== flag + 1)
-        .map((arg) => (arg === sessionIdFor('i3-planted-skill' as TaskId) ? randomUUID() : arg));
+        .map((arg) => (arg === sessionIdFor('i3-skill' as TaskId) ? controlSession : arg));
       const control = parseStream((await h.exec(h.handle, cmd, { env: invocation.env })).stdout);
-      expect(control.init?.skills, 'the control did not list the .claude/skills plant, so the assertion cannot see what it guards').toContain(SKILL.id);
-      expect(control.result?.narrative, 'the control listed the plant but its token did not reach the reply').toContain(SKILL.token);
+      const controlSent = h.recorded.filter((r) => r.body.includes(controlSession)).map((r) => r.body).join('\n');
+      expect(controlSent, 'the control sent no request, so the comparison above cannot be shown to see a plant').not.toBe('');
+      for (const plant of PLANTED.filter((p) => LOADED_BY_DEFAULT.includes(p.path))) {
+        expect(controlSent, `the control did not send ${plant.path}, so the comparison above cannot see it`).toContain(plant.token);
+      }
+      expect(control.init?.skills, 'the control did not list the .claude/skills plant, so the skills check above cannot see it').toContain(SKILL.id);
       expect(control.init?.agents, 'the control did not list the planted agent definition, so the agents check above cannot see it').toContain(PROBE_ROLE.role);
     });
   },
 );
+
+/**
+ * The plants the pinned CLI sends without `--setting-sources ''`, so the ones
+ * the control can show the recorder sees. The agent definition is listed on
+ * the init line instead, and `.agents/skills` is read in neither case (D-R23-01).
+ */
+const LOADED_BY_DEFAULT: readonly string[] = ['CLAUDE.md', '.claude/rules/override.md', `.claude/skills/${SKILL.id}/SKILL.md`];
+
+/** Where two request bodies first part, with a little of each, so a failure names the line that moved. */
+function firstDifference(was: string, is: string): string {
+  let i = 0;
+  while (i < was.length && i < is.length && was[i] === is[i]) i += 1;
+  return `at character ${String(i)}, empty ${JSON.stringify(was.slice(Math.max(0, i - 80), i + 120))}, planted ${JSON.stringify(is.slice(Math.max(0, i - 80), i + 120))}`;
+}
 
 // Last in the file, and it must stay last: it reads the sessions the assertions above ran, and adds no model call.
 invariantTest(
