@@ -1,0 +1,93 @@
+The code under review is in the file
+`2026-11-21-R52-cli-current-code-mode-off-review-bundle.txt` (SHA-256 bfb2e5b95bfea1fac6ed0fc405693d6b614bc9ac62d12087e6a68b1a31edc47d) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing a driver that runs a third-party coding-agent CLI (Claude Code) inside a sandbox container, as part of a TypeScript project. You have the source and nothing else — no design documents,
+no author reasoning, no prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The driver builds a container image holding the Claude Code CLI at one pinned version, then runs each task as a CLI session inside a sandbox, with the tools the task's policy granted passed as `--tools` and every other configuration source turned off. This change moves the pinned CLI from 2.1.310 to 2.1.330, a release line that fixes permission-check bypasses in the CLI. It also switches off the CLI's "Code Mode", an experimental feature added in 2.1.323. In Code Mode the model writes JavaScript that calls its tools through a script tool (`REPL`), rather than calling each tool individually. The switch is the environment variable `CLAUDE_CODE_EXPERIMENTAL_CODE_MODE`, set to `0` on every exec the driver makes. The vendor documents `1` as on and `0` as off, and says a `0` in the environment or a settings file keeps the feature off even where the other says `1`. The bundle also carries maintainer tooling and documentation commits that landed in the same range; those are reviewable but are not the subject.
+
+It must hold against a capable, motivated party trying to reach a tool, or a way of calling tools, that the task's policy did not grant. Assume no deceptive intent — only
+that the easiest path gets taken.
+
+That party controls what the model returns, every command and file write the granted tools let it make inside the container, the files in the workspace, and anything it can write in the container's own filesystem, the CLI's home directory under /tmp included. It does not control the components the runtime is wired with — the Vault, the sandbox
+provider, and the drivers are runtime-selected and trusted, even where a
+function takes one as an argument — and it does not control code running inside
+the runtime's own process. In particular it does not choose the argv or the environment the driver passes to `docker exec`, and it does not choose the CLI version the image is built from.
+
+The invariants at stake:
+
+Default deny: a capability not granted in policy is not available. Adding one is an explicit, versioned edit to policy. A tool the grant did not name must be unavailable to the model, not merely unused.
+
+Fail closed: a missing required check, an absent driver capability, an unsupported stack, or a shrunken suite is a refusal — never a silent degrade, never a warning that lets the run continue.
+
+Every capability claim maps to an executable assertion that fails when the capability is deleted. Documentation asserting a subsystem is wired is not evidence that it is.
+
+The mechanisms that matter most:
+
+- `CLI_ENVIRONMENT` in `src/driver.ts`, the base environment of every exec, now carrying `CLAUDE_CODE_EXPERIMENTAL_CODE_MODE: '0'`, and `environmentFor`, which layers per-model settings over it.
+- The two CLI invocations that inherit it: the MCP inspection (`#ungrantedMcpTools`) and the task run (`#invocationFor`), including the optional `--settings` file.
+- `CLI_VERSION` in `src/image.ts`, from which the image tag and the Dockerfile build argument are both derived.
+- The new tests in `test/driver.test.ts` ("Code Mode is off in every session the driver starts") and the added `REPL` refusal in `test/invariants.test.ts`, which are meant to fail when the switch is deleted or set to `1`.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+Pinning the CLI's bytes (R53), and changing any tier's model (R54).
+
+The ids in parentheses name later pieces of work in this project; they carry no meaning for the review. Pinning the CLI's bytes means installing it by content hash rather than by version number and recording the image's content ID in evidence. Changing a tier's model means altering which model each of the fast, standard, and deep tiers calls.
+
+THE QUESTION
+
+How would the model, inside a task, end up able to call tools through Code Mode, or through any other path the `--tools` grant does not govern — and would the tests in this change notice?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.

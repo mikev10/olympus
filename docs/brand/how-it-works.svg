@@ -1,0 +1,116 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1060 560" width="1060" height="560" role="img" aria-labelledby="t d">
+  <title id="t">How one task moves through Olympus</title>
+  <desc id="d">Olympus locks the tests, hands the task to an agent, which writes code and claims done. Olympus runs the checks itself in a fresh sandbox, a reviewer from a different model family reviews, and the gate reads the evidence in the Vault to merge the work or send it back.</desc>
+  <style>
+    .bg { fill: #ffffff; }
+    .lane { fill: #f3f5f8; }
+    .lane-label { font: 600 13px system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #5a6577; letter-spacing: 0.06em; }
+    .lane-sub, .sub { font: 400 12px system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #5a6577; }
+    .ttl { font: 600 14px system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #1b2330; }
+    .chip-t { font: 500 12px system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #1b2330; }
+    .quote { font: italic 500 12px system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #b5620c; }
+    .num, .tag { font: 500 11px ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace; fill: #5a6577; }
+    .tag-v { font: 600 11px ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace; fill: #6a4fc0; }
+    .box-a { fill: #fbf0e4; stroke: #b5620c; stroke-width: 2; }
+    .box-o { fill: #e9eefb; stroke: #2f5bd3; stroke-width: 2; }
+    .box-v { fill: #f1edfa; stroke: #6a4fc0; stroke-width: 2; }
+    .chip { fill: #ffffff; stroke: #6a4fc0; stroke-width: 1.2; }
+    .flow { fill: none; stroke: #1b2330; stroke-width: 1.8; }
+    .rec { fill: none; stroke: #5a6577; stroke-width: 1.5; stroke-dasharray: 5 4; }
+    .decide { fill: none; stroke: #6a4fc0; stroke-width: 2; }
+    .arrow { fill: #1b2330; } .arrow-m { fill: #5a6577; } .arrow-v { fill: #6a4fc0; }
+    .ok { fill: #e5f3ea; stroke: #1f8a4c; stroke-width: 2; } .ok-t { font: 600 13px system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #1f8a4c; }
+    .no { fill: #f8e7e5; stroke: #b4372f; stroke-width: 2; } .no-t { font: 600 13px system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #b4372f; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #0d1117; }
+      .lane { fill: #161b22; }
+      .lane-label, .lane-sub, .sub, .num, .tag { fill: #9aa5b5; }
+      .ttl, .chip-t { fill: #e5e9ef; }
+      .quote { fill: #f0a04b; }
+      .tag-v { fill: #ab93f2; }
+      .box-a { fill: #2c2217; stroke: #f0a04b; }
+      .box-o { fill: #1b2440; stroke: #7e9cff; }
+      .box-v { fill: #241e3a; stroke: #ab93f2; }
+      .chip { fill: #0d1117; stroke: #ab93f2; }
+      .flow { stroke: #e5e9ef; } .rec { stroke: #9aa5b5; } .decide { stroke: #ab93f2; }
+      .arrow { fill: #e5e9ef; } .arrow-m { fill: #9aa5b5; } .arrow-v { fill: #ab93f2; }
+      .ok { fill: #14301f; stroke: #4cc27f; } .ok-t { fill: #4cc27f; }
+      .no { fill: #3a1d1b; stroke: #f07a70; } .no-t { fill: #f07a70; }
+    }
+  </style>
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="ahm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="arrow-m" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="ahv" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="arrow-v" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1060" height="560" rx="12"/>
+
+  <rect class="lane" x="8" y="56" width="1044" height="116" rx="10"/>
+  <rect class="lane" x="8" y="208" width="1044" height="120" rx="10"/>
+  <rect class="lane" x="8" y="356" width="864" height="96" rx="10"/>
+  <text class="lane-label" x="24" y="104">AGENTS</text>
+  <text class="lane-sub" x="24" y="122">the workers</text>
+  <text class="lane-label" x="24" y="258">OLYMPUS</text>
+  <text class="lane-sub" x="24" y="276">the factory</text>
+  <text class="lane-label" x="24" y="398">VAULT</text>
+  <text class="lane-sub" x="24" y="416">the records</text>
+
+  <text class="tag" x="160" y="36">ONE TASK, LEFT TO RIGHT · dashed lines = recorded in the Vault</text>
+
+  <rect class="box-o" x="160" y="232" width="150" height="72" rx="8"/>
+  <text class="num" x="172" y="252">1</text>
+  <text class="ttl" x="172" y="272">Lock the tests</text>
+  <text class="sub" x="172" y="290">before any code exists</text>
+
+  <rect class="box-o" x="340" y="232" width="150" height="72" rx="8"/>
+  <text class="num" x="352" y="252">2</text>
+  <text class="ttl" x="352" y="272">Hand out the task</text>
+  <text class="sub" x="352" y="290">in a throwaway sandbox</text>
+
+  <rect class="box-a" x="340" y="78" width="150" height="72" rx="8"/>
+  <text class="num" x="352" y="98">3</text>
+  <text class="ttl" x="352" y="118">Write the code</text>
+  <text class="quote" x="352" y="137">“Done! Tests pass.”</text>
+
+  <rect class="box-o" x="520" y="232" width="150" height="72" rx="8"/>
+  <text class="num" x="532" y="252">4</text>
+  <text class="ttl" x="532" y="272">Run the checks itself</text>
+  <text class="sub" x="532" y="290">in a fresh sandbox</text>
+
+  <rect class="box-a" x="700" y="78" width="150" height="72" rx="8"/>
+  <text class="num" x="712" y="98">5</text>
+  <text class="ttl" x="712" y="118">Review the change</text>
+  <text class="sub" x="712" y="137">a different model family</text>
+
+  <rect class="box-o" x="880" y="232" width="150" height="72" rx="8"/>
+  <text class="num" x="892" y="252">6</text>
+  <text class="ttl" x="892" y="272">The gate</text>
+  <text class="sub" x="892" y="290">evidence decides</text>
+
+  <path class="flow" d="M310,268 H336" marker-end="url(#ah)"/>
+  <path class="flow" d="M430,232 V154" marker-end="url(#ah)"/>
+  <path class="flow" d="M490,96 H505 V250 H516" marker-end="url(#ah)"/>
+  <path class="flow" d="M670,268 H685 V114 H696" marker-end="url(#ah)"/>
+  <path class="flow" d="M850,114 H955 V228" marker-end="url(#ah)"/>
+
+  <path class="rec" d="M235,304 V378" marker-end="url(#ahm)"/>
+  <path class="rec" d="M400,150 V200 H322 V378" marker-end="url(#ahm)"/>
+  <path class="rec" d="M595,304 V378" marker-end="url(#ahm)"/>
+  <path class="rec" d="M775,150 V378" marker-end="url(#ahm)"/>
+
+  <rect class="box-v" x="150" y="380" width="710" height="62" rx="8"/>
+  <rect class="chip" x="166" y="394" width="138" height="34" rx="6"/><text class="chip-t" x="178" y="416">Locked tests</text>
+  <rect class="chip" x="316" y="394" width="190" height="34" rx="6"/><text class="chip-t" x="328" y="416">Agent’s “done” (a claim)</text>
+  <rect class="chip" x="518" y="394" width="160" height="34" rx="6"/><text class="chip-t" x="530" y="416">Check results</text>
+  <rect class="chip" x="690" y="394" width="156" height="34" rx="6"/><text class="chip-t" x="702" y="416">Review verdict</text>
+
+  <path class="decide" d="M860,411 H915 V308" marker-end="url(#ahv)"/>
+  <text class="tag-v" x="868" y="402">reads</text>
+
+  <path class="flow" d="M1000,304 V464" marker-end="url(#ah)"/>
+  <rect class="ok" x="900" y="468" width="140" height="34" rx="17"/><text class="ok-t" x="944" y="490">Merged</text>
+  <rect class="no" x="900" y="510" width="140" height="34" rx="17"/><text class="no-t" x="928" y="532">Sent back</text>
+  <text class="sub" x="618" y="500">Checks failed but the agent said “done”?</text>
+  <text class="sub" x="618" y="518">The claim loses. The work goes back.</text>
+</svg>

@@ -53,6 +53,10 @@ the source of truth for what is done and what is next.
 
 ## How the line works
 
+<p align="center"><img src="docs/brand/how-it-works.svg" alt="One task moving through Olympus. Olympus locks the tests and hands the task to an agent, which writes the code and claims it is done. Olympus runs the checks itself in a fresh sandbox, and a reviewer from a different model family reviews the change. The gate reads the locked tests, the claim, the check results, and the review verdict from the Vault, and either merges the work or sends it back." width="100%"></p>
+
+Agents write the code; Olympus runs the checks, keeps the evidence in the Vault, and decides at the gate. The picture is simplified to six steps. The full line is below.
+
 Work moves through ten stations, in order:
 
 | # | Station | What happens |
@@ -392,18 +396,28 @@ with `--spec`, `--tests`, `--security-part`, `--manifest`, and `--graph`.
 `FACTORY_REPOSITORY` at a revision (default `HEAD`) and prints the highest
 autonomy level the repository can support, with every probe's outcome and
 the probe that holds the ceiling. The scan installs and runs the repository's
-checks in sandboxes and takes minutes. It writes nothing, and admission does
+checks in sandboxes and takes minutes. A scan calls no model and spends no
+API credit: every probe's outcome is computed from what the runtime observes.
+The sandboxes have no network access except during the install step, which
+can only reach the package registries for the repo's stack (the public npm
+registry or PyPI for Python lockfiles, by default) and no other hosts. It
+writes nothing, and admission does
 not read it yet: a run is still admitted at the level policy allows.
 
 ## Contributing
 
 Work is cut into units that a contributor can finish and verify alone, without
 running the whole factory. [CONTRIBUTING.md](CONTRIBUTING.md) has the rule
-every unit follows, the units that are open, and how to write a conformance
+every unit follows, how to send a small fix, and how to write a conformance
 suite with the kit. The units themselves are defined in
 [docs/plan](docs/plan): the spine, the decomposition, and a spec for each unit
 that needs one. Decisions made while building each unit are recorded in
 [docs/decisions.md](docs/decisions.md).
+
+Questions, ideas, and things you built with Olympus go in
+[Discussions](https://github.com/mikev10/olympus/discussions). Issues are
+for work with a known shape; a discussion is the place to start when it does
+not have one yet.
 
 ## License
 

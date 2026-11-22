@@ -104,7 +104,7 @@ function stream(parts: { tools?: string[]; servers?: Array<{ name: string; statu
     agents: ['claude', 'builder'],
     model: 'claude-sonnet-5',
     apiKeySource: KEY_VARIABLE,
-    claude_code_version: '2.1.310',
+    claude_code_version: '2.1.330',
   };
   const result = {
     type: 'result',
@@ -468,6 +468,67 @@ describe('execution configuration the agent could write (I3, I4)', () => {
   test('a path that merely starts with the workspace name is not inside it', () => {
     expect(() => driverWith(new RecordingProvider(), { workdir: '/workspace', settingsPath: '/workspace-settings/s.json' }))
       .not.toThrow();
+  });
+});
+
+describe('Code Mode is off in every session the driver starts (I4, #172)', () => {
+  // Code Mode lets the model write a script that calls its tools, a route to
+  // them that no grant names. Its default is off, and since 2.1.329 turning off
+  // non-essential traffic no longer keeps it off, so the driver says `0` on
+  // every exec rather than trusting a default a later CLI can change. A `0` in
+  // the environment holds against a `1` in any settings file (D-R52-03).
+  const SWITCH = 'CLAUDE_CODE_EXPERIMENTAL_CODE_MODE';
+
+  function claudeCalls(provider: RecordingProvider): Array<{ cmd: string[]; env: Readonly<Record<string, string>> | undefined }> {
+    return provider.calls.filter((call) => call.cmd.includes('claude'));
+  }
+
+  function expectOff(provider: RecordingProvider, sessions: number): void {
+    const calls = claudeCalls(provider);
+    expect(calls).toHaveLength(sessions);
+    for (const call of calls) {
+      expect(call.env?.[SWITCH], `the ${SWITCH} setting of: ${call.cmd.join(' ').slice(0, 120)}`).toBe('0');
+      // Nothing on the argv turns it back on: no setting names it, and the tool it runs scripts through is never granted.
+      expect(call.cmd.some((arg) => arg.includes(SWITCH))).toBe(false);
+      // `--tools` must be present before its value means anything: without it,
+      // `indexOf` is -1 and the check below would read `cmd[0]` and pass (gemini-1).
+      const tools = call.cmd.indexOf('--tools');
+      expect(tools, 'the session carries --tools').toBeGreaterThanOrEqual(0);
+      expect(call.cmd[tools + 1]?.split(',')).not.toContain('REPL');
+    }
+  }
+
+  test('a task with no MCP grant runs one session, with Code Mode off', async () => {
+    const provider = new RecordingProvider();
+    provider.stdout = stream({ tools: [...DECLARED_TOOLS] });
+    await driverWith(provider, { settingsPath: '/tmp/settings.json' }).runTask(request({ tools: [...DECLARED_TOOLS] }));
+    expectOff(provider, 1);
+  });
+
+  test('a task with an MCP grant runs the inspection and the task, both with Code Mode off', async () => {
+    const provider = new RecordingProvider();
+    const connected = [{ name: 'used', status: 'connected' }];
+    provider.claudeReplies.push(
+      stream({ tools: ['Read', 'mcp__used__thing'], servers: connected }),
+      stream({ tools: ['Read', 'mcp__used__thing'], servers: connected }),
+    );
+    await driverWith(provider, { mcpServers: { used: { command: 'node' } } }).runTask(request({ tools: ['Read', 'mcp__used__thing'] }));
+    expectOff(provider, 2);
+  });
+
+  test('every tier, so no per-model setting overrides it', async () => {
+    for (const tier of ['fast', 'standard', 'deep'] as const) {
+      const provider = new RecordingProvider();
+      provider.stdout = stream();
+      await driverWith(provider).runTask(request({ tier }));
+      expectOff(provider, 1);
+    }
+  });
+
+  test('the tool Code Mode runs scripts through is refused as a grant before anything runs', async () => {
+    const provider = new RecordingProvider();
+    await expect(driverWith(provider).runTask(request({ tools: ['Read', 'REPL'] }))).rejects.toThrow(/does not declare/);
+    expect(claudeCalls(provider)).toHaveLength(0);
   });
 });
 
