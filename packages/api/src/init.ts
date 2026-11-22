@@ -16,7 +16,7 @@
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { constants } from 'node:fs';
-import { access, chmod, copyFile, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, lstat, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseEnv, promisify } from 'node:util';
@@ -104,12 +104,20 @@ function within(outer: string, inner: string): boolean {
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
 }
 
+/**
+ * Whether anything is at `path`, a link included: `lstat`, so a dangling link
+ * is something there, as the exclusive writes below will find it (R36b review,
+ * codex-2). Only an absent entry is absence; any other error is thrown, never
+ * read as room to write (I5).
+ */
 async function exists(path: string): Promise<boolean> {
   try {
-    await access(path, constants.F_OK);
+    await lstat(path);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return false;
+    throw error;
   }
 }
 
