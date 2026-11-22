@@ -1,3 +1,19 @@
+# External review of R39, codex, 2026-11-21
+
+The R39 change (tests and checks that could pass by accident, and labels on the local Docker provider's objects) as one bundle, reviewed by the Codex family. Triage: `2026-11-21-R39-tests-cannot-pass-by-accident-triage.md`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex. A headless `codex exec` run (CLI 0.155.1) under a read-only sandbox, with recorded approval policy `never`, in an empty scratch working directory and a scratch config home holding only `auth.json`, with an environment of `CODEX_HOME` alone. The pre-run listing of both is the manifest's `cleanRoom`.
+- **Cross-family agreement:** codex-1 (gemini-1), codex-2 (gemini-2), and codex-6 (gemini-4) were raised by both families. codex-3, codex-4, and codex-5 were raised by Codex alone.
+- **Date:** 2026-11-21
+- **Bundle:** `2026-11-21-R39-tests-cannot-pass-by-accident-review-bundle.txt`, SHA-256 `82809a1161cc0c2188a1c8b7e49a861f6ad31eb634590bd12181e3596504533a`, base `10d2236` (`reviewed/R52`), head `f7a33c4` (the unit tip before the review files). It held 18 files: new files in full, modified files as function-context diffs. `docs/decisions.md`, `docs/reviews/`, `docs/plan/`, and `pnpm-lock.yaml` were excluded. Prompt: `2026-11-21-R39-tests-cannot-pass-by-accident-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer said it had no prior project context, performed no external lookups, and did not execute tests. That is a self-report and cannot be checked from here.
+- **Coverage, and any gap:** items 1, 3, 5, 6, and 7 were answered. For item 2 it said it found no wholly tautological assertion. Item 4 was touched only in passing: casts and generic erasure do not remove `first`'s check.
+- **Citations:** line numbers refer to positions in the bundle's new-side diffs, not the repository. They are hints, located by construct in the triage.
+
+---
+
 BASE: 10d2236
 HEAD: f7a33c4
 packages/sandbox/test/upstream.ts

@@ -10884,3 +10884,15 @@ Started on `v2` at fe0be42 and rebased onto 7931508 (R52, #188, and the R56 amen
   `commit-tree` is given no stdin, and a stdin error rejects the call.
 - **#117:** not reproduced (D-R39-03). The writer found is removed, and the
   comparison is per path, so a recurrence names the file.
+
+### D-R39-08: review triage
+
+Both families counted on their first run, with no reruns. Eleven findings; every one holds, three of them raised by both families.
+Eight mechanisms were fixed, each shown failing against the old code: the sweep judges a pid only in its own host, boot, and PID
+namespace (codex-1, gemini-1, 388a020); `afterAll` records leftovers before it sweeps (codex-4, 388a020); the Vault surface
+check reads static members and refuses a Proxy (codex-2, gemini-2, gemini-3, 742603f); `allText` refuses an entry that is neither
+a file nor a directory (codex-6, gemini-4, 8c02a46); probe containers carry the labels (codex-3, 6052bf9); the tree snapshot
+records a symlink by its target (gemini-5, 19d7c18). codex-5 (a reused pid keeps a dead run's objects) and the other half of
+gemini-1 (another hostname's leftovers are never swept) are rejected as tradeoffs: both fail toward a leftover, never toward
+removing a live run's objects. D-R39-05's "a reused pid ... never removes a live run's" held for pid reuse and not for PID
+namespaces; codex-1 is that correction. Full record: `docs/reviews/2026-11-21-R39-tests-cannot-pass-by-accident-triage.md`.
