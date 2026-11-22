@@ -4,7 +4,7 @@
  * file as empty (#93), and the I1 surface check read only the class
  * prototype's own string names (#65).
  */
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
@@ -30,6 +30,22 @@ describe('allText refuses a file it cannot read (#93)', () => {
     const failing = (path: string): Promise<string> =>
       path.endsWith('unreadable.txt') ? Promise.reject(new Error(`EACCES: ${path}`)) : Promise.resolve('a token');
     await expect(allText(dir, failing)).rejects.toThrow(/EACCES/u);
+  });
+
+  // codex-6, gemini-4: a symlink is not a file, and the old walk skipped it, so the text behind it went unread.
+  test('refuses a symlink, to a file outside the directory or to nothing', async () => {
+    const outside = await mkdtemp(join(tmpdir(), 'all-text-outside-'));
+    try {
+      await writeFile(join(outside, 'secret'), 'the merge token');
+      await mkdir(join(dir, 'nested'));
+      await symlink(join(outside, 'secret'), join(dir, 'nested', 'link'), 'file');
+      await expect(allText(dir)).rejects.toThrow(/neither a file nor a directory/u);
+      await rm(join(dir, 'nested', 'link'));
+      await symlink(join(outside, 'gone'), join(dir, 'nested', 'dangling'), 'file');
+      await expect(allText(dir)).rejects.toThrow(/neither a file nor a directory/u);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
   });
 });
 
@@ -82,6 +98,7 @@ describe('the Vault surface check sees the whole instance (#65)', () => {
 
   test('an inherited helper is refused', () => {
     class Base {
+      held(): void { return; }
       remove(): void { return; }
     }
     class Inherits extends Base {
@@ -99,6 +116,42 @@ describe('the Vault surface check sees the whole instance (#65)', () => {
     }
     expect(oldRead(Getter)).toStrictEqual(NAMED);
     expect(vaultSurfaceProblems(new Getter(), NAMED).join('\n')).toMatch(/'read', which is not a plain method/u);
+  });
+
+  // codex-2, gemini-2: `vault.constructor` reaches a static member, which the prototype walk skipped.
+  test('a static member, own or inherited, is refused', () => {
+    class Own {
+      static put(): void { return; }
+      read(): void { return; }
+      recordRun(): void { return; }
+    }
+    expect(oldRead(Own)).toStrictEqual(NAMED);
+    expect(vaultSurfaceProblems(new Own(), NAMED).join('\n')).toMatch(/a static 'put'/u);
+    class Base {
+      held(): void { return; }
+      static wipe(): void { return; }
+    }
+    class Heir extends Base {
+      read(): void { return; }
+      recordRun(): void { return; }
+    }
+    expect(oldRead(Heir)).toStrictEqual(NAMED);
+    expect(vaultSurfaceProblems(new Heir(), NAMED).join('\n')).toMatch(/a static 'wipe'/u);
+  });
+
+  // gemini-3: a Proxy's traps decide what reflection reports, so a clean read of one is no evidence.
+  test('a Proxy is refused, whatever its traps report', () => {
+    const hidden = new Proxy(new Clean(), {
+      ownKeys: () => [],
+      get: (target, key) => (key === 'wipe' ? () => 'wiped' : Reflect.get(target, key) as unknown),
+    });
+    expect((hidden as unknown as { wipe: () => string }).wipe()).toBe('wiped');
+    expect(vaultSurfaceProblems(hidden, NAMED).join('\n')).toMatch(/is a Proxy/u);
+    class Behind {
+      read(): void { return; }
+    }
+    Object.setPrototypeOf(Behind.prototype, new Proxy(Clean.prototype, {}));
+    expect(vaultSurfaceProblems(new Behind(), NAMED).join('\n')).toMatch(/prototype on the chain is a Proxy/u);
   });
 
   test('a named operation that is absent is refused', () => {
