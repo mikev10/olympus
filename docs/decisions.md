@@ -10852,3 +10852,35 @@ Started on `v2` at fe0be42. Issues #117, #82, #74, #19, #48, #93, #65.
   hands it classes the old prototype read passes (an instance field, a
   symbol-keyed method, an inherited helper, a getter under an allowed name)
   and each is refused.
+
+### D-R39-07: what each fix was shown doing, against the old behaviour
+
+- **#48:** with `packages/api/src/line.ts:2019` changed to record no
+  evidence reference, the old `line.test.ts` (from `HEAD` before the fix)
+  and the new one were run side by side. The two tests the issue names, "a
+  required check that cannot be started has no result and fails the gate"
+  and "a unit check ... records the count", passed in the old file and
+  failed in the new one with `no evidence reference was recorded`. The
+  mutation was reverted; the new file passes 47 of 47.
+- **#93:** `test/fail-closed.test.ts` hands `allText` a reader that fails
+  for one file; it rejects with the read error. The old body caught every
+  error into `''`, so the same reader resolved.
+- **#65:** the same file hands `vaultSurfaceProblems` four classes whose
+  prototype's own string names are exactly the allowed ones, asserted in
+  each test with the old read, so the old check passed each: an instance
+  field, a symbol-keyed method, an inherited helper, and a getter under an
+  allowed name. Each is refused. The real `LocalVault` passes the new check.
+- **#74:** the test now reads `relayNames` of the id in the refusal's
+  `sandbox`, so a relay another suite creates mid-test is not compared at
+  all. The race itself was not staged; the old comparison's dependence on
+  every `model-relay-*` on the daemon is read from the code.
+- **#19:** a network labelled with this host and a pid that does not exist,
+  and one labelled with a running process's pid, were created; a run of the
+  relay file removed the first and left the second. A provision with the
+  provider's labels shows them on the sandbox, relay, proxy, and both
+  networks, under deny-all and under an allowlist. Four malformed labels
+  refuse `create` at the `labels` layer.
+- **#82:** reproduced as described in D-R39-02; after the fix,
+  `commit-tree` is given no stdin, and a stdin error rejects the call.
+- **#117:** not reproduced (D-R39-03). The writer found is removed, and the
+  comparison is per path, so a recurrence names the file.
