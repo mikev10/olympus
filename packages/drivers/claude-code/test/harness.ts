@@ -347,7 +347,15 @@ export async function withRecordingDriver<T>(
         body({
           ...h,
           recorded: recorder.recorded,
-          requestsFor: (taskId) => recorder.recorded.filter((r) => sessionOf(r.body) === sessionIdFor(taskId)),
+          requestsFor: (taskId) => {
+            // A messages request that names no session would be in no session's list, so a comparison of
+            // two sessions' requests could pass with the one that carried the difference missing (gemini-2).
+            const unattributed = recorder.recorded.filter((r) => r.method === 'POST' && r.url.startsWith('/v1/messages') && sessionOf(r.body) === undefined);
+            if (unattributed.length > 0) {
+              throw new Error(`${String(unattributed.length)} request(s) to the recording endpoint name no session, so no session's requests can be read as complete; the first went to ${unattributed[0]?.url ?? ''}`);
+            }
+            return recorder.recorded.filter((r) => sessionOf(r.body) === sessionIdFor(taskId));
+          },
         }),
       options,
       { kind: 'recording', port: recorder.port },
