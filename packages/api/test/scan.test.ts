@@ -33,9 +33,8 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-test('a security check scans the tree without its dependency trees, at any depth and in any case', async () => {
+async function scanListing(files: readonly string[], installed: readonly string[]): Promise<string[]> {
   const tree = join(root, 'tree');
-  const files = ['src/app.ts', 'node_modules/left-pad/index.js', 'packages/a/node_modules/x/i.js', 'Node_Modules/y.js', '.venv/lib/z.py', 'lib/site-packages/w.py'];
   for (const f of files) {
     await mkdir(join(tree, ...f.split('/').slice(0, -1)), { recursive: true });
     await writeFile(join(tree, ...f.split('/')), 'x');
@@ -46,8 +45,25 @@ test('a security check scans the tree without its dependency trees, at any depth
   const scratch = join(root, 'scratch');
   const outcome = await scanTree({
     sandbox, tree, scratch: { dir: scratch, tree: join(scratch, 'tree'), config: join(scratch, 'config') },
-    check, scanner, limits: null, user: { uid: 1000, gid: 1000 },
+    check, scanner, limits: null, user: { uid: 1000, gid: 1000 }, installed,
   });
   expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
-  expect(sandbox.listed.split('\n').sort()).toEqual(['src/app.ts']);
+  return sandbox.listed.split('\n').sort();
+}
+
+test('a security check scans the tree without the dependency trees the install made, at any depth', async () => {
+  const listed = await scanListing(
+    ['src/app.ts', 'node_modules/left-pad/index.js', 'packages/a/node_modules/x/i.js', '.venv/lib/z.py'],
+    ['node_modules', 'packages/a/node_modules', '.venv'],
+  );
+  expect(listed).toEqual(['src/app.ts']);
+});
+
+// A name is not provenance (R36b review, codex-1 and gemini-1): only what the install made is left out.
+test('anything the install did not make is scanned, whatever it is named', async () => {
+  const listed = await scanListing(
+    ['src/app.ts', 'src/node_modules', 'src/__pycache__/payload.py', 'assets/site-packages/secret.txt', 'node_modules/left-pad/index.js'],
+    ['node_modules'],
+  );
+  expect(listed).toEqual(['assets/site-packages/secret.txt', 'src/__pycache__/payload.py', 'src/app.ts', 'src/node_modules']);
 });

@@ -5,8 +5,8 @@
  * `verify`, and records the egress it returns.
  */
 import { cp, mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
-import { basename, dirname, join, relative } from 'node:path';
-import { isDependencyTree, type SecurityScanner } from '@olympus-ai/adapters';
+import { dirname, join, relative, sep } from 'node:path';
+import type { SecurityScanner } from '@olympus-ai/adapters';
 import type { CheckResult, SecurityCheckSpec } from '@olympus-ai/integrity';
 import type { EgressLog, SandboxHandle, SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
 import { renderFindings } from './security.js';
@@ -25,6 +25,13 @@ export interface ScanOptions {
   /** The host profile's limits, or `null` on a graph with no profile: a sandbox that runs no image, which applies none. */
   readonly limits: Readonly<Omit<SandboxSpec['limits'], 'wallClockMs'>> | null;
   readonly user: SandboxSpec['user'];
+  /**
+   * The dependency trees the runtime's install put in `tree`, as `/`-separated
+   * paths relative to it: left out of the copy, and nothing else is. A name is
+   * not provenance, so a file or directory the install did not make is
+   * scanned whatever it is called (R36b review, codex-1 and gemini-1).
+   */
+  readonly installed: readonly string[];
 }
 
 export type ScanOutcome =
@@ -71,19 +78,23 @@ async function setAsideNamed(root: string, names: readonly string[]): Promise<st
 }
 
 /**
- * A copy of `tree` without its dependency trees, at any depth and in any case
- * (D-R36b-10). Every check runs over the runtime's install of the lockfile,
- * and a task's writes there are escalated and never carried into the tree the
- * checks judge (D-R15-05), so what a dependency tree holds is the install's,
- * not the change's; scanning it scanned tens of thousands of files no change
- * wrote, past the check's wall clock. A link is copied as a link.
+ * A copy of `tree` without the dependency trees the runtime's install put
+ * there (D-R36b-10). The install first removes every tree of those names the
+ * base or a task left, at any depth, then puts its own in (`installInto`), and
+ * a task's writes to one are escalated and never carried into the tree the
+ * checks judge (D-R15-05); so what `installed` names is the install's, never
+ * the change's. Scanning it scanned tens of thousands of files no change wrote,
+ * past the check's wall clock. Only the paths named are left out: a file or
+ * directory the install did not make is copied whatever it is called. A link
+ * is copied as a link.
  */
-async function copyScanned(source: string, target: string): Promise<void> {
+async function copyScanned(source: string, target: string, installed: readonly string[]): Promise<void> {
+  const skip = new Set(installed);
   await rm(target, { recursive: true, force: true });
   await mkdir(dirname(target), { recursive: true, mode: 0o700 });
   await cp(source, target, {
     recursive: true, errorOnExist: true, force: false, verbatimSymlinks: true,
-    filter: (path) => path === source || !isDependencyTree(basename(path)),
+    filter: (path) => path === source || !skip.has(relative(source, path).split(sep).join('/')),
   });
 }
 
@@ -107,7 +118,7 @@ export async function scanTree(options: ScanOptions): Promise<ScanOutcome> {
   await rm(scratch.dir, { recursive: true, force: true });
   await mkdir(scratch.config, { recursive: true });
   try {
-    await copyScanned(options.tree, scratch.tree);
+    await copyScanned(options.tree, scratch.tree, options.installed);
     const clash = await setAsideNamed(scratch.tree, scanner.inTreeConfig);
     if (clash !== undefined) {
       const name = relative(scratch.tree, clash).replace(/\\/g, '/');

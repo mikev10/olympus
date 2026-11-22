@@ -192,7 +192,8 @@ const ROOT = 'root';
 
 /** The outcome of installing into a tree: the record, nothing to install, or why its checks cannot start. */
 export type InstallOutcome =
-  | { readonly ok: true; readonly install: InstallRecord | null }
+  /** `trees`: the dependency trees the install put in the tree, `/`-separated and relative to it; empty when it installed nothing. */
+  | { readonly ok: true; readonly install: InstallRecord | null; readonly trees: readonly string[] }
   | { readonly ok: false; readonly at: 'plan' | 'provision' | 'install'; readonly reason: string };
 
 /**
@@ -207,7 +208,7 @@ export async function installInto(ctx: LineContext, tree: string, base: string, 
   const isTree = treeNamer(installers);
   for (const path of await dependencyTrees(tree, isTree)) await rm(join(tree, ...path.split('/')), { recursive: true, force: true });
   const plan = await planInstall(tree, installers, ctx.policy.installRegistries);
-  if (plan.kind === 'none') return { ok: true, install: null };
+  if (plan.kind === 'none') return { ok: true, install: null, trees: [] };
   if (plan.kind === 'refused') return { ok: false, at: 'plan', reason: `no dependency was installed: ${plan.reason}` };
   const { installer } = plan;
 
@@ -225,10 +226,11 @@ export async function installInto(ctx: LineContext, tree: string, base: string, 
     if (!made.ok) return made;
     record = made.install;
   }
-  for (const path of await dependencyTrees(join(dir, ROOT), isTree)) {
+  const trees = await dependencyTrees(join(dir, ROOT), isTree);
+  for (const path of trees) {
     await cp(join(dir, ROOT, ...path.split('/')), join(tree, ...path.split('/')), { recursive: true, errorOnExist: true, force: false, verbatimSymlinks: true });
   }
-  return { ok: true, install: record };
+  return { ok: true, install: record, trees };
 }
 
 async function install(

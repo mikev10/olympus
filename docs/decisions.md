@@ -10990,6 +10990,17 @@ Started on `v2` at f3f8878, after R37 (#163) and D-TOOLING-11 (#167). Issues
   dependency changes the lockfile. That path is judged by the install's
   registry policy and the dependency audit, not by the source scanners.
 - **Reverse:** restore `copyTree` in `scanTree` and delete the test.
+- **Amended by the external review (codex-1, gemini-1):** a name is not
+  provenance. The first version left out every entry named like a
+  dependency tree, at any depth, file or directory. A regular file named
+  `node_modules`, or a `.venv` or `__pycache__` directory in a Node.js
+  tree the install never touches, then reached neither scanner. Now
+  `installInto` returns the trees it put in the tree (`trees`), and
+  `scanTree` leaves out exactly those paths and nothing else. The install
+  removes every tree of its stack's names before it puts its own in, so
+  every path it returns is the install's. Nightly installs nothing, so it
+  passes an empty list and scans everything. Tested in
+  `test/scan.test.ts`, which fails on the name-based filter.
 
 ### D-R36b-11: the runtime names where a test draft's test files go
 
