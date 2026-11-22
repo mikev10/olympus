@@ -46,8 +46,10 @@ roles:
     triggerKinds: [human]
     # Per task. The worst-case cost a run must approve is summed from these.
     # Cache reads count against maxTokens: a model reading the repository
-    # spends most of its tokens there.
-    budget: { maxTokens: 200000, maxCostUsd: 1, maxWallClockMs: 600000 }
+    # spends most of its tokens there, so a seat that reads it gets enough
+    # tokens that maxCostUsd binds first (200000 ended a real build before
+    # it wrote anything).
+    budget: { maxTokens: 1000000, maxCostUsd: 1, maxWallClockMs: 600000 }
     sensitiveGrants: []
     narrowed: null
     repoInstructions: false
@@ -61,15 +63,15 @@ roles:
     escalation: none
     autonomyCeiling: 1
     triggerKinds: [human]
-    budget: { maxTokens: 200000, maxCostUsd: 1, maxWallClockMs: 600000 }
+    budget: { maxTokens: 1000000, maxCostUsd: 1, maxWallClockMs: 600000 }
     sensitiveGrants: []
     narrowed: null
     repoInstructions: false
   # The four drafting seats, used only by a run that drafts its spec
   # (create --draft-spec) or its tests (--draft-tests). Delete them if no run
   # drafts. A drafting run also needs FACTORY_RUBRICS_DIR.
-  # A drafter reads the repository before it writes its draft, so each
-  # drafter gets twice the tokens of the other seats.
+  # A drafter reads the repository before it writes its draft, so it gets
+  # the builder's tokens; a critic reads only the draft.
   spec-drafter:
     stations: [spec]
     writableGlobs: ["**"]
@@ -80,7 +82,7 @@ roles:
     escalation: none
     autonomyCeiling: 1
     triggerKinds: [human]
-    budget: { maxTokens: 400000, maxCostUsd: 1, maxWallClockMs: 600000 }
+    budget: { maxTokens: 1000000, maxCostUsd: 1, maxWallClockMs: 600000 }
     sensitiveGrants: []
     narrowed: null
     repoInstructions: false
@@ -108,7 +110,7 @@ roles:
     escalation: none
     autonomyCeiling: 1
     triggerKinds: [human]
-    budget: { maxTokens: 400000, maxCostUsd: 1, maxWallClockMs: 600000 }
+    budget: { maxTokens: 1000000, maxCostUsd: 1, maxWallClockMs: 600000 }
     sensitiveGrants: []
     narrowed: null
     repoInstructions: false

@@ -42,6 +42,17 @@ describe('what init copies', () => {
     await sameDirectory(DEFAULT_RUBRICS_DIRECTORY, join(EXAMPLES, 'rubrics'));
   });
 
+  // A real build spent its 200,000 tokens reading the repository before it wrote anything (#192,
+  // D-R36b-12): every seat that reads the repository is bound by its dollars, not its tokens.
+  test('every seat that reads the repository has a token budget its dollar budget binds before', async () => {
+    const policy = await readFile(join(SETUP_DIRECTORY, 'policy.yaml'), 'utf8');
+    for (const seat of ['builder', 'reviewer', 'spec-drafter', 'test-drafter']) {
+      const block = new RegExp(`\\n  ${seat}:\\n[\\s\\S]*?budget: \\{ maxTokens: (\\d+), maxCostUsd: ([\\d.]+)`, 'u').exec(policy);
+      expect(block, seat).not.toBeNull();
+      expect(Number(block?.[1]), seat).toBeGreaterThanOrEqual(1_000_000);
+    }
+  });
+
   test('a Python stack gets the Python registries and protects pyproject.toml; Node.js gets the policy unchanged', async () => {
     const shipped = await readFile(join(SETUP_DIRECTORY, 'policy.yaml'), 'utf8');
     expect(stackPolicy(shipped, 'node')).toBe(shipped);

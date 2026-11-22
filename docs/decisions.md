@@ -10879,3 +10879,33 @@ Started on `v2` at f3f8878, after R37 (#163) and D-TOOLING-11 (#167). Issues
   rejected: carrying the validator's messages. That is #174, an amendment.
 - **Reverse:** restore the one-line `draftDestination` and the role
   paragraph.
+
+### D-R36b-12: a seat that reads the repository is bound by its dollars, not its tokens
+
+- **Found:** in the `my-recipes` run `7c2fe8a8` (#192), the build task
+  parked after three attempts. The relay refused each one with "the budget
+  of 200000 tokens (maxTokens) is spent". Across them the build read
+  593,227 cache-read tokens and wrote 6,976 output tokens, at $0.29 in
+  total. The policy `init` writes gives `builder` and `reviewer` 200,000
+  tokens, and cache reads count against that limit. The drafters had
+  400,000, and the spec drafter also ran out on one of its two calls.
+  200,000 cache-read tokens cost about $0.10 against a `maxCostUsd` of $1,
+  so the token bound ended the work long before the dollar bound would
+  have.
+- **Chosen:** `builder`, `reviewer`, `spec-drafter` and `test-drafter` get
+  `maxTokens: 1000000` in `setup/policy.yaml` and `examples/policy.yaml`,
+  which stay byte-identical. The critics, which read only the draft, keep
+  200,000. `maxCostUsd` is unchanged, and the worst-case cost a run must
+  approve is summed from `maxCostUsd` alone (`cost.ts`, `worstCaseCost`).
+  So the $42 approval and every per-task dollar ceiling stay the same; only
+  the token limit, which bound first, is raised. Tested in
+  `test/init.test.ts`, which fails at 200,000.
+- **Rejected:**
+  - 400,000 for the builder. That is the drafters' figure, and a drafter
+    ran out at it in this run.
+  - Not counting cache reads against `maxTokens`. That changes how the
+    relay meters a budget, and a bound that ignores most of a model's
+    reading is weaker. It is out of R36b's scope.
+  - Retrying a spent-budget refusal less, filed as #193. It changes when
+    the line parks a task.
+- **Reverse:** restore 200,000 and 400,000 in both policies.
