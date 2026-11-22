@@ -7,7 +7,7 @@ import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, relative } from 'node:path';
+import { dirname, join, relative, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { EGRESS_PROXY_IMAGE, LocalDockerProvider } from '@olympus-ai/sandbox';
 import { NPM_REGISTRY, PYPI_REGISTRIES, SECRET_SCAN_IMAGE, type BranchProtectionChecker, type ScanOptions } from '../src/index.js';
@@ -45,7 +45,9 @@ export async function writeFiles(root: string, files: Readonly<Record<string, st
 /** A git repository at `root` with `files` committed. */
 export async function gitRepository(root: string, files: Readonly<Record<string, string>>): Promise<void> {
   await writeFiles(root, files);
-  const git = (...args: string[]) => run('git', ['-C', root, '-c', 'user.email=readiness@example.invalid', '-c', 'user.name=readiness', ...args]);
+  // No auto maintenance: `git commit` would start it detached, and a lock or log it holds while the tree is hashed
+  // reads as the scan having changed the repository (#117, D-R39-03).
+  const git = (...args: string[]) => run('git', ['-C', root, '-c', 'maintenance.auto=false', '-c', 'gc.auto=0', '-c', 'user.email=readiness@example.invalid', '-c', 'user.name=readiness', ...args]);
   await git('init', '--quiet', '--initial-branch=main');
   await git('add', '--all');
   await git('commit', '--quiet', '--message', 'fixture');
@@ -107,16 +109,22 @@ export const PROTECTED: BranchProtectionChecker = {
   check: () => Promise.resolve({ protected: true, detail: 'main requires a review and passing checks' }),
 };
 
-/** Every file under `root`, `.git` included, with its content hash: what "byte-identical" is checked against. */
-export async function treeHash(root: string): Promise<string> {
-  const entries: string[] = [];
+/**
+ * Every entry under `root`, `.git` included: each file with its content hash, each directory as itself. What
+ * "byte-identical" is checked against, kept per path so a difference names the paths that changed (#117).
+ */
+export async function treeSnapshot(root: string): Promise<Readonly<Record<string, string>>> {
+  const entries: Array<readonly [string, string]> = [];
   const walk = async (dir: string): Promise<void> => {
     for (const entry of await readdir(dir, { withFileTypes: true })) {
       const path = join(dir, entry.name);
-      if (entry.isDirectory()) await walk(path);
-      else entries.push(`${relative(root, path)}\0${createHash('sha256').update(await readFile(path)).digest('hex')}`);
+      const at = relative(root, path).split(sep).join('/');
+      if (entry.isDirectory()) {
+        entries.push([`${at}/`, 'directory']);
+        await walk(path);
+      } else entries.push([at, createHash('sha256').update(await readFile(path)).digest('hex')]);
     }
   };
   await walk(root);
-  return createHash('sha256').update(entries.sort().join('\n')).digest('hex');
+  return Object.fromEntries(entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
 }
