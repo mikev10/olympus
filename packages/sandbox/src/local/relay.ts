@@ -101,10 +101,18 @@ export const METER_PREFIX = 'model-relay-meter ';
  *   `prompt_tokens` (less its cached part, counted as cache reads) and
  *   `completion_tokens`, from the body or from the stream chunk that carries it.
  *   A request asking for a service tier other than the default, a web search,
- *   audio, or a tool the API runs itself is refused unsent: each is billed
- *   outside that usage (#88). An answer reporting a tier other than the
+ *   audio, or a tool the API runs itself is refused unsent: a tier is billed
+ *   at another rate, a search or a hosted tool per call, and audio at audio
+ *   rates inside the same prompt_tokens and completion_tokens the table
+ *   charges at one rate (#88, gemini-3). A request naming no tier is served at
+ *   the upstream's own default, so an answer reporting a tier other than the
  *   default is counted as read and then stops the relay forwarding, as an
- *   unreadable one does, since the price table holds the default rate alone.
+ *   unreadable one does (codex-1). An answer naming no tier, as a local
+ *   endpoint's does, is read at the table's rate.
+ *
+ * This source runs as one `docker run` argument, so its length counts toward
+ * the host's command-line limit, 32767 characters on Windows. Explanation
+ * belongs in this comment, which is outside it, rather than inside it.
  * - Under the `openai-responses` dialect (A-R26-01) the same rules hold with
  *   that API's names: a `POST` to a granted path ending `/responses` is
  *   metered and a `GET` is free; the ceiling is the larger of the model's
@@ -280,7 +288,7 @@ function refuseWith(res, status, type, message, reason) {
 
 function refuseSpent(res) {
   const why = exhausted === 'unreadable'
-    ? 'a response whose cost could not be counted (no readable usage, or a service tier other than the default) was charged what could be read of it, and no later call is forwarded'
+    ? 'a response whose cost could not be counted was charged what could be read of it, and no later call is forwarded'
     : exhausted === 'tokens'
       ? 'the budget of ' + String(budget.maxTokens) + ' tokens (maxTokens) is spent'
       : 'the budget of ' + String(budget.maxCostUsd) + ' USD (maxCostUsd) is spent';
@@ -308,10 +316,7 @@ function usageReader() {
     const output = count(usage.output_tokens);
     if (output !== null) { u.output = output; if (final) u.final = true; }
   };
-  // openai-chat: the tier the answer was served at. A request naming none is served at the
-  // upstream's own default, which need not be the rate the price table holds, so an answer
-  // naming any tier but the default is one whose cost the meter cannot count (codex-1).
-  // An answer naming no tier, as a local endpoint's does, is read at the table's rate.
+  // openai-chat: an answer served at a tier other than the default is not at the table's rate.
   u.tierOpenai = function (tier) {
     if (tier !== undefined && tier !== null && tier !== 'default') u.offTier = true;
   };
@@ -421,8 +426,6 @@ function charge(model, maxTokens, u, success) {
     write1h = cacheWrite - write5m;
     if (u.final) output = u.output;
     else { charged = 'ceiling'; output = Math.max(maxTokens, u.output); }
-    // Its tokens are counted at the table's rate, which is not the rate it was billed at, so
-    // nothing after it is forwarded: the budget can no longer say what was spent.
     if (u.offTier) charged = 'off-tier';
   }
   const costUsd = (input * p.inputPerMTok + output * p.outputPerMTok + cacheRead * p.cacheReadPerMTok +
@@ -541,17 +544,12 @@ function responsesUnmeterable(request) {
   return null;
 }
 
-// What an openai-chat request asks for that costs more than its tokens, or null (#88, D-R38-05).
-// A service tier other than the default is billed at another rate, a web search is billed per
-// call, and audio, out or in, is billed at audio rates while reported inside the same
-// prompt_tokens and completion_tokens the price table charges at one rate. Each is spend the
-// budget cannot see, so each is refused as the responses dialect refuses its own (D-P13-12).
+// What an openai-chat request asks for that costs more than its tokens, or null (#88).
 function chatUnmeterable(request) {
   const tier = request.service_tier;
   if (tier !== undefined && tier !== null && tier !== 'default') return 'the request asks for the service tier ' + JSON.stringify(String(tier).slice(0, 40));
   if (request.web_search_options !== undefined && request.web_search_options !== null) return 'the request asks for a web search';
   if (request.audio !== undefined && request.audio !== null) return 'the request asks for audio output';
-  // Only tools the client runs, as under the responses dialect: a tool the API runs itself is billed per call (gemini-3).
   const tools = request.tools;
   if (tools !== undefined && tools !== null) {
     if (!Array.isArray(tools)) return 'the request names tools that are not a list';
