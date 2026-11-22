@@ -43,8 +43,9 @@ describe('what init copies', () => {
   });
 
   // A real build spent its 200,000 tokens reading the repository before it wrote anything (#192,
-  // D-R36b-12): every seat that reads the repository is bound by its dollars, not its tokens.
-  test('every seat that reads the repository has a token budget its dollar budget binds before', async () => {
+  // D-R36b-12). This holds the allowance, not which bound is met first: on read-heavy work a cache
+  // read costs so little that the token bound still is (R36b review, codex-4, gemini-2).
+  test('every seat that reads the repository has room to read a small one: at least 1,000,000 tokens', async () => {
     const policy = await readFile(join(SETUP_DIRECTORY, 'policy.yaml'), 'utf8');
     for (const seat of ['builder', 'reviewer', 'spec-drafter', 'test-drafter']) {
       const block = new RegExp(`\\n  ${seat}:\\n[\\s\\S]*?budget: \\{ maxTokens: (\\d+), maxCostUsd: ([\\d.]+)`, 'u').exec(policy);

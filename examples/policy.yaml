@@ -46,9 +46,10 @@ roles:
     triggerKinds: [human]
     # Per task. The worst-case cost a run must approve is summed from these.
     # Cache reads count against maxTokens: a model reading the repository
-    # spends most of its tokens there, so a seat that reads it gets enough
-    # tokens that maxCostUsd binds first (200000 ended a real build before
-    # it wrote anything).
+    # spends most of its tokens there, so a seat that reads it gets room
+    # to read a small repository and still write its change (200000 ended
+    # a real build before it wrote anything). A cache read costs little,
+    # so on read-heavy work this bound is still met before maxCostUsd.
     budget: { maxTokens: 1000000, maxCostUsd: 1, maxWallClockMs: 600000 }
     sensitiveGrants: []
     narrowed: null

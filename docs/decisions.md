@@ -11056,3 +11056,14 @@ Started on `v2` at f3f8878, after R37 (#163) and D-TOOLING-11 (#167). Issues
   - Retrying a spent-budget refusal less, filed as #193. It changes when
     the line parks a task.
 - **Reverse:** restore 200,000 and 400,000 in both policies.
+- **Corrected by the external review (codex-4, gemini-2):** the title's
+  claim does not hold. The relay checks the token bound before the dollar
+  bound, and a cache read on the standard tier costs $0.20 per million
+  tokens, so a purely read-heavy task meets 1,000,000 tokens at about
+  $0.20, well before `maxCostUsd` 1. What 1,000,000 buys is room to read
+  a small repository and still write the change: the passing build read
+  302,512. The policy comment, the test's name, and the changeset now say
+  that, and the number stands. Making the dollar bound bind first would
+  take about 5,000,000 tokens at today's prices, a figure that moves with
+  every price change. That is #197's territory (measure before
+  tuning), not this unit's.
