@@ -10704,3 +10704,151 @@ Started on `v2` at 44725bf. Issues #170, #172.
 ### D-R52-04: review triage
 
 Both families counted, with no reruns. gemini-1 is fixed (13eee68): `expectOff` asserts that `--tools` is present before reading its value. codex-1 and codex-2 are a known limit: no test observes whether Code Mode is on, because the CLI's init line shows the same tools whatever the switch says (D-R52-02). The switch therefore rests on the vendor's documented precedence. Owner: R53, the next unit to change the CLI image, which re-verifies the pin. gemini-2's premise does not hold: the container holds a placeholder, not the key. Its residue is that the relay does not inspect an Anthropic request's `tools`, so a task granted `Bash` could reach ungranted server-side tools. That is relay work, filed as #189. gemini-3 is rejected: the argv check catches an inline settings argument naming the variable. Full record: `docs/reviews/2026-11-21-R52-cli-current-code-mode-off-triage.md`.
+
+## R39: Tests that cannot pass by accident
+
+Started on `v2` at fe0be42. Issues #117, #82, #74, #19, #48, #93, #65.
+
+### D-R39-01: boundary, verified
+
+- **Deliverables:**
+  - The readiness scan test's fixture repositories start no background git
+    process, and a changed tree names the paths that changed (#117).
+  - The readiness `tree.test.ts` git helper writes no stdin to a command
+    that does not read it, and a failed stdin write rejects the call rather
+    than escaping as an unhandled error (#82).
+  - The relay test's failed-provision check reads only the relay names its
+    own refused provision chose, from the refusal's `sandbox` (#74).
+  - The local provider puts caller-given Docker labels on every container
+    and network it creates; the relay tests label everything they create
+    with their own run, remove it after the file, sweep what a dead run
+    left, and fail on any removal that fails (#19).
+  - `line.test.ts` throws where it returned early on a missing evidence
+    reference or driver request (#48).
+  - Conformance's `allText` propagates a read error (#93).
+  - The I1 closed-operation check reads a constructed `LocalVault` and its
+    whole prototype chain by `Reflect.ownKeys`, and requires each allowed
+    name to be a plain method (#65).
+- **Out of scope (verbatim):** new assertions beyond these seven issues.
+- **Acceptance:** `pnpm -r typecheck`, `pnpm -r lint`, `pnpm -r test` pass;
+  each fail-open fix (#48, #93, #65) is shown failing against the old
+  behaviour and passing with the fix; the flakes' mechanisms are reproduced
+  where they can be, and recorded where they cannot.
+- **Invariants:** I5 (fail closed: a test that passes on an error, a missing
+  record, or an unreadable file is the suite failing open); I1 (the closed
+  operation check is one of its assertions; the mount layer's assertion is
+  untouched); I8 (each fix has a negative test or a recorded demonstration);
+  I10 (the label key carries no Greek name).
+- **Pending registry entries owed:** none name R39. The baseline is
+  unchanged.
+- **Gate paths touched, all declared by the entry's issues:**
+  `packages/conformance/` (#93, #65). No `vitest.config`, manifest, or
+  `types.ts` changes (D-R39-05). The PR needs the `gate-change` label and the
+  squash body `Gate-Change: acknowledged`.
+
+### D-R39-02: assumptions, each verified
+
+- Dependencies shipped: `reviewed/P10`, `reviewed/P11`, `reviewed/R1`,
+  `reviewed/I1b` tags exist; `origin/v2` is fe0be42.
+- The scan reads the checkout only through `rev-parse`, `ls-tree`, and
+  `cat-file --batch` (`packages/readiness/src/tree.ts:32,58,73`) and runs
+  every probe in a copy under its own `mkdtemp` (`scan.ts:120-124`). None of
+  those writes into `.git`.
+- `treeHash` hashes `.git` too (`packages/readiness/test/repo.ts:111`), and
+  the fixture is made by `git commit` (`repo.ts:51`).
+- `git commit` starts `git maintenance run --auto --quiet --detach` and
+  returns before it ends: `GIT_TRACE=1 git commit` on git 2.49 shows the
+  spawn. With `-c maintenance.auto=false` the trace shows none. Thirty local
+  trials of commit-then-list-`.git` did not catch a change, so the race is a
+  verified writer, not a reproduced failure (D-R39-03).
+- `commitOf` sends `''` to `commit-tree ... -m`, which does not read stdin
+  (`tree.test.ts:56`), and the helper has no stdin error listener
+  (`tree.test.ts:39`). Reproduced: a 4 MiB write to `commit-tree -m` with no
+  listener ends the process with an unhandled `write EPIPE`.
+- `SandboxRefusal` carries `sandbox`, the container name of a failed start
+  (`packages/sandbox/src/local/refusal.ts:48`); `provision` rethrows with it
+  (`provider.ts:506`); the relay is named `relayNames(id)` with the same id
+  (`relay.ts:1017`, `provider.ts:524`). `egress.test.ts:483` is #14's fix.
+- The relay test's teardown swallows every removal failure
+  (`relay.test.ts:177,225`); nothing the provider creates carries a label
+  (no `--label` in `packages/sandbox/src`); the only creation sites are
+  `provider.ts:346`, `proxy.ts:321-326`, `relay.ts:1116-1125`, and
+  `createSandboxNetwork` (`docker.ts:249`). The probe's container is `--rm`.
+- `LocalDockerOptions` is the sandbox package's own type in `provider.ts`,
+  not a core contract and not a `types.ts`, so an optional field is package
+  work with a changeset.
+- `line.test.ts` has eight early returns on `undefined`, at lines 185, 216,
+  288, 319, 439, 455, 605, 633.
+- `allText` catches every read error into `''` (`integration.ts:273`), and
+  its one caller asserts the store does not hold the merge token
+  (`integration.ts:290`): an unreadable file passes that negative check.
+- The I1 check reads `Object.getOwnPropertyNames(LocalVault.prototype)`
+  (`i1.ts:54`); `LocalVault`'s constructor does no I/O
+  (`packages/vault/src/local/vault.ts:812-823`), so an instance can be built
+  over two empty directories.
+
+### D-R39-03: #117 is fixed by removing the writer, and a recurrence names its file
+
+- **Ambiguous:** the failure was seen once in CI and is not reproduced here.
+  The scan itself writes nothing into the checkout; the one writer verified
+  is git's detached maintenance, which `git commit` starts and does not wait
+  for. A lock or log it holds while `before` is hashed is gone when `after`
+  is.
+- **Options:** (A) the fixture's git runs with `maintenance.auto=false` and
+  `gc.auto=0`, and `treeHash` is replaced by a per-path snapshot so a
+  failure prints which paths were added, removed, or changed; (B) drop
+  `.git` from the hash; (C) wait or retry until the hash settles.
+- **Chosen: A.** It removes the one writer found and keeps the property
+  whole. B weakens "the scan changes nothing" exactly where a scan that ran
+  git against the source would write. C hides a writer rather than naming
+  it, which is what the issue asks not to do.
+- **Residual:** if the cause is something else, the next failure lists the
+  path, which is the diagnosis the issue asked for.
+- **Reverse:** drop the two `-c` flags and return to the single hash.
+
+### D-R39-04: #82 rejects a failed stdin write rather than ignoring EPIPE
+
+- **Options:** (A) `commitOf` passes no input to `commit-tree -m`, and the
+  helper rejects on any stdin error; (B) swallow EPIPE.
+- **Chosen: A.** Every remaining stdin consumer (`hash-object --stdin`,
+  `mktree`) reads all its input, so a failed write means the object was not
+  built from the bytes given. B would let that pass.
+- **Reverse:** remove the listener and the `[]`.
+
+### D-R39-05: #19 labels every Docker object, and the relay tests sweep by owner
+
+- **Ambiguous:** a teardown that never runs (a killed worker, a timed-out
+  hook) cannot be fixed inside that teardown. Something later has to find
+  what it left, and nothing the provider creates is findable but by name
+  prefix.
+- **Options:** (A) `LocalDockerOptions.labels`, validated and put on every
+  container and network the provider creates; the relay tests label their
+  provider, upstreams, and own networks with an owner value naming host,
+  process, and run; `afterAll` removes everything with this run's value and
+  fails if any removal fails; `beforeAll` removes what a dead process on
+  this host left; (B) a ledger file of names each test writes; (C) sweep by
+  `model-relay-*`/`sandbox-*` name.
+  (D) A vitest `globalSetup`, as the issue suggests.
+- **Chosen: A.** B misses a provision interrupted before it returns, which
+  has already created the relay. C removes a concurrent suite's live
+  objects, which is #74's failure. D needs a `vitest.config` change, a gate
+  path this unit does not declare; `beforeAll`/`afterAll` in the file reach
+  the same objects. The owner's process is checked with `process.kill(pid,
+  0)`: a reused pid leaves a leftover in place, never removes a live run's.
+- **Label rules:** a key must match Docker's lower-case reverse-DNS form and
+  must not use the `com.docker.`, `io.docker.`, or `org.dockerproject.`
+  prefixes; a value may not hold a control character. Anything else refuses
+  at `create`, before a daemon is asked to make anything.
+- **Reverse:** drop the option and the sweep; teardown failures still fail.
+
+### D-R39-06: the fail-open fixes are each proved against the old code
+
+- #48: a helper throws naming the missing record. Shown by making the line
+  record no evidence and running old and new tests (D-R39-07 records the
+  run).
+- #93: `allText` takes its reader as a parameter defaulting to `readFile`, so
+  a test gives it one that fails; the old body returned `''` for it.
+- #65: the check becomes an exported function over an instance; its test
+  hands it classes the old prototype read passes (an instance field, a
+  symbol-keyed method, an inherited helper, a getter under an allowed name)
+  and each is refused.
