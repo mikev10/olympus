@@ -1,0 +1,16 @@
+BASE: reviewed/R52
+HEAD: 8314a7d
+packages/sandbox/src/local/relay.ts
+bfae41adad626471aee7e20984d84e6c
+
+I have no prior context about this project, and I did not perform any external lookups. 
+
+### Findings
+
+**packages/drivers/claude-code/test/claims.test.ts:43** — Place where the mechanism can succeed while the property it protects is violated — High — The `driver.subagents` assertion only inspects the `system` parameter of the child's requests using `systemTextOf`. If a developer leaks the parent's role instructions by appending them to a user message (e.g., inside `request.messages[0].content`), `systemTextOf` entirely misses them. The `expect(system).not.toContain(parent.role.instructions)` check will successfully pass, but the core property is violated because the child session is being influenced by the parent's instructions. Resolve by inspecting all text blocks across `messages` in addition to the `system` parameter.
+
+**packages/drivers/claude-code/test/invariants.test.ts:279** — Place where the mechanism can succeed while the property it protects is violated — High — `I3.workspace-instructions-not-loaded` relies on `requestsFor`, which filters recorded requests using `sessionOf(body)`. `sessionOf` silently returns `undefined` if `metadata.user_id` is missing or fails to parse as a valid JSON string. If the CLI developer omits or obfuscates `metadata.user_id` in the main `/v1/messages` request (which carries the planted instructions) but leaves it in the `count_tokens` request, `requestsFor` drops the main request. The assertion passes because it only compares the byte-identical `count_tokens` requests. The control run fails to catch this because it searches the raw request body using `.includes(controlSession)`, successfully finding the obfuscated session ID and the plant tokens. Resolve by asserting that every request reaching the recording endpoint has a valid, parsable session ID, or by unifying the attribution logic between the test and the control runs.
+
+**packages/sandbox/src/local/relay.ts:536** — Ways the configuration can be satisfied without doing what it appears to do — Medium — The `chatUnmeterable` function for the `openai-chat` dialect completely forgets to check the `request.tools` array. While the `responsesUnmeterable` function correctly loops through `request.tools` to refuse any tool not in `CLIENT_TOOLS`, `chatUnmeterable` omits this logic. If the upstream API supports a hosted tool billed per-call (such as web search or retrieval), an attacker can invoke it by placing it in the `tools` array, allowing unmetered spend to easily bypass the budget. Resolve by adding a `request.tools` validation loop to `chatUnmeterable` that mirrors the one in `responsesUnmeterable`.
+
+**packages/drivers/claude-code/test/harness.ts:46** — Anything that fails open (fails closed due to unhandled error) — Low — `systemTextOf` aggressively throws an error if any system block is an object but lacks a `text` property. If the API introduces a block type in the system prompt that does not carry text (e.g., a pure cache-control block), this test utility will throw an unhandled exception, causing assertions that rely on it to crash and fail closed. Resolve by filtering out or ignoring non-text blocks rather than throwing an error, or by specifically enforcing `type === 'text'`.
