@@ -55,7 +55,8 @@ invariantTest(
       for (const request of sent) {
         const system = systemTextOf(request);
         expect(system, "the child's role instructions are not in the system prompt its session sent").toContain(role.instructions);
-        expect(system, "the parent request's role reached the child's session").not.toContain(parent.role.instructions);
+        // Anywhere in the request, not only its system blocks: a role carried in a message instructs the session as well (gemini-1).
+        expect(request.body, "the parent request's role reached the child's session").not.toContain(JSON.stringify(parent.role.instructions).slice(1, -1));
       }
       // And really was under the parent's grants, read from what the CLI
       // printed before it took a turn, not from what the model said afterwards.
