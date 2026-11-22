@@ -680,7 +680,7 @@ export class LocalDockerProvider implements SandboxProvider {
     const name = `probe-${randomUUID()}`;
     sandbox.probes.add(name);
     try {
-      const result = await dockerCli(this.#executable, probeRunArgs(name, sandbox.controls.containerId, this.#proxyImage), {
+      const result = await dockerCli(this.#executable, probeRunArgs(name, sandbox.controls.containerId, this.#proxyImage, this.#labels), {
         timeoutMs: remaining,
         ...this.#outputCap,
         stdin: JSON.stringify(request),
