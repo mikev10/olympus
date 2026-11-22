@@ -63,7 +63,8 @@ function driverClaim(key: DriverClaimKey, title: string, openaiCompatible: strin
 const DRIVER: Array<[ClaimId, ClaimEntry]> = [
   driverClaim(
     'subagents',
-    "spawnSubagent() runs a child task under the parent request's policy grants and returns its own TaskResult",
+    "spawnSubagent() runs a child task under the parent request's policy grants and returns its own TaskResult, " +
+      "and the system prompt the child's session sent carries the child's role instructions and not the parent's",
     'subagents is declared false and absent: there is no spawnSubagent(), and a model call naming a subagent tool is answered with an error and runs nothing',
   ),
   driverClaim(

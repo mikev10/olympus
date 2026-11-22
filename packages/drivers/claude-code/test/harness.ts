@@ -12,17 +12,24 @@
  *
  * They also cost money. Every task in this file is the smallest one that can
  * prove its point, and the prompts ask for one word wherever a word will do.
+ *
+ * `withRecordingDriver` is the exception: the same container, CLI, and relay,
+ * with the relay forwarding to a recording endpoint on the host. It needs no
+ * credential and calls no model, and is for assertions about what the CLI
+ * sends rather than what a model answers (D-R38-03).
  */
 import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm } from 'node:fs/promises';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, expect } from 'vitest';
 import type { Budget, CompiledRole, RoleId, TaskId, TaskRequest } from '@olympus-ai/core';
-import type { ExecOptions, ExecResult, LocalDockerProvider, MeterReading, SandboxHandle, SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
-import { MODEL_CREDENTIAL, MODEL_RELAY, ClaudeCodeDriver, ensureImage, parseStream, type ClaudeCodeDriverOptions } from '../src/index.js';
+import type { ExecOptions, ExecResult, LocalDockerProvider, MeterReading, RelaySpec, SandboxHandle, SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
+import { MODEL_CREDENTIAL, MODEL_RELAY, ClaudeCodeDriver, ensureImage, parseStream, sessionIdFor, type ClaudeCodeDriverOptions } from '../src/index.js';
 
 /**
  * Where the host's credential is read from, to be handed to the provider. The
@@ -165,7 +172,128 @@ export interface Harness {
   exec(sandbox: SandboxHandle, cmd: string[], options?: ExecOptions): Promise<ExecResult>;
 }
 
-function spec(image: string, workspaceDir: string): SandboxSpec {
+/** One request the CLI sent, as the recording endpoint received it through the relay. */
+export interface RecordedRequest {
+  readonly method: string;
+  readonly url: string;
+  /** The body exactly as it arrived, so two requests can be compared byte for byte. */
+  readonly body: string;
+}
+
+/** A harness whose relay forwards to a recording endpoint on the host instead of the API (D-R38-03). */
+export interface RecordingHarness extends Harness {
+  /** Every request the CLI sent under `taskId`'s session id, in the order they arrived. */
+  requestsFor(taskId: TaskId): readonly RecordedRequest[];
+  /** Every request the endpoint received, from any session. */
+  readonly recorded: readonly RecordedRequest[];
+}
+
+/** What the recording endpoint answers every message with. */
+export const RECORDED_ANSWER = 'recorded';
+
+/** The session a request names in `metadata.user_id`, or undefined when it names none. */
+function sessionOf(body: string): string | undefined {
+  try {
+    const userId = (JSON.parse(body) as { metadata?: { user_id?: unknown } }).metadata?.user_id;
+    if (typeof userId !== 'string') return undefined;
+    const sessionId = (JSON.parse(userId) as { session_id?: unknown }).session_id;
+    return typeof sessionId === 'string' ? sessionId : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The text of a request's `system` blocks, joined, or a failure naming why
+ * there is none: a request whose system prompt cannot be read would otherwise
+ * pass every "does not contain" check made of it.
+ */
+export function systemTextOf(request: RecordedRequest): string {
+  const system = (JSON.parse(request.body) as { system?: unknown }).system;
+  if (typeof system === 'string') return system;
+  if (!Array.isArray(system)) throw new Error(`the request to ${request.url} carries no system prompt`);
+  return system
+    .map((block: unknown) => {
+      const text = block !== null && typeof block === 'object' ? (block as { text?: unknown }).text : undefined;
+      if (typeof text !== 'string') throw new Error(`a system block of the request to ${request.url} has no text`);
+      return text;
+    })
+    .join('\n');
+}
+
+/** One server-sent event, framed as the messages API frames it. */
+function sse(name: string, data: unknown): string {
+  return `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
+}
+
+/**
+ * An endpoint on the host that records every request it is sent and answers a
+ * messages call with a minimal stream naming the request's model. It calls no
+ * model, so what it proves is what the CLI sent, never what a model chose.
+ */
+async function startRecorder(): Promise<{ port: number; recorded: RecordedRequest[]; close: () => Promise<void> }> {
+  const recorded: RecordedRequest[] = [];
+  const server = createServer((q, s) => {
+    const parts: Buffer[] = [];
+    q.on('data', (c: Buffer) => parts.push(c));
+    q.on('end', () => {
+      const body = Buffer.concat(parts).toString('utf8');
+      const url = q.url ?? '';
+      recorded.push({ method: q.method ?? '', url, body });
+      if (q.method === 'POST' && url.startsWith('/v1/messages/count_tokens')) {
+        s.writeHead(200, { 'content-type': 'application/json' });
+        s.end(JSON.stringify({ input_tokens: 10 }));
+        return;
+      }
+      if (q.method !== 'POST' || !url.startsWith('/v1/messages')) {
+        s.writeHead(404, { 'content-type': 'application/json' });
+        s.end(JSON.stringify({ type: 'error', error: { type: 'not_found_error', message: 'the recording endpoint answers messages only' } }));
+        return;
+      }
+      let model: unknown;
+      try {
+        model = (JSON.parse(body) as { model?: unknown }).model;
+      } catch {
+        model = null;
+      }
+      s.writeHead(200, { 'content-type': 'text/event-stream' });
+      s.end(
+        sse('message_start', {
+          type: 'message_start',
+          message: { id: 'msg_recorded', type: 'message', role: 'assistant', model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 1 } },
+        }) +
+          sse('content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }) +
+          sse('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: RECORDED_ANSWER } }) +
+          sse('content_block_stop', { type: 'content_block_stop', index: 0 }) +
+          sse('message_delta', { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 1 } }) +
+          sse('message_stop', { type: 'message_stop' }),
+      );
+    });
+  });
+  // Every interface: on a Linux engine the host gateway is the bridge's address, not loopback.
+  await new Promise<void>((done) => server.listen(0, '0.0.0.0', done));
+  const { port } = server.address() as AddressInfo;
+  return { port, recorded, close: () => new Promise<void>((done) => server.close(() => { done(); })) };
+}
+
+/** The driver's relay, pointed at the recording endpoint: keyless, local, and nothing else changed (A-R21-01, A-R21-02). */
+function recordingRelay(port: number): RelaySpec {
+  return {
+    ...MODEL_RELAY,
+    paths: [...MODEL_RELAY.paths],
+    upstream: { local: 'docker-host', port },
+    scheme: 'none',
+    credential: null,
+    budget: { maxTokens: BUDGET.maxTokens, maxCostUsd: BUDGET.maxCostUsd },
+  };
+}
+
+/** The driver's relay to the API, holding the credential the provider was given. */
+function apiRelay(): RelaySpec {
+  return { ...MODEL_RELAY, paths: [...MODEL_RELAY.paths], budget: { maxTokens: BUDGET.maxTokens, maxCostUsd: BUDGET.maxCostUsd } };
+}
+
+function spec(image: string, workspaceDir: string, relay: RelaySpec): SandboxSpec {
   return {
     image,
     mounts: { workspace: { source: workspaceDir, target: WORKDIR, mode: 'rw' }, others: [] },
@@ -175,7 +303,7 @@ function spec(image: string, workspaceDir: string): SandboxSpec {
     // directly — has no route to it.
     egress: { mode: 'deny-all', allow: [] },
     // The relay enforces the task's budget: the same bounds the request carries (D-P13-01).
-    relay: { ...MODEL_RELAY, paths: [...MODEL_RELAY.paths], budget: { maxTokens: BUDGET.maxTokens, maxCostUsd: BUDGET.maxCostUsd } },
+    relay,
     limits: { cpus: 2, memoryMb: 2048, pids: 512, wallClockMs: 600_000 },
     // The image's own `node` user (image/Dockerfile), which the CLI's home belongs to.
     user: { uid: 1000, gid: 1000 },
@@ -198,7 +326,45 @@ export async function withDriver<T>(
   body: (h: Harness) => Promise<T>,
   options: Partial<Omit<ClaudeCodeDriverOptions, 'provider'>> = {},
 ): Promise<T> {
-  const secret = credential();
+  return harnessed(body, options, { kind: 'api', secret: credential() });
+}
+
+/**
+ * The same harness, with the relay forwarding to a recording endpoint on the
+ * host rather than to the API. Needs a Docker daemon and no credential, and
+ * calls no model: an assertion here reads what the CLI sent (D-R38-03). Its
+ * sandboxes are kept out of `meteredSessions`, because the meter control is
+ * about usage the API reported, and a recorded answer's is not.
+ */
+export async function withRecordingDriver<T>(
+  body: (h: RecordingHarness) => Promise<T>,
+  options: Partial<Omit<ClaudeCodeDriverOptions, 'provider'>> = {},
+): Promise<T> {
+  const recorder = await startRecorder();
+  try {
+    return await harnessed(
+      (h) =>
+        body({
+          ...h,
+          recorded: recorder.recorded,
+          requestsFor: (taskId) => recorder.recorded.filter((r) => sessionOf(r.body) === sessionIdFor(taskId)),
+        }),
+      options,
+      { kind: 'recording', port: recorder.port },
+    );
+  } finally {
+    await recorder.close();
+  }
+}
+
+type Upstream = { readonly kind: 'api'; readonly secret: string } | { readonly kind: 'recording'; readonly port: number };
+
+async function harnessed<T>(
+  body: (h: Harness) => Promise<T>,
+  options: Partial<Omit<ClaudeCodeDriverOptions, 'provider'>>,
+  upstream: Upstream,
+): Promise<T> {
+  const relay = upstream.kind === 'api' ? apiRelay() : recordingRelay(upstream.port);
   // One nonce per harness, so every task of this run shares a prefix that no
   // earlier run has ever presented to the cache.
   const prefix = stablePrefixFor(randomUUID());
@@ -224,8 +390,12 @@ export async function withDriver<T>(
   // A Vault root that exists and holds nothing: the provider requires one, and
   // no mount here may be it, sit inside it, or contain it (I1).
   // The credential goes to the provider, which gives it to the relay and to nothing else.
-  const provider = await Provider.create({ vaultPaths: [vaultDir], credentials: { [MODEL_CREDENTIAL]: secret } });
-  const handle = await provider.provision(spec(image, workspaceDir));
+  const provider = await Provider.create(
+    upstream.kind === 'api'
+      ? { vaultPaths: [vaultDir], credentials: { [MODEL_CREDENTIAL]: upstream.secret } }
+      : { vaultPaths: [vaultDir], dockerHostPorts: [upstream.port] },
+  );
+  const handle = await provider.provision(spec(image, workspaceDir, relay));
 
   // The driver is given a provider that reports each exec as it starts and
   // ends. It is the real provider underneath — nothing is stubbed — so an
@@ -254,7 +424,8 @@ export async function withDriver<T>(
       execs.push({ cmd: [...cmd], env: o?.env });
       try {
         const result = await provider.exec(h, cmd, o);
-        recordCost(result.stdout);
+        // A recorded answer cost nothing, so it is not in the account of where the money went.
+        if (upstream.kind === 'api') recordCost(result.stdout);
         sessionUsage(result.stdout, countsFor(h));
         return result;
       } finally {
@@ -295,7 +466,7 @@ export async function withDriver<T>(
         const dir = join(base, `workspace-${String(extra.length)}`);
         await mkdir(dir, { recursive: true });
         await chmod(dir, 0o777);
-        extra.push(await provider.provision(spec(image, dir)));
+        extra.push(await provider.provision(spec(image, dir, relay)));
       }
       return extra.slice(-count);
     },
@@ -308,11 +479,11 @@ export async function withDriver<T>(
   } finally {
     // The reading is kept, or why it could not be taken: the meter control fails on either.
     const reading = await provider.destroy(handle).then((t) => t.meter).catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))));
-    meteredSessions.push({ test, reading, cli: countsFor(handle) });
+    if (upstream.kind === 'api') meteredSessions.push({ test, reading, cli: countsFor(handle) });
     // Each extra sandbox's relay metered its own calls, and each reading is kept beside the first's.
     for (const more of extra) {
       const read = await provider.destroy(more).then((t) => t.meter).catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))));
-      meteredSessions.push({ test, reading: read, cli: countsFor(more) });
+      if (upstream.kind === 'api') meteredSessions.push({ test, reading: read, cli: countsFor(more) });
     }
     await rm(base, { recursive: true, force: true });
   }
