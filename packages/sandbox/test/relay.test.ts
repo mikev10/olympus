@@ -12,10 +12,11 @@
  */
 import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { readFileSync, readlinkSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { mkdir, mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
-import { hostname, tmpdir } from 'node:os';
+import { hostname, tmpdir, uptime } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'vitest';
@@ -98,12 +99,25 @@ const issuers = new Map<SandboxHandle, LocalDockerProvider>();
 const upstreams: string[] = [];
 
 /**
- * Every Docker object this file creates carries one label naming the host, the process, and this run (#19,
+ * Where a pid means one process: this host, this boot, and this PID namespace. A pid read in any other scope
+ * names nothing here, so an owner from one is never judged by this process (codex-1, gemini-1): a runner in
+ * another container on the same hostname and daemon is alive whatever `process.kill` answers here. On Linux the
+ * boot and the namespace are the kernel's own, and a read that fails throws rather than letting two namespaces
+ * look alike; elsewhere there are no PID namespaces, and the boot is the minute the host started.
+ */
+function processScope(): string {
+  if (process.platform !== 'linux') return `${hostname()}|boot-${String(Math.round((Date.now() - uptime() * 1000) / 60_000))}|host`;
+  return `${hostname()}|${readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim()}|${readlinkSync('/proc/self/ns/pid')}`;
+}
+const SCOPE = processScope();
+
+/**
+ * Every Docker object this file creates carries one label naming the process's scope, its pid, and this run (#19,
  * D-R39-05). A run killed before its teardown is found by it, and only by it: a neighbour's objects carry
  * another owner, and a name prefix would not tell the two apart (#74).
  */
 const OWNER_KEY = 'sandbox-test.owner';
-const OWNER = `${hostname()}/${String(process.pid)}/${randomUUID()}`;
+const OWNER = `${SCOPE}/${String(process.pid)}/${randomUUID()}`;
 const LABELS = { [OWNER_KEY]: OWNER };
 const LABEL_ARGS = ['--label', `${OWNER_KEY}=${OWNER}`];
 
@@ -243,11 +257,15 @@ async function labelled(): Promise<Array<{ kind: 'container' | 'network'; id: st
   return [...(await rows('container', ['ps', '--all'])), ...(await rows('network', ['network', 'ls']))];
 }
 
-/** Whether an owner names a process on this host that has exited. Another host's, or one still running, is never swept. */
+/**
+ * Whether an owner names a process in this process's scope that has exited. An owner from another host, boot, or
+ * PID namespace, or one still running, is never swept: a leftover is the safe failure, a live run's objects removed
+ * is not. A reused pid keeps a dead run's objects in place for the same reason (codex-5).
+ */
 function ownerIsGone(owner: string): boolean {
-  const [host, pid] = owner.split('/');
+  const [scope, pid] = owner.split('/');
   const id = Number(pid);
-  if (host !== hostname() || !Number.isSafeInteger(id) || id <= 0) return false;
+  if (scope !== SCOPE || !Number.isSafeInteger(id) || id <= 0) return false;
   try {
     process.kill(id, 0);
     return false;
@@ -273,12 +291,38 @@ beforeAll(async () => {
   certificate = await makeCertificate();
 });
 
+/**
+ * This run's objects still on the daemon. A container Docker is already removing on its own — `--rm`, and exited —
+ * is not one: the daemon removes it after the call that ran it returns.
+ */
+async function ownLeftovers(): Promise<string[]> {
+  const left: string[] = [];
+  for (const object of (await labelled()).filter((o) => o.owner === OWNER)) {
+    if (object.kind === 'container') {
+      const shown = await run('docker', ['inspect', '--type', 'container', '--format', '{{.HostConfig.AutoRemove}} {{.State.Status}}', object.id]).then(
+        ({ stdout }) => stdout.trim(),
+        (error: unknown) => {
+          if (stderrOf(error).includes('No such container')) return 'gone';
+          throw error;
+        },
+      );
+      if (shown === 'gone' || /^true (exited|dead|removing)$/u.test(shown)) continue;
+    }
+    left.push(`${object.kind} ${object.id}`);
+  }
+  return left;
+}
+
 afterAll(async () => {
-  // Whatever this run made that its per-test teardown did not reach, such as a provision interrupted after its relay
-  // started; then nothing of this run may be left.
+  // What this run left past its per-test teardown is recorded before anything removes it, so a teardown that reported
+  // success and left a container fails here rather than being cleaned up into a pass (codex-4). Then everything of
+  // this run is removed, and nothing may remain.
+  const leftBehind = await ownLeftovers();
   await sweep((owner) => owner === OWNER);
-  const left = (await labelled()).filter((object) => object.owner === OWNER);
-  if (left.length > 0) throw new Error(`relay tests: this run left ${left.map((o) => `${o.kind} ${o.id}`).join(', ')}`);
+  const remaining = await ownLeftovers();
+  if (leftBehind.length > 0 || remaining.length > 0) {
+    throw new Error(`relay tests: teardown left ${leftBehind.join(', ') || 'nothing'}; after the sweep, ${remaining.join(', ') || 'nothing'} remained`);
+  }
 });
 
 beforeEach(async () => {
@@ -586,6 +630,21 @@ describe('the relay is the only route to its upstream', () => {
       await listener.stop();
       await removeDocker(['network', 'rm', plain]);
     }
+  });
+});
+
+describe('the sweep removes only what an owner it can prove dead left', () => {
+  // codex-1, gemini-1: a pid is a process only in the scope it was read in.
+  test('an owner whose pid has exited here is gone; one still running, or from another scope, is not', () => {
+    const dead = 2 ** 22 + 12_345;
+    expect(() => process.kill(dead, 0)).toThrow();
+    expect(ownerIsGone(`${SCOPE}/${String(dead)}/run`)).toBe(true);
+    expect(ownerIsGone(`${SCOPE}/${String(process.pid)}/run`)).toBe(false);
+    for (const scope of [`${hostname()}|another-boot|host`, `${hostname()}|${SCOPE.split('|')[1] ?? ''}|pid:[1]`, `elsewhere|${SCOPE.split('|').slice(1).join('|')}`]) {
+      expect(ownerIsGone(`${scope}/${String(dead)}/run`), scope).toBe(false);
+    }
+    expect(ownerIsGone(`${hostname()}/${String(dead)}/run`), 'the owner form before R39 triage').toBe(false);
+    expect(ownerIsGone('not an owner')).toBe(false);
   });
 });
 
