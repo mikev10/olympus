@@ -512,8 +512,8 @@ export const MODEL_RELAY_ENFORCES_BUDGET_OPENAI_CHAT = runtime({
 export const MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE_OPENAI_CHAT = runtime({
   id: 'I5.model-relay-fails-closed-on-unmetered-usage-openai-chat',
   title:
-    'under the openai-chat dialect a model with no price and a request with no output ceiling are refused before the upstream sees them, an answer with no completion_tokens is charged its ceiling, ' +
-    'and an answer with no readable usage stops the relay forwarding',
+    'under the openai-chat dialect a model with no price, a request with no output ceiling, and a request asking for a service tier other than the default, a web search, or audio are refused before the upstream sees them, ' +
+    'while one naming the default tier and text alone is sent; an answer with no completion_tokens is charged its ceiling, and an answer with no readable usage stops the relay forwarding',
   run: async () => {
     const certificate = await makeCertificate();
     await withSandboxDirs('i5-relay-unmetered-openai-', async (dirs) => {
@@ -531,8 +531,24 @@ export const MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE_OPENAI_CHAT = runtime({
             if (unsent.map((a) => a.status).join(',') !== '400,400' || (await upstreamLog()).length !== 0) {
               throw new Error(`I5: an unpriced or uncapped openai-chat request was answered ${JSON.stringify(unsent)} or reached the upstream`);
             }
-            // Charged its ceiling: 64 output tokens, not the 7 the upstream never reported.
-            const partial = await sendAll(provider, handle, [message(1000, 7, 'final')], 'openai-chat');
+            // Billed outside prompt_tokens and completion_tokens, or at a rate the price table does not hold (#88, D-R38-05).
+            const unmeterable: Array<[string, Record<string, unknown>]> = [
+              ['a flex service tier', { ...message(10, 1), service_tier: 'flex' }],
+              ['the auto service tier', { ...message(10, 1), service_tier: 'auto' }],
+              ['web search options', { ...message(10, 1), web_search_options: {} }],
+              ['audio output', { ...message(10, 1), audio: { voice: 'alloy', format: 'wav' } }],
+              ['an audio modality', { ...message(10, 1), modalities: ['text', 'audio'] }],
+              ['audio input', { ...message(10, 1), messages: [{ role: 'user', content: [{ type: 'input_audio', input_audio: { data: '', format: 'wav' } }] }] }],
+            ];
+            const billed = await sendAll(provider, handle, unmeterable.map(([, body]) => body), 'openai-chat');
+            for (const [i, [what]] of unmeterable.entries()) {
+              const answer = billed[i];
+              if (answer?.status !== 400 || !answer.body.includes('billed outside')) throw new Error(`I5: an openai-chat request with ${what} was answered ${JSON.stringify(answer)}`);
+            }
+            if ((await upstreamLog()).length !== 0) throw new Error('I5: an openai-chat request billed outside its token usage reached the upstream');
+            // Charged its ceiling: 64 output tokens, not the 7 the upstream never reported. It names the
+            // default tier and text alone, so a relay that refused every request naming either fails here.
+            const partial = await sendAll(provider, handle, [{ ...message(1000, 7, 'final'), service_tier: 'default', modalities: ['text'], web_search_options: null }], 'openai-chat');
             if (partial[0]?.status !== 200) throw new Error(`I5: an openai-chat call with partial usage was answered ${JSON.stringify(partial)}`);
             const blind = await sendAll(provider, handle, [message(1000, 7, 'all'), message(10, 1)], 'openai-chat');
             if (blind.map((a) => a.status).join(',') !== '200,402') throw new Error(`I5: after an unreadable openai-chat answer the relay answered ${JSON.stringify(blind)}`);
@@ -541,7 +557,7 @@ export const MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE_OPENAI_CHAT = runtime({
         ),
         'I5',
       );
-      if (reading.calls !== 2 || reading.inputTokens !== 1000 || reading.outputTokens !== 64 + 64 || reading.exhausted !== 'unreadable' || reading.refused !== 3) {
+      if (reading.calls !== 2 || reading.inputTokens !== 1000 || reading.outputTokens !== 64 + 64 || reading.exhausted !== 'unreadable' || reading.refused !== 9) {
         throw new Error(`I5: the openai-chat destroy read ${JSON.stringify(reading)}`);
       }
     });

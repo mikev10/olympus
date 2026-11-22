@@ -100,6 +100,8 @@ export const METER_PREFIX = 'model-relay-meter ';
  *   `max_completion_tokens` and `max_tokens`, times `n`; the usage is
  *   `prompt_tokens` (less its cached part, counted as cache reads) and
  *   `completion_tokens`, from the body or from the stream chunk that carries it.
+ *   A request asking for a service tier other than the default, a web search,
+ *   or audio is refused unsent: each is billed outside that usage (#88).
  * - Under the `openai-responses` dialect (A-R26-01) the same rules hold with
  *   that API's names: a `POST` to a granted path ending `/responses` is
  *   metered and a `GET` is free; the ceiling is the larger of the model's
@@ -526,6 +528,37 @@ function responsesUnmeterable(request) {
   return null;
 }
 
+// What an openai-chat request asks for that costs more than its tokens, or null (#88, D-R38-05).
+// A service tier other than the default is billed at another rate, a web search is billed per
+// call, and audio, out or in, is billed at audio rates while reported inside the same
+// prompt_tokens and completion_tokens the price table charges at one rate. Each is spend the
+// budget cannot see, so each is refused as the responses dialect refuses its own (D-P13-12).
+function chatUnmeterable(request) {
+  const tier = request.service_tier;
+  if (tier !== undefined && tier !== null && tier !== 'default') return 'the request asks for the service tier ' + JSON.stringify(String(tier).slice(0, 40));
+  if (request.web_search_options !== undefined && request.web_search_options !== null) return 'the request asks for a web search';
+  if (request.audio !== undefined && request.audio !== null) return 'the request asks for audio output';
+  const modalities = request.modalities;
+  if (modalities !== undefined && modalities !== null) {
+    if (!Array.isArray(modalities)) return 'the request names modalities that are not a list';
+    for (let i = 0; i < modalities.length; i += 1) {
+      if (modalities[i] !== 'text') return 'the request asks for the modality ' + JSON.stringify(String(modalities[i]).slice(0, 40));
+    }
+  }
+  const messages = request.messages;
+  if (Array.isArray(messages)) {
+    for (let i = 0; i < messages.length; i += 1) {
+      const content = messages[i] !== null && typeof messages[i] === 'object' ? messages[i].content : undefined;
+      if (!Array.isArray(content)) continue;
+      for (let j = 0; j < content.length; j += 1) {
+        const part = content[j];
+        if (part !== null && typeof part === 'object' && part.type === 'input_audio') return 'the request sends audio input';
+      }
+    }
+  }
+  return null;
+}
+
 // One metered call at a time (D-P13-13).
 let busy = false;
 const waiting = [];
@@ -580,7 +613,7 @@ function metered(req, res, target, path) {
         release();
         return;
       }
-      const unmeterable = responses ? responsesUnmeterable(request) : null;
+      const unmeterable = responses ? responsesUnmeterable(request) : openai ? chatUnmeterable(request) : null;
       if (unmeterable !== null) {
         refuseWith(res, 400, 'invalid_request_error', unmeterable + ', which is billed outside the usage this meter reads, so it is not sent', 'unmeterable');
         release();
