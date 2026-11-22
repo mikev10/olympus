@@ -651,6 +651,7 @@ order between them is settled before any of them is picked up.
 | R53 | Harness integrity: the agent CLI by content, the image in evidence ([#169](https://github.com/mikev10/olympus/issues/169)) (opens with a contract amendment) | M2 | P5, R26, R9, R52 | — |
 | R54 | The `deep` tier's model, chosen by the benchmark ([#171](https://github.com/mikev10/olympus/issues/171)) | M2 | R7, R14, P13, R52 | — |
 | R55 | An operator can read a draft, and the host refuses a rejected key ([#175](https://github.com/mikev10/olympus/issues/175), [#176](https://github.com/mikev10/olympus/issues/176)) | M2 | R19, R36b | — |
+| R56 | The relay forwards only the tools a task was granted ([#189](https://github.com/mikev10/olympus/issues/189)) (opens with a contract amendment) | M2 | P12, P13, R26 | — |
 
 ### R1 — Readiness
 
@@ -3213,7 +3214,9 @@ security fixes. R39 can also run beside R36b; its packages overlap R36b's
 only in `packages/conformance/src/registry/`. R38 waits for R52, because both
 change `packages/drivers/claude-code`. After R36b merges: the #174
 amendment, then R53, R54, R55, then R40 onward as the R38 to R51 amendment
-orders them.
+orders them. R56 was added after R52's review and comes after R55. It opens
+with a contract amendment to the relay grant, so it does not run beside
+another unit changing `packages/sandbox`.
 
 ### R52 — The driver's CLI is current, and Code Mode is off
 
@@ -3304,6 +3307,33 @@ and every attempt fails 401 until it parks.
 
 **Why after R36b:** both touch `packages/api` and `packages/cli`, which
 R36b is changing.
+
+### R56 — The relay forwards only the tools a task was granted
+
+Issue [#189](https://github.com/mikev10/olympus/issues/189), found in R52's
+external review (D-R52-04). For the Anthropic dialect the model relay reads
+only `model` and `max_tokens` and forwards the body byte for byte
+(`packages/sandbox/src/local/relay.ts:81`). Only the OpenAI Responses path
+filters tool types (`relay.ts:514`). A task granted `Bash` can send the relay
+a request of its own, with `curl` or a nested `claude`, because the container
+holds the relay URL and the placeholder key. That request can name
+Anthropic's server-side tools, such as web search, which run at the API
+rather than through the sandbox's egress. Everything else such a request
+does is something `Bash` already could. The server-side tools are not, so
+they are an ungranted capability (I4).
+
+- the relay refuses an Anthropic-dialect request whose `tools` name a
+  server-side tool the task's grant does not include
+- an assertion that, from inside the sandbox, a request naming an ungranted
+  server tool is refused and a granted one passes
+
+**Contract amendment first:** the relay's grant carries paths and no tools
+(`packages/sandbox/src/types.ts:60`), so telling the relay which server tools
+a task may use is a change to that type. It is confirmed before the build.
+
+**Why M2:** default deny at the one boundary a granted command tool can reach
+on its own, and the relay controls P12 and P13 built are the place that
+enforces it.
 
 ## Working Rules
 
