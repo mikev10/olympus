@@ -53,6 +53,13 @@ async function read<T>(vault: Vault, ref: Parameters<Vault['read']>[0]): Promise
 /** A unit check: no command, since its runner is the base framework's (D-R15-04). */
 const UNIT_CHECK = { id: 'unit', kind: 'unit', required: true, timeoutMs: 10_000 } as const;
 
+/** The first of `items`, or a failure naming what was not recorded: an absent record fails the test, never ends it early (#48). */
+function first<T>(items: readonly T[], what: string): T {
+  const [item] = items;
+  if (item === undefined) throw new Error(`no ${what} was recorded`);
+  return item;
+}
+
 function refusedState(outcome: RunOutcome): RunState {
   if (outcome.ok || outcome.reason !== 'refused' || outcome.state === null) throw new Error(`expected a refusal on the line, got ${JSON.stringify(outcome)}`);
   return outcome.state;
@@ -181,8 +188,7 @@ describe('hello at L1', () => {
     const entered = state.stations.map((e) => Date.parse(e.enteredAt));
     expect(entered.every((t, i) => !Number.isNaN(t) && (i === 0 || t >= (entered[i - 1] ?? Infinity)))).toBe(true);
 
-    const [ref] = state.evidenceRefs;
-    if (ref === undefined) return;
+    const ref = first(state.evidenceRefs, 'evidence reference');
     const bundle = await read<EvidenceBundle>(components.vault, ref);
     expect(bundle).toMatchObject({ runId, taskId: hello, collectedBy: 'runtime', claimEvidenceDiff: [] });
     expect(bundle.checks).toEqual([
@@ -212,8 +218,7 @@ describe('hello at L1', () => {
     const sandbox = new RecordingSandbox(new StubSandboxProvider());
     await startRun(runRequest(runId, workspace, { ...components, driver, reviewer: new ChosenDriver({ family: 'other' }), sandbox }));
     expect(driver.requests).toHaveLength(1);
-    const [req] = driver.requests;
-    if (req === undefined) return;
+    const req = first(driver.requests, 'driver request');
     expect(req).toMatchObject({ taskId: hello, role: { role: 'builder' }, variableSuffix: hello, tier: 'standard', tools: ['Read', 'Write'] });
     expect(req.stablePrefix).toContain(await readSpec(workspace));
     expect(req.stablePrefix).toContain('The black-box oracle');
@@ -284,8 +289,7 @@ describe('the verdict follows the checks and nothing else (I2)', () => {
     await writeChecks(workspace, [{ ...HELLO_CHECK, id: 'cannot-start', command: ['no-such-program-p4', '--version'] }]);
     const state = refusedState(await startRun(runRequest(runId, workspace, components)));
     expect(state.tasks[hello]).toBe('parked');
-    const [ref] = state.evidenceRefs;
-    if (ref === undefined) return;
+    const ref = first(state.evidenceRefs, 'evidence reference');
     expect((await read<EvidenceBundle>(components.vault, ref)).checks.map((c) => c.checkId)).toEqual(['hello-written', 'secret-scan']);
   });
 
@@ -315,8 +319,7 @@ describe('the verdict follows the checks and nothing else (I2)', () => {
     const installing = { ...components, installers: [standInNpmInstaller(workspace)] };
     const state = refusedState(await startRun(runRequest(runId, workspace, installing, { policy: policy({ installRegistries: ['registry.npmjs.org'] }) })));
     expect(state.tasks[hello]).toBe('passed');
-    const [ref] = state.evidenceRefs;
-    if (ref === undefined) return;
+    const ref = first(state.evidenceRefs, 'evidence reference');
     const bundle = await read<EvidenceBundle>(components.vault, ref);
     expect(bundle.checks[0]?.suiteCount).toBe(1);
     expect(bundle.install).toMatchObject({ stack: 'npm', lockfile: 'package-lock.json', baseLockfileSha256: bundle.install?.lockfileSha256, lockfileDiff: { added: [], removed: [], changed: [] } });
@@ -435,8 +438,7 @@ describe('locks are re-verified at every transition (I3)', () => {
     const state = refusedState(outcome);
     expect(state.tasks[hello]).toBe('failed');
     expect(state.violations).toHaveLength(1);
-    const [ref] = state.violations;
-    if (ref === undefined) return;
+    const ref = first(state.violations, 'integrity violation');
     // The task in flight is failed with the violation, but it had not run when
     // the mismatch was found, so no role is named for it (D-P4-08, A-P4-05).
     expect(await read<IntegrityViolation>(components.vault, ref)).toMatchObject({ kind: 'lock-tamper', taskId: hello, role: 'unattributed' });
@@ -451,8 +453,7 @@ describe('locks are re-verified at every transition (I3)', () => {
     expect(outcome).toMatchObject({ at: 'verify', transition: { reason: 'lock-tamper' } });
     const state = refusedState(outcome);
     expect(state.evidenceRefs).toEqual([]);
-    const [ref] = state.violations;
-    if (ref === undefined) return;
+    const ref = first(state.violations, 'integrity violation');
     const violation = await read<IntegrityViolation>(components.vault, ref);
     expect(violation.detail).toMatchObject({ station: 'verify', phase: 'after-checks' });
   });
@@ -601,8 +602,7 @@ describe('what a station is handed, beyond its prompt', () => {
     expect(driver.requests).toHaveLength(0);
     const state = refusedState(outcome);
     expect(state.violations).toHaveLength(1);
-    const [ref] = state.violations;
-    if (ref === undefined) return;
+    const ref = first(state.violations, 'integrity violation');
     const violation = await read<IntegrityViolation>(base.vault, ref);
     expect(violation.detail).toMatchObject({ station: 'build', phase: 'context' });
   });
@@ -629,8 +629,7 @@ describe('what a station is handed, beyond its prompt', () => {
     const outcome = await startRun(runRequest(runId, workspace, components));
     expect(outcome).toMatchObject({ at: 'review', transition: { reason: 'lock-tamper' } });
     expect(reviewer.requests).toHaveLength(0);
-    const [ref] = refusedState(outcome).violations;
-    if (ref === undefined) return;
+    const ref = first(refusedState(outcome).violations, 'integrity violation');
     const violation = await read<IntegrityViolation>(base.vault, ref);
     // The reviewer never ran, so the builder is the last role that acted; the reviewer's driver is what found it.
     expect(violation.role).toBe('builder');

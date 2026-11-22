@@ -5,7 +5,7 @@
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { renderReport, scan, type ProbeId, type ProbeResult, type ReadinessReport } from '../src/index.js';
-import { EMPTY_LOCK, PROTECTED, gitRepository, lockfileFor, manifest, options, treeHash, withWorkbench, writeFiles, type Workbench } from './repo.js';
+import { EMPTY_LOCK, PROTECTED, gitRepository, lockfileFor, manifest, options, treeSnapshot, withWorkbench, writeFiles, type Workbench } from './repo.js';
 
 const probe = (report: ReadinessReport, id: ProbeId): ProbeResult => {
   const found = report.probes.find((p) => p.probe === id);
@@ -36,11 +36,11 @@ describe('a repository that supports every ceiling-bearing probe', () => {
         'sum.test.js': "import { expect, test } from 'vitest';\nimport { sum } from './sum.js';\ntest('adds', () => expect(sum(1, 2)).toBe(3));\n",
         'AGENTS.md': '# Agents\n',
       });
-      const before = await treeHash(dir);
+      const before = await treeSnapshot(dir);
 
       const first = await scan(options(bench, dir, { branchProtection: PROTECTED }));
       expect(first.ceiling, renderReport(first)).toMatchObject({ kind: 'scanned', level: 2, heldBy: { kind: 'scan-limit' } });
-      expect(await treeHash(dir)).toBe(before);
+      expect(await treeSnapshot(dir)).toStrictEqual(before);
 
       for (const result of first.probes) {
         expect(result.collectedBy).toBe('runtime');
@@ -59,7 +59,7 @@ describe('a repository that supports every ceiling-bearing probe', () => {
 
       const second = await scan(options(bench, dir, { branchProtection: PROTECTED }));
       expect(second.ceiling).toEqual(first.ceiling);
-      expect(await treeHash(dir)).toBe(before);
+      expect(await treeSnapshot(dir)).toStrictEqual(before);
     });
   });
 });
