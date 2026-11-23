@@ -11645,9 +11645,15 @@ merged and tagged `reviewed/*` (`git tag -l 'reviewed/*'`).
 
 - **Chosen:** `corpus/v2` copies v1 and adds the following:
   - `fast-check` in calc's lockfile;
-  - `test/property/multiply.property.test.ts`;
-  - `verify-property.json`, which is `verify.json` plus a required property
-    check declared `fails` on the base;
+  - `test/property/multiply.property.test.ts` and `verify-property.json`
+    (`verify.json` plus a required property check declared `fails` on the
+    base), both under `arms/line-with-properties/calc/`. That overlay is
+    laid over calc for that arm alone. calc has no vitest config, so its
+    `unit` check runs every suite it holds. A property file in the shared
+    repository would therefore run in the `line` arm too, under fast-check's
+    own random seed, and that arm would no longer be without properties.
+    In the property arm, `unit` runs the file in the same way, unpinned,
+    beside the pinned property check;
   - the `edge-case-only` item, `Math.abs(a * b)`. It is right on the three
     acceptance inputs and wrong when the signs differ, which "the product of
     two finite numbers" covers;
