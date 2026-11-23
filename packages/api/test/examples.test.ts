@@ -16,7 +16,7 @@ import { hashedLockfile } from '@olympus-ai/adapters';
 import { StrictPolicyEngine, StubDriver, type RoleId } from '@olympus-ai/core';
 import { loadPolicyFile } from '../src/policy-file.js';
 import { commitFixture } from '@olympus-ai/conformance/git';
-import { removeWorkspace, stubComponents } from './harness.js';
+import { removeWorkspace, RIG_SCANNER, stubComponents } from './harness.js';
 
 const EXAMPLES = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'examples');
 const TOKEN = 't'.repeat(40);
@@ -36,7 +36,7 @@ beforeEach(async () => {
     // The host's own scanners, so the manifest's pinned secret-scan image is the one checked; stub drivers in the
     // drafting seats, since the host seats real ones and this proves the files, not the models.
     components: stubComponents(workspace, { scanners: SCANNERS, drafting: { specDrafter: new StubDriver(), specCritic: new StubDriver(), testDrafter: new StubDriver(), testCritic: new StubDriver() } }), token: TOKEN, principal: 'local',
-    policyFile: join(EXAMPLES, 'policy.yaml'), rolesDirectory: join(EXAMPLES, 'roles'), rubricsDirectory: join(EXAMPLES, 'rubrics'),
+    policyFile: join(EXAMPLES, 'policy.yaml'), rolesDirectory: join(EXAMPLES, 'roles'), rubricsDirectory: join(EXAMPLES, 'rubrics'), readiness: RIG_SCANNER,
   });
   url = await server.listen(0, '127.0.0.1');
 });

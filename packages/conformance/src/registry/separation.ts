@@ -19,7 +19,7 @@ import type { SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
 import type { UsageRecord } from '@olympus-ai/vault';
 import { runtime } from '../kit/assert.js';
 import type { LocalAssertion } from '../kit/types.js';
-import { HELLO_REVIEW, HELLO_TASK, linePolicy, readArtifact, stubDriver, withLine, type ObservedDriver } from './line.js';
+import { HELLO_REVIEW, HELLO_TASK, linePolicy, readArtifact, RIG_SCANNER, stubDriver, withLine, type ObservedDriver } from './line.js';
 import { inTask, writes } from './verification.js';
 
 const api = async () => import('@olympus-ai/api');
@@ -293,7 +293,7 @@ export const LOCAL_TOKEN_REACHES_NO_SANDBOX: LocalAssertion = runtime({
       const policyFile = join(rig.dirs.artifacts, '..', 'policy.yaml');
       await writeFile(policyFile, JSON.stringify(await linePolicy()));
       const req = await rig.request(components);
-      const server = createApiServer({ components, token: LOCAL_TOKEN, principal: 'r9-principal', policyFile, rolesDirectory: rig.roles });
+      const server = createApiServer({ readiness: RIG_SCANNER, components, token: LOCAL_TOKEN, principal: 'r9-principal', policyFile, rolesDirectory: rig.roles });
       const address = await server.listen(0, '127.0.0.1');
       const headers = { authorization: `Bearer ${LOCAL_TOKEN}`, 'content-type': 'application/json' };
       const settled = async (runId: string): Promise<{ standing: { standing: string }; state: RunState }> => {

@@ -15,7 +15,7 @@ import { randomUUID } from 'node:crypto';
 import { cp, mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { buildGraph, containerUser, parseGraph, DEFAULT_LIMITS, localWorkspaceStore, startRun, worstCaseCost, type ContainerUser, type GraphBinding, type RunOutcome, type RunRequest } from '@olympus-ai/api';
+import { buildGraph, containerUser, parseGraph, DEFAULT_LIMITS, localWorkspaceStore, startRun, worstCaseCost, type AdmissionReadiness, type ContainerUser, type GraphBinding, type RunOutcome, type RunRequest } from '@olympus-ai/api';
 import { DEFAULT_ROLES_DIRECTORY } from '@olympus-ai/compiler';
 import {
   StrictPolicyEngine,
@@ -34,6 +34,15 @@ import { imageId, LocalDockerProvider, type SandboxHandle, type SandboxProvider,
 import { LocalVault, type EnforcementDecision, type Vault } from '@olympus-ai/vault';
 import { DEFAULT_ARMS, repoDir, type Arm, type Corpus, type Item, type RepoPolicy } from './corpus.js';
 import { BENCH_TOOLS, BenchStub, ScriptedSeat } from './seats.js';
+
+/**
+ * The benchmark's readiness scan (A-R40-02): L2 for whatever commit it is asked about, held by the scan limit.
+ * The benchmark measures whether the line catches false-done work, not readiness, and its corpus repositories
+ * are built here with no branch protection to probe; a run's readiness term is this declaration, not a scan.
+ */
+export const BENCH_READINESS: AdmissionReadiness = {
+  ceilingAt: (_checkout, commit) => Promise.resolve({ kind: 'scanned', level: 2, heldBy: { kind: 'scan-limit' }, commit }),
+};
 
 const run = promisify(execFile);
 
@@ -253,6 +262,7 @@ export async function throughTheLine(bench: Bench, corpus: Corpus, item: Item, a
     roles: DEFAULT_ROLES_DIRECTORY,
     components,
     approvedCostUsd: worstCaseCost(graph, policy).usd,
+    readiness: BENCH_READINESS,
   });
   return classify(outcome, await recorded(vault, runId));
 }

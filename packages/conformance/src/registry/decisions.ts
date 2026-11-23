@@ -371,6 +371,10 @@ export const DECISION_TABLE: Readonly<Record<CauseKey, Row>> = {
     const { startRun } = await api();
     await startRun(await rig.request(await realComponents(rig), { requestedLevel: 3, policy: await realPolicy(3) }));
   }),
+  'admission:readiness-unscanned': admissionRow('admission:readiness-unscanned', 'p14-unscanned-', async (rig) => {
+    const { startRun } = await api();
+    await startRun(await rig.request(await rig.components(), { readiness: null }));
+  }),
   'admission:readiness-refused': admissionRow('admission:readiness-refused', 'p14-readiness-', async (rig) => {
     const { startRun } = await api();
     const readiness = {

@@ -112,6 +112,12 @@ beforeEach(async () => {
     principal: 'cli-test',
     policyFile,
     rolesDirectory: roles,
+    // The server's readiness scan (A-R40-02): L2 for the commit asked about. The CLI is under test here, not readiness.
+    readiness: {
+      resolve: () => Promise.reject(new Error('the readiness route is not under test')),
+      scan: () => Promise.reject(new Error('the readiness route is not under test')),
+      ceilingAt: (_checkout, commit) => Promise.resolve({ kind: 'scanned', level: 2, heldBy: { kind: 'scan-limit' }, commit }),
+    },
   });
   // Not a default: an ephemeral port on the loopback address, known to the CLI only through --url.
   url = await server.listen(0, '127.0.0.1');

@@ -17,7 +17,7 @@ import type { IntegrationRecord } from '@olympus-ai/vault';
 import { runtime } from '../kit/assert.js';
 import { allText } from './all-text.js';
 import { MERGED_AT, withFakeGitHub, type FakeGitHub } from '../kit/fake-github.js';
-import { HELLO_TASK, linePolicy, refusalOf, stubDriver, withLine, writeManifest, type LineRig, type RigOptions } from './line.js';
+import { HELLO_TASK, linePolicy, refusalOf, RIG_SCANNER, stubDriver, withLine, writeManifest, type LineRig, type RigOptions } from './line.js';
 import { specFor, throughProxy, withProvider, withSandbox } from './local-sandbox.js';
 import { inTask, writes } from './verification.js';
 
@@ -372,7 +372,7 @@ export const RUN_REPORT_READS_ONLY_RECORDS = runtime({
 
       // Served and printed: the API's report is the same object, and the CLI asks for it.
       const { createApiServer } = await api();
-      const server = createApiServer({ components: await it.components(), token: REPORT_TOKEN, principal: 'conformance', policyFile: join(it.rig.dirs.artifacts, 'missing-policy.yaml'), rolesDirectory: it.rig.roles });
+      const server = createApiServer({ readiness: RIG_SCANNER, components: await it.components(), token: REPORT_TOKEN, principal: 'conformance', policyFile: join(it.rig.dirs.artifacts, 'missing-policy.yaml'), rolesDirectory: it.rig.roles });
       const address = await server.listen(0, '127.0.0.1');
       try {
         const res = await fetch(`${address}/runs/${it.rig.runId}/report`, { headers: { authorization: `Bearer ${REPORT_TOKEN}` } });
@@ -442,7 +442,7 @@ export const OUTCOMES_DERIVED_FROM_RUN_RECORDS = runtime({
       if (cost.kind !== 'cost' || cost.bound !== 'exact' || Math.abs(cost.usd - 0.002 * read) > 1e-12) throw new Error(`I2: cost per merged change is ${JSON.stringify(cost)}, not ${String(read)} calls at $0.002`);
 
       const { createApiServer } = await api();
-      const server = createApiServer({ components: await it.components(), token: REPORT_TOKEN, principal: 'conformance', policyFile: join(it.rig.dirs.artifacts, 'missing-policy.yaml'), rolesDirectory: it.rig.roles });
+      const server = createApiServer({ readiness: RIG_SCANNER, components: await it.components(), token: REPORT_TOKEN, principal: 'conformance', policyFile: join(it.rig.dirs.artifacts, 'missing-policy.yaml'), rolesDirectory: it.rig.roles });
       const address = await server.listen(0, '127.0.0.1');
       try {
         const headers = { authorization: `Bearer ${REPORT_TOKEN}` };

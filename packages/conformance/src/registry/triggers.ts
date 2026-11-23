@@ -17,7 +17,7 @@ import type {
 import type { CandidateRecord, TriggerDecision, Vault } from '@olympus-ai/vault';
 import { lintFixture, runtime } from '../kit/assert.js';
 import type { LocalAssertion } from '../kit/types.js';
-import { linePolicy, lineScope, stubDriver, withLine, type LineRig } from './line.js';
+import { linePolicy, lineScope, RIG_SCANNER, stubDriver, withLine, type LineRig } from './line.js';
 import { withVaultDirs } from './local-vault.js';
 
 const api = async () => import('@olympus-ai/api');
@@ -302,7 +302,7 @@ const DELIVERY_REFUSED_BEFORE_IT_IS_READ = runtime({
       const policy = await issuePolicy();
       const policyFile = join(rig.dirs.artifacts, '..', 'policy.yaml');
       await writeFile(policyFile, JSON.stringify(policy));
-      const server = createApiServer({ components: await rig.components(), token: TOKEN, principal: 'conformance', policyFile, rolesDirectory: rig.roles, secrets: SECRETS });
+      const server = createApiServer({ readiness: RIG_SCANNER, components: await rig.components(), token: TOKEN, principal: 'conformance', policyFile, rolesDirectory: rig.roles, secrets: SECRETS });
       const address = await server.listen(0, '127.0.0.1');
       const vault = await localVault(rig.dirs);
       const post = async (path: string, body: Buffer, signature?: string): Promise<number> => {

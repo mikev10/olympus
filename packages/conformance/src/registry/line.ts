@@ -11,7 +11,7 @@
  */
 import { cp, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { BuiltGraph, GraphParts, RunOutcome, RunRequest, WorkspaceStore } from '@olympus-ai/api';
+import type { AdmissionReadiness, BuiltGraph, ReadinessScanner, GraphParts, RunOutcome, RunRequest, WorkspaceStore } from '@olympus-ai/api';
 import type {
   ApprovalKey,
   ApprovalOutcome,
@@ -37,6 +37,21 @@ import type { Vault } from '@olympus-ai/vault';
 import { commitFixture } from '../kit/git.js';
 import { workspaceRoot } from '../kit/workspace.js';
 import { withVaultDirs, type VaultDirs } from './local-vault.js';
+
+/**
+ * The rig's readiness scan (A-R40-02): L2 for whatever commit it is asked about, held by the scan limit. A
+ * trusted component of the rig, as its drivers and Vault are; an assertion about readiness passes its own.
+ */
+export const RIG_READINESS: AdmissionReadiness = {
+  ceilingAt: (_checkout, commit) => Promise.resolve({ kind: 'scanned', level: 2, heldBy: { kind: 'scan-limit' }, commit }),
+};
+
+/** The same scan as a server's scanner: admission asks it for a ceiling, and the readiness route is not under test. */
+export const RIG_SCANNER: ReadinessScanner = {
+  resolve: () => Promise.reject(new Error('the readiness route is not under test')),
+  scan: () => Promise.reject(new Error('the readiness route is not under test')),
+  ceilingAt: (checkout, commit) => RIG_READINESS.ceilingAt(checkout, commit),
+};
 
 /** `parts` as a built graph: itself when `buildGraph` already made it, else built now. */
 export async function built(parts: GraphParts): Promise<BuiltGraph> {
@@ -303,6 +318,7 @@ export async function withLine<T>(prefix: string, body: (rig: LineRig) => Promis
           roles,
           components,
           approvedCostUsd: null,
+          readiness: RIG_READINESS,
           ...overrides,
         };
         // A person who read the worst-case figure approved it, unless the assertion says otherwise (D-P9-03).
