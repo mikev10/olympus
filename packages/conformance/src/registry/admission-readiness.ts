@@ -5,7 +5,7 @@
  * that none ran, rather than reading as cleared (F1).
  */
 import type { RunRequest } from '@olympus-ai/api';
-import type { AdmissionRecord } from '@olympus-ai/vault';
+import { isNoRunState, type AdmissionRecord } from '@olympus-ai/vault';
 import { runtime } from '../kit/assert.js';
 import type { LocalAssertion } from '../kit/types.js';
 import { linePolicy, readRecord, withLine, type LineRig } from './line.js';
@@ -25,12 +25,14 @@ function port(level: Scanned['level'], asked: string[] = [], commit?: string): P
   };
 }
 
+/** Whether the run has state. Only the Vault's own no-state error means none; any other failure is a fault and is thrown (codex-5). */
 async function recorded(rig: LineRig): Promise<boolean> {
   try {
     await rig.state();
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if (isNoRunState(error)) return false;
+    throw error;
   }
 }
 
