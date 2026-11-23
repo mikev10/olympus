@@ -41,15 +41,32 @@ function testTag(): string {
   return tag;
 }
 
-/** The daemon's platform package: what the image's install must hold. */
-async function platformPackage(): Promise<string> {
+/** The daemon's CPU, as npm names it. */
+async function daemonCpu(): Promise<string> {
   const arch = await docker('info', '--format', '{{.Architecture}}');
-  const cpu = arch === 'aarch64' || arch === 'arm64' ? 'arm64' : arch === 'x86_64' || arch === 'amd64' ? 'x64' : arch;
-  return `${CLI_PACKAGE}-linux-${cpu}`;
+  return arch === 'aarch64' || arch === 'arm64' ? 'arm64' : arch === 'x86_64' || arch === 'amd64' ? 'x64' : arch;
+}
+
+/** The daemon's platform package: the one whose binary the CLI runs. */
+async function platformPackage(): Promise<string> {
+  return `${CLI_PACKAGE}-linux-${await daemonCpu()}`;
+}
+
+/**
+ * Every lockfile entry the image's install must hold, read from the committed lockfile by npm's own rule and not
+ * from the install check: an entry that is not optional, and an optional one whose os, cpu and libc admit a glibc
+ * Linux on the daemon's CPU. An entry naming no libc admits every libc, as npm installs it.
+ */
+function requiredEntries(locked: Lock, cpu: string): string[] {
+  const admits = (list: readonly string[] | undefined, value: string): boolean => list === undefined || list.includes(value);
+  return Object.entries(locked.packages)
+    .filter(([path]) => path !== '')
+    .filter(([, e]) => e.optional !== true || (admits(e.os, 'linux') && admits(e.cpu, cpu) && admits(e.libc, 'glibc')))
+    .map(([path]) => path);
 }
 
 interface Lock {
-  readonly packages: Record<string, { readonly version?: string; readonly integrity?: string; readonly optional?: boolean; readonly os?: string[]; readonly cpu?: string[] }>;
+  readonly packages: Record<string, { readonly version?: string; readonly integrity?: string; readonly optional?: boolean; readonly os?: string[]; readonly cpu?: string[]; readonly libc?: string[] }>;
 }
 
 async function lock(dir: string): Promise<Lock> {
@@ -75,6 +92,7 @@ invariantTest(
     + 'the built image holds every package the lockfile pins for its platform at its locked version and integrity, and its CLI reports CLI_VERSION',
   async () => {
     const platform = await platformPackage();
+    const cpu = await daemonCpu();
     const records = await temp('r53-records-');
 
     // The context as committed, built under a tag of its own.
@@ -84,21 +102,33 @@ invariantTest(
     // npm's record of the install, inside the image: every package for this platform, at the lockfile's hash.
     const installed = JSON.parse(await docker('run', '--rm', id, 'cat', '/opt/cli/node_modules/.package-lock.json')) as Lock;
     const locked = await lock(imageContext());
-    for (const pkg of [CLI_PACKAGE, platform]) {
-      const path = `node_modules/${pkg}`;
+    const required = requiredEntries(locked, cpu);
+    // The CLI, its platform package, and every other entry npm installs for this platform: none left unchecked.
+    expect(required).toContain(`node_modules/${CLI_PACKAGE}`);
+    expect(required).toContain(`node_modules/${platform}`);
+    for (const path of required) {
       expect(installed.packages[path]?.integrity, path).toBe(locked.packages[path]?.integrity);
       expect(installed.packages[path]?.version, path).toBe(locked.packages[path]?.version);
     }
     // The binary on PATH is the lockfile's, not one installed by name elsewhere.
     expect(await docker('run', '--rm', id, 'readlink', '-f', '/usr/local/bin/claude')).toMatch(/^\/opt\/cli\/node_modules\/@anthropic-ai\/claude-code\//);
+    // And the bytes it runs are the platform package's binary, from the tarball the lockfile pins: the CLI's postinstall
+    // links that binary over its placeholder and fetches nothing, so the executable carries no bytes the lockfile does not.
+    const sums = (await docker('run', '--rm', '--entrypoint', 'sh', id, '-c', `sha256sum "$(readlink -f /usr/local/bin/claude)" /opt/cli/node_modules/${platform}/claude`))
+      .split('\n')
+      .map((line) => line.split(/\s+/)[0]);
+    expect(sums).toHaveLength(2);
+    expect(sums[0]).toBe(sums[1]);
 
-    // npm skips an optional package whose tarball fails its hash; the build must not (D-R53-02).
-    const altered = await recordedImage({ tag: testTag(), context: await alteredContext(platform), buildArgs: { BASE: BASE_IMAGE }, records }).then(
-      () => null,
-      (error: unknown) => error,
-    );
-    expect(altered).toBeInstanceOf(Error);
-    expect((altered as Error).message).toContain(`node_modules/${platform}`);
+    // npm skips an optional package whose tarball fails its hash; the build must not, for every one it must hold (D-R53-02).
+    for (const path of required.filter((p) => locked.packages[p]?.optional === true)) {
+      const altered = await recordedImage({ tag: testTag(), context: await alteredContext(path.slice('node_modules/'.length)), buildArgs: { BASE: BASE_IMAGE }, records }).then(
+        () => null,
+        (error: unknown) => error,
+      );
+      expect(altered, path).toBeInstanceOf(Error);
+      expect((altered as Error).message, path).toContain(path);
+    }
     // And the CLI's own package, which npm refuses itself.
     const top = await recordedImage({ tag: testTag(), context: await alteredContext(CLI_PACKAGE), buildArgs: { BASE: BASE_IMAGE }, records }).then(
       () => null,
