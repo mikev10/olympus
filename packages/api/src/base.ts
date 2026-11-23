@@ -5,6 +5,7 @@
  * check declared, in the runtime's terms alone (I2). It is exported so the
  * rule is assertable without a run.
  */
+import { propertyBaseCause } from './property.js';
 import type { BaseMismatch, StationRefusal, VaultRef } from '@olympus-ai/core';
 import type { CheckSpec, DeclaredCheckSpec } from '@olympus-ai/integrity';
 import type { BaseRunRecord } from '@olympus-ai/vault';
@@ -36,7 +37,13 @@ export function baseMismatches(checks: readonly CheckSpec[], record: BaseRunReco
       mismatched.push({ checkId: check.id, declared: check.onBase, exitCode: null, cause: 'no-result' });
       continue;
     }
-    const failed = result.exitCode !== 0;
+    // A property check's base is judged by its runs, never by an exit code that a check running no case also gives (R25).
+    const property = check.kind === 'property' ? propertyBaseCause(check, result) : undefined;
+    if (property !== undefined) {
+      mismatched.push({ checkId: check.id, declared: check.onBase, exitCode: result.exitCode, cause: property });
+      continue;
+    }
+    const failed = check.kind === 'property' ? check.onBase === 'fails' : result.exitCode !== 0;
     if (failed !== (check.onBase === 'fails')) {
       mismatched.push({ checkId: check.id, declared: check.onBase, exitCode: result.exitCode, cause: 'contrary' });
       continue;

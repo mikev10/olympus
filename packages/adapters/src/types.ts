@@ -3,7 +3,7 @@
  * uses to enumerate suites, parse assertions, and measure coverage. I5: a
  * stack with no adapter loses controls loudly and can never run at L3.
  */
-import type { CheckResult } from '@olympus-ai/integrity';
+import type { CheckResult, PropertyRun } from '@olympus-ai/integrity';
 import type { SandboxHandle } from '@olympus-ai/sandbox';
 import type { SecurityScanner } from './security.js';
 
@@ -81,6 +81,37 @@ export interface BehavioralScenario {
 
 export interface ManifestAdapter { detectConfigChanges(base: string, head: string): Promise<string[]>; }
 
+/** Where a property is registered: the call that hands it to the framework, tree-relative, by line. */
+export interface PropertySite { readonly file: string; readonly line: number; }
+
+/**
+ * The pin a property check runs under: the seed and case count the locked
+ * manifest names, and the marker that tags each report the runtime reads.
+ */
+export interface PropertyPin { readonly seed: number; readonly numRuns: number; readonly marker: string; }
+
+/**
+ * A stack's property framework (R25). The test framework's runner runs the
+ * locked files. This adapter decides what runs under them and how a run is
+ * counted. It finds each registration statically, on the host, so a file
+ * that registers none is refused at admission. It writes the module the
+ * runtime loads ahead of the runner, which sets the seed and the case count
+ * and reports every run, so nothing in a file decides them. And it reads
+ * those reports back (D-R25-02).
+ */
+export interface PropertyAdapter {
+  /** The framework and its major, e.g. `fast-check@4`. */
+  readonly framework: string;
+  /** Every registration in `file`, an absolute path whose tree-relative name is `name`, in line order. Refuses a file it cannot read. */
+  registrations(file: string, name: string): Promise<PropertySite[]>;
+  /** The preload's source text, for the locked files `tests` under `pin`. */
+  preload(pin: PropertyPin, tests: readonly string[]): string;
+  /** The environment that loads the preload mounted at `path` ahead of the runner and every worker it starts. */
+  environment(path: string): Readonly<Record<string, string>>;
+  /** Each report tagged with `pin.marker` in `stdout`, or null when a tagged line cannot be read: a report half-read is not a count. */
+  reports(stdout: string, pin: PropertyPin): PropertyRun[] | null;
+}
+
 /** I5: an unsupported stack disables controls loudly and refuses L3. */
 export interface AdapterSet {
   stack: string;
@@ -96,6 +127,13 @@ export interface AdapterSet {
    * (R17).
    */
   staticAnalysis: SecurityScanner | null;
+  /**
+   * The stack's property framework, or null where it has none. A manifest
+   * that pins a property check on a set without one is refused at admission
+   * (R25, I5). Its absence is not a missing control: a property requirement
+   * for every spec is policy's to set, not the stack's.
+   */
+  readonly property: PropertyAdapter | null;
   /**
    * The dependency trees this stack's install writes, by directory name,
    * found at any depth (A-R29-01). What a task writes under one is never

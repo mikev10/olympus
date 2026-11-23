@@ -1,3 +1,4 @@
+import { R25_ASSERTIONS } from './property.js';
 import { mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { RunId } from '@olympus-ai/core';
@@ -57,6 +58,7 @@ export const I3: InvariantEntry = {
     ...R19_ASSERTIONS.I3,
     ...R16_ASSERTIONS.I3,
     ...R8B_I3,
+    ...R25_ASSERTIONS.I3,
     ...R20_I3,
     // R23: workspace instructions, per driver.
     ...R23_I3,

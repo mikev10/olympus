@@ -125,7 +125,7 @@ import { baseRefusal, declaredChecks } from './base.js';
 import { readUsage } from './cost.js';
 import { recordDecision, recordEgress, stationDecider } from './decisions.js';
 import { requiredShortfall } from './gate.js';
-import type { EgressPolicy, RelayMeter, SandboxHandle, SandboxSpec, Teardown } from '@olympus-ai/sandbox';
+import type { EgressPolicy, ExecResult, RelayMeter, SandboxHandle, SandboxSpec, Teardown } from '@olympus-ai/sandbox';
 import { splitFrontMatter } from '@olympus-ai/compiler';
 import type { AdmissionRecord, AdmittedArtifact, AttemptFailure, BaseRunRecord, RepoInstructionFile, CallTiming, DiffEntry, EnforcementDecision, EvidenceBundle, IntegrationOpened, IntegrationRecord, UnstartedCheck, UsageReading, UsageRecord, Vault } from '@olympus-ai/vault';
 import { draftFloorOf, draftStation, isDrafted, lockApproved, testDraftOf, type DraftingContext } from './drafting.js';
@@ -134,9 +134,11 @@ import { imageFor, type BuiltGraph } from './graph.js';
 import { installInto } from './install.js';
 import type { RunOutcome } from './run.js';
 import { acceptedEscalations, analyzeTamper, notCarriedFindings, tamperFindings } from './tamper.js';
+import { prepareProperty, propertyResult, type PreparedProperty } from './property.js';
 import { checkImageOf, claimEvidenceDiff, commandOf, runnerMissing, suiteRunner, suitesRun, taskResultProblems, writesOutsideGrant } from './verification.js';
 import {
   attemptPaths,
+  propertyPaths,
   basePath,
   baseRunPath,
   composeDiff,
@@ -558,9 +560,14 @@ export async function runOnBase(
       unstarted.push({ checkId: check.id, reason: missing });
       continue;
     }
+    const property = await propertyRun(ctx, tree, check, on.draft === null ? 'base' : `base.${on.draft}`, on.checks.indexOf(check));
+    if (!property.ok) {
+      unstarted.push({ checkId: check.id, reason: property.reason });
+      continue;
+    }
     let handle: SandboxHandle;
     try {
-      handle = await sandbox.provision(checkSandbox(ctx, tree, check, stackImage));
+      handle = await sandbox.provision(checkSandbox(ctx, tree, check, stackImage, property.prepared));
     } catch (error) {
       unstarted.push({ checkId: check.id, reason: `its sandbox could not be provisioned: ${describe(error)}` });
       continue;
@@ -569,14 +576,14 @@ export async function runOnBase(
       const startedAt = new Date().toISOString();
       try {
         // The pinned argument vector, or a suite check's runner, exactly: no shell, no splitting (A-P6-01, D-R15-04).
-        const exec = await sandbox.exec(handle, [...commandOf(check, runner)]);
+        const exec = await sandbox.exec(handle, [...commandOf(check, runner)], property.prepared === null ? undefined : { env: property.prepared.env });
         checks.push({
           checkId: check.id,
           exitCode: exec.exitCode,
           stdout: exec.stdout,
           stderr: exec.stderr,
           suiteCount: await suitesRun(check, runner, tree),
-          expectation: null,
+          ...judged(property.prepared, exec),
           findings: null,
           durationMs: exec.durationMs,
           startedAt,
@@ -904,8 +911,22 @@ function workspaceOnly(ctx: LineContext, source: string, mode: 'rw' | 'ro', egre
 }
 
 /** One check's sandbox: the verified tree read-only, no network, and the check's own timeout as its wall clock. */
-function checkSandbox(ctx: LineContext, tree: string, check: CheckSpec, stackImage: string | null): SandboxSpec {
-  return workspaceOnly(ctx, tree, 'ro', { mode: 'deny-all', allow: [] }, 'check', check.timeoutMs, stackImage);
+function checkSandbox(ctx: LineContext, tree: string, check: CheckSpec, stackImage: string | null, prepared: PreparedProperty | null = null): SandboxSpec {
+  const spec = workspaceOnly(ctx, tree, 'ro', { mode: 'deny-all', allow: [] }, 'check', check.timeoutMs, stackImage);
+  // A property check's preload is the runtime's, on a read-only mount of its own beside the tree (R25).
+  return prepared === null ? spec : { ...spec, mounts: { ...spec.mounts, others: [...spec.mounts.others, { ...prepared.mount }] } };
+}
+
+/** A property check's preload, written and its registrations read, or why it cannot start; null for every other kind (R25). */
+async function propertyRun(ctx: LineContext, tree: string, check: CheckSpec, label: string, index: number): Promise<{ ok: true; prepared: PreparedProperty | null } | { ok: false; reason: string }> {
+  if (check.kind !== 'property') return { ok: true, prepared: null };
+  const { workspaces } = ctx.components;
+  return prepareProperty(basePath(workspaces, ctx.run.id), tree, check, propertyPaths(workspaces, ctx.run.id, label, index));
+}
+
+/** What a check's exec yields beyond its exit code and output: a property check's evidence and the runtime's comparison, or none. */
+function judged(prepared: PreparedProperty | null, exec: ExecResult): Pick<CheckResult, 'expectation' | 'property'> {
+  return prepared === null ? { expectation: null, property: null } : propertyResult(prepared, exec);
 }
 
 /** The scope a role holds as admitted, before any narrowing; for what narrowing never touches, such as tiers (R14). */
@@ -1689,9 +1710,15 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
       unstarted.push({ checkId: check.id, reason: missing });
       continue;
     }
+    const property = await propertyRun(ctx, tree, check, diffSha256, index);
+    if (!property.ok) {
+      results.push(undefined);
+      unstarted.push({ checkId: check.id, reason: property.reason });
+      continue;
+    }
     let handle: SandboxHandle;
     try {
-      handle = await sandbox.provision(checkSandbox(ctx, tree, check, stackImage));
+      handle = await sandbox.provision(checkSandbox(ctx, tree, check, stackImage, property.prepared));
     } catch (error) {
       return spendRetry(ctx, task, error);
     }
@@ -1699,14 +1726,14 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
       const startedAt = new Date().toISOString();
       try {
         // The pinned argument vector, or a suite check's runner, exactly: no shell, no splitting (A-P6-01, D-R15-04).
-        const exec = await sandbox.exec(handle, [...commandOf(check, runner)]);
+        const exec = await sandbox.exec(handle, [...commandOf(check, runner)], property.prepared === null ? undefined : { env: property.prepared.env });
         results.push({
           checkId: check.id,
           exitCode: exec.exitCode,
           stdout: exec.stdout,
           stderr: exec.stderr,
           suiteCount: await suitesRun(check, runner, tree),
-          expectation: null,
+          ...judged(property.prepared, exec),
           findings: null,
           durationMs: exec.durationMs,
           startedAt,

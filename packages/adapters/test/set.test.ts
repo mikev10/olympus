@@ -78,6 +78,7 @@ describe('adapterAdmission', () => {
       behavioral: [],
       manifest: null,
       staticAnalysis: null,
+      property: null,
       dependencyTrees: [],
       checkImage: null,
       unavailableControls: () => [],
