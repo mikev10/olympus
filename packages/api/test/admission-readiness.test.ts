@@ -13,7 +13,7 @@ import { hashedLockfile } from '@olympus-ai/adapters';
 import { commitFixture } from '@olympus-ai/conformance/git';
 import type { ProbeResult, ReadinessReport } from '@olympus-ai/readiness';
 import { createApiServer, SCANNERS, type ApiServer, type ReadinessScanner } from '../src/index.js';
-import { protectionStands } from '../src/readiness-scan.js';
+import { protectionStands, remember } from '../src/readiness-scan.js';
 import { removeWorkspace, stubComponents } from './harness.js';
 
 const EXAMPLES = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'examples');
@@ -97,5 +97,16 @@ describe('a cached report stands only while branch protection reads as it record
   test('with no checker, only the indeterminate answer a scan without one records stands', async () => {
     await expect(protectionStands(reportWith('indeterminate'), null)).resolves.toBe(true);
     await expect(protectionStands(reportWith('supported'), null)).resolves.toBe(false);
+  });
+});
+
+describe('the report cache is bounded (gemini-4)', () => {
+  test('keeps at most max entries, dropping the oldest, and a key set again is the newest', () => {
+    const map = new Map<string, number>();
+    for (const key of ['a', 'b', 'c']) remember(map, key, 1, 2);
+    expect([...map.keys()]).toEqual(['b', 'c']);
+    remember(map, 'b', 2, 2);
+    remember(map, 'd', 1, 2);
+    expect([...map.entries()]).toEqual([['b', 2], ['d', 1]]);
   });
 });

@@ -62,10 +62,23 @@ export function readinessScanner(options: ReadinessScannerOptions): ReadinessSca
       if (cached !== undefined && (await protectionStands(cached, options.branchProtection))) return cached.ceiling;
       reports.delete(key);
       const report = await scanAt(checkout, commit, protectedPaths);
-      reports.set(key, report);
+      remember(reports, key, report, MAX_REPORTS);
       return report.ceiling;
     },
   };
+}
+
+/** Reports kept at once: a few runs' worth of commits, so the cache saves the re-sent admission and cannot grow without bound (gemini-4). */
+const MAX_REPORTS = 64;
+
+/** Sets `key`, then drops the oldest entries until at most `max` remain. A Map iterates in insertion order. */
+export function remember<K, V>(map: Map<K, V>, key: K, value: V, max: number): void {
+  map.delete(key);
+  map.set(key, value);
+  for (const oldest of map.keys()) {
+    if (map.size <= max) break;
+    map.delete(oldest);
+  }
 }
 
 async function protectedPathsOf(policyFile: string): Promise<readonly string[]> {
