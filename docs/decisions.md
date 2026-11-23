@@ -11880,3 +11880,36 @@ Started on `v2` at b79c699. Issue #169. Builds A-R53-01 (D-A-HI-01).
   *Rejected:* `npm-shrinkwrap.json`. Whether a packer ships one below the
   package root is a rule this unit cannot pin. *Reverse:* rename it back and
   add it to the package's `files`, if a packer is found that ships it.
+
+### D-R53-05: review fixes, and one known limit
+
+From the triage (`docs/reviews/2026-11-22-R53-harness-integrity-triage.md`).
+
+- **codex-2, fixed (ddcca04).** `I2.harness-image-recorded-by-the-runtime`
+  compared records with the profile's constants. It now wraps the rig's
+  sandbox, requires each image to be named by as many call records as
+  sandboxes were provisioned from it, and runs a line whose build record names
+  an image the profile does not, so a bundle that took the profile's image
+  fails. *Reverse:* drop the provision capture and the third line.
+- **codex-3, fixed (8f959bc).** Claude Code's lockfile also requires
+  `-linux-x64-musl`, an optional entry that names no `libc`, so npm installs it
+  and `check-install.js` requires it. The image test checked only the CLI and
+  the plain platform package. Both drivers' tests now derive the required set
+  from the lockfile by npm's rule, check each one, and alter each required
+  optional entry's hash. Codex's lockfile has no such entry, and its test is
+  changed only so that both drivers stay alike.
+- **codex-1, known limit, with a test (8f959bc).** `check-install.js` compares
+  npm's recorded integrity and the installed `package.json` versions. It
+  hashes no installed file. The bytes come from tarballs that `npm ci` verified
+  against the lockfile's sha512. The one lifecycle script either lockfile
+  declares is Claude Code's `install.cjs`. It was read in the built image: it
+  uses no network, and it links the platform package's binary over the
+  placeholder. Claude Code's image test now requires the executable on PATH to
+  be byte-identical to that binary. `--ignore-scripts` was rejected, because
+  it would leave the placeholder as the CLI. Hashing every installed file
+  against the lockfile was rejected too: the lockfile pins tarballs, not
+  files, so the expected hashes would have to be committed separately, and
+  that is a lockfile format this unit does not define. *Owner:* a later CLI
+  bump that adds a lifecycle script, or changes this one, re-reads it. A
+  version bump is a reviewed lockfile diff, and `hasInstallScript` shows in
+  that diff.
