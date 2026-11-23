@@ -11487,7 +11487,7 @@ Full record: `docs/reviews/2026-11-22-R38-driver-evidence-does-not-flake-triage.
 
 ## R40: Admission enforces the readiness ceiling
 
-Started on `v2` at eb93b71 as `unit/r40`. Issues #129, #38. The start-unit
+Started on `v2` at eb93b71 as `unit/r40` and rebased onto 3fde9eb (R38, #204) before shipping; R38 touches no file R40 changes but `docs/decisions.md`, whose tail both appended to. Issues #129, #38. The start-unit
 session stopped once, before any code, because the unit entry declared no
 contract change and enforcing the ceiling needs one (CLAUDE.md, working rule
 6). The maintainer confirmed amendment A-R40-01 and the scan source
