@@ -11484,3 +11484,121 @@ of the embedded source, to 30246 characters. The ceiling is #207.
 source.
 
 Full record: `docs/reviews/2026-11-22-R38-driver-evidence-does-not-flake-triage.md`.
+
+## R40: Admission enforces the readiness ceiling
+
+Started on `v2` at eb93b71 as `unit/r40`. Issues #129, #38. The start-unit
+session stopped once, before any code, because the unit entry declared no
+contract change and enforcing the ceiling needs one (CLAUDE.md, working rule
+6). The maintainer confirmed amendment A-R40-01 and the scan source
+(D-R40-03) on 2026-11-22; the entry now carries both, its acceptance, and its
+gate paths.
+
+### D-R40-01: boundary, verified
+
+- **Deliverables:**
+  - A-R40-01: `AdmissionRefusal` gains `readiness-refused`; `AdmissionRecord`
+    gains `readiness`, the term admission read (scanned, or not scanned and
+    why).
+  - Admission scans the base commit through a readiness port on the run
+    request and refuses a run requested above the derived ceiling, naming the
+    probe (or the scan limit) that holds it, before anything but the refusal
+    is recorded. A resume re-reads the refusal from the record.
+  - The host passes its scanner to admission; the scanner caches a report by
+    checkout, commit, and protected paths, and rescans when branch protection
+    no longer reads as it did.
+  - `I8.ceiling-bearing-probe-check-is-exercised` requires each negative
+    fixture's probe to be `absent`, with a detail naming the failure the
+    fixture was built to cause (#38).
+- **Out of scope (verbatim):** changing how the ceiling is derived (R43
+  changes how readiness installs, not what it concludes).
+- **Acceptance:** `pnpm -r typecheck`, `pnpm -r lint`, `pnpm -r test` pass,
+  the readiness conformance suite included (needs Docker). Each new assertion
+  is shown failing with its check deleted.
+- **Invariants:** I4 (the ceiling only adds a refusal: it never raises a
+  level, grants a capability, or admits a run policy refused); I5 (a run
+  above the ceiling is refused, not downgraded or warned about; a scan that
+  throws refuses admission; an indeterminate probe no longer passes a
+  fixture); I2 (the recorded ceiling is the runtime's derivation, never a
+  caller's); I8 (each wiring has an assertion that fails when it is deleted).
+- **Pending registry entries owed:** none name R40. The baseline is
+  unchanged.
+- **Gate paths:** `packages/vault/src/types.ts` (A-R40-01),
+  `packages/conformance/`. The PR needs the `gate-change` label and the
+  squash body `Gate-Change: acknowledged`.
+
+### D-R40-02: assumptions, each verified
+
+- Dependencies shipped: tags `reviewed/R1`, `reviewed/P4`, `reviewed/P14`,
+  `reviewed/R36b` exist (`git tag -l`).
+- No admission path reads readiness: `policyRefusal`
+  (`packages/api/src/run.ts:860`) resolves only the policy terms, and
+  `resolveWithReadiness` (`packages/readiness/src/resolve.ts:39`) has no
+  caller outside the readiness package and conformance (`grep -rn`).
+- A refusal at admission is recorded as `AdmissionRefusal`, a closed union
+  in a protected contract file (`packages/vault/src/types.ts:227`,
+  `.github/protected-paths.txt`), so a readiness refusal needs a new arm:
+  the reason for A-R40-01.
+- The decision table is `Record<CauseKey, Row>` over
+  `admission:${AdmissionRefusal['reason']}`
+  (`packages/conformance/src/registry/decisions.ts:51,342`), so the new arm
+  fails to compile until it has a recorded-decision scenario.
+- `vault` depends on `core`, `integrity`, `sandbox` and not `readiness`
+  (`packages/vault/package.json`), so the recorded term is a structural type
+  in the Vault, and the API checks at compile time that readiness's ceiling
+  is assignable to it.
+- The host already builds a scanner over `FACTORY_REPOSITORY` and hands it
+  to the server (`packages/api/src/host/main.ts:127`); the server builds
+  every run request (`packages/api/src/http/server.ts:468`).
+- A scan resolves its revision itself (`packages/readiness/src/scan.ts:119`)
+  and reports the full commit; `resolveCommit` is exported
+  (`packages/readiness/src/tree.ts:27`).
+- A scan's inputs beyond the commit's tree are the policy's protected paths
+  and the branch-protection checker (`scan.ts:140,144`); the images and
+  registries are fixed constants of the host.
+- An L0 request cannot exceed any ceiling: `ScanLevel` is 0 to 2
+  (`packages/readiness/src/types.ts:15`).
+- The I8 fixture check fails only on `supported` or a missing probe
+  (`packages/conformance/src/registry/readiness.ts:480`), as #38 says.
+
+### D-R40-03: where the ceiling comes from
+
+- **Chosen (confirmed by the maintainer):** admission scans the commit it
+  snapshots, through an optional port on the run request. The host always
+  supplies one. A request with no port, and an L0 request, are recorded as
+  not scanned, with the reason, and leave the policy terms unchanged (F1:
+  the term is present only when a scan ran, and absence is explicit).
+- **Rejected:** a ceiling the caller supplies. Whoever sends the request
+  could send any ceiling, and the record would hold a claim, not a
+  derivation (I2).
+- **Rejected:** refusing every run that has no port. F1 says an absent scan
+  leaves the other three terms unchanged; refusing would make readiness a
+  grant gate the spine does not state.
+- **Reverse by:** making the port required on `RunRequest`.
+
+### D-R40-04: the scan cache
+
+A scan installs and runs the suite, so it takes minutes, and a person's
+first admission is refused for an unapproved cost and sent again. The host's
+scanner keeps each report in memory, keyed by checkout, full commit, and the
+policy's protected paths. A commit's tree cannot change; branch protection
+can, so on a hit the scanner asks the checker again and rescans unless it
+reads as the cached probe recorded it. Nothing is stored in the Vault (R1
+§5: storing a result is an amendment owed to the first unit that stores
+one). **Residual:** an image or registry change under a fixed tag is not
+seen until the host restarts. **Reverse by:** dropping the cache, at a
+scan per admission.
+
+### D-R40-05: where the check sits
+
+After every check that reads only the request, the policy, and the base,
+and before the cost check, as the controls check is: a person approves a
+figure only for a run nothing else refuses (#145). The refusal is derived
+from the record admission is about to write, as `admissionRefusal` derives
+the controls refusal (D-P8-03), so a resume holds the run to what admission
+read. A scan that throws (no sandbox, an unreadable policy) refuses
+admission by throwing, after discarding the base, as other faults do.
+**Alternative rejected:** resolving each station through
+`resolveWithReadiness`. The ceiling is the repository's, not a station's,
+and the policy terms are already refused earlier with their own
+attribution; folding them changes refusals other units record.
