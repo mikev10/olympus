@@ -3063,6 +3063,21 @@ negative fixtures accept an indeterminate probe as proof its check ran
   R1: it never grants what policy withheld.
 - An indeterminate probe is not proof a check ran; the fixtures that accept
   one are refused.
+- **Amendment A-R40-01** (confirmed by the maintainer, 2026-11-22): the Vault's
+  `AdmissionRefusal` gains a `readiness-refused` arm carrying the requested
+  level, the ceiling, the probe or scan limit that holds it, and the commit;
+  `AdmissionRecord` gains the readiness term admission read, scanned or
+  explicitly not scanned, so a resume reads it rather than rescanning.
+
+**Acceptance:** a run requested above the scanned ceiling of its base commit
+is refused before anything is recorded but the refusal, naming the holding
+probe; one at or below it is admitted with the ceiling in its record; a run
+admitted with no scan records that no scan ran. Each R1 negative fixture
+fails on an `indeterminate` probe. Each assertion fails when its check is
+deleted.
+
+**Gate paths:** `packages/vault/src/types.ts` (A-R40-01) and
+`packages/conformance/`.
 
 **Out of scope:** changing how the ceiling is derived (R43 changes how
 readiness installs, not what it concludes).

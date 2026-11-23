@@ -12,7 +12,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import type { AutonomyLevel, Policy, RoleId, StationId } from '@olympus-ai/core';
-import type { ProbeId, ProbeOutcome, ProbeResult, ReadinessCeiling, ReadinessReport, ScanOptions } from '@olympus-ai/readiness';
+import type { ProbeEvidence, ProbeId, ProbeOutcome, ProbeResult, ReadinessCeiling, ReadinessReport, ScanOptions } from '@olympus-ai/readiness';
 import type { SandboxProvider } from '@olympus-ai/sandbox';
 import { compileError, runtime } from '../kit/assert.js';
 import type { LocalAssertion } from '../kit/types.js';
@@ -406,20 +406,43 @@ const FIXTURES: Readonly<Record<string, Fixture>> = {
  * own check is what decides. `testing.tamper-analysis` cannot be isolated from
  * `testing.adapter`: the adapters build no test adapter without a manifest, so
  * a stack lacking either lacks the test adapter (D-R1-24).
+ *
+ * `names` is the failure the fixture was built to cause, as the probe's detail
+ * words it, and `via` how the probe observed it. The probe must be `absent`
+ * with both: an `indeterminate` probe is one whose check never ran, and a
+ * check that never ran is not proof that it works (#38, D-R2-10).
  */
-const NEGATIVE: Readonly<Record<string, { readonly fixture: string; readonly rests: readonly ProbeId[] }>> = {
-  'build.pinned-manifest': { fixture: 'two-lockfiles', rests: [] },
-  'build.install': { fixture: 'stale-lockfile', rests: ['build.pinned-manifest'] },
-  'build.clean': { fixture: 'incremental-build-with-a-secret', rests: ['build.install'] },
-  'testing.adapter': { fixture: 'no-framework', rests: ['build.install'] },
-  'testing.enumerate': { fixture: 'no-tests', rests: ['build.install', 'testing.adapter'] },
-  'testing.green-at-base': { fixture: 'skipped-and-unmeasured', rests: ['build.install', 'testing.enumerate'] },
-  'testing.coverage': { fixture: 'skipped-and-unmeasured', rests: ['build.install', 'testing.enumerate'] },
-  'testing.tamper-analysis': { fixture: 'no-framework', rests: ['build.install'] },
-  'integrate.protected-paths': { fixture: 'no-framework', rests: [] },
-  'integrate.secret-scan': { fixture: 'incremental-build-with-a-secret', rests: [] },
-  'integrate.branch-protection': { fixture: 'no-framework', rests: [] },
+const NEGATIVE: Readonly<Record<string, { readonly fixture: string; readonly rests: readonly ProbeId[]; readonly names: RegExp; readonly via: ProbeEvidence['via'] }>> = {
+  'build.pinned-manifest': { fixture: 'two-lockfiles', rests: [], names: /^several lockfiles are committed \(/u, via: 'static' },
+  // npm ci refuses a lockfile out of step with its manifest with its usage text, which the detail's 400-character
+  // tail keeps; an install that ran and failed (the network, a package) prints none of it (codex-3).
+  'build.install': { fixture: 'stale-lockfile', rests: ['build.pinned-manifest'], names: /^npm install from the lockfile exited 1: .*Run "npm help ci" for more info/u, via: 'executed' },
+  // The build fails for the one reason the fixture gives it: the prebuilt file is untracked, so the clean tree lacks it.
+  'build.clean': { fixture: 'incremental-build-with-a-secret', rests: ['build.install'], names: /^the build script in a fresh container exited 1: .*code: 'ENOENT', syscall: 'access', path: 'dist\/prebuilt\.js'/u, via: 'executed' },
+  'testing.adapter': { fixture: 'no-framework', rests: ['build.install'], names: /^no test adapter for this stack: /u, via: 'static' },
+  'testing.enumerate': { fixture: 'no-tests', rests: ['build.install', 'testing.adapter'], names: / adapter enumerated no test files$/u, via: 'static' },
+  'testing.green-at-base': { fixture: 'skipped-and-unmeasured', rests: ['build.install', 'testing.enumerate'], names: / exited 0 and no test passed: /u, via: 'executed' },
+  'testing.coverage': { fixture: 'skipped-and-unmeasured', rests: ['build.install', 'testing.enumerate'], names: / exited 0 and measured no file$/u, via: 'executed' },
+  'testing.tamper-analysis': { fixture: 'no-framework', rests: ['build.install'], names: /^tamper analysis compares .* this stack lacks /u, via: 'static' },
+  'integrate.protected-paths': { fixture: 'no-framework', rests: [], names: /^no tracked file matches the protected paths nothing-matches\/\*\*$/u, via: 'static' },
+  'integrate.secret-scan': { fixture: 'incremental-build-with-a-secret', rests: [], names: /^the secret scan found leaks: /u, via: 'executed' },
+  'integrate.branch-protection': { fixture: 'no-framework', rests: [], names: /^main accepts direct pushes$/u, via: 'checker' },
 };
+
+/**
+ * Why a negative fixture's probe is not the refusal it was built to cause, or
+ * null when it is: `absent`, observed the way the fixture expects, with the
+ * detail naming the failure. Exported so its refusal of an `indeterminate`
+ * probe is tested without a scan.
+ */
+export function negativeFailure(probe: string, fixture: string, result: ProbeResult | undefined, expected: { readonly names: RegExp; readonly via: ProbeEvidence['via'] }): string | null {
+  if (result === undefined) return `${probe} is missing from the report over ${fixture}`;
+  if (result.outcome !== 'absent') return `${probe} was ${result.outcome} over ${fixture} (${result.detail}); a fixture is met only by absent, never by a check that did not run`;
+  if (result.evidence.via !== expected.via) return `${probe} over ${fixture} was observed via ${result.evidence.via}, not ${expected.via}`;
+  if (result.evidence.via === 'executed' && result.evidence.run.kind !== 'exited') return `${probe} over ${fixture} was stopped (${result.evidence.run.reason}), so its check did not decide`;
+  if (!expected.names.test(result.detail)) return `${probe} was absent over ${fixture} for another reason than the fixture's (${result.detail}; expected ${String(expected.names)})`;
+  return null;
+}
 
 /** Resolves `root`'s lockfile in the scan image, so the install a scan runs reproduces the one resolved here. */
 async function resolveLock(provider: SandboxProvider, root: string): Promise<void> {
@@ -447,7 +470,7 @@ export const CEILING_BEARING_PROBE_CHECK_IS_EXERCISED: LocalAssertion = runtime(
   // Six scans, two of which install a real framework from the registry.
   timeoutMs: 600_000,
   title:
-    'every probe the readiness package declares ceiling-bearing is scanned over a repository where its property does not hold, while the probes it rests on hold there, and is not reported supported; a probe whose check is replaced by an unconditional supported fails this (needs Docker and the npm registry)',
+    'every probe the readiness package declares ceiling-bearing is scanned over a repository where its property does not hold, while the probes it rests on hold there, and is reported absent for the failure the fixture was built to cause; a probe whose check is replaced by an unconditional supported, or that could not run, fails this (needs Docker and the npm registry)',
   run: async () => {
     const { CEILING_BEARING, scan } = await readiness();
     const declared = new Set<string>(CEILING_BEARING);
@@ -468,7 +491,7 @@ export const CEILING_BEARING_PROBE_CHECK_IS_EXERCISED: LocalAssertion = runtime(
         reports.set(name, await scan({ ...(await scanOptions(provider, root)), ...fixture.options }));
       }
       const failures: string[] = [];
-      for (const [probe, { fixture, rests }] of Object.entries(NEGATIVE)) {
+      for (const [probe, { fixture, rests, names, via }] of Object.entries(NEGATIVE)) {
         const report = reports.get(fixture);
         if (report === undefined) throw new Error(`I8: fixture ${fixture} was never scanned`);
         const outcome = (id: string) => report.probes.find((p) => p.probe === id);
@@ -477,9 +500,8 @@ export const CEILING_BEARING_PROBE_CHECK_IS_EXERCISED: LocalAssertion = runtime(
             failures.push(`control: in ${fixture}, ${rest} was ${outcome(rest)?.outcome ?? 'missing'} (${outcome(rest)?.detail ?? ''}), so ${probe} is not what decides`);
           }
         }
-        if (outcome(probe)?.outcome === 'supported' || outcome(probe) === undefined) {
-          failures.push(`${probe} was ${outcome(probe)?.outcome ?? 'missing'} over ${fixture}, where its property does not hold`);
-        }
+        const failure = negativeFailure(probe, fixture, outcome(probe), { names, via });
+        if (failure !== null) failures.push(failure);
       }
       if (failures.length > 0) throw new Error(`I8: ${failures.join('; ')}`);
     });

@@ -19,8 +19,13 @@ const run = promisify(execFile);
 const UTF8 = new TextDecoder('utf-8', { fatal: true });
 
 /** `git` against `checkout`, with the one setting that could start a configured process on a read turned off. */
+/**
+ * Every read names objects by their own content: `--no-replace-objects` stops a replace ref in the
+ * repository from making a commit's name read as another tree, so a base snapshot and a readiness scan of one
+ * commit read one tree whenever each runs (R40, codex-2, gemini-1).
+ */
 function gitArgs(checkout: string, ...args: string[]): string[] {
-  return ['-C', checkout, '-c', 'core.fsmonitor=false', ...args];
+  return ['--no-replace-objects', '-C', checkout, '-c', 'core.fsmonitor=false', ...args];
 }
 
 /** The full object name `revision` names, or a refusal saying why it names none. */

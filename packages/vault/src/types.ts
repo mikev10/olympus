@@ -248,7 +248,31 @@ export type AdmissionRefusal =
   /** The trigger policy refused the run's trigger, for any kind, `human` included (A-R22-05, D-R22-06). */
   | { readonly reason: 'trigger-refused'; readonly cause: TriggerAdmissionCause }
   /** The candidate the run was asked from waited past the policy's window, and is recorded as expired (D-R22-04). */
-  | { readonly reason: 'candidate-expired'; readonly candidate: CandidateId };
+  | { readonly reason: 'candidate-expired'; readonly candidate: CandidateId }
+  /**
+   * The run asked for a level above the readiness ceiling of its base commit
+   * (A-R40-01): the level asked for, the ceiling, what holds it, and the
+   * commit scanned. Subtractive only: no other refusal reads it.
+   */
+  | { readonly reason: 'readiness-refused'; readonly requestedLevel: AutonomyLevel; readonly ceiling: RecordedScanLevel; readonly heldBy: RecordedHeldBy; readonly commit: string };
+
+/** The levels a readiness scan can derive: L3 is the M3 canary's, and no scan grants it (R1). */
+export type RecordedScanLevel = Exclude<AutonomyLevel, 3>;
+
+/** What holds a recorded ceiling: one probe, by the id the readiness package names it with, or the rule that no scan grants L3. */
+export type RecordedHeldBy = { readonly kind: 'probe'; readonly probe: string } | { readonly kind: 'scan-limit' };
+
+/**
+ * The readiness term admission read (A-R40-01): the ceiling a scan of the base
+ * commit derived, or that no scan ran and why. Never a caller's value: the
+ * runtime writes the scan's derivation (I2). `not-scanned` leaves the policy
+ * terms as they are and is recorded, so absence is visible rather than read
+ * as clearance (F1).
+ */
+export type RecordedReadiness =
+  | { readonly kind: 'scanned'; readonly level: RecordedScanLevel; readonly heldBy: RecordedHeldBy; readonly commit: string }
+  /** `no-scanner`: the request carried no scan port. `level-zero`: an L0 run, which no ceiling is below. */
+  | { readonly kind: 'not-scanned'; readonly because: 'no-scanner' | 'level-zero' };
 
 /**
  * The admission checks a resume repeats before the line runs, refused there
@@ -748,6 +772,13 @@ export interface AdmissionRecord {
    * holding none.
    */
   readonly repoInstructions?: readonly RepoInstructionFile[];
+  /**
+   * The readiness term admission read (A-R40-01). A run above a scanned
+   * ceiling is refused at admission, and a resume re-reads the refusal from
+   * here rather than rescanning. Absent on a record written before R40,
+   * which is read as not scanned: it leaves the policy terms as they are.
+   */
+  readonly readiness?: RecordedReadiness;
 }
 
 /**
