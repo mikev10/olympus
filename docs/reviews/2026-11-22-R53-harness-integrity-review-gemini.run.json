@@ -1,0 +1,48 @@
+{
+  "unit": "R53",
+  "family": "gemini",
+  "artifacts": {
+    "promptFile": "2026-11-22-R53-harness-integrity-review-prompt.txt",
+    "bundleFile": "2026-11-22-R53-harness-integrity-review-bundle.txt",
+    "matchingPairs": 1
+  },
+  "invocation": {
+    "kind": "api",
+    "method": "POST",
+    "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent",
+    "modelRequested": "gemini-3.1-pro-preview",
+    "headerNames": [
+      "x-goog-api-key",
+      "content-type"
+    ]
+  },
+  "cleanRoom": null,
+  "exitCode": 1,
+  "timedOut": false,
+  "startedAt": "2026-11-23T03:54:33.190Z",
+  "endedAt": "2026-11-23T03:54:33.437Z",
+  "durationMs": 247,
+  "cliVersion": "api:generativelanguage/v1beta",
+  "modelReported": null,
+  "tokenUsage": null,
+  "payloadSha256": "7da8ec43c7ed802de3f719cf246579b924ed131acd5bd000016e093dd3e15cb9",
+  "payloadBytes": 312577,
+  "ingestion": {
+    "kind": "unreported",
+    "floor": 62515
+  },
+  "postRunFileCount": null,
+  "recordedApprovalPolicy": null,
+  "bundleSha256": "19939fc0d492297d9c11de6c522ec6f6519cf36a51cf6128116a435938ac04b1",
+  "integrity": {
+    "kind": "failed",
+    "absent": [
+      "base",
+      "head",
+      "finalSection",
+      "endNonce"
+    ]
+  },
+  "replySha256": null,
+  "outcome": "FAILED"
+}
