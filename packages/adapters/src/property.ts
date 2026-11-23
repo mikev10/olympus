@@ -46,6 +46,24 @@ export class FastCheckAdapter implements PropertyAdapter {
       if (binding.imported === 'default' || binding.imported === '*') namespaces.add(local);
       else if (binding.imported === 'assert') asserts.add(local);
     }
+    // A use of the framework that no report could be located at, or that hides an `assert` from the parse, is
+    // refused rather than left out of what must report: it could register a property nothing requires (codex-2).
+    for (const local of namespaces) {
+      for (const ref of scope.references.get(local) ?? []) {
+        const parent = ref.parent;
+        if (ts.isQualifiedName(parent) || ts.isTypeQueryNode(parent)) continue;
+        if (ts.isElementAccessExpression(parent) && parent.expression === ref) {
+          unsupported(sf, name, ref, `a computed access to '${local}', which the parse cannot read`);
+        }
+        if (!ts.isPropertyAccessExpression(parent) || parent.expression !== ref) {
+          unsupported(sf, name, ref, `'${local}' used as a value, which can carry its assert where the parse cannot follow`);
+        }
+        if (parent.name.text === 'assert' && !isCallee(parent)) unsupported(sf, name, ref, `'${local}.assert' not called where it is named`);
+      }
+    }
+    for (const local of asserts) {
+      for (const ref of scope.references.get(local) ?? []) if (!isCallee(ref)) unsupported(sf, name, ref, `'${local}', fast-check's assert, not called where it is named`);
+    }
     const sites: PropertySite[] = [];
     const visit = (node: ts.Node): void => {
       if (ts.isCallExpression(node)) {
@@ -73,6 +91,18 @@ export class FastCheckAdapter implements PropertyAdapter {
   reports(stdout: string, pin: PropertyPin): PropertyRun[] | null {
     return readReports(stdout, pin.marker);
   }
+}
+
+/** Whether `node` is the callee of a call, through any wrapper that does not change its value. */
+function isCallee(node: ts.Node): boolean {
+  let at = node;
+  while (ts.isParenthesizedExpression(at.parent) || ts.isNonNullExpression(at.parent) || ts.isAsExpression(at.parent)) at = at.parent;
+  return ts.isCallExpression(at.parent) && at.parent.expression === at;
+}
+
+function unsupported(sf: ts.SourceFile, name: string, node: ts.Node, what: string): never {
+  const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
+  return refuse('unsupported-feature', `${name}:${String(line)}: ${what}; a property is registered only by calling fast-check's assert directly`);
 }
 
 /** A POSIX path inside the sandbox as `--import` takes it: a `file:` URL, so no character of it is read as a specifier. */

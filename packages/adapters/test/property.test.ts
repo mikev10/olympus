@@ -35,6 +35,18 @@ describe('FastCheckAdapter.registrations', () => {
     expect(await sites("import { assert } from 'node:assert';\nimport fc from 'fast-check';\nassert(true);\n")).toEqual([]);
   });
 
+  test('a use of the framework\'s assert it cannot locate is refused, not silently left unrequired (codex-2)', async () => {
+    await expect(sites("import fc from 'fast-check';\nfc['assert'](fc.property(fc.integer(), () => true));\n")).rejects.toThrow(/computed/);
+    await expect(sites("import fc from 'fast-check';\nconst check = fc.assert;\ncheck(fc.property(fc.integer(), () => true));\n")).rejects.toThrow(/not called/);
+    await expect(sites("import * as fc from 'fast-check';\nconst { assert } = fc;\nassert(fc.property(fc.integer(), () => true));\n")).rejects.toThrow(/as a value/);
+    await expect(sites("import { assert } from 'fast-check';\nconst again = assert;\n")).rejects.toThrow(/not called/);
+    await expect(sites("import fc from 'fast-check';\nimport { run } from './helper';\nrun(fc);\n")).rejects.toThrow(/as a value/);
+  });
+
+  test('the framework\'s other uses and its types are allowed', async () => {
+    expect(await sites("import fc from 'fast-check';\nconst a: fc.Arbitrary<number> = fc.integer();\ntype T = typeof fc;\nfc.assert(fc.property(a, () => true));\n")).toEqual([4]);
+  });
+
   test('a file that does not parse is refused', async () => {
     await expect(sites('import fc from \'fast-check\';\nfc.assert(\n')).rejects.toThrow(/does not parse/);
   });
