@@ -14,6 +14,7 @@ import { READINESS_OUTCOME_IS_RUNTIME_DERIVED } from './readiness.js';
 import { VAULT_LISTS_EVERY_RUN } from './local-vault.js';
 import { ADMISSION_RECORDS_THE_DETECTED_STACK } from './outcomes.js';
 import { CODEX_RELAY_METER_AGREES_WITH_SESSION } from './codex.js';
+import { R53_I2 } from './harness-image.js';
 import { TELEMETRY_IS_DRAWN_FROM_RUNTIME_RECORDS } from './telemetry.js';
 import { BASE_RESULTS_ARE_THE_RUNTIMES, RESUME_READS_THE_BASE_RECORD } from './base-run.js';
 import { R20_I2 } from './roles.js';
@@ -27,6 +28,8 @@ import { R13B_I2 } from './nightly-review.js';
 export const I2: InvariantEntry = {
   title: INVARIANTS.I2,
   assertions: [
+    // R53: the image every driver call ran in, by content (A-R53-01).
+    ...R53_I2,
     // R20: the role compiler.
     ...R20_I2,
     // R13a: the nightly checks that call no model.

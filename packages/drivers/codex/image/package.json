@@ -1,0 +1,7 @@
+{
+  "name": "factory-codex-image",
+  "private": true,
+  "dependencies": {
+    "@openai/codex": "0.166.0"
+  }
+}

@@ -467,6 +467,8 @@ function usageProblem(r: unknown): string | undefined {
   if (typeof timing.endedAt === 'string' && Date.parse(timing.endedAt) < Date.parse(timing.startedAt as string)) {
     return 'it records a call that ended before it started (codex-6)';
   }
+  const image = harnessImageProblem(r.harnessImage);
+  if (image !== undefined) return image;
   if (reading.kind === 'unmetered' || reading.kind === 'pending') return undefined;
   if (reading.kind === 'lost') return hasString(reading, 'detail') && reading.detail !== '' ? undefined : 'a lost reading does not say why it was lost';
   if (reading.kind !== 'metered') return `the reading's kind ${String(reading.kind)} is not metered, unmetered, pending, or lost`;
@@ -913,7 +915,10 @@ export class LocalVault implements Vault {
     return tampered.length === 0 ? { ok: true } : { ok: false, tampered };
   }
 
+  /** A bundle names the image its build call ran in, or it is not stored (A-R53-01). */
   writeEvidence(b: EvidenceBundle): Promise<VaultRef> {
+    const image = harnessImageProblem((b as { harnessImage?: unknown }).harnessImage);
+    if (image !== undefined) return Promise.reject(new Error(`LocalVault: refusing an evidence bundle for task ${String(b.taskId)}: ${image}`));
     return storeObject(this.#store, b.runId, 'evidence', b);
   }
 
@@ -1424,6 +1429,23 @@ const LISTED = /^(?:CLAUDE\.md|AGENTS\.md|\.claude\/rules\/[^/]+\.md|\.(?:claude
 /** Whether `path` is one the fixed list can name. */
 export function isRepoInstructionPath(path: string): boolean {
   return LISTED.test(path) && !path.split('/').some((part) => part === '.' || part === '..');
+}
+
+/** An image's content ID as the container engine names it: `sha256:` and 64 hex digits (A-R53-01). */
+export const IMAGE_CONTENT_ID = /^sha256:[0-9a-f]{64}$/;
+
+/**
+ * Why `value` is not a harness image the runtime can write, or undefined
+ * (A-R53-01). `not-recorded` is only ever read, for a record written before
+ * R53, so writing it is refused, as is an ID that is not a content ID: a tag
+ * or a repository digest names bytes the engine can change under it.
+ */
+export function harnessImageProblem(value: unknown): string | undefined {
+  if (value === 'no-sandbox') return undefined;
+  if (value === 'not-recorded') return "its harness image is 'not-recorded', which is how a record from before R53 is read and is never written (A-R53-01)";
+  if (!isRecord(value) || typeof value.id !== 'string') return 'it names no harness image the call ran in (A-R53-01)';
+  if (!IMAGE_CONTENT_ID.test(value.id)) return `its harness image ${JSON.stringify(value.id)} is not a content ID, sha256: and 64 hex digits (A-R53-01)`;
+  return undefined;
 }
 
 /** Why `value` is not a repository instruction set a record can hold, or undefined. Absent is the empty set. */

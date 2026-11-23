@@ -7,7 +7,10 @@
  * image, against the capture endpoint on the sandbox's loopback (D-R26-02),
  * so what they read is the request the session would send.
  */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
+import { imageContext, lockProblems } from '../src/image.js';
 import type { TaskId } from '@olympus-ai/core';
 import { DRIVER_CONTRACT_VERSION } from '@olympus-ai/core';
 import type { SandboxProvider } from '@olympus-ai/sandbox';
@@ -273,5 +276,20 @@ describe('the inspection reads the request the session would send (D-R26-02)', (
         return (await driver.inspect(h.request({ taskId: `plants-${String(n)}` as TaskId, tools: [...DECLARED_TOOLS] }))).body;
       });
     });
+  });
+});
+
+
+describe('the image pins the CLI by content (R53)', () => {
+  test('the lockfile pins the CLI at CLI_VERSION and every package by sha512 from the registry, and the Dockerfile installs from it and never by name', () => {
+    expect(lockProblems()).toEqual([]);
+    const instructions = readFileSync(join(imageContext(), 'Dockerfile'), 'utf8')
+      .split('\n')
+      .filter((line) => !line.trimStart().startsWith('#'))
+      .join('\n');
+    expect(instructions).toMatch(/COPY package\.json package-lock\.json check-install\.js \/opt\/cli\//);
+    expect(instructions).toMatch(/npm ci --no-fund --no-audit/);
+    expect(instructions).toMatch(/node check-install\.js \/opt\/cli/);
+    expect(instructions).not.toMatch(/npm (?:install|i|add|update)\b|\bnpx\b|\byarn\b|\bpnpm\b/);
   });
 });

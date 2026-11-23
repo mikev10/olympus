@@ -50,6 +50,7 @@ import { R10_I5 } from './ratchet.js';
 import { R19_ASSERTIONS } from './drafting.js';
 import { R16_ASSERTIONS } from './bug-fix.js';
 import { R24_I5 } from './repo-instructions.js';
+import { R53_I5 } from './harness-image.js';
 
 /** The declaration order the graph builder promises: vault, sandbox, driver, then the integrator a stub graph lacks (D-I1b-05). */
 const SKELETON_COMPONENTS: readonly string[] = ['StubVault', 'StubSandboxProvider', 'StubDriver', 'no integrator', 'unattested scanners'];
@@ -61,6 +62,8 @@ const CONTENDERS = 8;
 export const I5: InvariantEntry = {
   title: INVARIANTS.I5,
   assertions: [
+    // R53: the image every driver call ran in, by content (A-R53-01).
+    ...R53_I5,
     // R24: the target repository's instructions as granted context.
     ...R24_I5,
     // R20: the role compiler.

@@ -176,7 +176,7 @@ async function withReview<T>(prefix: string, family: string, body: (rig: Rig) =>
 async function seedRun(vault: Vault, head: string, family = 'claude'): Promise<void> {
   const call = (taskId: string, station: 'build' | 'review', role: string, f: string) => vault.recordUsage({
     runId: RUN, taskId: taskId as TaskId, station, attempt: 1, model: model(f), role: { id: role as RoleId, sha256: ROLE_HASH }, driver: `scripted-${f}@1`,
-    reading: { kind: 'unmetered' }, timing: { startedAt: `${DAY}T09:00:00.000Z`, endedAt: `${DAY}T09:01:00.000Z` }, collectedBy: 'runtime',
+    reading: { kind: 'unmetered' }, timing: { startedAt: `${DAY}T09:00:00.000Z`, endedAt: `${DAY}T09:01:00.000Z` }, harnessImage: 'no-sandbox', collectedBy: 'runtime',
   });
   await call('build-1', 'build', 'builder', family);
   await call('review-1', 'review', 'reviewer', 'judge');

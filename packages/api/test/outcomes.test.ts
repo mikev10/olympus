@@ -15,6 +15,7 @@ function usage(runId: string, taskId: string, station: StationId, attempt: numbe
     driver: 'stub@1',
     reading: { kind: 'metered', inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd, refused: 0, exhausted: null },
     timing: { startedAt: '2026-10-01T00:00:00.000Z', endedAt: '2026-10-01T00:01:00.000Z' },
+    harnessImage: 'no-sandbox',
     collectedBy: 'runtime',
   } as unknown as UsageRecord;
 }

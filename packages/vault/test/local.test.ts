@@ -18,7 +18,7 @@ import { join } from 'node:path';
 import { DEFAULT_POLICY_DOCUMENT, StrictPolicyEngine, StubDriver, type ModelFamily, type RoleId, type RunId, type RunState, type TaskId } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
-import { draftDigest, isNoRunState, LocalVault, StubVault, type AdmissionRecord, type CallTiming, type CriticRecord, type DraftRecord, type EvidenceBundle } from '../src/index.js';
+import { draftDigest, isNoRunState, LocalVault, StubVault, type AdmissionRecord, type CallTiming, type CriticRecord, type HarnessImage, type DraftRecord, type EvidenceBundle } from '../src/index.js';
 
 const runId = 'run-1' as RunId;
 const taskId = 'task-1' as TaskId;
@@ -43,6 +43,9 @@ afterEach(async () => {
   await rm(base, { recursive: true, force: true });
 });
 
+/** A content ID as the engine names one (A-R53-01). */
+const IMAGE = 'sha256:' + 'e'.repeat(64);
+
 function bundle(): EvidenceBundle {
   return {
     runId,
@@ -61,6 +64,7 @@ function bundle(): EvidenceBundle {
   install: null,
     collectedBy: 'runtime',
     driverProvenanceId: 'local-vault-test@1.0.0',
+    harnessImage: { id: IMAGE },
     contractVersion: '1.0.0',
   };
 }
@@ -170,6 +174,14 @@ describe('evidence and violations', () => {
     expect(await readdir(join(store, 'runs', runId, 'objects', 'evidence'))).toHaveLength(1);
   });
 
+  test('refuses a bundle that names no content ID its build call ran in, and stores one that ran in no sandbox (A-R53-01)', async () => {
+    await expect(vault.writeEvidence({ ...bundle(), harnessImage: 'no-sandbox' })).resolves.toMatchObject({ kind: 'evidence' });
+    const { harnessImage: _omitted, ...imageless } = bundle();
+    await expect(vault.writeEvidence(imageless as never)).rejects.toThrow(/harness image/);
+    await expect(vault.writeEvidence({ ...bundle(), harnessImage: 'not-recorded' })).rejects.toThrow(/not-recorded/);
+    await expect(vault.writeEvidence({ ...bundle(), harnessImage: { id: 'factory-codex:0.166.0-abc' } })).rejects.toThrow(/content ID/);
+  });
+
   test('a violation is stored under its own kind', async () => {
     const recorded = violation();
     const ref = await vault.recordViolation(recorded);
@@ -257,6 +269,7 @@ describe('usage records (A-P13-03, A-I1a-01, A-I1a-04, A-I1a-05)', () => {
     driver: 'stub@1',
     reading: { kind: 'metered' as const, calls: 2, inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0.001, exhausted: 'none' as const, refused: 0 },
     timing: { startedAt: '2026-10-28T10:00:00.000Z', endedAt: '2026-10-28T10:01:00.000Z' } as CallTiming,
+    harnessImage: { id: IMAGE } as HarnessImage,
     collectedBy: 'runtime' as const,
   };
   const PENDING_TIMING = { startedAt: '2026-10-28T10:00:00.000Z', endedAt: null };
@@ -293,6 +306,16 @@ describe('usage records (A-P13-03, A-I1a-01, A-I1a-04, A-I1a-05)', () => {
     await expect(vault.recordUsage(driverless as never)).rejects.toThrow(/driver/);
     await expect(vault.recordUsage({ ...record, driver: null })).rejects.toThrow(/driver/);
     await expect(vault.recordUsage({ ...record, driver: '' })).rejects.toThrow(/driver/);
+  });
+
+  test('stores a call that ran in no sandbox as no-sandbox, and refuses one that names no content ID it ran in (A-R53-01)', async () => {
+    await expect(vault.recordUsage({ ...record, harnessImage: 'no-sandbox' })).resolves.toMatchObject({ kind: 'usage' });
+    const { harnessImage: _omitted, ...imageless } = record;
+    await expect(vault.recordUsage(imageless as never)).rejects.toThrow(/harness image/);
+    await expect(vault.recordUsage({ ...record, harnessImage: 'not-recorded' })).rejects.toThrow(/not-recorded/);
+    for (const id of ['factory-claude-code:2.1.330-abc', `node@${IMAGE}`, 'sha256:' + 'E'.repeat(64), 'sha256:' + 'e'.repeat(63), '']) {
+      await expect(vault.recordUsage({ ...record, harnessImage: { id } })).rejects.toThrow(/content ID/);
+    }
   });
 
   test('stores a pending reading, written before the call it stands for (D-I1a-12)', async () => {

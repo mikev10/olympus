@@ -6,7 +6,7 @@
  * says so. The store is a Map that dies with the process. P1 replaces this
  * file.
  */
-import { repoInstructionsProblem, seatBeforeR9 } from '../local/vault.js';
+import { harnessImageProblem, repoInstructionsProblem, seatBeforeR9 } from '../local/vault.js';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -118,6 +118,9 @@ export class StubVault implements Vault {
   }
 
   writeEvidence(b: EvidenceBundle): Promise<VaultRef> {
+    // As the filesystem Vault refuses it: a bundle names the image its build call ran in (A-R53-01).
+    const image = harnessImageProblem((b as { harnessImage?: unknown }).harnessImage);
+    if (image !== undefined) return Promise.reject(new Error(`StubVault: refusing an evidence bundle: ${image}`));
     return Promise.resolve(this.store(b.runId, 'evidence', b));
   }
 
@@ -156,6 +159,9 @@ export class StubVault implements Vault {
     }
     // As the filesystem Vault refuses it: the line never writes a call with no driver (A-R9-01).
     if (typeof r.driver !== 'string' || r.driver === '') return Promise.reject(new Error('StubVault: a usage record names the driver the call was made through (A-R9-01)'));
+    // As the filesystem Vault refuses it: a call names the image it ran in, never `not-recorded` (A-R53-01).
+    const image = harnessImageProblem((r as { harnessImage?: unknown }).harnessImage);
+    if (image !== undefined) return Promise.reject(new Error(`StubVault: refusing a usage record: ${image}`));
     const ref = this.store(r.runId, 'usage', r);
     const refs = this.usage.get(r.runId) ?? [];
     if (!refs.some((u) => u.hash === ref.hash)) refs.push(ref);

@@ -39,6 +39,7 @@ function bundle(): EvidenceBundle {
   install: null,
     collectedBy: 'runtime',
     driverProvenanceId: 'stub-driver@1.0.0',
+    harnessImage: { id: `sha256:${'e'.repeat(64)}` },
     contractVersion: '1.0.0',
   };
 }
@@ -252,8 +253,18 @@ describe('the R12 fields, as the filesystem Vault takes them (codex-7)', () => {
     role: { id: 'builder', sha256: 'a'.repeat(64) },
     driver: 'stub@1',
     reading: { kind: 'unmetered' },
+    harnessImage: 'no-sandbox',
     collectedBy: 'runtime',
   };
+
+  test('refuses a usage record, and a bundle, that names no content ID the call ran in (A-R53-01)', async () => {
+    const TIMING = { startedAt: '2026-10-28T10:00:00.000Z', endedAt: '2026-10-28T10:01:00.000Z' };
+    for (const harnessImage of [undefined, 'not-recorded', { id: 'factory-claude-code:2.1.330-abc' }]) {
+      await expect(vault.recordUsage({ ...usage, timing: TIMING, harnessImage } as never)).rejects.toThrow(/harness image/);
+      await expect(vault.writeEvidence({ ...bundle(), harnessImage } as never)).rejects.toThrow(/harness image/);
+    }
+    await expect(vault.recordUsage({ ...usage, timing: TIMING, harnessImage: { id: `sha256:${'e'.repeat(64)}` } } as never)).resolves.toMatchObject({ kind: 'usage' });
+  });
 
   test('refuses a usage record whose timing is not a start and an end', async () => {
     for (const timing of [null, {}, [], { endedAt: null }]) {

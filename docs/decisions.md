@@ -11768,7 +11768,7 @@ Started on `v2` at b79c699. Issue #169. Builds A-R53-01 (D-A-HI-01).
   - *Reverse:* delete the records check from `ensureImage`. The tag is then
     trusted as before.
 - **C3. How a hash mismatch fails the build.** `npm ci` from the lockfile,
-  followed by `check-install.cjs`. That script is copied into the image and
+  followed by `check-install.js`. That script is copied into the image and
   owned by root. It reads the lockfile and npm's record of the install
   (`node_modules/.package-lock.json`). Every lockfile entry that is not
   optional, or is optional and matches the image's `os` and `cpu`, must be
@@ -11813,3 +11813,61 @@ Started on `v2` at b79c699. Issue #169. Builds A-R53-01 (D-A-HI-01).
   which is now a content ID, so it runs by ID too. Its record is a nightly
   part, not a `UsageRecord`, and A-R53-01 gives it no field. That is recorded
   as a known limit, with an issue filed at ship time.
+
+### D-R53-04: judgment calls made during the work
+
+- **The build logic is shared, and the install check is copied.**
+  `recordedImage()` and `harnessLockProblems()` live in `@olympus-ai/sandbox`,
+  which both drivers already depend on (`package.json`). Before R53, each
+  driver kept its own copy of `ensureImage`. One implementation removes the
+  risk that the two copies drift apart. `check-install.js` has to be inside
+  each build context, because a Docker build cannot copy from outside its
+  context, so each image directory holds a copy. Each copy is proven by its
+  own driver's `I5.<driver>-image-installs-the-cli-by-content`.
+  *Reverse:* move the functions back into each driver's `image.ts`.
+- **`check-install.js`, not `.cjs`.** The lint's project service allows a
+  default project for `*.js`, `*.mjs`, and `*.ts` only (`eslint.config.js`).
+  That file is a gate path #169 does not declare. The script follows
+  `codex/image/catalog.js`: CommonJS with `require`, the same two header
+  comments, and run by plain `node` in a directory whose `package.json` sets no
+  `type`. *Reverse:* rename it and add `*.cjs` to `allowDefaultProject`, in a
+  gate change of its own.
+- **`imageId(ref, { pull: true })`.** The Python rig in `stacks.ts` ran
+  `PYTHON_IMAGE` as its build image, and it worked only because `docker run`
+  pulls a missing image. CI pre-pulls the node base and alpine (`ci.yml:78-82`)
+  but not that image. Reading the ID without pulling would refuse on a cold
+  runner. The pull is allowed only for a reference pinned by digest, so it
+  cannot fetch whatever a tag names that day. A pull by tag is refused before
+  the engine is asked. *Reverse:* drop the option and pre-pull in CI, which
+  is a gate change.
+- **`ensureImage` returns an ID where it returned a tag.** Its four callers
+  (`api/src/host/compose.ts:231`, `claude-code/test/harness.ts:379`,
+  `codex/test/harness.ts:135`, and `benchmark/test/tiers/model.tier.ts:55`)
+  each pass the value to a sandbox as its image, and Docker runs an ID as it
+  ran the tag (D-R53-02). None of them reads it as a name.
+- **The real tag in the external test.** `I5.<driver>-image-replaced-is-refused`
+  builds or accepts the real tag through `ensureImage()` with the default
+  records, as the host would. A record in a temporary directory would leave
+  the daemon holding a tag that the next `ensureImage()` refuses, in the CI
+  job that runs the paid suites afterwards and on a maintainer's machine. The
+  refusals are shown against empty and foreign record directories for that
+  tag. The true retag is shown on a tag of the test's own, which is removed
+  afterwards.
+- **The assertion's reviewer has a provenance of its own.** The rig's two
+  stubs share `provenanceId()`, so a `driverImages` entry keyed by it would
+  have caught the builder too. `I2.harness-image-recorded-by-the-runtime`
+  gives the reviewer its own ID, so the profile provisions each seat from a
+  different image, and a line that recorded the build image for both is
+  caught.
+- **Each control, deleted, fails its assertion.** Run locally:
+  - Without `node check-install.js` in the Dockerfile, the altered platform
+    hash built (`expected null to be an instance of Error`).
+  - With `npm install --global` by name in place of the lockfile, the image
+    has no `/opt/cli/node_modules/.package-lock.json`.
+  - Without the records check in `recordedImage`, the refusal resolved.
+  - Without `buildGraph`'s check, a tag profile was not refused.
+  - With the line recording `no-sandbox` always, the build call names no
+    image.
+  - With the bundle taking the profile's image, a bundle was written for a
+    build call whose record named none.
+  - Without the Vault's checks, three Vault tests fail.

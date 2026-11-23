@@ -140,7 +140,9 @@ export async function readUsage(vault: Vault, state: RunState): Promise<UsageRec
     }
     // A record written before R12 carries no times, and one before R9 no driver: each read as not recorded (A-R12-01, A-R9-01).
     const timed = record.timing === undefined ? { ...(record as UsageRecord), timing: 'not-recorded' as const } : (record as UsageRecord);
-    records.push(record.driver === undefined ? { ...timed, driver: null } : timed);
+    // And one before R53 names no image: read as not recorded, never as an image it may not have run in (A-R53-01).
+    const imaged = record.harnessImage === undefined ? { ...timed, harnessImage: 'not-recorded' as const } : timed;
+    records.push(record.driver === undefined ? { ...imaged, driver: null } : imaged);
   }
   return records;
 }

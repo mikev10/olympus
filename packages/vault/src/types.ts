@@ -143,8 +143,23 @@ export interface EvidenceBundle {
   install: InstallRecord | null;
   collectedBy: 'runtime';             // literal type: no other value is representable
   driverProvenanceId: string;
+  /**
+   * The image the build call this bundle verifies ran in, copied from that
+   * call's usage record, so a verdict is tied to the bytes that produced it
+   * and not to the version `driverProvenanceId` names (A-R53-01).
+   */
+  harnessImage: HarnessImage;
   contractVersion: string;
 }
+
+/**
+ * The image a driver call's sandbox was started from, as the runtime read it
+ * from the container engine and never from a driver (I2, A-R53-01): its
+ * content ID, `sha256:` and 64 hex digits. `no-sandbox` is a line with no
+ * sandbox profile, which provisions no image. `not-recorded` is how a record
+ * written before R53 is read; the Vault refuses to write one.
+ */
+export type HarnessImage = { readonly id: string } | 'no-sandbox' | 'not-recorded';
 
 /**
  * What one driver call cost, as the runtime collected it: the reading the
@@ -190,6 +205,8 @@ export interface UsageRecord {
    * before R12 is read; the Vault refuses to write one.
    */
   timing: CallTiming | 'not-recorded';
+  /** The image this call's sandbox was started from (A-R53-01). */
+  harnessImage: HarnessImage;
   collectedBy: 'runtime';
 }
 

@@ -1,19 +1,29 @@
-# The image a task runs in: Node, and the Claude Code CLI at one version.
+# The image a task runs in: Node, and the Claude Code CLI by content.
 #
 # Built by this package rather than pulled, because no published image carries
-# the CLI. Both inputs are pinned — the base by digest, the CLI by exact
-# version — so the image a reviewer builds is the image CI built. The build
+# the CLI. Every input is pinned: the base by digest, and the CLI and each of
+# its platform packages by sha512 in package-lock.json (R53). The build
 # happens on the host, where the network is the developer's own; the container
 # this produces reaches only what the sandbox's egress allowlist grants it.
 #
-# Nothing is copied in from the repository. The workspace arrives at run time
-# as the sandbox's one writable mount, so the image holds no project code and
-# a stale image cannot serve a task an old copy of the tree.
+# Nothing is copied in from the repository but this directory's manifest,
+# lockfile, and install check. The workspace arrives at run time as the
+# sandbox's one writable mount, so the image holds no project code and a
+# stale image cannot serve a task an old copy of the tree.
 ARG BASE
 FROM ${BASE}
 
-ARG CLI_VERSION
-RUN npm install --global --no-fund --no-audit "@anthropic-ai/claude-code@${CLI_VERSION}"  && npm cache clean --force
+# From the lockfile and never by name: `npm ci` installs exactly what it pins
+# and checks each tarball against its sha512. It skips an optional platform
+# package whose tarball fails that check, so check-install.js then fails the
+# build unless every package pinned for this platform is installed as locked.
+# Root owns all of it, so a task's user cannot rewrite the CLI or the check.
+COPY package.json package-lock.json check-install.js /opt/cli/
+RUN cd /opt/cli \
+    && npm ci --no-fund --no-audit \
+    && node check-install.js /opt/cli \
+    && npm cache clean --force \
+    && ln -s /opt/cli/node_modules/.bin/claude /usr/local/bin/claude
 
 # A task's commands run as a user that does not own the CLI it runs, so a model
 # that rewrites its own binary is refused by the filesystem rather than by

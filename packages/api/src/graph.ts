@@ -22,7 +22,7 @@ import { ClaudeCodeDriver } from '@olympus-ai/driver-claude-code';
 import { OpenAICompatibleDriver } from '@olympus-ai/driver-openai-compatible';
 import { LocalDockerProvider } from '@olympus-ai/sandbox';
 import type { SandboxSpec } from '@olympus-ai/sandbox';
-import { LocalVault } from '@olympus-ai/vault';
+import { IMAGE_CONTENT_ID, LocalVault } from '@olympus-ai/vault';
 import type { ComponentGraph } from './run.js';
 
 import { GitHubIntegrator, type Integrator } from './integrate.js';
@@ -172,11 +172,30 @@ function unattestedInstallers(installers: readonly DependencyInstaller[]): Unsaf
  * the declarations: vault, sandbox, driver, reviewer. A reviewer that is the
  * driver itself is read once.
  */
+/**
+ * Every image a driver call can run in names its content, `sha256:` and 64
+ * hex digits, or the graph is not built (A-R53-01, D-R53-03). A tag or a
+ * repository digest is a name the engine can answer with other bytes; an ID
+ * is the image, and it is what the evidence records the call ran in. Refused
+ * here, at composition, rather than on the first call, where it would be an
+ * attempt that failed and was retried. The check image is not a driver call's
+ * and is not held to it.
+ */
+function checkDriverImages(profile: SandboxProfile): void {
+  const named: Array<[string, unknown]> = [['buildImage', profile.buildImage], ...Object.entries(profile.driverImages ?? {}).map(([id, image]): [string, unknown] => [`driverImages[${JSON.stringify(id)}]`, image])];
+  for (const [slot, image] of named) {
+    if (typeof image !== 'string' || !IMAGE_CONTENT_ID.test(image)) {
+      throw new Error(`buildGraph: the profile's ${slot} is ${JSON.stringify(image)}, not a content ID (sha256: and 64 hex digits); a driver call runs only in an image named by its content (A-R53-01)`);
+    }
+  }
+}
+
 export function buildGraph(parts: GraphParts): BuiltGraph {
   const { profile, scanners, installers, ...components } = parts;
   if ((profile ?? null) === null && components.sandbox instanceof LocalDockerProvider) {
     throw new Error('buildGraph: a LocalDockerProvider needs a sandbox profile; it refuses a sandbox with no image or limits (D-I1a-01)');
   }
+  if (profile !== undefined && profile !== null) checkDriverImages(profile);
   const declarations: UnsafeDeclaration[] = [];
   const slots = [['vault', components.vault], ['sandbox', components.sandbox], ['driver', components.driver], ['reviewer', components.reviewer]] as const;
   for (const [slot, component] of slots) {
