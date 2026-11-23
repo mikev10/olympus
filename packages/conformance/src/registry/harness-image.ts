@@ -11,6 +11,7 @@
  * refused (I5).
  */
 import type { TaskId } from '@olympus-ai/core';
+import type { SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
 import type { EvidenceBundle, UsageRecord, Vault } from '@olympus-ai/vault';
 import { external, runtime } from '../kit/assert.js';
 import type { ExternalAssertion, LocalAssertion } from '../kit/types.js';
@@ -25,6 +26,8 @@ const IMAGE_TESTS = 'test/image.test.ts';
 /** Two content IDs no engine holds: the stub sandbox runs no image, so the line records what it was given. */
 const BUILD_IMAGE = `sha256:${'b'.repeat(64)}`;
 const REVIEW_IMAGE = `sha256:${'d'.repeat(64)}`;
+/** An image no profile names: what a build call's record says it ran in when it differs from the profile now. */
+const RECORDED_IMAGE = `sha256:${'e'.repeat(64)}`;
 const LIMITS = { cpus: 1, memoryMb: 512, pids: 64 };
 
 function installsByContent(driver: 'claude-code' | 'codex', pkg: string): ExternalAssertion {
@@ -51,6 +54,43 @@ function replacedIsRefused(driver: 'claude-code' | 'codex', pkg: string): Extern
   });
 }
 
+/** A sandbox that records the image of every spec it is asked to provision, so a record is compared with what ran, not with the profile. */
+async function provisionsSeen(): Promise<{ sandbox: SandboxProvider; images: string[] }> {
+  const { StubSandboxProvider } = await import('@olympus-ai/sandbox');
+  const target = new StubSandboxProvider();
+  const images: string[] = [];
+  const sandbox = new Proxy(target, {
+    get(t, prop) {
+      if (prop === 'provision') {
+        return async (spec: SandboxSpec) => {
+          images.push(spec.image);
+          return t.provision(spec);
+        };
+      }
+      const value: unknown = Reflect.get(t, prop, t);
+      return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(t) : value;
+    },
+  });
+  return { sandbox, images };
+}
+
+/** A Vault whose usage records read back as `rewrite` gives them. */
+function usageRead(vault: Vault, rewrite: (record: UsageRecord) => Partial<UsageRecord>): Vault {
+  return new Proxy(vault, {
+    get(target, prop, receiver) {
+      if (prop === 'read') {
+        return async (ref: Parameters<Vault['read']>[0]) => {
+          const bytes = await target.read(ref);
+          if (ref.kind !== 'usage') return bytes;
+          return new TextEncoder().encode(JSON.stringify(rewrite(JSON.parse(new TextDecoder().decode(bytes)) as UsageRecord)));
+        };
+      }
+      const value: unknown = Reflect.get(target, prop, receiver);
+      return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+    },
+  });
+}
+
 /** Every usage record the run wrote that is not a pending one, read back. */
 async function calls(vault: Vault, refs: ReadonlyArray<Parameters<Vault['read']>[0]>): Promise<UsageRecord[]> {
   const records = await Promise.all(refs.map((ref) => readRecord<UsageRecord>(vault, ref)));
@@ -60,15 +100,18 @@ async function calls(vault: Vault, refs: ReadonlyArray<Parameters<Vault['read']>
 export const HARNESS_IMAGE_RECORDED_BY_THE_RUNTIME: LocalAssertion = runtime({
   id: 'I2.harness-image-recorded-by-the-runtime',
   title:
-    "every driver call's usage record and every evidence bundle name the content ID of the image the line provisioned the call from, the profile's for that "
-    + "driver and never anything the driver returned; with no profile they name no-sandbox; and a usage record read from before R53 is not-recorded",
+    "every driver call's usage record names the content ID of the image its sandbox was provisioned from, the profile's for that driver and never anything "
+    + "the driver returned; every evidence bundle names the image its build call's record names, even where the profile now names another; with no profile "
+    + "they name no-sandbox; and a usage record read from before R53 is not-recorded",
   run: async () => {
     const { readUsage, startRun } = await api();
     await withLine('r53-i2-', async (rig) => {
       // A reviewer through a driver of its own, so the profile provisions it from its own image (R9, D-R9-06).
       const reviewer = { ...(await stubDriver({ family: 'other-family' })), provenanceId: () => 'r53-reviewer@1' };
+      const seen = await provisionsSeen();
       const components = await rig.components({
         reviewer,
+        sandbox: seen.sandbox,
         profile: { buildImage: BUILD_IMAGE, driverImages: { [reviewer.provenanceId()]: REVIEW_IMAGE }, checkImage: 'check-image-is-not-a-driver-call', limits: LIMITS },
       });
       await startRun(await rig.request(components));
@@ -83,6 +126,15 @@ export const HARNESS_IMAGE_RECORDED_BY_THE_RUNTIME: LocalAssertion = runtime({
       for (const r of reviews) {
         if (typeof r.harnessImage !== 'object' || r.harnessImage.id !== REVIEW_IMAGE) throw new Error(`I2: a review call recorded ${JSON.stringify(r.harnessImage)}, not the image its driver is provisioned from`);
       }
+      // Each image is named by as many call records as sandboxes were provisioned from it: compared with what ran, not with the profile.
+      for (const image of [BUILD_IMAGE, REVIEW_IMAGE]) {
+        const ran = seen.images.filter((i) => i === image).length;
+        const recorded = usage.filter((r) => typeof r.harnessImage === 'object' && r.harnessImage.id === image).length;
+        if (ran !== recorded) throw new Error(`I2: ${String(ran)} sandboxes were provisioned from ${image}, and ${String(recorded)} call records name it`);
+      }
+      for (const r of usage) {
+        if (typeof r.harnessImage !== 'object' || !seen.images.includes(r.harnessImage.id)) throw new Error(`I2: a call record names ${JSON.stringify(r.harnessImage)}, which no sandbox was provisioned from`);
+      }
       const bundles = await Promise.all(state.evidenceRefs.map((ref) => readRecord<EvidenceBundle>(components.vault, ref)));
       if (bundles.length === 0) throw new Error('the rig wrote no evidence bundle to read');
       for (const b of bundles) {
@@ -90,22 +142,22 @@ export const HARNESS_IMAGE_RECORDED_BY_THE_RUNTIME: LocalAssertion = runtime({
       }
 
       // A record from before R53 carries no image, and is read as not recorded rather than as any image.
-      const legacy: Vault = new Proxy(components.vault, {
-        get(target, prop, receiver) {
-          if (prop === 'read') {
-            return async (ref: Parameters<Vault['read']>[0]) => {
-              const bytes = await target.read(ref);
-              if (ref.kind !== 'usage') return bytes;
-              const { harnessImage: _image, ...record } = JSON.parse(new TextDecoder().decode(bytes)) as UsageRecord;
-              return new TextEncoder().encode(JSON.stringify(record));
-            };
-          }
-          const value: unknown = Reflect.get(target, prop, receiver);
-          return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value;
-        },
-      });
+      const legacy = usageRead(components.vault, ({ harnessImage: _image, ...record }) => record);
       const old = await readUsage(legacy, state);
       if (old.length === 0 || old.some((r: UsageRecord) => r.harnessImage !== 'not-recorded')) throw new Error('I5: a usage record from before R53 was read as naming an image');
+    });
+
+    // A bundle names the image its build call's record names, not the one the profile names now: the two differ, as after a resume on a rebuilt image.
+    await withLine('r53-i2-record-', async (rig) => {
+      const components = await rig.components({ profile: { buildImage: BUILD_IMAGE, checkImage: 'c', limits: LIMITS } });
+      const ranElsewhere = usageRead(components.vault, (record) => ({ ...record, harnessImage: { id: RECORDED_IMAGE } }));
+      await startRun(await rig.request({ ...components, vault: ranElsewhere }));
+      const state = await rig.state();
+      const bundles = await Promise.all(state.evidenceRefs.map((ref) => readRecord<EvidenceBundle>(components.vault, ref)));
+      if (bundles.length === 0) throw new Error('the rig wrote no evidence bundle to read');
+      for (const b of bundles) {
+        if (typeof b.harnessImage !== 'object' || b.harnessImage.id !== RECORDED_IMAGE) throw new Error(`I2: a bundle names ${JSON.stringify(b.harnessImage)}, not the image its build call's record names`);
+      }
     });
 
     await withLine('r53-i2-none-', async (rig) => {
@@ -149,20 +201,7 @@ export const HARNESS_IMAGE_UNNAMED_IS_REFUSED: LocalAssertion = runtime({
       }
 
       // The build call's record, as the line reads it back at verify, with its image taken away.
-      const unnamed: Vault = new Proxy(components.vault, {
-        get(target, prop, receiver) {
-          if (prop === 'read') {
-            return async (ref: Parameters<Vault['read']>[0]) => {
-              const bytes = await target.read(ref);
-              if (ref.kind !== 'usage') return bytes;
-              const { harnessImage: _image, ...record } = JSON.parse(new TextDecoder().decode(bytes)) as UsageRecord;
-              return new TextEncoder().encode(JSON.stringify(record));
-            };
-          }
-          const value: unknown = Reflect.get(target, prop, receiver);
-          return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value;
-        },
-      });
+      const unnamed = usageRead(components.vault, ({ harnessImage: _image, ...record }) => record);
       const outcome = await startRun(await rig.request({ ...components, vault: unnamed })).then((o) => o, (error: unknown) => error);
       const state = await rig.state();
       if (state.evidenceRefs.length > 0) throw new Error('I5: a bundle was written for a build call whose record names no image');
