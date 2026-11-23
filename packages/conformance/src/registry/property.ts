@@ -22,7 +22,8 @@ import type { SandboxHandle, SandboxProvider, SandboxSpec } from '@olympus-ai/sa
 import type { BaseRunRecord, EvidenceBundle } from '@olympus-ai/vault';
 import { runtime } from '../kit/assert.js';
 import type { LocalAssertion } from '../kit/types.js';
-import { ARTIFACTS, HELLO_TASK, readRecord, refusalOf, stubDriver, withLine, writeManifest, type LineRig } from './line.js';
+import { ONE_RULE } from './decisions.js';
+import { ARTIFACTS, HELLO_TASK, linePolicy, readRecord, refusalOf, stubDriver, withLine, writeManifest, type LineRig } from './line.js';
 
 const api = async () => import('@olympus-ai/api');
 
@@ -344,8 +345,40 @@ export const PROPERTY_CATCHES_HARD_CODED_OUTPUT: LocalAssertion = runtime({
   },
 });
 
+export const POLICY_REQUIRES_A_PROPERTY_PER_RULE: LocalAssertion = runtime({
+  id: 'I5.policy-requires-a-property-check-per-authorization-rule',
+  title:
+    "under a policy that sets propertyPerAuthorizationRule, an authorization rule with its denial check and no required property check naming it refuses the test-design exit, naming the rule, before the base runs; a required property check naming it in deniesRule lets the run cross; a property check never stands in for the denial check",
+  run: async () => {
+    const { startRun } = await api();
+    const policy = await linePolicy({}, { propertyPerAuthorizationRule: true });
+    const denies = { id: 'stranger-refused', kind: 'behavioral', onBase: 'passes', deniesRule: 'owner-only', command: ['node', '-e', 'process.exit(0)'], required: true, timeoutMs: 10_000 };
+    const states = { ...property('owner-property', [HOLDS], 'passes'), deniesRule: 'owner-only' };
+    const attempt = async (prefix: string, checks: readonly unknown[]) =>
+      withLine(prefix, async (rig) => {
+        await withProperties(rig);
+        await writeFile(join(rig.dirs.artifacts, 'security.json'), JSON.stringify(ONE_RULE));
+        await writeManifest(rig.dirs, [COMPILES, property('hello-property', [HELLO_PROPERTY], 'fails'), ...checks]);
+        const components = await rig.components({ sandbox: await mounting() });
+        const refusal = refusalOf(await startRun(await rig.request(components, { artifacts: PROPERTY_ARTIFACTS, policy })), prefix);
+        return { refusal, base: await components.vault.readBaseRun(rig.runId, null) };
+      });
+    const unstated = await attempt('r25-rule-', [denies]);
+    if (unstated.refusal.at !== 'test-design' || unstated.refusal.transition.reason !== 'denial-check-missing' || unstated.refusal.transition.rules.join() !== 'owner-only' || !unstated.refusal.transition.message.includes('property')) {
+      throw new Error(`R25: a rule with no property check under the policy was ${JSON.stringify(unstated.refusal.transition)} at ${unstated.refusal.at}`);
+    }
+    if (unstated.base !== null) throw new Error('R25: the base ran before the rule with no property check refused the exit');
+    const alone = await attempt('r25-rule-alone-', [states]);
+    if (alone.refusal.transition.reason !== 'denial-check-missing' || alone.refusal.transition.message.includes('property')) {
+      throw new Error(`R25: a property check stood in for the denial check: ${JSON.stringify(alone.refusal.transition)}`);
+    }
+    const both = await attempt('r25-rule-control-', [denies, states]);
+    if (both.refusal.at !== 'integrate') throw new Error(`R25 control: a rule with both checks stopped at ${both.refusal.at}: ${JSON.stringify(both.refusal.transition)}`);
+  },
+});
+
 export const R25_ASSERTIONS = {
   I2: [PROPERTY_SEED_REPRODUCES],
   I3: [PROPERTY_EDIT_IS_LOCK_TAMPER],
-  I5: [PROPERTY_CHECK_NEEDS_THE_SLOT, PROPERTY_FILE_MUST_REGISTER, PROPERTY_CHECK_RUNS_EVERY_PINNED_CASE, PROPERTY_CATCHES_HARD_CODED_OUTPUT],
+  I5: [PROPERTY_CHECK_NEEDS_THE_SLOT, PROPERTY_FILE_MUST_REGISTER, PROPERTY_CHECK_RUNS_EVERY_PINNED_CASE, PROPERTY_CATCHES_HARD_CODED_OUTPUT, POLICY_REQUIRES_A_PROPERTY_PER_RULE],
 } as const;

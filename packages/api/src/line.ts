@@ -459,7 +459,7 @@ async function work(ctx: LineContext, station: StationId): Promise<StationRefusa
       // Drafted tests are drafted here; their draft is locked at the exit, once approved (R19).
       if (isDrafted(ctx, 'test-design')) return draftStation(ctx, 'test-design');
       // Read from what was admitted, so it is refused before anything is locked or run (R17).
-      const undenied = denialRefusal(ctx.securityPart, ctx.checks);
+      const undenied = denialRefusal(ctx.securityPart, ctx.checks, ctx.policy.propertyPerAuthorizationRule);
       if (undenied !== undefined) return undenied;
       // A base record means this station locked and ran its checks before a stop: the locks are
       // held, and the base is judged by the record rather than run again (D-A-BF-01).

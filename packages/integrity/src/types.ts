@@ -82,7 +82,13 @@ export interface PropertyCheckSpec extends SuiteCheckFields {
   /** The cases every property must run, a positive integer. */
   numRuns: number;
   expectedSuiteCount?: never;
-  deniesRule?: never;
+  /**
+   * The authorization rule whose refusal the properties state, as the spec's
+   * security part names it. Where policy sets `propertyPerAuthorizationRule`,
+   * every rule needs a required property check that names it, beside its
+   * denial check (D-R25-05). It is never the denial check itself.
+   */
+  deniesRule?: string;
   reproduces?: never;
 }
 

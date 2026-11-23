@@ -611,7 +611,7 @@ async function readTestDraft(ctx: LineContext, start: string, work: string): Pro
     });
     for (const test of tests) if (!named.has(test)) problems.push({ path: test, code: 'unreferenced' });
     for (const p of mergedCheckProblems(ctx.checks, checks)) problems.push({ path: `${manifestPath}#${p.path}`, code: p.code });
-    const undenied = denialRefusal(ctx.securityPart, [...ctx.checks, ...checks]);
+    const undenied = denialRefusal(ctx.securityPart, [...ctx.checks, ...checks], ctx.policy.propertyPerAuthorizationRule);
     if (undenied?.reason === 'denial-check-missing') for (const rule of undenied.rules) problems.push({ path: `${manifestPath}#deniesRule:${rule}`, code: 'denial-check-missing' });
     // A bug fix's draft needs a required check declaring that it reproduces the defect; no other run's may declare one (A-R16-04).
     for (const p of reproductionProblems(checks, ctx.drafting.template === 'bug-fix', manifestPath, false)) problems.push({ path: p.path, code: p.code });

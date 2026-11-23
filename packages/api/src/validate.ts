@@ -496,8 +496,8 @@ function checkProblems(checks: unknown, report: Report, alone: boolean): void {
     }
     const denies = (check as { deniesRule?: unknown }).deniesRule;
     if (denies !== undefined) {
-      if (c.kind !== 'acceptance' && c.kind !== 'behavioral') {
-        report(`${at}.deniesRule`, 'not-applicable', `${at}.deniesRule is named on a check that is neither an acceptance nor a behavioral check; a denial is exercised by a locked acceptance check`);
+      if (c.kind !== 'acceptance' && c.kind !== 'behavioral' && c.kind !== 'property') {
+        report(`${at}.deniesRule`, 'not-applicable', `${at}.deniesRule is named on a check that is not an acceptance, behavioral, or property check; a denial is exercised by a locked check`);
       } else if (!isNonEmptyString(denies)) report(`${at}.deniesRule`, 'empty', `${at}.deniesRule must name an authorization rule of the spec's security part`);
       // An optional denial check can fail every verify and stop nothing, yet still satisfy test-design (codex-2, gemini-1).
       else if (c.required === false) report(`${at}.required`, 'not-required', `${at} names a rule it denies, so it must be required; an optional check holds the gate to nothing`);
