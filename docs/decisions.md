@@ -11608,7 +11608,7 @@ merged and tagged `reviewed/*` (`git tag -l 'reviewed/*'`).
 
 - **Chosen:** `NODE_OPTIONS=--import=<runtime preload>`, under vitest, from
   a read-only mount. Each report goes to stdout as
-  `OLYMPUS-PROPERTY <nonce> <json>`, keyed by the `file:line` of its
+  `PROPERTY-RUN <nonce> <json>`, keyed by the `file:line` of its
   `assert` call. The verdict requires all of the following:
   - exit code 0;
   - at least one report from every registration the adapter found
