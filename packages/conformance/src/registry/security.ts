@@ -239,7 +239,7 @@ export const FINGERPRINT_IGNORES_LINE: LocalAssertion = runtime({
     if (newFindings(base, copied).length !== 1) throw new Error('R17: a second copy of a base secret was not a new finding');
     if (parseGitleaksReport('[{"RuleID":"x","File":"a","StartLine":1,"Secret":"REDACTED"}]') !== undefined) throw new Error('R17: a redacted report was read as findings');
     const check = (await secretScanCheck()) as unknown as SecurityCheckSpec;
-    const unread = { checkId: check.id, exitCode: 0, stdout: '', stderr: '', suiteCount: null, expectation: null, findings: null, durationMs: 1, startedAt: new Date(0).toISOString() };
+    const unread = { checkId: check.id, exitCode: 0, stdout: '', stderr: '', suiteCount: null, expectation: null, findings: null, property: null, durationMs: 1, startedAt: new Date(0).toISOString() };
     if (securityShortfall(check, unread, [], STAND_IN_SECRET_SCANNER, { suppressionMarkersAdded: [] })?.cause !== 'no-result') {
       throw new Error('R17: a scan with no readable report was not judged no-result');
     }

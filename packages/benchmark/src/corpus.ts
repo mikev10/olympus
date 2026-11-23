@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 export const CORPUS_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'corpus');
 
 /** The corpus a result is measured against unless a caller names another. */
-export const CURRENT_CORPUS = 'v1';
+export const CURRENT_CORPUS = 'v2';
 
 export type ItemKind = 'seeded' | 'control';
 export type Tier = 'deterministic' | 'model';
@@ -52,6 +52,30 @@ export interface Item {
   readonly asked: string | null;
 }
 
+/**
+ * One arm of the line: the verification manifest each repository's run
+ * admits, and the files it admits as acceptance tests. Two arms over the same
+ * items differ only in what verifies them, so the difference between their
+ * results is the difference those checks make (R25, D-R25-04).
+ */
+export interface Arm {
+  readonly verificationManifest: string;
+  readonly acceptanceTests: readonly string[];
+  /**
+   * A directory under the corpus holding, per repository, files laid over it
+   * for this arm alone, or null. A check's files live there when the other
+   * arms must not hold them at all: a repository's unit check runs every
+   * suite it holds, so a property file in the shared tree would run in every
+   * arm (D-R25-04).
+   */
+  readonly overlay: string | null;
+}
+
+/** The arm a corpus that names none runs: v1's, the line as R7 measured it. */
+export const DEFAULT_ARMS: Readonly<Record<string, Arm>> = {
+  line: { verificationManifest: 'verify.json', acceptanceTests: ['test/acceptance/multiply.test.ts'], overlay: null },
+};
+
 export interface RepoPolicy {
   /** The globs the build seat may write. */
   readonly builderGlobs: readonly string[];
@@ -65,6 +89,8 @@ export interface Corpus {
   readonly repos: Readonly<Record<string, RepoPolicy>>;
   /** Each group's detector: the prefixes of the causes that are it (`detectorFired` in `result.ts`). */
   readonly groups: Readonly<Record<string, readonly string[]>>;
+  /** The line's arms, by name; `DEFAULT_ARMS` when the manifest names none. */
+  readonly arms: Readonly<Record<string, Arm>>;
   readonly items: readonly Item[];
 }
 
@@ -72,6 +98,8 @@ interface Manifest {
   readonly version: string;
   readonly repos: Readonly<Record<string, RepoPolicy>>;
   readonly groups: Readonly<Record<string, readonly string[]>>;
+  /** Absent in a manifest that names no arm, so a version made before arms existed digests as it was released. */
+  readonly arms?: Readonly<Record<string, Arm>>;
   readonly files: Readonly<Record<string, string>>;
 }
 
@@ -108,7 +136,7 @@ export async function loadCorpus(version: string = CURRENT_CORPUS, root: string 
   if (released !== undefined && released !== digest) {
     throw new Error(`benchmark: corpus ${version} was released at sha256:${released} and now digests to sha256:${digest}; a changed corpus is a new version`);
   }
-  return { version, digest, root: dir, repos: manifest.repos, groups: manifest.groups, items };
+  return { version, digest, root: dir, repos: manifest.repos, groups: manifest.groups, arms: manifest.arms ?? DEFAULT_ARMS, items };
 }
 
 /**
@@ -118,6 +146,7 @@ export async function loadCorpus(version: string = CURRENT_CORPUS, root: string 
  */
 const RELEASED: Readonly<Record<string, string>> = {
   v1: '7ffb35d1884826309c0332cadefa81608eaa57ab6bb072978dab3ae2cba9fc58',
+  v2: 'd145e2f1c36891361f2c9fd7757447cf1e5a5f3ac3c0fe237dc2bd11a7041064',
 };
 
 /** The directory a repository's files are read from. */
@@ -154,13 +183,15 @@ export async function digests(dir: string): Promise<Record<string, string>> {
 
 /**
  * SHA-256 over every pinned file's path and digest, in path order, then the
- * manifest's own content: the builder grants and the detector groups decide
- * outcomes as much as any file does.
+ * manifest's own content: the builder grants, the detector groups, and the
+ * arms decide outcomes as much as any file does. Arms are hashed only where
+ * the manifest names them.
  */
-export function corpusDigest(files: Readonly<Record<string, string>>, manifest: Pick<Manifest, 'repos' | 'groups'>): string {
+export function corpusDigest(files: Readonly<Record<string, string>>, manifest: Pick<Manifest, 'repos' | 'groups' | 'arms'>): string {
   const hash = createHash('sha256');
   for (const path of Object.keys(files).sort()) hash.update(`${path}\0${files[path] ?? ''}\n`);
-  hash.update(`${MANIFEST}\0${canonical({ repos: manifest.repos, groups: manifest.groups })}\n`);
+  const content = manifest.arms === undefined ? { repos: manifest.repos, groups: manifest.groups } : { repos: manifest.repos, groups: manifest.groups, arms: manifest.arms };
+  hash.update(`${MANIFEST}\0${canonical(content)}\n`);
   return hash.digest('hex');
 }
 
@@ -190,12 +221,25 @@ function parseManifest(text: string, version: string): Manifest {
     }
     groups[name] = prefixes;
   }
+  let arms: Record<string, Arm> | undefined;
+  if (parsed.arms !== undefined) {
+    if (!isRecord(parsed.arms) || Object.keys(parsed.arms).length === 0) throw new Error(`benchmark: corpus ${version}'s arms must name at least one arm`);
+    arms = {};
+    for (const [name, arm] of Object.entries(parsed.arms)) {
+      const overlay = isRecord(arm) ? arm.overlay : undefined;
+      if (!isRecord(arm) || typeof arm.verificationManifest !== 'string' || !isTreePath(arm.verificationManifest) || !isStringList(arm.acceptanceTests) || arm.acceptanceTests.length === 0 || !arm.acceptanceTests.every(isTreePath)
+        || !(overlay === null || (typeof overlay === 'string' && isTreePath(overlay) && overlay.startsWith('arms/')))) {
+        throw new Error(`benchmark: corpus ${version}'s arm '${name}' needs a verificationManifest, a non-empty list of acceptanceTests, each a path inside the repository, and an overlay under arms/ or null`);
+      }
+      arms[name] = { verificationManifest: arm.verificationManifest, acceptanceTests: arm.acceptanceTests, overlay };
+    }
+  }
   const files: Record<string, string> = {};
   for (const [path, digest] of Object.entries(parsed.files)) {
     if (typeof digest !== 'string' || !/^[0-9a-f]{64}$/.test(digest)) throw new Error(`benchmark: corpus ${version} pins ${path} at something that is not a SHA-256`);
     files[path] = digest;
   }
-  return { version, repos, groups, files };
+  return { version, repos, groups, ...(arms === undefined ? {} : { arms }), files };
 }
 
 const KINDS: ReadonlySet<string> = new Set<ItemKind>(['seeded', 'control']);

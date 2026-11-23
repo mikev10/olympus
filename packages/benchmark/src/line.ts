@@ -15,7 +15,7 @@ import { randomUUID } from 'node:crypto';
 import { cp, mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { buildGraph, containerUser, parseGraph, DEFAULT_LIMITS, localWorkspaceStore, startRun, worstCaseCost, type ContainerUser, type GraphBinding, type RunOutcome } from '@olympus-ai/api';
+import { buildGraph, containerUser, parseGraph, DEFAULT_LIMITS, localWorkspaceStore, startRun, worstCaseCost, type ContainerUser, type GraphBinding, type RunOutcome, type RunRequest } from '@olympus-ai/api';
 import { DEFAULT_ROLES_DIRECTORY } from '@olympus-ai/compiler';
 import {
   StrictPolicyEngine,
@@ -32,7 +32,7 @@ import { BASE_IMAGE } from '@olympus-ai/driver-claude-code';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
 import { imageId, LocalDockerProvider, type SandboxHandle, type SandboxProvider, type SandboxSpec } from '@olympus-ai/sandbox';
 import { LocalVault, type EnforcementDecision, type Vault } from '@olympus-ai/vault';
-import { repoDir, type Corpus, type Item, type RepoPolicy } from './corpus.js';
+import { DEFAULT_ARMS, repoDir, type Arm, type Corpus, type Item, type RepoPolicy } from './corpus.js';
 import { BENCH_TOOLS, BenchStub, ScriptedSeat } from './seats.js';
 
 const run = promisify(execFile);
@@ -104,11 +104,14 @@ export async function openBench(base: string, credentials: Readonly<Record<strin
  * pinned lockfile inside a sandbox whose only egress is the registry, so the
  * tree holds the container's binaries and not the host's.
  */
-export async function installed(bench: Bench, corpus: Corpus, repo: string): Promise<{ dir: string; commit: string }> {
-  const done = bench.installed.get(repo);
+export async function installed(bench: Bench, corpus: Corpus, repo: string, overlay: string | null = null): Promise<{ dir: string; commit: string }> {
+  const key = overlay === null ? repo : `${repo}+${overlay}`;
+  const done = bench.installed.get(key);
   if (done !== undefined) return done;
-  const dir = join(bench.base, 'repos', repo);
+  const dir = join(bench.base, 'repos', randomUUID());
   await cp(repoDir(corpus, repo), dir, { recursive: true });
+  // An arm's own files are laid over the repository before it is committed, so they are its base (D-R25-04).
+  if (overlay !== null) await cp(join(corpus.root, overlay, repo), dir, { recursive: true });
   const git = (...args: string[]) => run('git', ['-C', dir, '-c', 'user.email=benchmark@example.invalid', '-c', 'user.name=benchmark', '-c', 'core.autocrlf=false', ...args]);
   await git('init', '--quiet', '--initial-branch=main');
   await git('add', '--all');
@@ -120,7 +123,7 @@ export async function installed(bench: Bench, corpus: Corpus, repo: string): Pro
     wallClockMs: 900_000,
   });
   const made = { dir, commit };
-  bench.installed.set(repo, made);
+  bench.installed.set(key, made);
   return made;
 }
 
@@ -193,7 +196,7 @@ export function benchPolicyDocument(repo: RepoPolicy): PolicyDocument {
   };
 }
 
-/** The artifacts every corpus repository declares, at these paths. */
+/** The artifacts every corpus repository declares, at these paths, in the default arm. */
 export const ARTIFACTS = {
   spec: ['spec.md'],
   acceptanceTests: ['test/acceptance/multiply.test.ts'],
@@ -202,12 +205,20 @@ export const ARTIFACTS = {
   specParts: { security: 'security.json' },
 } as const;
 
+/** The arm a caller that names none runs. */
+const DEFAULT_LINE_ARM: Arm = DEFAULT_ARMS.line ?? { verificationManifest: ARTIFACTS.verificationManifest, acceptanceTests: ARTIFACTS.acceptanceTests, overlay: null };
+
+/** The artifacts a run of `arm` admits: the default ones, with the arm's manifest and acceptance tests. */
+export function artifactsOf(arm: Arm): RunRequest['artifacts'] {
+  return { ...ARTIFACTS, acceptanceTests: [...arm.acceptanceTests], verificationManifest: arm.verificationManifest };
+}
+
 /** One item through the line: a fresh copy of its installed repository, a fresh store, a fresh run. */
-export async function throughTheLine(bench: Bench, corpus: Corpus, item: Item): Promise<LineOutcome> {
+export async function throughTheLine(bench: Bench, corpus: Corpus, item: Item, arm: Arm = DEFAULT_LINE_ARM): Promise<LineOutcome> {
   if (item.seat !== 'build') throw new Error(`benchmark: item '${item.id}' is a ${item.seat}'s draft, which the line arm of the deterministic tier does not run`);
   const policyOf = corpus.repos[item.repo];
   if (policyOf === undefined) throw new Error(`benchmark: item '${item.id}' names repository '${item.repo}', which the corpus does not hold`);
-  const source = await installed(bench, corpus, item.repo);
+  const source = await installed(bench, corpus, item.repo, arm.overlay);
   // A name that says nothing about the item, so nothing on disk or in a container's labels carries its id (I3).
   const name = randomUUID();
   const root = join(bench.base, 'runs', name);
@@ -237,7 +248,7 @@ export async function throughTheLine(bench: Bench, corpus: Corpus, item: Item): 
     baseCommit: source.commit,
     requestedLevel: 1,
     workspace: repository,
-    artifacts: ARTIFACTS,
+    artifacts: artifactsOf(arm),
     policy,
     roles: DEFAULT_ROLES_DIRECTORY,
     components,

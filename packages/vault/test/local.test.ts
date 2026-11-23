@@ -393,7 +393,7 @@ describe('enforcement decisions (A-P14-01)', () => {
 });
 
 describe('the base record (D-A-BF-01)', () => {
-  const reproduced = { checkId: 'reproduces', exitCode: 1, stdout: '', stderr: '', suiteCount: 1, expectation: null, findings: null, durationMs: 1, startedAt: '2026-10-11T00:00:00.000Z' };
+  const reproduced = { checkId: 'reproduces', exitCode: 1, stdout: '', stderr: '', suiteCount: 1, expectation: null, findings: null, property: null, durationMs: 1, startedAt: '2026-10-11T00:00:00.000Z' };
   const record = {
     runId,
     baseTreeSha256: 'c'.repeat(64),

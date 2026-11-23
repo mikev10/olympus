@@ -8,6 +8,7 @@ import type { RoleId, RunId, TaskId } from '@olympus-ai/core';
 export type CheckKind =
   | 'compile' | 'typecheck' | 'lint' | 'unit'
   | 'acceptance' | 'behavioral' | 'coverage' | 'mutation'
+  | 'property'
   | SecurityCheckKind;
 
 /** The kinds a scanner runs: deterministic, no model call, judged by their findings against the base (D-A-SC-01). */
@@ -25,7 +26,7 @@ export type BaseDeclaration = 'fails' | 'passes';
  * exit if one does otherwise (D-A-BF-01, D-R15-02). No other kind carries a
  * declaration: one that did nothing would be a claim with no effect.
  */
-export type CheckSpec = AcceptanceCheckSpec | UnitCheckSpec | BehavioralCheckSpec | SecurityCheckSpec | OtherCheckSpec;
+export type CheckSpec = AcceptanceCheckSpec | UnitCheckSpec | PropertyCheckSpec | BehavioralCheckSpec | SecurityCheckSpec | OtherCheckSpec;
 
 /**
  * A scanner's check. It pins no command: the runtime runs the scanner its
@@ -46,17 +47,50 @@ export interface SecurityCheckSpec extends CheckSpecFields {
   onBase?: never;
   expectedSuiteCount?: never;
   deniesRule?: never;
+  seed?: never;
+  numRuns?: never;
 }
 
 /**
- * A check whose result is a test runner's: `unit` and `acceptance`. It pins
+ * A check whose result is a test runner's: `unit`, `acceptance`, and
+ * `property`. It pins
  * no command. The runtime runs the test framework the base declares, from
  * the base's own install, over the suites the check names, so a suite count
  * is a count of what the runner was made to load rather than an inventory
  * of the tree, and nothing the change writes can stand in for the runner
  * (D-R15-04).
  */
-export type SuiteCheckSpec = AcceptanceCheckSpec | UnitCheckSpec;
+export type SuiteCheckSpec = AcceptanceCheckSpec | UnitCheckSpec | PropertyCheckSpec;
+
+/**
+ * A property check (R25) runs locked property files. Each states what must
+ * hold for every input in a domain, and the stack's property framework
+ * checks it against inputs it generates. The files are admitted and locked
+ * with the acceptance tests (I3). The runtime sets the seed and the number of
+ * cases through the set's property adapter; the file never does. Every
+ * property the adapter found in the files must report that many cases on
+ * that seed. Fewer, another seed, or no report is a refusal (I5, D-R25-02).
+ * The seed is pinned so that a rerun reaches the same verdict (I2).
+ */
+export interface PropertyCheckSpec extends SuiteCheckFields {
+  kind: 'property';
+  onBase: BaseDeclaration;
+  /** Tree-relative paths, each an admitted file that registers at least one property with the set's framework. */
+  tests: readonly [string, ...string[]];
+  /** The generator's seed, a 32-bit signed integer. */
+  seed: number;
+  /** The cases every property must run, a positive integer. */
+  numRuns: number;
+  expectedSuiteCount?: never;
+  /**
+   * The authorization rule whose refusal the properties state, as the spec's
+   * security part names it. Where policy sets `propertyPerAuthorizationRule`,
+   * every rule needs a required property check that names it, beside its
+   * denial check (D-R25-05). It is never the denial check itself.
+   */
+  deniesRule?: string;
+  reproduces?: never;
+}
 
 /**
  * An acceptance check runs exactly the locked acceptance tests it names, and
@@ -69,6 +103,8 @@ export interface AcceptanceCheckSpec extends SuiteCheckFields, DenialFields {
   /** Tree-relative paths, each an admitted acceptance test the base's framework enumerates as a suite. */
   tests: readonly [string, ...string[]];
   expectedSuiteCount?: never;
+  seed?: never;
+  numRuns?: never;
 }
 
 /**
@@ -95,6 +131,8 @@ export interface UnitCheckSpec extends SuiteCheckFields {
   tests?: never;
   expectedSuiteCount?: number;        // I5: a shrunken enumeration is a failure
   deniesRule?: never;
+  seed?: never;
+  numRuns?: never;
 }
 
 export interface BehavioralCheckSpec extends CommandCheckFields, DenialFields {
@@ -109,7 +147,7 @@ export interface OtherCheckSpec extends CommandCheckFields {
 }
 
 /** A check that carries a declaration, and so runs over the base. */
-export type DeclaredCheckSpec = (AcceptanceCheckSpec | BehavioralCheckSpec) & { onBase: BaseDeclaration };
+export type DeclaredCheckSpec = (AcceptanceCheckSpec | PropertyCheckSpec | BehavioralCheckSpec) & { onBase: BaseDeclaration };
 
 interface CheckSpecFields {
   id: string;
@@ -133,6 +171,8 @@ interface CommandCheckFields extends CheckSpecFields {
   command: readonly [string, ...string[]];
   tests?: never;
   expectedSuiteCount?: number;        // I5: a shrunken enumeration is a failure
+  seed?: never;
+  numRuns?: never;
 }
 
 export interface VerificationManifest {
@@ -201,8 +241,38 @@ export interface CheckResult {
    * Required, so omission is not representable.
    */
   findings: readonly Finding[] | null;
+  /**
+   * A property check's runs, as the runtime read them from its process's
+   * reports. `null` for every other kind, and for a property check none of
+   * whose reports could be read. Never an empty run: a check that reported
+   * nothing has not shown that a property holds (I5). Required, so omission
+   * is not representable. The verdict is `expectation`, the runtime's
+   * comparison of these runs against the pin (D-R25-02).
+   */
+  property: PropertyEvidence | null;
   durationMs: number;
   startedAt: string;
+}
+
+/** What a property check ran: the pin it ran under, and one entry per report (R25). */
+export interface PropertyEvidence {
+  readonly seed: number;
+  /** The cases pinned for every property. */
+  readonly numRuns: number;
+  readonly runs: readonly PropertyRun[];
+}
+
+/** One property's run, as its framework reported it, located at the call that registered it. */
+export interface PropertyRun {
+  /** Tree-relative. */
+  readonly file: string;
+  readonly line: number;
+  readonly seed: number;
+  /** The cases the framework ran before it stopped: every pinned case, or up to and including the first that failed. */
+  readonly casesRun: number;
+  readonly failed: boolean;
+  /** The shrunk counterexample as the framework prints it, or `null` when no case failed. */
+  readonly counterexample: string | null;
 }
 
 export interface TamperReport {

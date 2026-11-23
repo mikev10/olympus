@@ -1,0 +1,138 @@
+The code under review is in the file
+`2026-11-22-R25-property-checks-review-bundle.txt` (SHA-256 0f835f16bc14dffef8402f0ce7ed39e561e38552c19e882f01707f560d451922) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing a new kind of verification check, the property check, in the
+runtime of a TypeScript project that carries code changes from a specification
+to a merge through fixed stations, where the runtime, not the model that wrote
+the change, decides whether the change passed. You have the source and nothing
+else — no design documents, no author reasoning, no prior version, no
+conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+Before a model builds a change, a test-design stage writes and locks acceptance
+tests and a verification manifest of checks; the runtime hashes them, and later
+runs every check itself in a fresh sandbox with no network, over the base
+commit plus the change, and derives the verdict from what it observed. This
+unit adds a `property` check kind: a locked test file that states properties
+with fast-check (`fc.assert(fc.property(...))`), run under the base's own
+vitest, while a runtime-written preload, loaded through NODE_OPTIONS from a
+read-only mount, sets the seed and the number of cases the manifest pins and
+reports every run, located at the `assert` call that made it. The runtime then
+compares those reports against the pin and against every registration it found
+statically in the file, and that comparison is the check's verdict. It also
+adds a policy field that can require a property check for each authorization
+rule a spec names, and a benchmark corpus version with an item a property check
+should catch and an arm that runs with property checks.
+
+It must hold against a capable, motivated party trying to have a change judged
+as passing its property checks when the properties do not hold for it, or
+judged on fewer cases, another seed, or none. Assume no deceptive intent — only
+that the easiest path gets taken.
+
+That party controls the change: every file the build writes into the workspace,
+its source and anything it adds, which then runs inside the check's process as
+the code under test. It does not control the locked artifacts (the spec, the
+manifest, the acceptance and property test files), which are hashed before the
+build, nor the base commit or its dependency install, which the runtime makes
+from the lockfile. It does not control the components the runtime is wired
+with — the Vault, the sandbox provider, and the drivers are runtime-selected
+and trusted, even where a function takes one as an argument — and it does not
+control code running inside the runtime's own process.
+
+The invariants at stake:
+
+- The runtime derives status; the model never reports it. A verdict follows
+  what the runtime observed, never a claim.
+- An agent may not be judged by an artifact it can write. Specs and acceptance
+  tests, property files among them, are hashed before the build and re-verified
+  at every station transition.
+- Fail closed. A missing required check, an absent capability, an unsupported
+  stack, or a shrunken enumeration is a refusal — never a silent degrade, never
+  a warning that lets the run continue.
+- No agent writes to the Vault, and the Vault is never mounted into a sandbox.
+- Every capability claim maps to an executable assertion that fails when the
+  capability is deleted.
+- Greek names never appear in code.
+
+The mechanisms that matter most:
+
+- `FastCheckAdapter.registrations` (packages/adapters/src/property.ts): the
+  static parse that decides which `assert` calls are registrations that must
+  report, and `readReports`, which reads the tagged lines from stdout.
+- The preload source in the same file: how it finds the tree's fast-check, how
+  it configures it, and how it locates a run's call site from the stack.
+- `propertyOutcome`, `propertyBaseCause`, and `propertyAdmissionProblems`
+  (packages/api/src/property.ts), and their use in packages/api/src/line.ts,
+  base.ts, run.ts, drafting.ts, and security.ts (`denialRefusal`).
+- Admission and manifest validation of the new kind in
+  packages/api/src/validate.ts and verification.ts.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+Machine-checked proof of any property, which would be a later check kind with
+its own spec; properties a model writes outside `test-design`; property checks
+for a stack without an adapter slot; and a property requirement for every spec,
+which is policy's to set.
+
+Identifiers in comments such as D-R25-02, A-P8-01, or R15 refer to the
+project's decision log and plan, which you do not have; they carry no meaning
+you need.
+
+THE QUESTION
+
+How would a change make a property check pass, at the base run or at verify,
+when the properties the locked file states do not hold for it, or when fewer
+cases than pinned ran, on a seed other than the pinned one, or none at all —
+and how would a property file or manifest be admitted that can never fail?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.

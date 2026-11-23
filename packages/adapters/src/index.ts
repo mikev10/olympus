@@ -23,6 +23,7 @@ export {
 } from './detect.js';
 export { JestAdapter, VitestAdapter } from './framework.js';
 export { ConfigManifestAdapter } from './manifest.js';
+export { FastCheckAdapter, readReports, reportTag, type FastCheckMajor } from './property.js';
 export { changedLines } from './line-diff.js';
 export {
   diffTrees,

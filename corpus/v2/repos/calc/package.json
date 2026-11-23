@@ -1,0 +1,10 @@
+{
+  "name": "calc",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "vitest": "4.1.11",
+    "fast-check": "4.3.0"
+  }
+}

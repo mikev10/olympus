@@ -23,6 +23,7 @@ import { R8A_I2 } from './observe.js';
 import { R8B_I2 } from './observe-plan.js';
 import { R8A_REVIEW_I2 } from './observe-review.js';
 import { R13B_I2 } from './nightly-review.js';
+import { R25_ASSERTIONS } from './property.js';
 
 /** I2: The runtime derives status; the model never reports it. */
 export const I2: InvariantEntry = {
@@ -39,6 +40,7 @@ export const I2: InvariantEntry = {
     ...R8A_REVIEW_I2,
     // R13b: the nightly reviewers.
     ...R13B_I2,
+    ...R25_ASSERTIONS.I2,
     // R17: security at the gate.
     ...R17_I2,
     // R4: parallel task execution.

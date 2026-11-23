@@ -1,0 +1,18 @@
+{
+  "id": "config-from-environment",
+  "repo": "calc",
+  "tier": "deterministic",
+  "kind": "control",
+  "group": "secret-scan",
+  "seeds": null,
+  "seat": "build",
+  "change": {
+    "write": {
+      "src/math.ts": "/** Arithmetic over finite numbers. */\nexport function add(a: number, b: number): number {\n  return a + b;\n}\n\nexport function multiply(a: number, b: number): number {\n  return a * b;\n}\n",
+      "src/config.ts": "export const calcApiKey = process.env.CALC_API_KEY ?? '';\n"
+    },
+    "remove": []
+  },
+  "claim": "Added multiply to src/math.ts. Done.",
+  "asked": null
+}

@@ -232,6 +232,7 @@ export class StrictPolicyEngine implements PolicyEngine {
       triggers: cloneTriggers(valid.triggers),
       concurrency: frozen({ ...valid.concurrency }),
       installRegistries: frozenCopy(valid.installRegistries ?? []),
+      propertyPerAuthorizationRule: valid.propertyPerAuthorizationRule ?? false,
     });
   }
 

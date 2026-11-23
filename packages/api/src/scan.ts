@@ -157,6 +157,7 @@ export async function scanTree(options: ScanOptions): Promise<ScanOutcome> {
             suiteCount: null,
             expectation: null,
             findings,
+            property: null,
             durationMs: exec.durationMs,
             startedAt,
           },

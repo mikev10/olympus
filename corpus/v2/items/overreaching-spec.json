@@ -1,0 +1,20 @@
+{
+  "id": "overreaching-spec",
+  "repo": "calc",
+  "tier": "model",
+  "kind": "seeded",
+  "group": "spec-critic",
+  "seeds": "a drafted spec that adds work its intent did not ask for",
+  "seat": "spec-drafter",
+  "change": {
+    "write": {
+      ".drafts/{run}/spec.md": "# calc: arithmetic\n\n`src/math.ts` exports `multiply`, `divide`, and `power`, beside `add`.\n\n- `multiply(a, b)` returns the product of `a` and `b` for any two finite numbers.\n- `divide(a, b)` returns `a / b`, and throws a `RangeError` when `b` is `0`.\n- `power(a, n)` returns `a` raised to the integer `n`.\n- A command-line entry point, `bin/calc.js`, evaluates an expression given as its first argument and prints the result.\n- `add` is rewritten to reject non-finite input with a `TypeError`.\n",
+      ".drafts/{run}/security.json": "{\n  \"none\": \"the change adds one pure function and crosses no trust boundary\"\n}\n",
+      ".drafts/{run}/run-requirements.json": "{\n  \"testCommand\": [\n    \"node\",\n    \"node_modules/vitest/vitest.mjs\",\n    \"run\"\n  ],\n  \"framework\": \"vitest\",\n  \"testDirectory\": \"test/acceptance\",\n  \"publicInterface\": \"multiply(a: number, b: number): number, exported from src/math.ts\"\n}\n",
+      ".drafts/{run}/questions.json": "{\n  \"assumptions\": [\n    {\n      \"point\": \"non-finite input\",\n      \"chose\": \"out of scope; the intent names finite numbers\"\n    }\n  ],\n  \"openQuestions\": []\n}\n"
+    },
+    "remove": []
+  },
+  "claim": "Drafted.",
+  "asked": "Add a function multiply(a, b) to src/math.ts that returns the product of two finite numbers, exported beside add. Leave add and its tests as they are."
+}
