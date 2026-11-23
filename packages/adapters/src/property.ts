@@ -82,7 +82,7 @@ function pathToImport(path: string): string {
 
 /** The tag that begins every report line: the framework, then the per-check marker. */
 export function reportTag(marker: string): string {
-  return `OLYMPUS-PROPERTY ${marker} `;
+  return `PROPERTY-RUN ${marker} `;
 }
 
 /**

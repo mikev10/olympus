@@ -17,7 +17,7 @@ import type { CheckResult, CheckSpec, ExpectationMismatch, ExpectationOutcome, P
 import type { RequestProblem } from './validate.js';
 
 /** Where the preload's directory is mounted in a property check's sandbox: read-only, beside the tree and never in it. */
-export const PROPERTY_MOUNT = '/olympus-property';
+export const PROPERTY_MOUNT = '/property-preload';
 const PRELOAD = 'preload.mjs';
 
 /** The base's property framework, or null where its stack has none. Read from the base, which no task wrote. */

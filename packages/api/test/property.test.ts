@@ -74,7 +74,9 @@ describe('a property check in a manifest', () => {
     expect(codes({ ...base, onBase: undefined })).toContain('manifest.checks[0].onBase:undeclared');
     expect(codes({ ...base, tests: [] })).toContain('manifest.checks[0].tests:missing');
     expect(codes({ ...base, command: ['node'] })).toContain('manifest.checks[0].command:not-applicable');
-    expect(codes({ ...base, deniesRule: 'r' })).toContain('manifest.checks[0].deniesRule:not-applicable');
+    // A property check may name a rule it states (A-R25-01), and like every check that does, it is required.
+    expect(codes({ ...base, deniesRule: 'r' })).toEqual([]);
+    expect(codes({ ...base, deniesRule: 'r', required: false })).toContain('manifest.checks[0].required:not-required');
   });
 
   test('no other kind pins a seed or a case count', () => {
