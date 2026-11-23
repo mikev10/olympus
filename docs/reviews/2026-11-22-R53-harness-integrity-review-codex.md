@@ -1,3 +1,19 @@
+# External review of R53, codex, 2026-11-22
+
+The Codex family's review of R53 (each driver's CLI pinned by sha512 in a lockfile the image installs from, a tag refused unless this host recorded building its image, and the image's content ID in the evidence). Triage: `2026-11-22-R53-harness-integrity-triage.md`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex. A headless `codex exec` run under a read-only sandbox, with recorded approval policy `never`, in an empty scratch working directory and a scratch config home holding only `auth.json`, with an environment of `CODEX_HOME` alone. The pre-run listing of both is the manifest's `cleanRoom`. Outcome `counted`: 96219 input tokens against a floor of 62515, and all four bundle markers echoed.
+- **Cross-family agreement:** none. Gemini raised no findings, so codex-1, codex-2, and codex-3 were raised by Codex alone. Both families assessed the tag-replacement refusal, the runtime-owned recording, and the Vault's write-time checks as sound.
+- **Date:** 2026-11-22
+- **Bundle:** `2026-11-22-R53-harness-integrity-review-bundle.txt`, SHA-256 `19939fc0d492297d9c11de6c522ec6f6519cf36a51cf6128116a435938ac04b1`, base `reviewed/R38`, head `02bc9da` (the unit branch before review, with the two amendment commits after R38 in its range). It held 42 sections: every new file in full and every modified file as a function-context diff. `docs/decisions.md`, `docs/plan/`, `docs/reviews/`, and `pnpm-lock.yaml` were excluded. Prompt: `2026-11-22-R53-harness-integrity-review-prompt.txt`.
+- **Prior context and lookups:** it reported no prior context, no lookups, and no tests run. Self-reported; not independently verifiable.
+- **Coverage, and any gap:** items 1, 6, and 7 answered with content. Items 2, 3, and 4 answered as none found. Item 5 was not addressed separately; graph.ts:189 accepting any well-formed content ID is raised under item 7 instead.
+- **Citations:** line numbers refer to the bundle's new-side positions, not the repository, and are hints.
+
+---
+
 BASE: reviewed/R38  
 HEAD: 02bc9da  
 packages/vault/test/stub.test.ts  

@@ -1,3 +1,19 @@
+# External review of R53, gemini, 2026-11-22
+
+The Gemini family's review of R53 (each driver's CLI pinned by sha512 in a lockfile the image installs from, a tag refused unless this host recorded building its image, and the image's content ID in the evidence). Triage: `2026-11-22-R53-harness-integrity-triage.md`.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini. A direct `generateContent` API call to `gemini-3.1-pro-preview`, offering no tools. `cleanRoom` is `null` because an API call loads no local configuration. Outcome `counted` on the second run: 93261 input tokens against a floor of 62515, and all four bundle markers echoed. The first run, `2026-11-22-R53-harness-integrity-review-gemini.attempt-1.run.json`, was `FAILED`: Google answered HTTP 402, with the project's prepaid credits depleted, and no reply came back.
+- **Cross-family agreement:** none. It raised no findings. It assessed as sound the same mechanisms Codex did, plus the install check and `harnessLockProblems`, which Codex left open in its codex-1 finding.
+- **Date:** 2026-11-22
+- **Bundle:** `2026-11-22-R53-harness-integrity-review-bundle.txt`, SHA-256 `19939fc0d492297d9c11de6c522ec6f6519cf36a51cf6128116a435938ac04b1`, base `reviewed/R38`, head `02bc9da` (the unit branch before review, with the two amendment commits after R38 in its range). It held 42 sections: every new file in full and every modified file as a function-context diff. `docs/decisions.md`, `docs/plan/`, `docs/reviews/`, and `pnpm-lock.yaml` were excluded. Prompt: `2026-11-22-R53-harness-integrity-review-prompt.txt`.
+- **Prior context and lookups:** it reported no prior context and no external lookups. Self-reported; not independently verifiable.
+- **Coverage, and any gap:** item 6 answered with content. Items 1 to 5 and 7 were answered in one sentence as none found, with "the adversarial framing fits". No construction was attempted for any of them.
+- **Citations:** it cited no line numbers.
+
+---
+
 BASE: reviewed/R38
 HEAD: 02bc9da
 packages/vault/test/stub.test.ts
