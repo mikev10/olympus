@@ -11484,3 +11484,52 @@ of the embedded source, to 30246 characters. The ceiling is #207.
 source.
 
 Full record: `docs/reviews/2026-11-22-R38-driver-evidence-does-not-flake-triage.md`.
+
+### A-R36b-01: a runtime send-back carries the validator's message (#174)
+
+R36b's real run on my-recipes (run ed031f3a) sent its test draft back three
+times for the shape of `acceptance.json`. Each retry was told codes such as
+`not-a-kind` at a path, never the message `parseManifest` had already
+written (`checks[0].kind must be one of ...`), so the drafter could not
+correct a field it was never told about. D-R36b-08 fixed the role text that
+ships with `init`; this is the other half. Planned against `v2` at eb93b71
+and confirmed by the maintainer before any code (2026-11-22).
+
+- **Chosen:** a runtime problem gains an optional `message`, in
+  `DraftSendBack`'s `runtime` variant (`packages/core/src/run/types.ts`) and
+  in `RetryPart`'s `runtime-problems` (`packages/core/src/station/types.ts`).
+  The retry renders it as `- path: code — message`
+  (`packages/core/src/station/machine.ts`, `retrySuffix`), cut to 300
+  characters, since a message can quote the drafter's own value and a
+  retry's suffix is not the place for a long one.
+- **Which problems carry one:** only those a validator found by reading the
+  draft alone: `parseManifest` over the drafted manifest (`draftedChecks`),
+  `parseSecurityPart` and `parseRunRequirements` over a drafted spec's
+  parts, and `parsePlan` over a drafted observation plan
+  (`packages/api/src/drafting.ts`). Each already returns a `RequestProblem`
+  with a message, and none reads the base. Every problem judged against the
+  base or the verification manifest (`exists`, `unbound`, merged-check
+  collisions, a missing denial check) stays a path and a code, and at
+  `test-design` the base-derived ones still reach the drafter as one
+  `base-refusal` with nothing in it (A-R19-11). A message can name only
+  what the drafter wrote.
+- **Optional, not required:** send-backs recorded before this amendment
+  have no message and must still read and render, as A-R4-05 did for
+  `parkedFor`. A problem without one renders as before.
+- **Assertion:** `I3.retry-is-told-its-own-shape-mistakes`
+  (`packages/conformance/src/registry/drafting.ts`): a test draft whose
+  manifest names an unknown check kind is sent back by the runtime, the
+  record keeps the message, and the retry is told it beside the code. It
+  fails against the line before this change, which told the retry
+  `not-a-kind` alone. That base-derived problems still reach the drafter as
+  one contentless `base-refusal` stays held by
+  `I3.base-refusal-tells-the-drafter-nothing-of-the-repository`, unchanged,
+  and by `retryParts` filtering on code before any message is read.
+  `packages/core/test/station-machine.test.ts` covers the rendering, the
+  cut, and a problem with no message.
+- **Rejected:** carrying every validator's message. A message from a check
+  judged against the base could name what the base holds, a channel around
+  the black box. Making `message` required, which would break reading
+  earlier records.
+- **Reverse:** revert the commit. Records written with a message still read
+  under the earlier types, which ignore an extra field.
