@@ -94,9 +94,11 @@ const siteKey = (file: string, line: number): string => `${file}:${String(line)}
  */
 export function propertyOutcome(pin: Pick<PropertyPin, 'seed' | 'numRuns'>, sites: readonly PropertySite[], exitCode: number, evidence: PropertyEvidence | null): ExpectationOutcome {
   const mismatches: ExpectationMismatch[] = [];
+  // A check with nothing that must report shows nothing, whatever it printed (codex-5, I5).
+  if (sites.length === 0) mismatches.push({ field: 'registrations', expected: 'at least one property registered in the locked files', observed: 'none' });
   if (exitCode !== 0) mismatches.push({ field: 'exitCode', expected: '0', observed: String(exitCode) });
   if (evidence === null) {
-    mismatches.push({ field: 'reports', expected: 'every report readable', observed: 'a report that could not be read' });
+    mismatches.push({ field: 'reports', expected: 'every report readable, after the preload configured the framework', observed: 'a report that could not be read, or no pin set' });
   } else {
     const registered = new Set(sites.map((s) => siteKey(s.file, s.line)));
     const reported = new Map<string, PropertyRun[]>();
@@ -128,10 +130,20 @@ export function propertyOutcome(pin: Pick<PropertyPin, 'seed' | 'numRuns'>, site
 
 /**
  * Whether a property check did on the base what it declared, or how it did
- * not. `passes` is met only when the comparison held. `fails` is met only
- * by a run that failed on the pinned seed at a registration: a check that
- * exited non-zero because nothing ran did not fail (I5). A suite count below
- * the named files is `suite-count`, as for any suite check.
+ * not. `passes` is met only when the comparison held.
+ *
+ * `fails` needs readable evidence, so it needs the preload to have configured
+ * the framework. On that evidence it is met in one of two ways:
+ * - some run failed, and every report beside it is sound: at a registration,
+ *   on the pinned seed, and, where it did not fail, with every pinned case.
+ *   Every registration must also have reported (codex-3).
+ * - nothing reported at all and the process exited non-zero. The file never
+ *   reached a property, as when it imports what the base does not yet have.
+ *   An acceptance check's import failure reproduces in the same way
+ *   (gemini-3).
+ *
+ * A check whose framework was never configured did not fail (I5). A suite
+ * count below the named files is `suite-count`, as for any suite check.
  */
 export function propertyBaseCause(check: PropertyCheckSpec, result: CheckResult): BaseMismatch['cause'] | undefined {
   const outcome = result.expectation;
@@ -139,9 +151,13 @@ export function propertyBaseCause(check: PropertyCheckSpec, result: CheckResult)
     if (outcome?.held === true) return undefined;
     return result.property?.runs.some((r) => r.failed) === true ? 'contrary' : 'suite-count';
   }
-  const failed = result.property?.runs.some((r) => r.failed && r.seed === check.seed && r.file !== '') === true;
-  if (failed) return undefined;
-  return outcome?.held === true ? 'contrary' : 'no-result';
+  const evidence = result.property;
+  if (evidence === null) return 'no-result';
+  if (evidence.runs.length === 0) return result.exitCode !== 0 ? undefined : 'no-result';
+  // Every mismatch but the ones a failing property is expected to cause.
+  const unsound = outcome?.held === false && outcome.mismatches.some((m) => m.field !== 'exitCode' && !m.field.endsWith('.failed'));
+  if (unsound) return 'suite-count';
+  return evidence.runs.some((r) => r.failed) ? undefined : 'contrary';
 }
 
 /**

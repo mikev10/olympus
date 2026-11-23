@@ -92,10 +92,15 @@ export function reportTag(marker: string): string {
  * shorter, because a dropped report would read as a property that never ran
  * rather than one that did. A report located in no locked file is kept with
  * an empty file name, for the comparison to refuse.
+ *
+ * Nothing is readable unless the preload said it configured the framework.
+ * Only then does an empty set mean the file never reached a property, rather
+ * than that the pin was never set (gemini-3).
  */
 export function readReports(stdout: string, marker: string): PropertyRun[] | null {
   const tag = reportTag(marker);
   const runs: PropertyRun[] = [];
+  let ready = false;
   for (const raw of stdout.split('\n')) {
     const at = raw.indexOf(tag);
     if (at === -1) continue;
@@ -107,6 +112,10 @@ export function readReports(stdout: string, marker: string): PropertyRun[] | nul
     }
     if (typeof value !== 'object' || value === null) return null;
     const r = value as Record<string, unknown>;
+    if (Object.keys(r).length === 1 && r.ready === true) {
+      ready = true;
+      continue;
+    }
     const file = r.file === null ? '' : r.file;
     const line = r.line === null ? 0 : r.line;
     if (typeof file !== 'string' || !isCount(line) || !Number.isInteger(r.seed) || !isCount(r.casesRun) || typeof r.failed !== 'boolean') return null;
@@ -114,7 +123,7 @@ export function readReports(stdout: string, marker: string): PropertyRun[] | nul
     if (counterexample !== null && typeof counterexample !== 'string') return null;
     runs.push({ file, line, seed: r.seed as number, casesRun: r.casesRun, failed: r.failed, counterexample });
   }
-  return runs;
+  return ready ? runs : null;
 }
 
 function isCount(value: unknown): value is number {
@@ -167,5 +176,6 @@ fc.configureGlobal({
     if (message !== undefined) throw new Error(message);
   },
 });
+process.stdout.write(config.tag + JSON.stringify({ ready: true }) + '\\n');
 `;
 }

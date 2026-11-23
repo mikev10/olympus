@@ -108,7 +108,11 @@ export interface PropertyAdapter {
   preload(pin: PropertyPin, tests: readonly string[]): string;
   /** The environment that loads the preload mounted at `path` ahead of the runner and every worker it starts. */
   environment(path: string): Readonly<Record<string, string>>;
-  /** Each report tagged with `pin.marker` in `stdout`, or null when a tagged line cannot be read: a report half-read is not a count. */
+  /**
+   * Each report tagged with `pin.marker` in `stdout`. Null when a tagged line
+   * cannot be read, since a report half-read is not a count, and null when the
+   * preload never said it configured the framework, since then no pin was set.
+   */
   reports(stdout: string, pin: PropertyPin): PropertyRun[] | null;
 }
 

@@ -87,6 +87,9 @@ const SOMETIMES = 'sometimes.property.test.mjs';
 const MULTIPLY_TEST = 'multiply.test.mjs';
 const MULTIPLY_PROPERTY = 'multiply.property.test.mjs';
 const MATH = 'math.mjs';
+/** A property over a module the base does not have, which the build writes. */
+const NEW_MODULE_PROPERTY = 'greet.property.test.mjs';
+const NEW_MODULE = 'greet.mjs';
 
 const PROPERTY_FILES: Readonly<Record<string, string>> = {
   [HELLO_PROPERTY]: "import fc from 'fast-check';\nimport { existsSync } from 'node:fs';\nfc.assert(fc.property(fc.integer(), () => existsSync(['hello', 'txt'].join('.'))));\n",
@@ -98,6 +101,7 @@ const PROPERTY_FILES: Readonly<Record<string, string>> = {
   [MULTIPLY_TEST]: "import { multiply } from './math.mjs';\nfor (const [a, b, p] of [[3, 4, 12], [7, 0, 0], [-2, -5, 10]]) if (multiply(a, b) !== p) throw new Error(`multiply(${a}, ${b}) is not ${p}`);\n",
   [MULTIPLY_PROPERTY]: "import fc from 'fast-check';\nimport { multiply } from './math.mjs';\nfc.assert(fc.property(fc.integer(), (a) => multiply(a, 1) === a));\n",
   [MATH]: "export function multiply() { throw new Error('multiply is not written'); }\n",
+  [NEW_MODULE_PROPERTY]: "import fc from 'fast-check';\nimport { greet } from './greet.mjs';\nfc.assert(fc.property(fc.integer(), (n) => greet(n) === `hello ${n}`));\n",
 };
 
 /** R7's `hard-coded-output`, as JavaScript: right on the acceptance test's three inputs, a sum elsewhere. */
@@ -255,6 +259,19 @@ export const PROPERTY_CHECK_RUNS_EVERY_PINNED_CASE: LocalAssertion = runtime({
         if (!named) throw new Error(`R25: the comparison for ${file} did not name ${field}: ${JSON.stringify(result?.expectation)}`);
       });
     }
+    // A file that imports what the base does not have yet never reaches a property there: with the framework
+    // configured, that reproduces as an acceptance check's import failure does, and the build then makes it hold (gemini-3).
+    await withLine('r25-cases-new-module-', async (rig) => {
+      await withProperties(rig);
+      await writeManifest(rig.dirs, [COMPILES, property('greets', [NEW_MODULE_PROPERTY], 'fails')]);
+      const sandbox = await mounting();
+      const driver = await writing(NEW_MODULE, 'export function greet(n) {\n  return `hello ${n}`;\n}\n', sandbox);
+      const components = await rig.components({ sandbox, driver, reviewer: driver });
+      const refusal = refusalOf(await startRun(await rig.request(components, { artifacts: PROPERTY_ARTIFACTS })), 'R25 new module');
+      if (refusal.at !== 'integrate') throw new Error(`R25: a property over a module the base lacks stopped at ${refusal.at}: ${JSON.stringify(refusal.transition)}`);
+      const result = await baseResult(rig, components, 'greets');
+      if (result?.property?.runs.length !== 0 || result.exitCode === 0) throw new Error(`R25: the base run of a module it lacks left ${JSON.stringify(result?.property)}`);
+    });
     await withLine('r25-cases-control-', async (rig) => {
       await withProperties(rig);
       await writeManifest(rig.dirs, [COMPILES, property('holds', [HOLDS], 'passes'), property('hello-property', [HELLO_PROPERTY], 'fails')]);

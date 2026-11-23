@@ -25,7 +25,8 @@ describe('propertyOutcome', () => {
     expect(fields(propertyOutcome(pin, sites, 0, evidence([run(3), run(9), { ...run(0), file: '' }])))).toEqual(['reports']);
   });
 
-  test('no registration at all never holds on an empty report', () => {
+  test('no registration at all never holds, whatever was reported (codex-5)', () => {
+    expect(fields(propertyOutcome(pin, [], 0, evidence([])))).toEqual(['registrations']);
     expect(propertyOutcome(pin, [], 0, evidence([run(3)])).held).toBe(false);
   });
 });
@@ -37,12 +38,25 @@ describe('propertyBaseCause', () => {
     return { checkId: 'p', exitCode, stdout: '', stderr: '', suiteCount: 1, findings: null, property, expectation: propertyOutcome(pin, sites, exitCode, property), durationMs: 1, startedAt: '' };
   };
 
-  test("'fails' is met only by a run that failed on the pinned seed", () => {
+  test("'fails' is met by a run that failed on the pinned seed, every other report sound", () => {
     expect(propertyBaseCause(check('fails'), result([run(3, { failed: true, casesRun: 1, counterexample: '[0]' }), run(9)], 1))).toBeUndefined();
-    expect(propertyBaseCause(check('fails'), result([], 1))).toBe('no-result');
     expect(propertyBaseCause(check('fails'), result(null, 1))).toBe('no-result');
-    expect(propertyBaseCause(check('fails'), result([run(3, { failed: true, seed: 1 })], 1))).toBe('no-result');
     expect(propertyBaseCause(check('fails'), result([run(3), run(9)], 0))).toBe('contrary');
+  });
+
+  test("'fails' is refused when the reports beside the failed run are not sound (codex-3)", () => {
+    const failed = run(3, { failed: true, casesRun: 1, counterexample: '[0]' });
+    expect(propertyBaseCause(check('fails'), result([failed], 1))).toBe('suite-count');
+    expect(propertyBaseCause(check('fails'), result([failed, run(9, { casesRun: 2 })], 1))).toBe('suite-count');
+    expect(propertyBaseCause(check('fails'), result([failed, run(9, { seed: 1 })], 1))).toBe('suite-count');
+    expect(propertyBaseCause(check('fails'), result([failed, run(9), run(5)], 1))).toBe('suite-count');
+    expect(propertyBaseCause(check('fails'), result([run(3, { failed: true, seed: 1 }), run(9)], 1))).toBe('suite-count');
+  });
+
+  test("'fails' is met by a file that never reached a property, once the framework was configured (gemini-3)", () => {
+    // The evidence is readable only once the preload reported that it configured the framework.
+    expect(propertyBaseCause(check('fails'), result([], 1))).toBeUndefined();
+    expect(propertyBaseCause(check('fails'), result([], 0))).toBe('no-result');
   });
 
   test("'passes' is met only when the comparison held", () => {

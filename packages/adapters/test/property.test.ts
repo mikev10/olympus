@@ -43,17 +43,23 @@ describe('FastCheckAdapter.registrations', () => {
 describe('reports', () => {
   const tag = reportTag('abc');
   test('reads every tagged line and ignores the rest', () => {
-    const out = `noise\n${tag}{"file":"t.ts","line":3,"seed":7,"casesRun":25,"failed":false,"counterexample":null}\n${tag}{"file":null,"line":null,"seed":7,"casesRun":1,"failed":true,"counterexample":"[0]"}\n`;
+    const out = `noise\n${tag}{"ready":true}\n${tag}{"file":"t.ts","line":3,"seed":7,"casesRun":25,"failed":false,"counterexample":null}\n${tag}{"file":null,"line":null,"seed":7,"casesRun":1,"failed":true,"counterexample":"[0]"}\n`;
     expect(readReports(out, 'abc')).toEqual([
       { file: 't.ts', line: 3, seed: 7, casesRun: 25, failed: false, counterexample: null },
       { file: '', line: 0, seed: 7, casesRun: 1, failed: true, counterexample: '[0]' },
     ]);
-    expect(readReports(out, 'other')).toEqual([]);
+    expect(readReports(out, 'other')).toBeNull();
   });
 
   test('a tagged line that cannot be read makes the whole set unreadable', () => {
-    expect(readReports(`${tag}{"file":"t.ts","line":3}\n`, 'abc')).toBeNull();
-    expect(readReports(`${tag}not json\n`, 'abc')).toBeNull();
+    expect(readReports(`${tag}{"ready":true}\n${tag}{"file":"t.ts","line":3}\n`, 'abc')).toBeNull();
+    expect(readReports(`${tag}{"ready":true}\n${tag}not json\n`, 'abc')).toBeNull();
+  });
+
+  test('with no line saying the preload configured the framework, nothing is readable (gemini-3)', () => {
+    expect(readReports('', 'abc')).toBeNull();
+    expect(readReports(`${tag}{"file":"t.ts","line":3,"seed":7,"casesRun":25,"failed":false,"counterexample":null}\n`, 'abc')).toBeNull();
+    expect(readReports(`${tag}{"ready":true}\n`, 'abc')).toEqual([]);
   });
 });
 
