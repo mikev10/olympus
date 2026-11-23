@@ -100,6 +100,19 @@ export const METER_PREFIX = 'model-relay-meter ';
  *   `max_completion_tokens` and `max_tokens`, times `n`; the usage is
  *   `prompt_tokens` (less its cached part, counted as cache reads) and
  *   `completion_tokens`, from the body or from the stream chunk that carries it.
+ *   A request asking for a service tier other than the default, a web search,
+ *   audio, or a tool the API runs itself is refused unsent: a tier is billed
+ *   at another rate, a search or a hosted tool per call, and audio at audio
+ *   rates inside the same prompt_tokens and completion_tokens the table
+ *   charges at one rate (#88, gemini-3). A request naming no tier is served at
+ *   the upstream's own default, so an answer reporting a tier other than the
+ *   default is counted as read and then stops the relay forwarding, as an
+ *   unreadable one does (codex-1). An answer naming no tier, as a local
+ *   endpoint's does, is read at the table's rate.
+ *
+ * This source runs as one `docker run` argument, so its length counts toward
+ * the host's command-line limit, 32767 characters on Windows. Explanation
+ * belongs in this comment, which is outside it, rather than inside it.
  * - Under the `openai-responses` dialect (A-R26-01) the same rules hold with
  *   that API's names: a `POST` to a granted path ending `/responses` is
  *   metered and a `GET` is free; the ceiling is the larger of the model's
@@ -275,7 +288,7 @@ function refuseWith(res, status, type, message, reason) {
 
 function refuseSpent(res) {
   const why = exhausted === 'unreadable'
-    ? 'a response whose usage could not be read was charged its ceiling, and no later call is forwarded'
+    ? 'a response whose cost could not be counted was charged what could be read of it, and no later call is forwarded'
     : exhausted === 'tokens'
       ? 'the budget of ' + String(budget.maxTokens) + ' tokens (maxTokens) is spent'
       : 'the budget of ' + String(budget.maxCostUsd) + ' USD (maxCostUsd) is spent';
@@ -285,7 +298,7 @@ function refuseSpent(res) {
 // The usage a response reports. input_tokens read is 'any'; output_tokens
 // read where the dialect puts the final count is 'final'.
 function usageReader() {
-  const u = { any: false, final: false, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, write5m: null, write1h: null };
+  const u = { any: false, final: false, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, write5m: null, write1h: null, offTier: false };
   function count(v) { return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null; }
   u.take = function (usage, final) {
     if (usage === null || typeof usage !== 'object') return;
@@ -302,6 +315,10 @@ function usageReader() {
     }
     const output = count(usage.output_tokens);
     if (output !== null) { u.output = output; if (final) u.final = true; }
+  };
+  // openai-chat: an answer served at a tier other than the default is not at the table's rate.
+  u.tierOpenai = function (tier) {
+    if (tier !== undefined && tier !== null && tier !== 'default') u.offTier = true;
   };
   // openai-chat: prompt_tokens counts the cached prompt too, so the cached part
   // is taken out of the input and counted as cache reads. It reports no writes.
@@ -350,7 +367,7 @@ function streamParser(u) {
     try { event = JSON.parse(text.slice(5)); } catch (error) { return; }
     if (event === null || typeof event !== 'object') return;
     // openai-chat: the usage arrives on one chunk, the last before [DONE], which does not parse and is skipped.
-    if (openai) { if (event.usage !== null && typeof event.usage === 'object') u.takeOpenai(event.usage); return; }
+    if (openai) { u.tierOpenai(event.service_tier); if (event.usage !== null && typeof event.usage === 'object') u.takeOpenai(event.usage); return; }
     // openai-responses: the usage is the response.completed event's, and no other event's (A-R26-01).
     if (responses) {
       if (event.type === 'response.completed' && event.response !== null && typeof event.response === 'object') u.takeResponses(event.response.usage);
@@ -387,7 +404,7 @@ function bodyParser(u) {
       let body = null;
       try { body = JSON.parse(Buffer.concat(parts).toString('utf8')); } catch (error) { return; }
       if (body !== null && typeof body === 'object') {
-        if (openai) u.takeOpenai(body.usage); else if (responses) u.takeResponses(body.usage); else u.take(body.usage, true);
+        if (openai) { u.tierOpenai(body.service_tier); u.takeOpenai(body.usage); } else if (responses) u.takeResponses(body.usage); else u.take(body.usage, true);
       }
     },
   };
@@ -409,6 +426,7 @@ function charge(model, maxTokens, u, success) {
     write1h = cacheWrite - write5m;
     if (u.final) output = u.output;
     else { charged = 'ceiling'; output = Math.max(maxTokens, u.output); }
+    if (u.offTier) charged = 'off-tier';
   }
   const costUsd = (input * p.inputPerMTok + output * p.outputPerMTok + cacheRead * p.cacheReadPerMTok +
     write5m * p.cacheWritePerMTok + write1h * p.cacheWrite1hPerMTok) / 1e6;
@@ -418,7 +436,7 @@ function charge(model, maxTokens, u, success) {
   totals.cacheReadTokens += cacheRead;
   totals.cacheWriteTokens += cacheWrite;
   totals.costUsd += costUsd;
-  if (charged === 'unreadable') exhaust('unreadable');
+  if (charged === 'unreadable' || charged === 'off-tier') exhaust('unreadable');
   if (totals.inputTokens + totals.outputTokens + totals.cacheReadTokens + totals.cacheWriteTokens >= budget.maxTokens) exhaust('tokens');
   if (totals.costUsd >= budget.maxCostUsd) exhaust('cost');
   meterLine({
@@ -526,6 +544,42 @@ function responsesUnmeterable(request) {
   return null;
 }
 
+// What an openai-chat request asks for that costs more than its tokens, or null (#88).
+function chatUnmeterable(request) {
+  const tier = request.service_tier;
+  if (tier !== undefined && tier !== null && tier !== 'default') return 'the request asks for the service tier ' + JSON.stringify(String(tier).slice(0, 40));
+  if (request.web_search_options !== undefined && request.web_search_options !== null) return 'the request asks for a web search';
+  if (request.audio !== undefined && request.audio !== null) return 'the request asks for audio output';
+  const tools = request.tools;
+  if (tools !== undefined && tools !== null) {
+    if (!Array.isArray(tools)) return 'the request names tools that are not a list';
+    for (let i = 0; i < tools.length; i += 1) {
+      const t = tools[i];
+      const type = t !== null && typeof t === 'object' ? t.type : undefined;
+      if (CLIENT_TOOLS.indexOf(type) === -1) return 'the request offers the hosted tool ' + JSON.stringify(String(type).slice(0, 40));
+    }
+  }
+  const modalities = request.modalities;
+  if (modalities !== undefined && modalities !== null) {
+    if (!Array.isArray(modalities)) return 'the request names modalities that are not a list';
+    for (let i = 0; i < modalities.length; i += 1) {
+      if (modalities[i] !== 'text') return 'the request asks for the modality ' + JSON.stringify(String(modalities[i]).slice(0, 40));
+    }
+  }
+  const messages = request.messages;
+  if (Array.isArray(messages)) {
+    for (let i = 0; i < messages.length; i += 1) {
+      const content = messages[i] !== null && typeof messages[i] === 'object' ? messages[i].content : undefined;
+      if (!Array.isArray(content)) continue;
+      for (let j = 0; j < content.length; j += 1) {
+        const part = content[j];
+        if (part !== null && typeof part === 'object' && part.type === 'input_audio') return 'the request sends audio input';
+      }
+    }
+  }
+  return null;
+}
+
 // One metered call at a time (D-P13-13).
 let busy = false;
 const waiting = [];
@@ -580,7 +634,7 @@ function metered(req, res, target, path) {
         release();
         return;
       }
-      const unmeterable = responses ? responsesUnmeterable(request) : null;
+      const unmeterable = responses ? responsesUnmeterable(request) : openai ? chatUnmeterable(request) : null;
       if (unmeterable !== null) {
         refuseWith(res, 400, 'invalid_request_error', unmeterable + ', which is billed outside the usage this meter reads, so it is not sent', 'unmeterable');
         release();

@@ -21,29 +21,43 @@ import { invariantTest } from '@olympus-ai/conformance/vitest';
 import type { RoleId, TaskId } from '@olympus-ai/core';
 import type { SandboxHandle } from '@olympus-ai/sandbox';
 import { DECLARED_TOOLS, HOOK_SETTINGS, PARALLELISM, artifactFiles } from '../src/index.js';
-import { MCP_SERVER_SOURCE, withDriver } from './harness.js';
+import { MCP_SERVER_SOURCE, RECORDED_ANSWER, systemTextOf, withDriver, withRecordingDriver } from './harness.js';
 
 invariantTest(
   'driver.subagents',
-  'spawnSubagent() runs a child task under the parent request\'s policy grants and returns its own TaskResult',
+  "spawnSubagent() runs a child task under the parent request's policy grants and returns its own TaskResult, " +
+    "and the system prompt the child's session sent carries the child's role instructions and not the parent's",
   async () => {
-    await withDriver(async (h) => {
+    // Against a recording endpoint rather than the API: whether the role reached
+    // the session is read from the request the CLI sent, not from whether a
+    // model chose to follow it, which is what made this flake (#165, D-R38-03).
+    await withRecordingDriver(async (h) => {
+      const role = { role: 'reviewer' as RoleId, instructions: 'You review. Do exactly what the message asks, then end your reply with the exact token PLUM-6620.', sha256: '0'.repeat(64) };
       const parent = h.request({ taskId: 'sub-parent' as TaskId, tools: ['Read'] });
-      const child = await h.driver.spawnSubagent({ role: 'reviewer' as RoleId, instructions: 'You review. Do exactly what the message asks, then end your reply with the exact token PLUM-6620.', sha256: '0'.repeat(64) }, {
+      const child = await h.driver.spawnSubagent(role, {
         ...parent,
         taskId: 'sub-child' as TaskId,
         variableSuffix: 'Reply with the word child.',
       });
 
-      // A TaskResult of its own, not the parent's, and carrying the contract
-      // version rather than a status the model chose (I2).
+      // A TaskResult of its own, not the parent's, carrying the answer this
+      // session was sent and the contract version rather than a status the
+      // model chose (I2).
       expect(child.taskId).toBe('sub-child');
-      expect(child.claim.narrative.toLowerCase()).toContain('child');
+      expect(child.claim.narrative).toContain(RECORDED_ANSWER);
       expect(child.contractVersion).toBe(h.driver.contractVersion);
 
-      // The session really ran under the role it was given: only the role's
-      // instructions ask for the token, and the message does not (D-R20-14).
-      expect(child.claim.narrative).toContain('PLUM-6620');
+      // The session really ran under the role it was given: the child's
+      // session sent its role's instructions as system text, and not the
+      // parent request's role (D-R20-14).
+      const sent = h.requestsFor('sub-child' as TaskId);
+      expect(sent.length, 'the child session sent no request the endpoint could attribute to it').toBeGreaterThan(0);
+      for (const request of sent) {
+        const system = systemTextOf(request);
+        expect(system, "the child's role instructions are not in the system prompt its session sent").toContain(role.instructions);
+        // Anywhere in the request, not only its system blocks: a role carried in a message instructs the session as well (gemini-1).
+        expect(request.body, "the parent request's role reached the child's session").not.toContain(JSON.stringify(parent.role.instructions).slice(1, -1));
+      }
       // And really was under the parent's grants, read from what the CLI
       // printed before it took a turn, not from what the model said afterwards.
       const session = h.driver.sessionFor('sub-child' as TaskId);

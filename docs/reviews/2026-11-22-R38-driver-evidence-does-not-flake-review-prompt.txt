@@ -1,0 +1,119 @@
+The code under review is in the file
+`2026-11-22-R38-driver-evidence-does-not-flake-review-bundle.txt` (SHA-256 0878085aef378fb7722d1cddd63fd6ff23439c1daace78fabe9be4ae6114f7ca) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing a metering model relay and two conformance assertions over a coding-agent driver
+in a TypeScript project. You have the source and nothing else — no design documents,
+no author reasoning, no prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The project runs coding agents (the Claude Code CLI) inside Docker sandboxes. The sandbox's only network route is a
+"model relay": a small Node HTTP server, in its own container, that holds the API credential, meters each model call's
+token usage against a budget, and refuses any call whose cost it cannot count. This change does three things. It makes
+the relay's OpenAI Chat Completions dialect (`openai-chat`) refuse request options billed outside the token counts it
+reads (`chatUnmeterable` in `packages/sandbox/src/local/relay.ts`). It rewrites two driver assertions. One checks that a
+child task spawned with a role really runs under that role's instructions (`driver.subagents`, in
+`test/claims.test.ts`). The other checks that instruction files an agent plants in its workspace (CLAUDE.md, rules,
+skills, agent definitions) never reach a later session (`I3.workspace-instructions-not-loaded`, in
+`test/invariants.test.ts`). Both used to judge this from the model's reply. They now point the real CLI's relay at a
+recording HTTP endpoint on the host (`withRecordingDriver` in `test/harness.ts`) and judge from the requests the CLI
+actually sent.
+
+Not in the bundle, because it did not change: the driver (`packages/drivers/claude-code/src/driver.ts`) starts the CLI
+with `--append-system-prompt "<role instructions>\n\n<stable prefix>"`, `--setting-sources ''`, `--tools <grant>`, and
+`--session-id <id derived deterministically from the task id>`. The pinned CLI reports that session id in each request
+body's `metadata.user_id`, a JSON string with a `session_id` field. Assertions are registered in
+`packages/conformance/src/registry/`. An external assertion counts only if the owning package's test run report names
+the test as `[<id>] <title>`, with the title exactly equal to the registry's.
+
+It must hold against a capable, motivated party trying to make these assertions pass while the property they
+name does not hold, or to spend model budget through the relay that its meter does not count. Assume no deceptive
+intent — only that the easiest path gets taken.
+
+That party controls the request bodies a process inside the sandbox sends to the relay, the files in the task's
+workspace, and what the model returns. It does not control the components the runtime is wired with — the relay
+source, the sandbox provider, the driver, the CLI image, and the test harness's recording endpoint are trusted, even
+where a function takes one as an argument — and it does not control code running inside the runtime's own process.
+
+The invariants at stake:
+
+- An agent may not be judged by an artifact it can write: no instruction file an agent can place in the tree it hands
+  on may reach the next seat's session, which runs under its role alone.
+- Fail closed: a missing check, an absent capability, or a cost the meter cannot count is a refusal, never a silent
+  degrade or a warning that lets the run continue.
+- Every capability claim maps to an executable assertion that fails when the capability is deleted. An assertion that
+  passes regardless of the code under test is not evidence.
+
+The mechanisms that matter most:
+
+- `chatUnmeterable` and where `metered()` calls it: which request shapes it refuses before anything reaches the
+  upstream, and which it lets through.
+- The recording harness: the relay pointed at a keyless local upstream, requests attributed to a session by
+  `metadata.user_id`, and `systemTextOf` reading a request's system blocks.
+- The workspace-instruction assertion's byte-identical comparison of an empty workspace's requests against a planted
+  one's, under one task id, and the control that reruns the CLI without `--setting-sources ''`.
+- `driver.subagents`' check that the child's role instructions are in the system text its session sent, and the
+  parent's are not.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+Retrying a paid assertion until it passes. A retry that hides a real defect is the failure this unit removes.
+
+(Identifiers like unit or decision ids that appear in comments refer to the project's own planning records, which you
+do not have; they carry no meaning you need.)
+
+THE QUESTION
+
+How would you make `driver.subagents` or `I3.workspace-instructions-not-loaded` pass while a session did not run under
+its role alone? And how would you get spend past the `openai-chat` relay that its meter does not count?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.

@@ -1,0 +1,1013 @@
+BASE: reviewed/R52
+HEAD: 8314a7d
+
+=== COMMITS ===
+8314a7d R38: changeset
+011e0a9 R38: the workspace-instruction assertion compares the requests the session sent (#85)
+4eefcd0 R38: driver.subagents reads the role from the request the child sent (#165)
+c7bda48 R38: the openai-chat relay refuses a tier, a web search, or audio its meter cannot count (#88)
+ea84d08 R38: boundary and assumptions, verified (D-R38-01 to 05)
+7931508 amend: the relay's unchecked tools have a home (R56, #189) (#190)
+
+=== CHANGED ===
+ .changeset/r38-driver-evidence-does-not-flake.md   |   7 +
+ docs/decisions.md                                  | 199 +++++++++++++++++++++
+ docs/plan/DECOMPOSITION.md                         |  36 +++-
+ packages/conformance/src/registry/claims.ts        |   3 +-
+ packages/conformance/src/registry/local-relay.ts   |  26 ++-
+ .../src/registry/workspace-instructions.ts         |   6 +-
+ packages/drivers/claude-code/test/claims.test.ts   |  33 ++--
+ packages/drivers/claude-code/test/harness.ts       | 193 ++++++++++++++++++--
+ .../drivers/claude-code/test/invariants.test.ts    |  77 ++++++--
+ packages/sandbox/src/local/relay.ts                |  35 +++-
+ 10 files changed, 568 insertions(+), 47 deletions(-)
+
+
+===== .changeset/r38-driver-evidence-does-not-flake.md =====
+---
+"@olympus-ai/sandbox": patch
+"@olympus-ai/driver-claude-code": patch
+"@olympus-ai/conformance": patch
+---
+
+The model relay's `openai-chat` dialect refuses, unsent, a request for a service tier other than the default, a web search, or audio, because each is billed outside the token usage its meter reads (#88). `driver.subagents` and `I3.workspace-instructions-not-loaded` now read the requests the CLI sent to a recording endpoint, not the model's reply. Whether a role or a planted file reached a session no longer depends on whether a model chose to mention it (#165, #85), and neither assertion calls a model.
+
+===== packages/conformance/src/registry/claims.ts =====
+diff --git a/packages/conformance/src/registry/claims.ts b/packages/conformance/src/registry/claims.ts
+index d28c9f8..853121f 100644
+--- a/packages/conformance/src/registry/claims.ts
++++ b/packages/conformance/src/registry/claims.ts
+@@ -63,39 +63,40 @@ function driverClaim(key: DriverClaimKey, title: string, openaiCompatible: strin
+ const DRIVER: Array<[ClaimId, ClaimEntry]> = [
+   driverClaim(
+     'subagents',
+-    "spawnSubagent() runs a child task under the parent request's policy grants and returns its own TaskResult",
++    "spawnSubagent() runs a child task under the parent request's policy grants and returns its own TaskResult, " +
++      "and the system prompt the child's session sent carries the child's role instructions and not the parent's",
+     'subagents is declared false and absent: there is no spawnSubagent(), and a model call naming a subagent tool is answered with an error and runs nothing',
+   ),
+   driverClaim(
+     'hooks',
+     'the driver installs the hook points emitArtifacts() renders, and each one that fires arrives as a DriverEvent the CLI reported',
+     'hooks is declared false and absent: emitArtifacts refuses at the capability layer and writes nothing, so no hook point exists to fire',
+   ),
+   driverClaim(
+     'mcp',
+     "the MCP servers a task's grants name are reachable from that task, and no other server is loaded",
+     'mcp is declared false and absent: a grant naming an MCP tool is refused before anything runs, and no request offers one',
+   ),
+   driverClaim(
+     'parallelism',
+     'the driver runs the declared number of tasks concurrently, each on its own sandbox, under one provenance id: four overlap, a fifth waits, and a second task on one sandbox waits for the first',
+     'the driver runs the declared number of tasks concurrently, each on its own sandbox: two overlap, a third waits for a slot, and a second task on one sandbox waits for the first',
+   ),
+   driverClaim(
+     'computerUse',
+     'computerUse is declared false and is absent: no declared tool drives a display, and a session granted the whole inventory offers none',
+     'computerUse is declared false and absent: no declared tool drives a display, and a task granted the whole inventory is offered exactly Bash, Edit, Read, and Write',
+   ),
+   driverClaim(
+     'steering',
+     'steering is declared false and there is no steer(): a running task has no runtime message channel, in both directions',
+     'steering is declared false and there is no steer(): a running task has no runtime message channel',
+   ),
+   driverClaim(
+     'stablePrefixCaching',
+     'cacheReadTokens is zero on the first task of a run and non-zero on a second that shares its stablePrefix and differs only in variableSuffix',
+     "stablePrefixCaching is declared false: no request marks a prefix for caching, and the cached tokens a result reports are the endpoint's own count and nothing the driver claims",
+   ),
+ ];
+ 
+ /** One assertion per sandbox claim: observe the provisioned container, then require the declaration to match. */
+
+===== packages/conformance/src/registry/local-relay.ts =====
+diff --git a/packages/conformance/src/registry/local-relay.ts b/packages/conformance/src/registry/local-relay.ts
+index add2c22..cd7f76a 100644
+--- a/packages/conformance/src/registry/local-relay.ts
++++ b/packages/conformance/src/registry/local-relay.ts
+@@ -511,41 +511,57 @@ export const MODEL_RELAY_ENFORCES_BUDGET_OPENAI_CHAT = runtime({
+ /** What the relay cannot count under the openai-chat dialect it does not forgive, as P13 set for the other (A-R6-01). */
+ export const MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE_OPENAI_CHAT = runtime({
+   id: 'I5.model-relay-fails-closed-on-unmetered-usage-openai-chat',
+   title:
+-    'under the openai-chat dialect a model with no price and a request with no output ceiling are refused before the upstream sees them, an answer with no completion_tokens is charged its ceiling, ' +
+-    'and an answer with no readable usage stops the relay forwarding',
++    'under the openai-chat dialect a model with no price, a request with no output ceiling, and a request asking for a service tier other than the default, a web search, or audio are refused before the upstream sees them, ' +
++    'while one naming the default tier and text alone is sent; an answer with no completion_tokens is charged its ceiling, and an answer with no readable usage stops the relay forwarding',
+   run: async () => {
+     const certificate = await makeCertificate();
+     await withSandboxDirs('i5-relay-unmetered-openai-', async (dirs) => {
+       const { LocalDockerProvider: Provider } = await import('@olympus-ai/sandbox');
+       const provider = await Provider.create({ vaultPaths: [dirs.vault], credentials: { [CREDENTIAL]: `canary-${randomUUID()}` }, relayTrust: certificate.cert });
+       const reading = metered(
+         await withMeteredSandbox(
+           provider,
+           dirs,
+           certificate,
+           AMPLE,
+           async (handle, upstreamLog) => {
+             const { max_tokens: _ceiling, ...uncapped } = message(10, 1);
+             const unsent = await sendAll(provider, handle, [message(10, 1, undefined, 'unpriced-model'), uncapped], 'openai-chat');
+             if (unsent.map((a) => a.status).join(',') !== '400,400' || (await upstreamLog()).length !== 0) {
+               throw new Error(`I5: an unpriced or uncapped openai-chat request was answered ${JSON.stringify(unsent)} or reached the upstream`);
+             }
+-            // Charged its ceiling: 64 output tokens, not the 7 the upstream never reported.
+-            const partial = await sendAll(provider, handle, [message(1000, 7, 'final')], 'openai-chat');
++            // Billed outside prompt_tokens and completion_tokens, or at a rate the price table does not hold (#88, D-R38-05).
++            const unmeterable: Array<[string, Record<string, unknown>]> = [
++              ['a flex service tier', { ...message(10, 1), service_tier: 'flex' }],
++              ['the auto service tier', { ...message(10, 1), service_tier: 'auto' }],
++              ['web search options', { ...message(10, 1), web_search_options: {} }],
++              ['audio output', { ...message(10, 1), audio: { voice: 'alloy', format: 'wav' } }],
++              ['an audio modality', { ...message(10, 1), modalities: ['text', 'audio'] }],
++              ['audio input', { ...message(10, 1), messages: [{ role: 'user', content: [{ type: 'input_audio', input_audio: { data: '', format: 'wav' } }] }] }],
++            ];
++            const billed = await sendAll(provider, handle, unmeterable.map(([, body]) => body), 'openai-chat');
++            for (const [i, [what]] of unmeterable.entries()) {
++              const answer = billed[i];
++              if (answer?.status !== 400 || !answer.body.includes('billed outside')) throw new Error(`I5: an openai-chat request with ${what} was answered ${JSON.stringify(answer)}`);
++            }
++            if ((await upstreamLog()).length !== 0) throw new Error('I5: an openai-chat request billed outside its token usage reached the upstream');
++            // Charged its ceiling: 64 output tokens, not the 7 the upstream never reported. It names the
++            // default tier and text alone, so a relay that refused every request naming either fails here.
++            const partial = await sendAll(provider, handle, [{ ...message(1000, 7, 'final'), service_tier: 'default', modalities: ['text'], web_search_options: null }], 'openai-chat');
+             if (partial[0]?.status !== 200) throw new Error(`I5: an openai-chat call with partial usage was answered ${JSON.stringify(partial)}`);
+             const blind = await sendAll(provider, handle, [message(1000, 7, 'all'), message(10, 1)], 'openai-chat');
+             if (blind.map((a) => a.status).join(',') !== '200,402') throw new Error(`I5: after an unreadable openai-chat answer the relay answered ${JSON.stringify(blind)}`);
+           },
+           'openai-chat',
+         ),
+         'I5',
+       );
+-      if (reading.calls !== 2 || reading.inputTokens !== 1000 || reading.outputTokens !== 64 + 64 || reading.exhausted !== 'unreadable' || reading.refused !== 3) {
++      if (reading.calls !== 2 || reading.inputTokens !== 1000 || reading.outputTokens !== 64 + 64 || reading.exhausted !== 'unreadable' || reading.refused !== 9) {
+         throw new Error(`I5: the openai-chat destroy read ${JSON.stringify(reading)}`);
+       }
+     });
+   },
+ });
+ 
+ /** The budget, under OpenAI's Responses API (A-R26-01): the same bounds, read from that API's usage names. */
+
+===== packages/conformance/src/registry/workspace-instructions.ts =====
+diff --git a/packages/conformance/src/registry/workspace-instructions.ts b/packages/conformance/src/registry/workspace-instructions.ts
+index 0567f38..20423cb 100644
+--- a/packages/conformance/src/registry/workspace-instructions.ts
++++ b/packages/conformance/src/registry/workspace-instructions.ts
+@@ -65,67 +65,69 @@ export function workspaceInstructionProblems(
+ }
+ 
+ export const R23_I3 = [
+-  // Paid: a real container on the pinned image and real model calls. Raised by R20's external review (codex-1, D-R20-12); skills added by R23.
++  // A real container on the pinned image, with the relay forwarding to a recording endpoint, so it reads what
++  // the CLI sent and calls no model (R38, #85, D-R38-04). Raised by R20's external review (codex-1, D-R20-12); skills added by R23.
+   external({
+     id: 'I3.workspace-instructions-not-loaded',
+     title:
+       'a CLAUDE.md, a rules file, an agent definition named for the role, and a skill under .claude/skills and .agents/skills, planted in the workspace, '
+-      + "reach none of the session's instructions with no tools or with Skill granted, while the same session without --setting-sources '' lists the .claude/skills plant: "
++      + 'leave every request the session sends byte-identical to the same task over an empty workspace, with no tools or with Skill granted, and are listed by none of its init lines, '
++      + "while the same session without --setting-sources '' sends the CLAUDE.md, rules, and .claude/skills tokens and lists the skill and the agent definition: "
+       + 'the task runs under its role alone, so the agent cannot rewrite what instructs the next seat through the tree it hands on',
+     level: 'runtime',
+     package: CLAUDE_CODE,
+     file: 'test/invariants.test.ts',
+   }),
+   external({
+     id: 'I3.openai-compatible-workspace-instructions-not-loaded',
+     title:
+       'a workspace holding a CLAUDE.md, an AGENTS.md, a rules file, an agent definition named for the role, and a skill in each known location '
+       + 'leaves every request the driver sends byte-identical to the same task over an empty workspace: the session runs under its role alone',
+     level: 'runtime',
+     package: OPENAI_COMPATIBLE,
+     file: 'test/invariants.test.ts',
+   }),
+   // R26: paid, and its control runs the same invocation without the driver's instruction settings (D-A-DD-03).
+   external({
+     id: 'I3.codex-workspace-instructions-not-loaded',
+     title: CODEX_WORKSPACE_INSTRUCTIONS_NOT_LOADED_TITLE,
+     level: 'runtime',
+     package: CODEX_PACKAGE,
+     file: 'test/invariants.test.ts',
+   }),
+   runtime({
+     id: 'I3.every-driver-has-a-workspace-instruction-assertion',
+     title:
+       'every package under packages/drivers/ names a workspace-instruction assertion that I3 registers in that package or holds pending, '
+       + 'no row names anything else, and a driver package added without one is refused',
+     run: async () => {
+       const { I3 } = await import('./i3.js');
+       const packages = workspacePackages();
+       const drivers = packages.filter((p) => p.relativeDir.startsWith(DRIVERS_DIR)).map((p) => p.name);
+       // A package named as a driver and kept anywhere else would be found by nothing above (gemini-3).
+       const misplaced = packages
+         .filter((p) => p.name.startsWith(DRIVER_NAME_PREFIX) && !p.relativeDir.startsWith(DRIVERS_DIR))
+         .map((p) => `${p.name} is named as a driver but lives at ${p.relativeDir}, outside ${DRIVERS_DIR}`);
+       const problems = [...misplaced, ...workspaceInstructionProblems(drivers, WORKSPACE_INSTRUCTION_ASSERTIONS, I3)];
+       if (problems.length > 0) throw new Error(`I3: a driver is missing its workspace-instruction assertion\n  ${problems.join('\n  ')}`);
+       // The check must bite, not merely pass: a driver package with no row is refused.
+       const phantom = '@olympus-ai/driver-phantom';
+       const refused = workspaceInstructionProblems([...drivers, phantom], WORKSPACE_INSTRUCTION_ASSERTIONS, I3);
+       if (!refused.some((p) => p.startsWith(`${phantom} has no workspace-instruction assertion`))) {
+         throw new Error('I3: a driver package with no workspace-instruction assertion was not refused');
+       }
+       // A row cannot borrow another obligation: an unrelated pending id, or another driver's id (codex-2, gemini-1).
+       const unrelated = I3.pending.map((p) => p.id).find((id): id is AssertionId => id.startsWith('I3.'));
+       if (unrelated === undefined) throw new Error('I3: no pending entry to borrow, so the borrowing check is not exercised');
+       const borrowing: Array<[string, Readonly<Record<string, AssertionId>>]> = [
+         ['an unrelated pending id', { ...WORKSPACE_INSTRUCTION_ASSERTIONS, [phantom]: unrelated }],
+         ["another driver's id", { ...WORKSPACE_INSTRUCTION_ASSERTIONS, [phantom]: WORKSPACE_INSTRUCTION_ASSERTIONS[CLAUDE_CODE] ?? unrelated }],
+       ];
+       for (const [label, table] of borrowing) {
+         if (!workspaceInstructionProblems([...drivers, phantom], table, I3).some((p) => p.startsWith(phantom))) {
+           throw new Error(`I3: a driver row naming ${label} was not refused`);
+         }
+       }
+     },
+   }),
+ ];
+
+===== packages/drivers/claude-code/test/claims.test.ts =====
+diff --git a/packages/drivers/claude-code/test/claims.test.ts b/packages/drivers/claude-code/test/claims.test.ts
+index c248c6c..487a543 100644
+--- a/packages/drivers/claude-code/test/claims.test.ts
++++ b/packages/drivers/claude-code/test/claims.test.ts
+@@ -21,37 +21,50 @@ import { invariantTest } from '@olympus-ai/conformance/vitest';
+ import type { RoleId, TaskId } from '@olympus-ai/core';
+ import type { SandboxHandle } from '@olympus-ai/sandbox';
+ import { DECLARED_TOOLS, HOOK_SETTINGS, PARALLELISM, artifactFiles } from '../src/index.js';
+-import { MCP_SERVER_SOURCE, withDriver } from './harness.js';
++import { MCP_SERVER_SOURCE, RECORDED_ANSWER, systemTextOf, withDriver, withRecordingDriver } from './harness.js';
+ 
+ invariantTest(
+   'driver.subagents',
+-  'spawnSubagent() runs a child task under the parent request\'s policy grants and returns its own TaskResult',
++  "spawnSubagent() runs a child task under the parent request's policy grants and returns its own TaskResult, " +
++    "and the system prompt the child's session sent carries the child's role instructions and not the parent's",
+   async () => {
+-    await withDriver(async (h) => {
++    // Against a recording endpoint rather than the API: whether the role reached
++    // the session is read from the request the CLI sent, not from whether a
++    // model chose to follow it, which is what made this flake (#165, D-R38-03).
++    await withRecordingDriver(async (h) => {
++      const role = { role: 'reviewer' as RoleId, instructions: 'You review. Do exactly what the message asks, then end your reply with the exact token PLUM-6620.', sha256: '0'.repeat(64) };
+       const parent = h.request({ taskId: 'sub-parent' as TaskId, tools: ['Read'] });
+-      const child = await h.driver.spawnSubagent({ role: 'reviewer' as RoleId, instructions: 'You review. Do exactly what the message asks, then end your reply with the exact token PLUM-6620.', sha256: '0'.repeat(64) }, {
++      const child = await h.driver.spawnSubagent(role, {
+         ...parent,
+         taskId: 'sub-child' as TaskId,
+         variableSuffix: 'Reply with the word child.',
+       });
+ 
+-      // A TaskResult of its own, not the parent's, and carrying the contract
+-      // version rather than a status the model chose (I2).
++      // A TaskResult of its own, not the parent's, carrying the answer this
++      // session was sent and the contract version rather than a status the
++      // model chose (I2).
+       expect(child.taskId).toBe('sub-child');
+-      expect(child.claim.narrative.toLowerCase()).toContain('child');
++      expect(child.claim.narrative).toContain(RECORDED_ANSWER);
+       expect(child.contractVersion).toBe(h.driver.contractVersion);
+ 
+-      // The session really ran under the role it was given: only the role's
+-      // instructions ask for the token, and the message does not (D-R20-14).
+-      expect(child.claim.narrative).toContain('PLUM-6620');
++      // The session really ran under the role it was given: the child's
++      // session sent its role's instructions as system text, and not the
++      // parent request's role (D-R20-14).
++      const sent = h.requestsFor('sub-child' as TaskId);
++      expect(sent.length, 'the child session sent no request the endpoint could attribute to it').toBeGreaterThan(0);
++      for (const request of sent) {
++        const system = systemTextOf(request);
++        expect(system, "the child's role instructions are not in the system prompt its session sent").toContain(role.instructions);
++        expect(system, "the parent request's role reached the child's session").not.toContain(parent.role.instructions);
++      }
+       // And really was under the parent's grants, read from what the CLI
+       // printed before it took a turn, not from what the model said afterwards.
+       const session = h.driver.sessionFor('sub-child' as TaskId);
+       expect(session?.tools).toEqual(['Read']);
+       expect(session?.tools).not.toContain('Bash');
+ 
+       // And the capability is declared, so the two agree.
+       expect(h.driver.capabilities().subagents).toBe(true);
+     });
+   },
+ );
+
+===== packages/drivers/claude-code/test/harness.ts =====
+diff --git a/packages/drivers/claude-code/test/harness.ts b/packages/drivers/claude-code/test/harness.ts
+index b98ac2f..c538983 100644
+--- a/packages/drivers/claude-code/test/harness.ts
++++ b/packages/drivers/claude-code/test/harness.ts
+@@ -1,31 +1,38 @@
+ /**
+  * What the model-calling assertions share: a real container, a real model
+  * relay, and a real credential — held by the relay, never by the container.
+  *
+  * **These assertions require a Docker daemon and an `ANTHROPIC_API_KEY`, and
+  * they fail without either.** They are never skipped. An assertion that
+  * skipped itself would leave the registry reporting a capability claim as
+  * asserted on the strength of a test that did not run, which is worse than
+  * reporting it pending: the pending entry at least names what is owed. That is
+  * the reason `local-sandbox.ts` gives for the mount assertions, and the reason
+  * holds here for the same shape of evidence.
+  *
+  * They also cost money. Every task in this file is the smallest one that can
+  * prove its point, and the prompts ask for one word wherever a word will do.
++ *
++ * `withRecordingDriver` is the exception: the same container, CLI, and relay,
++ * with the relay forwarding to a recording endpoint on the host. It needs no
++ * credential and calls no model, and is for assertions about what the CLI
++ * sends rather than what a model answers (D-R38-03).
+  */
+ import { execFile, spawn } from 'node:child_process';
+ import { randomUUID } from 'node:crypto';
+ import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm } from 'node:fs/promises';
++import { createServer } from 'node:http';
++import type { AddressInfo } from 'node:net';
+ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+ import { promisify } from 'node:util';
+ import { afterAll, expect } from 'vitest';
+ import type { Budget, CompiledRole, RoleId, TaskId, TaskRequest } from '@olympus-ai/core';
+-import type { ExecOptions, ExecResult, LocalDockerProvider, MeterReading, SandboxHandle, SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
+-import { MODEL_CREDENTIAL, MODEL_RELAY, ClaudeCodeDriver, ensureImage, parseStream, type ClaudeCodeDriverOptions } from '../src/index.js';
++import type { ExecOptions, ExecResult, LocalDockerProvider, MeterReading, RelaySpec, SandboxHandle, SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
++import { MODEL_CREDENTIAL, MODEL_RELAY, ClaudeCodeDriver, ensureImage, parseStream, sessionIdFor, type ClaudeCodeDriverOptions } from '../src/index.js';
+ 
+ /**
+  * Where the host's credential is read from, to be handed to the provider. The
+  * same name the CLI reads its key from, which is a coincidence of convention:
+  * inside the sandbox that variable carries a placeholder.
+  */
+@@ -165,26 +172,147 @@ export interface Harness {
+   exec(sandbox: SandboxHandle, cmd: string[], options?: ExecOptions): Promise<ExecResult>;
+ }
+ 
+-function spec(image: string, workspaceDir: string): SandboxSpec {
++/** One request the CLI sent, as the recording endpoint received it through the relay. */
++export interface RecordedRequest {
++  readonly method: string;
++  readonly url: string;
++  /** The body exactly as it arrived, so two requests can be compared byte for byte. */
++  readonly body: string;
++}
++
++/** A harness whose relay forwards to a recording endpoint on the host instead of the API (D-R38-03). */
++export interface RecordingHarness extends Harness {
++  /** Every request the CLI sent under `taskId`'s session id, in the order they arrived. */
++  requestsFor(taskId: TaskId): readonly RecordedRequest[];
++  /** Every request the endpoint received, from any session. */
++  readonly recorded: readonly RecordedRequest[];
++}
++
++/** What the recording endpoint answers every message with. */
++export const RECORDED_ANSWER = 'recorded';
++
++/** The session a request names in `metadata.user_id`, or undefined when it names none. */
++function sessionOf(body: string): string | undefined {
++  try {
++    const userId = (JSON.parse(body) as { metadata?: { user_id?: unknown } }).metadata?.user_id;
++    if (typeof userId !== 'string') return undefined;
++    const sessionId = (JSON.parse(userId) as { session_id?: unknown }).session_id;
++    return typeof sessionId === 'string' ? sessionId : undefined;
++  } catch {
++    return undefined;
++  }
++}
++
++/**
++ * The text of a request's `system` blocks, joined, or a failure naming why
++ * there is none: a request whose system prompt cannot be read would otherwise
++ * pass every "does not contain" check made of it.
++ */
++export function systemTextOf(request: RecordedRequest): string {
++  const system = (JSON.parse(request.body) as { system?: unknown }).system;
++  if (typeof system === 'string') return system;
++  if (!Array.isArray(system)) throw new Error(`the request to ${request.url} carries no system prompt`);
++  return system
++    .map((block: unknown) => {
++      const text = block !== null && typeof block === 'object' ? (block as { text?: unknown }).text : undefined;
++      if (typeof text !== 'string') throw new Error(`a system block of the request to ${request.url} has no text`);
++      return text;
++    })
++    .join('\n');
++}
++
++/** One server-sent event, framed as the messages API frames it. */
++function sse(name: string, data: unknown): string {
++  return `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
++}
++
++/**
++ * An endpoint on the host that records every request it is sent and answers a
++ * messages call with a minimal stream naming the request's model. It calls no
++ * model, so what it proves is what the CLI sent, never what a model chose.
++ */
++async function startRecorder(): Promise<{ port: number; recorded: RecordedRequest[]; close: () => Promise<void> }> {
++  const recorded: RecordedRequest[] = [];
++  const server = createServer((q, s) => {
++    const parts: Buffer[] = [];
++    q.on('data', (c: Buffer) => parts.push(c));
++    q.on('end', () => {
++      const body = Buffer.concat(parts).toString('utf8');
++      const url = q.url ?? '';
++      recorded.push({ method: q.method ?? '', url, body });
++      if (q.method === 'POST' && url.startsWith('/v1/messages/count_tokens')) {
++        s.writeHead(200, { 'content-type': 'application/json' });
++        s.end(JSON.stringify({ input_tokens: 10 }));
++        return;
++      }
++      if (q.method !== 'POST' || !url.startsWith('/v1/messages')) {
++        s.writeHead(404, { 'content-type': 'application/json' });
++        s.end(JSON.stringify({ type: 'error', error: { type: 'not_found_error', message: 'the recording endpoint answers messages only' } }));
++        return;
++      }
++      let model: unknown;
++      try {
++        model = (JSON.parse(body) as { model?: unknown }).model;
++      } catch {
++        model = null;
++      }
++      s.writeHead(200, { 'content-type': 'text/event-stream' });
++      s.end(
++        sse('message_start', {
++          type: 'message_start',
++          message: { id: 'msg_recorded', type: 'message', role: 'assistant', model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 1 } },
++        }) +
++          sse('content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }) +
++          sse('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: RECORDED_ANSWER } }) +
++          sse('content_block_stop', { type: 'content_block_stop', index: 0 }) +
++          sse('message_delta', { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 1 } }) +
++          sse('message_stop', { type: 'message_stop' }),
++      );
++    });
++  });
++  // Every interface: on a Linux engine the host gateway is the bridge's address, not loopback.
++  await new Promise<void>((done) => server.listen(0, '0.0.0.0', done));
++  const { port } = server.address() as AddressInfo;
++  return { port, recorded, close: () => new Promise<void>((done) => server.close(() => { done(); })) };
++}
++
++/** The driver's relay, pointed at the recording endpoint: keyless, local, and nothing else changed (A-R21-01, A-R21-02). */
++function recordingRelay(port: number): RelaySpec {
++  return {
++    ...MODEL_RELAY,
++    paths: [...MODEL_RELAY.paths],
++    upstream: { local: 'docker-host', port },
++    scheme: 'none',
++    credential: null,
++    budget: { maxTokens: BUDGET.maxTokens, maxCostUsd: BUDGET.maxCostUsd },
++  };
++}
++
++/** The driver's relay to the API, holding the credential the provider was given. */
++function apiRelay(): RelaySpec {
++  return { ...MODEL_RELAY, paths: [...MODEL_RELAY.paths], budget: { maxTokens: BUDGET.maxTokens, maxCostUsd: BUDGET.maxCostUsd } };
++}
++
++function spec(image: string, workspaceDir: string, relay: RelaySpec): SandboxSpec {
+   return {
+     image,
+     mounts: { workspace: { source: workspaceDir, target: WORKDIR, mode: 'rw' }, others: [] },
+     // No egress at all: the relay is the sandbox's one route, and it reaches
+     // the API's messages endpoint and nothing else (P12). A task that wanted
+     // anything more — a package registry, an analytics endpoint, the API host
+     // directly — has no route to it.
+     egress: { mode: 'deny-all', allow: [] },
+     // The relay enforces the task's budget: the same bounds the request carries (D-P13-01).
+-    relay: { ...MODEL_RELAY, paths: [...MODEL_RELAY.paths], budget: { maxTokens: BUDGET.maxTokens, maxCostUsd: BUDGET.maxCostUsd } },
++    relay,
+     limits: { cpus: 2, memoryMb: 2048, pids: 512, wallClockMs: 600_000 },
+     // The image's own `node` user (image/Dockerfile), which the CLI's home belongs to.
+     user: { uid: 1000, gid: 1000 },
+   };
+ }
+ 
+ /**
+  * Provisions a sandbox, builds the image if the host does not hold it, and
+  * hands `body` a driver wired to both. Everything is torn down when `body`
+  * settles, whether it threw or not.
+  */
+ /** A role whose instructions a session that loaded it can be seen to follow, and one that did not cannot. */
+@@ -197,136 +325,179 @@ export const PROBE_ROLE: CompiledRole = {
+ export async function withDriver<T>(
+   body: (h: Harness) => Promise<T>,
+   options: Partial<Omit<ClaudeCodeDriverOptions, 'provider'>> = {},
+ ): Promise<T> {
+-  const secret = credential();
++  return harnessed(body, options, { kind: 'api', secret: credential() });
++}
++
++/**
++ * The same harness, with the relay forwarding to a recording endpoint on the
++ * host rather than to the API. Needs a Docker daemon and no credential, and
++ * calls no model: an assertion here reads what the CLI sent (D-R38-03). Its
++ * sandboxes are kept out of `meteredSessions`, because the meter control is
++ * about usage the API reported, and a recorded answer's is not.
++ */
++export async function withRecordingDriver<T>(
++  body: (h: RecordingHarness) => Promise<T>,
++  options: Partial<Omit<ClaudeCodeDriverOptions, 'provider'>> = {},
++): Promise<T> {
++  const recorder = await startRecorder();
++  try {
++    return await harnessed(
++      (h) =>
++        body({
++          ...h,
++          recorded: recorder.recorded,
++          requestsFor: (taskId) => recorder.recorded.filter((r) => sessionOf(r.body) === sessionIdFor(taskId)),
++        }),
++      options,
++      { kind: 'recording', port: recorder.port },
++    );
++  } finally {
++    await recorder.close();
++  }
++}
++
++type Upstream = { readonly kind: 'api'; readonly secret: string } | { readonly kind: 'recording'; readonly port: number };
++
++async function harnessed<T>(
++  body: (h: Harness) => Promise<T>,
++  options: Partial<Omit<ClaudeCodeDriverOptions, 'provider'>>,
++  upstream: Upstream,
++): Promise<T> {
++  const relay = upstream.kind === 'api' ? apiRelay() : recordingRelay(upstream.port);
+   // One nonce per harness, so every task of this run shares a prefix that no
+   // earlier run has ever presented to the cache.
+   const prefix = stablePrefixFor(randomUUID());
+   const image = await ensureImage();
+   const base = await mkdtemp(join(tmpdir(), 'factory-driver-'));
+   const workspaceDir = join(base, 'workspace');
+   const vaultDir = join(base, 'vault');
+   await mkdir(workspaceDir, { recursive: true });
+   await mkdir(vaultDir, { recursive: true });
+   // The container runs as a fixed user, and a bind mount carries the host's
+   // ownership straight through: a workspace owned by any other uid is not
+   // writable by the task, and the one thing the task is supposed to be able to
+   // write is its workspace. On a developer's machine the two usually coincide
+   // and this is a no-op; on a GitHub runner they do not -- the runner is uid
+   // 1001 and the image's user is 1000 -- and without this the I1 assertion
+   // fails having proved nothing about where commands ran.
+   //
+   // This makes the *fixture* usable. It does not fix the underlying constraint,
+   // which is recorded as a known limit: a runtime that creates a workspace as a
+   // uid the image does not run as hands the agent a read-only workspace.
+   await chmod(workspaceDir, 0o777);
+   const { LocalDockerProvider: Provider } = await import('@olympus-ai/sandbox');
+   // A Vault root that exists and holds nothing: the provider requires one, and
+   // no mount here may be it, sit inside it, or contain it (I1).
+   // The credential goes to the provider, which gives it to the relay and to nothing else.
+-  const provider = await Provider.create({ vaultPaths: [vaultDir], credentials: { [MODEL_CREDENTIAL]: secret } });
+-  const handle = await provider.provision(spec(image, workspaceDir));
++  const provider = await Provider.create(
++    upstream.kind === 'api'
++      ? { vaultPaths: [vaultDir], credentials: { [MODEL_CREDENTIAL]: upstream.secret } }
++      : { vaultPaths: [vaultDir], dockerHostPorts: [upstream.port] },
++  );
++  const handle = await provider.provision(spec(image, workspaceDir, relay));
+ 
+   // The driver is given a provider that reports each exec as it starts and
+   // ends. It is the real provider underneath — nothing is stubbed — so an
+   // assertion about concurrency reads the same containers everything else does.
+   let watcher: ((sandbox: SandboxHandle) => () => void) | undefined;
+   const extra: SandboxHandle[] = [];
+   // The CLI's own account, per sandbox: each sandbox's relay meters only the sessions run in it.
+   const counts = new Map<SandboxHandle, TokenCounts>();
+   const countsFor = (h: SandboxHandle): TokenCounts => {
+     let c = counts.get(h);
+     if (c === undefined) {
+       c = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+       counts.set(h, c);
+     }
+     return c;
+   };
+   const test = expect.getState().currentTestName ?? '(outside a test)';
+   const execs: Array<{ cmd: readonly string[]; env: Readonly<Record<string, string>> | undefined }> = [];
+   const watched: SandboxProvider = {
+     id: provider.id,
+     provision: (s: SandboxSpec) => provider.provision(s),
+     destroy: (h: SandboxHandle) => provider.destroy(h),
+     capabilities: () => provider.capabilities(),
+     exec: async (h: SandboxHandle, cmd: string[], o?: ExecOptions) => {
+       const leave = watcher?.(h);
+       execs.push({ cmd: [...cmd], env: o?.env });
+       try {
+         const result = await provider.exec(h, cmd, o);
+-        recordCost(result.stdout);
++        // A recorded answer cost nothing, so it is not in the account of where the money went.
++        if (upstream.kind === 'api') recordCost(result.stdout);
+         sessionUsage(result.stdout, countsFor(h));
+         return result;
+       } finally {
+         leave?.();
+       }
+     },
+   };
+   const driver = new ClaudeCodeDriver({ provider: watched, workdir: WORKDIR, ...options });
+   // The run tells the driver which sandbox its artifacts belong in. `emitArtifacts`
+   // takes a target directory and no handle, so a driver that has not been told
+   // refuses rather than writing to the host (I1) — which is what it did the first
+   // time this harness ran, because nothing here had said.
+   driver.useSandbox(handle);
+ 
+   const harness: Harness = {
+     stablePrefix: prefix,
+     driver,
+     provider,
+     handle,
+     workspaceDir,
+     request: (overrides: Partial<TaskRequest> = {}): TaskRequest => ({
+       taskId: 'probe' as TaskId,
+       role: PROBE_ROLE,
+       stablePrefix: prefix,
+       variableSuffix: 'Reply with the single word: ready',
+       tier: 'fast',
+       tools: [],
+       sandbox: handle,
+       timeoutMs: 300_000,
+       budget: BUDGET,
+       ...overrides,
+     }),
+     observeExec: (enter: (sandbox: SandboxHandle) => () => void): void => {
+       watcher = enter;
+     },
+     provisionMore: async (count: number): Promise<SandboxHandle[]> => {
+       for (let i = 0; i < count; i += 1) {
+         const dir = join(base, `workspace-${String(extra.length)}`);
+         await mkdir(dir, { recursive: true });
+         await chmod(dir, 0o777);
+-        extra.push(await provider.provision(spec(image, dir)));
++        extra.push(await provider.provision(spec(image, dir, relay)));
+       }
+       return extra.slice(-count);
+     },
+     execs,
+     exec: (sandbox, cmd, options) => watched.exec(sandbox, cmd, options),
+   };
+ 
+   try {
+     return await body(harness);
+   } finally {
+     // The reading is kept, or why it could not be taken: the meter control fails on either.
+     const reading = await provider.destroy(handle).then((t) => t.meter).catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))));
+-    meteredSessions.push({ test, reading, cli: countsFor(handle) });
++    if (upstream.kind === 'api') meteredSessions.push({ test, reading, cli: countsFor(handle) });
+     // Each extra sandbox's relay metered its own calls, and each reading is kept beside the first's.
+     for (const more of extra) {
+       const read = await provider.destroy(more).then((t) => t.meter).catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))));
+-      meteredSessions.push({ test, reading: read, cli: countsFor(more) });
++      if (upstream.kind === 'api') meteredSessions.push({ test, reading: read, cli: countsFor(more) });
+     }
+     await rm(base, { recursive: true, force: true });
+   }
+ }
+ 
+ /**
+  * The invariant half of the context: identical across every task of one run,
+  * and different from every other run's.
+  *
+  * The nonce is what makes the cache measurement mean anything. The CLI's own
+  * system prompt is large, identical between sessions, and cached account-wide,
+  * so by the time this assertion runs, earlier tasks in the same suite have
+  * already warmed it and a first task reads thousands of tokens from cache
+  * before it has done anything. A prefix no session has ever presented cannot
+  * be read from cache, so the first task must write it and only the second can
+  * read it — which is the thing the split is supposed to buy.
+  */
+
+===== packages/drivers/claude-code/test/invariants.test.ts =====
+diff --git a/packages/drivers/claude-code/test/invariants.test.ts b/packages/drivers/claude-code/test/invariants.test.ts
+index 835580f..4cae335 100644
+--- a/packages/drivers/claude-code/test/invariants.test.ts
++++ b/packages/drivers/claude-code/test/invariants.test.ts
+@@ -20,11 +20,11 @@ import { invariantTest } from '@olympus-ai/conformance/vitest';
+ import type { TaskId } from '@olympus-ai/core';
+ import { relayOf } from '@olympus-ai/sandbox';
+ import { DECLARED_TOOLS, DriverRefusal, ClaudeCodeDriver, KEY_PLACEHOLDER, KEY_VARIABLE, MODEL_RELAY, parseStream, sessionIdFor } from '../src/index.js';
+-import { PROBE_ROLE, PROCESS_DUMP, WORKDIR, credential, dockerOut, exportContains, meteredSessions, withDriver, workspaceContains } from './harness.js';
++import { PROBE_ROLE, PROCESS_DUMP, WORKDIR, credential, dockerOut, exportContains, meteredSessions, withDriver, withRecordingDriver, workspaceContains } from './harness.js';
+ 
+ /**
+  * A marker only a process inside the container can write, and only into the
+  * workspace mount. Finding it on the host proves the command ran in the
+  * container and reached the host only through the mount; finding *nothing*
+  * outside the workspace proves it reached the host by no other route.
+  */
+@@ -249,47 +249,92 @@ const SKILL_PROMPT =
+ invariantTest(
+   'I3.workspace-instructions-not-loaded',
+   'a CLAUDE.md, a rules file, an agent definition named for the role, and a skill under .claude/skills and .agents/skills, planted in the workspace, ' +
+-    "reach none of the session's instructions with no tools or with Skill granted, while the same session without --setting-sources '' lists the .claude/skills plant: " +
++    'leave every request the session sends byte-identical to the same task over an empty workspace, with no tools or with Skill granted, and are listed by none of its init lines, ' +
++    "while the same session without --setting-sources '' sends the CLAUDE.md, rules, and .claude/skills tokens and lists the skill and the agent definition: " +
+     'the task runs under its role alone, so the agent cannot rewrite what instructs the next seat through the tree it hands on',
+   async () => {
+-    await withDriver(async (h) => {
++    // Against a recording endpoint rather than the API: what the session was
++    // instructed with is read from the requests the CLI sent, not from whether
++    // a model mentioned a token, and the comparison needs no list of the file
++    // names the CLI reads (#85, D-R38-04).
++    await withRecordingDriver(async (h) => {
++      // Once with no tools, and once with Skill, the one grant under which the CLI lists skills at all (D-A-WI-01).
++      const grants = [['i3-none', []], ['i3-skill', ['Skill']]] as const;
++      const sent = async (): Promise<Map<string, readonly string[]>> => {
++        const bodies = new Map<string, readonly string[]>();
++        for (const [taskId, tools] of grants) {
++          const before = h.requestsFor(taskId as TaskId).length;
++          await h.driver.runTask(h.request({ taskId: taskId as TaskId, tools: [...tools], variableSuffix: SKILL_PROMPT }));
++          const requests = h.requestsFor(taskId as TaskId).slice(before).map((r) => r.body);
++          // A session that sent nothing would compare equal to another that sent nothing.
++          expect(requests.length, `${taskId}: the session sent no request the endpoint could attribute to it`).toBeGreaterThan(0);
++          bodies.set(taskId, requests);
++        }
++        return bodies;
++      };
++
++      // The same tasks, under the same task ids and so the same session ids, in
++      // the same container, first over the empty workspace and then over the planted one.
++      const empty = await sent();
+       for (const { path, body } of PLANTED) {
+         await mkdir(dirname(join(h.workspaceDir, path)), { recursive: true });
+         await writeFile(join(h.workspaceDir, path), body);
+       }
+-      // Once with no tools, and once with Skill, the one grant under which the CLI lists skills at all (D-A-WI-01).
+-      for (const [taskId, tools] of [['i3-planted', []], ['i3-planted-skill', ['Skill']]] as const) {
+-        const result = await h.driver.runTask(h.request({ taskId: taskId as TaskId, tools: [...tools], variableSuffix: SKILL_PROMPT }));
+-        // The session answered, so its silence on the tokens is the instructions' and not a session that never ran.
+-        expect(result.claim.narrative, taskId).toContain('READY');
+-        for (const { path, token } of PLANTED) expect(result.claim.narrative, `${taskId}: ${path} was loaded`).not.toContain(token);
+-        // The CLI's own account of the skills and agents it listed, which does not depend on the model mentioning them.
+-        // The agent definition is the one plant besides the skills that the init line can show (codex-1).
++      const planted = await sent();
++      for (const [taskId] of grants) {
++        const was = empty.get(taskId) ?? [];
++        const is = planted.get(taskId) ?? [];
++        expect(is.length, `${taskId}: the planted workspace changed how many requests the session sent`).toBe(was.length);
++        for (const [i, body] of is.entries()) {
++          expect(body === was[i], `${taskId}: request ${String(i)} differs from the empty workspace's: ${firstDifference(was[i] ?? '', body)}`).toBe(true);
++        }
++        // The CLI's own account of the skills and agents it listed. The agent
++        // definition is the one plant besides the skills that the init line can show (codex-1).
+         const session = h.driver.sessionFor(taskId as TaskId);
+         expect(session?.agents, `${taskId}: the workspace agent definition was listed`).not.toContain(PROBE_ROLE.role);
+         const listed = session?.skills;
+         expect(listed, taskId).toBeDefined();
+         expect(listed, `${taskId}: a workspace skill was listed`).not.toContain(SKILL.id);
+         expect(listed, `${taskId}: a workspace skill was listed`).not.toContain(OTHER_SKILL.id);
+       }
+ 
+       // The control: the driver's own Skill invocation, in the same sandbox, without `--setting-sources ''`
+-      // and under a session id of its own. It must see the plant, or the silence above proves nothing (I5).
+-      const invocation = h.execs.filter((e) => e.cmd.includes(sessionIdFor('i3-planted-skill' as TaskId))).at(-1);
++      // and under a session id of its own. What it sends must carry the plants, or the equality above
++      // could be a recorder that sees none of them (I5).
++      const invocation = h.execs.filter((e) => e.cmd.includes(sessionIdFor('i3-skill' as TaskId))).at(-1);
+       if (invocation?.env === undefined) throw new Error("the driver's Skill invocation was not recorded with its environment, so there is nothing to rerun as the control");
+       const flag = invocation.cmd.indexOf('--setting-sources');
+       expect(invocation.cmd[flag + 1]).toBe('');
++      const controlSession = randomUUID();
+       const cmd = invocation.cmd
+         .filter((_, i) => i !== flag && i !== flag + 1)
+-        .map((arg) => (arg === sessionIdFor('i3-planted-skill' as TaskId) ? randomUUID() : arg));
++        .map((arg) => (arg === sessionIdFor('i3-skill' as TaskId) ? controlSession : arg));
+       const control = parseStream((await h.exec(h.handle, cmd, { env: invocation.env })).stdout);
+-      expect(control.init?.skills, 'the control did not list the .claude/skills plant, so the assertion cannot see what it guards').toContain(SKILL.id);
+-      expect(control.result?.narrative, 'the control listed the plant but its token did not reach the reply').toContain(SKILL.token);
++      const controlSent = h.recorded.filter((r) => r.body.includes(controlSession)).map((r) => r.body).join('\n');
++      expect(controlSent, 'the control sent no request, so the comparison above cannot be shown to see a plant').not.toBe('');
++      for (const plant of PLANTED.filter((p) => LOADED_BY_DEFAULT.includes(p.path))) {
++        expect(controlSent, `the control did not send ${plant.path}, so the comparison above cannot see it`).toContain(plant.token);
++      }
++      expect(control.init?.skills, 'the control did not list the .claude/skills plant, so the skills check above cannot see it').toContain(SKILL.id);
+       expect(control.init?.agents, 'the control did not list the planted agent definition, so the agents check above cannot see it').toContain(PROBE_ROLE.role);
+     });
+   },
+ );
+ 
++/**
++ * The plants the pinned CLI sends without `--setting-sources ''`, so the ones
++ * the control can show the recorder sees. The agent definition is listed on
++ * the init line instead, and `.agents/skills` is read in neither case (D-R23-01).
++ */
++const LOADED_BY_DEFAULT: readonly string[] = ['CLAUDE.md', '.claude/rules/override.md', `.claude/skills/${SKILL.id}/SKILL.md`];
++
++/** Where two request bodies first part, with a little of each, so a failure names the line that moved. */
++function firstDifference(was: string, is: string): string {
++  let i = 0;
++  while (i < was.length && i < is.length && was[i] === is[i]) i += 1;
++  return `at character ${String(i)}, empty ${JSON.stringify(was.slice(Math.max(0, i - 80), i + 120))}, planted ${JSON.stringify(is.slice(Math.max(0, i - 80), i + 120))}`;
++}
++
+ // Last in the file, and it must stay last: it reads the sessions the assertions above ran, and adds no model call.
+ invariantTest(
+   'I2.relay-meter-agrees-with-session',
+
+===== packages/sandbox/src/local/relay.ts =====
+diff --git a/packages/sandbox/src/local/relay.ts b/packages/sandbox/src/local/relay.ts
+index 598cb98..c2bb4bf 100644
+--- a/packages/sandbox/src/local/relay.ts
++++ b/packages/sandbox/src/local/relay.ts
+@@ -59,61 +59,63 @@ export const RELAY_URL = `http://${RELAY_ALIAS}:${String(RELAY_PORT)}`;
+ /**
+  * What a relay writes for each metered event, one line each, to its own
+  * stdout. Only the provider reads it, with `docker logs` after the sandbox
+  * stopped (D-P13-07). Every value on the line is `JSON.stringify`'d, the path
+  * lines in `record` included, so nothing a client sends can begin a line of its own.
+  */
+ export const METER_PREFIX = 'model-relay-meter ';
+ 
+ /**
+  * The relay itself. Passed to `node --eval` as one argv element, so there is
+  * no shell, no mount, and no image build between this source and what runs.
+  *
+  * It fails closed at start: no credential, no header, an upstream that is not
+  * an `https` origin, an empty grant, no budget, a meter for a dialect it does
+  * not read, a price table it cannot charge from, or no port each exit non-zero
+  * rather than start a server, so a misconfigured relay is a sandbox that never
+  * comes up rather than one whose model calls fail later for a reason nothing
+  * recorded.
+  *
+  * Metering (P13), for the `anthropic-messages` dialect:
+  *
+  * - `POST /v1/messages` is metered. The request body is buffered to read its
+  *   `model` and `max_tokens`, and forwarded byte for byte; a model the price
+  *   table does not name is refused before anything is sent (D-P13-04). The
+  *   response is streamed back unchanged while a copy is read for its usage.
+  * - `POST /v1/messages/count_tokens`, `GET`, and `HEAD` cost nothing upstream
+  *   and are forwarded unmetered. Every other request is refused: a write whose
+  *   cost the meter cannot count is spend the budget cannot see (D-P13-12).
+  * - One metered call is in flight at a time, so a call begun under budget ends
+  *   over it by at most one call, as D-P13-03 states (D-P13-13).
+  * - After each response the totals are updated; once the tokens (all four
+  *   classes, D-P13-05) or the dollars reach their bound, every later request is
+  *   refused with 402 and `x-should-retry: false`, naming the bound.
+  * - A successful response with its input usage and no final output usage is
+  *   charged `max_tokens` as output; one with no readable usage at all is
+  *   charged `max_tokens` as output, marks the budget `unreadable`, and stops
+  *   the relay forwarding. A response in a content encoding the relay did not
+  *   ask for is unreadable. A response that is not a success is charged nothing.
+  * - Under the `openai-chat` dialect (A-R6-01) the same rules hold with that
+  *   API's names: a `POST` to a granted path ending `/chat/completions` is
+  *   metered and a `GET` is free; the ceiling is the larger of
+  *   `max_completion_tokens` and `max_tokens`, times `n`; the usage is
+  *   `prompt_tokens` (less its cached part, counted as cache reads) and
+  *   `completion_tokens`, from the body or from the stream chunk that carries it.
++ *   A request asking for a service tier other than the default, a web search,
++ *   or audio is refused unsent: each is billed outside that usage (#88).
+  * - Under the `openai-responses` dialect (A-R26-01) the same rules hold with
+  *   that API's names: a `POST` to a granted path ending `/responses` is
+  *   metered and a `GET` is free; the ceiling is the larger of the model's
+  *   `maxOutputTokens` and the request's `max_output_tokens`; the usage is
+  *   `input_tokens` (less its cached part, counted as cache reads) and
+  *   `output_tokens`, from the body or from the `response.completed` event.
+  * - The credential is written as the spec's scheme says: as it is, or as
+  *   `Bearer <credential>` (A-R6-02).
+  * - Started local (A-R21-01), the upstream is `http://${LOCAL_UPSTREAM_ALIAS}:<port>`
+  *   and nothing else, and it is the only way the relay speaks `http`. Under
+  *   the `none` scheme (A-R21-02) it holds no credential, writes none, and
+  *   deletes what the client sent in its header; that is allowed only started
+  *   local, so a relay to a remote origin is never an unauthenticated route.
+  * - On SIGTERM it stops taking requests, cuts off any call still in flight —
+  *   which is then charged by the rules above — and writes a `closed` line, the
+  *   provider's proof that the log it reads is complete.
+  */
+@@ -514,18 +516,49 @@ const CLIENT_TOOLS = ['function', 'custom'];
+ function responsesUnmeterable(request) {
+   if (Object.prototype.hasOwnProperty.call(request, 'prompt') && request.prompt !== null) return 'the request names a stored prompt';
+   const tier = request.service_tier;
+   if (tier !== undefined && tier !== null && tier !== 'default') return 'the request asks for the service tier ' + JSON.stringify(String(tier).slice(0, 40));
+   const tools = request.tools;
+   if (tools === undefined || tools === null) return null;
+   if (!Array.isArray(tools)) return 'the request names tools that are not a list';
+   for (let i = 0; i < tools.length; i += 1) {
+     const t = tools[i];
+     const type = t !== null && typeof t === 'object' ? t.type : undefined;
+     if (CLIENT_TOOLS.indexOf(type) === -1) return 'the request offers the hosted tool ' + JSON.stringify(String(type).slice(0, 40));
+   }
+   return null;
+ }
+ 
++// What an openai-chat request asks for that costs more than its tokens, or null (#88, D-R38-05).
++// A service tier other than the default is billed at another rate, a web search is billed per
++// call, and audio, out or in, is billed at audio rates while reported inside the same
++// prompt_tokens and completion_tokens the price table charges at one rate. Each is spend the
++// budget cannot see, so each is refused as the responses dialect refuses its own (D-P13-12).
++function chatUnmeterable(request) {
++  const tier = request.service_tier;
++  if (tier !== undefined && tier !== null && tier !== 'default') return 'the request asks for the service tier ' + JSON.stringify(String(tier).slice(0, 40));
++  if (request.web_search_options !== undefined && request.web_search_options !== null) return 'the request asks for a web search';
++  if (request.audio !== undefined && request.audio !== null) return 'the request asks for audio output';
++  const modalities = request.modalities;
++  if (modalities !== undefined && modalities !== null) {
++    if (!Array.isArray(modalities)) return 'the request names modalities that are not a list';
++    for (let i = 0; i < modalities.length; i += 1) {
++      if (modalities[i] !== 'text') return 'the request asks for the modality ' + JSON.stringify(String(modalities[i]).slice(0, 40));
++    }
++  }
++  const messages = request.messages;
++  if (Array.isArray(messages)) {
++    for (let i = 0; i < messages.length; i += 1) {
++      const content = messages[i] !== null && typeof messages[i] === 'object' ? messages[i].content : undefined;
++      if (!Array.isArray(content)) continue;
++      for (let j = 0; j < content.length; j += 1) {
++        const part = content[j];
++        if (part !== null && typeof part === 'object' && part.type === 'input_audio') return 'the request sends audio input';
++      }
++    }
++  }
++  return null;
++}
++
+ // One metered call at a time (D-P13-13).
+ let busy = false;
+ const waiting = [];
+@@ -546,83 +579,83 @@ let closing = false;
+ function metered(req, res, target, path) {
+   acquire(function () {
+     if (closing || req.destroyed) { res.destroy(); release(); return; }
+     if (exhausted !== 'none') { refuseSpent(res); release(); return; }
+     const parts = [];
+     let size = 0;
+     req.on('data', function (chunk) { size += chunk.length; if (size <= BODY_LIMIT) parts.push(chunk); });
+     req.on('error', function () {});
+     req.on('end', function () {
+       if (closing) { res.destroy(); release(); return; }
+       if (size > BODY_LIMIT) {
+         refuseWith(res, 413, 'request_too_large', 'a metered request body is limited to ' + String(BODY_LIMIT) + ' bytes', 'unreadable-request');
+         release();
+         return;
+       }
+       const body = Buffer.concat(parts);
+       let request = null;
+       try { request = JSON.parse(body.toString('utf8')); } catch (error) { request = null; }
+       const model = request !== null && typeof request === 'object' && typeof request.model === 'string' ? request.model : null;
+       const maxTokens = request !== null && typeof request === 'object'
+         ? (openai ? openaiCeiling(request) : responses ? responsesCeiling(request, model) : request.max_tokens)
+         : undefined;
+       if (model === null || !Object.prototype.hasOwnProperty.call(prices, model)) {
+         refuseWith(res, 400, 'invalid_request_error',
+           (model === null ? 'the request names no model' : 'the model ' + JSON.stringify(model.slice(0, 200)) + ' has no price') +
+           ', so its cost cannot be counted and it is not sent', 'unpriced');
+         release();
+         return;
+       }
+       if (!Number.isInteger(maxTokens) || maxTokens <= 0) {
+         refuseWith(res, 400, 'invalid_request_error',
+           (openai ? 'the request names no positive max_completion_tokens or max_tokens, or an n that is not a positive integer'
+             : responses ? 'the request names a max_output_tokens that is not a positive integer' : 'the request names no max_tokens') +
+           ', so an unreadable answer has no ceiling to charge', 'unreadable-request');
+         release();
+         return;
+       }
+-      const unmeterable = responses ? responsesUnmeterable(request) : null;
++      const unmeterable = responses ? responsesUnmeterable(request) : openai ? chatUnmeterable(request) : null;
+       if (unmeterable !== null) {
+         refuseWith(res, 400, 'invalid_request_error', unmeterable + ', which is billed outside the usage this meter reads, so it is not sent', 'unmeterable');
+         release();
+         return;
+       }
+       const u = usageReader();
+       let reader = null;
+       let settled = false;
+       const call = { outbound: null, cut: false, sent: false };
+       inFlight.add(call);
+       const headers = forwarded(req.headers, DROPPED);
+       if (req.headers['content-length'] === undefined) headers['content-length'] = String(body.length);
+       function done(answer, complete) {
+         if (settled) return;
+         settled = true;
+         if (reader !== null && reader.end !== undefined && complete) reader.end();
+         // A call with no answer may still be billed if the relay cut it off at close, or if
+         // its whole request was sent before it failed, so either is charged as unreadable.
+         // Only a failure before the request left the relay is provably free.
+         const status = answer === null ? 0 : answer.statusCode || 0;
+         charge(model, maxTokens, u, answer === null ? call.cut || call.sent : status >= 200 && status < 300);
+         inFlight.delete(call);
+         release();
+         if (closing && inFlight.size === 0) finish();
+       }
+       done.outbound = function (outbound) {
+         call.outbound = outbound;
+         outbound.on('finish', function () { call.sent = true; });
+       };
+       done.watch = function (answer) {
+         const encoding = String(answer.headers['content-encoding'] || 'identity').toLowerCase();
+         const type = String(answer.headers['content-type'] || '').toLowerCase();
+         if (encoding !== 'identity') return;
+         if (type.indexOf('text/event-stream') === 0) {
+           const parse = streamParser(u);
+           answer.on('data', parse);
+         } else if (type.indexOf('application/json') === 0) {
+           reader = bodyParser(u);
+           answer.on('data', reader.write);
+         }
+       };
+       send(req, res, target, path, headers, body, done);
+     });
+   });
+ }
+
+=== BUNDLE END === bfae41adad626471aee7e20984d84e6c

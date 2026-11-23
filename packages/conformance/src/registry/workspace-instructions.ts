@@ -65,12 +65,14 @@ export function workspaceInstructionProblems(
 }
 
 export const R23_I3 = [
-  // Paid: a real container on the pinned image and real model calls. Raised by R20's external review (codex-1, D-R20-12); skills added by R23.
+  // A real container on the pinned image, with the relay forwarding to a recording endpoint, so it reads what
+  // the CLI sent and calls no model (R38, #85, D-R38-04). Raised by R20's external review (codex-1, D-R20-12); skills added by R23.
   external({
     id: 'I3.workspace-instructions-not-loaded',
     title:
       'a CLAUDE.md, a rules file, an agent definition named for the role, and a skill under .claude/skills and .agents/skills, planted in the workspace, '
-      + "reach none of the session's instructions with no tools or with Skill granted, while the same session without --setting-sources '' lists the .claude/skills plant: "
+      + 'leave every request the session sends byte-identical to the same task over an empty workspace, with no tools or with Skill granted, and are listed by none of its init lines, '
+      + "while the same session without --setting-sources '' sends the CLAUDE.md, rules, and .claude/skills tokens and lists the skill and the agent definition: "
       + 'the task runs under its role alone, so the agent cannot rewrite what instructs the next seat through the tree it hands on',
     level: 'runtime',
     package: CLAUDE_CODE,
