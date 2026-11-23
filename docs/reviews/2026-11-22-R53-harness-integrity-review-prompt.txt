@@ -1,0 +1,150 @@
+The code under review is in the file
+`2026-11-22-R53-harness-integrity-review-bundle.txt` (SHA-256 19939fc0d492297d9c11de6c522ec6f6519cf36a51cf6128116a435938ac04b1) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing the supply-chain and evidence integrity of the agent harness
+of a TypeScript project: how the container image that runs a third-party
+coding-agent CLI is built and identified, and how the runtime records which
+image each agent call ran in. You have the source and nothing else — no design
+documents, no author reasoning, no prior version, no conversation that
+produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The project runs a third-party agent CLI (Claude Code or Codex, installed from
+npm) inside a Docker sandbox to do coding tasks, and keeps an evidence record
+of every call so an auditor can tie a verdict to what produced it. This change
+pins each CLI and its platform packages by sha512 in a lockfile committed
+beside each driver's Dockerfile (`image/cli-lock.json`), installs from it with
+`npm ci` followed by an install check (`image/check-install.js`), and has
+`ensureImage` return the image's content ID, refusing a tag the Docker daemon
+holds as an image this host has no record of building (records in
+`~/.factory/images/`). The runtime provisions every agent call's sandbox from
+that content ID and records it as `harnessImage` on the call's usage record and
+on the evidence bundle that verifies the call's work. The Vault refuses a
+record that names no content ID.
+
+It must hold against a capable, motivated party trying to get an agent call
+run in, or recorded as having run in, an image other than the one built from
+the committed lockfile — through the npm registry serving other bytes for a
+pinned version, a tag on the Docker daemon pointing at another image, or a
+record that names an image the call did not run in. Assume no deceptive intent
+— only that the easiest path gets taken.
+
+That party controls what the npm registry serves for any package name and
+version, which image a tag on the local Docker daemon points to between or
+during runs, the files of the workspace a task writes, and everything an agent
+CLI returns from inside the sandbox. It does not control the committed
+repository (the Dockerfiles, the lockfiles, the install check, the runtime's
+source), the host user's home directory where build records are kept, or the
+components the runtime is wired with — the Vault, the sandbox provider, and the
+drivers are runtime-selected and trusted, even where a function takes one as an
+argument — and it does not control code running inside the runtime's own
+process.
+
+The invariants at stake:
+
+The runtime derives status; the model never reports it. An agent's narrative is
+a claim, stored separately from evidence, and what the evidence records is
+collected by the runtime, never taken from the agent.
+
+Fail closed. A missing required check, an absent capability, an unsupported
+stack, or a shrunken suite is a refusal — never a silent degrade, never a
+warning that lets the run continue.
+
+Every capability claim maps to an executable assertion that fails when the
+capability is deleted.
+
+Greek names never appear in code: not in type names, file paths, config keys,
+or policy fields.
+
+The mechanisms that matter most:
+
+- The image build: `npm ci` from `cli-lock.json`, then `check-install.js`,
+  which must fail the build unless every package the lockfile pins for the
+  image's platform is installed at its locked version and integrity; and
+  `harnessLockProblems`, which refuses a lockfile entry without a sha512
+  integrity or resolved outside the npm registry before any build.
+- `recordedImage` / `ensureImage`: the tag's content ID accepted only when this
+  host recorded building it under that tag; the build's ID taken from
+  `--iidfile` and recorded; the content ID returned and used to provision.
+- The line's recording: `runTask` sets `harnessImage` from the image the
+  sandbox spec names; `buildCallImage` copies the build call's recorded image
+  into the evidence bundle; `buildGraph` refuses a driver image that is not a
+  content ID; both Vaults refuse `not-recorded` and malformed IDs.
+- The conformance entries and driver tests that claim each of the above.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+- bumping either CLI's version
+- the CLI's own settings, such as `permissions.blockWritesOutsideWorkingDirectories`
+  and `CLAUDE_CODE_SUBAGENT_EFFORT`. A setting in the agent's own
+  configuration is not a trust boundary, and the mount already confines writes.
+- signing or attesting the image
+- R6's endpoint driver, which runs no third-party harness
+- an image registry
+
+"R6" names another unit of the project: the driver that calls an
+OpenAI-compatible endpoint directly and runs no agent CLI. Absent work listed
+here is not a defect.
+
+The bundle's commit range also carries two earlier small changes that landed
+after the previous review: one adding a validator's message to a sent-back
+draft's retry, and the type amendment this unit builds. Review them as part of
+the range.
+
+THE QUESTION
+
+How would I get an agent call to run in an image whose CLI bytes are not the
+ones the committed lockfile pins, or get the evidence to name an image the call
+did not run in, without any check refusing?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.
