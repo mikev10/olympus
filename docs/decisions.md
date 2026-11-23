@@ -11628,3 +11628,34 @@ attribution; folding them changes refusals other units record.
 - The fake ports in conformance answer for whatever commit they are asked,
   so they prove the wiring, not a scan; the scan itself is R1's suite, run
   in full here.
+
+### D-R40-07: correction, a commit's tree could change
+
+D-R40-04 rested on "a commit's tree cannot change". Under a replace ref in the
+target repository it could: one object name read as another commit's content
+(codex-2, gemini-1; shown in the triage). Every git read in the readiness
+package now passes `--no-replace-objects` (4c8de92), which makes the
+assumption true for both the base snapshot and the scan. **Reverse by:**
+dropping the flag, which reopens the two-tree read.
+
+### D-R40-08: the ceiling binds at admission
+
+The readiness term is read at admission and re-read from the record on
+resume, as the adapter controls are (D-P8-03). A resume does not rescan, so
+a branch-protection change while a run is stopped is not seen by it (Codex's
+framing note). Recorded, not changed: rescanning at resume is a new
+behaviour for the units that own resume and integration. **Reverse by:**
+calling the port again in `resumeRun` and refusing on a lower answer.
+
+### D-R40-09: for the maintainer, whether a scan is required above L0
+
+Both families read fail-closed as requiring a scan for any run above L0
+(codex-1, gemini-2, gemini-3). F1 says the opposite in terms: absence
+"leaves the other three unchanged", recorded explicitly. D-R40-03 followed
+F1. The production host always wires a scanner
+(`packages/api/src/host/main.ts:127`), so the gap is a library caller or a
+server built without one. Changing it is a spine amendment. **Recommended:**
+amend F1 so admission above L0 refuses when no scan ran, with `level-zero`
+the only `not-scanned` admission, and every in-process caller (the
+conformance rigs, the API tests) given a scan port. **Alternative:** keep
+F1 as it is and record the library path as unenforced by design.

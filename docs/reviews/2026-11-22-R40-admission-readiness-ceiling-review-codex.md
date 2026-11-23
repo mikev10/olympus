@@ -1,3 +1,19 @@
+# External review of R40, codex, 2026-11-22
+
+The Codex family's review of R40 (admission enforces the readiness ceiling), as the runner wrote it, below this header. Triage: `2026-11-22-R40-admission-readiness-ceiling-triage.md`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex. A headless `codex exec` run under a read-only sandbox, with recorded approval policy `never`, in an empty scratch working directory and a scratch config home holding only `auth.json`, with an environment of `CODEX_HOME` alone; the pre-run listing of both is the manifest's `cleanRoom`. Ingestion 63,422 input tokens against a floor of 39,211; all four markers echoed.
+- **Cross-family agreement:** codex-1 with gemini-2 and gemini-3 (no scanner, no enforcement); codex-2 with gemini-1 (the base commit read twice). codex-3, codex-4, and codex-5 were raised by codex alone.
+- **Date:** 2026-11-22
+- **Bundle:** `2026-11-22-R40-admission-readiness-ceiling-review-bundle.txt`, SHA-256 `770c345227f3584e4cef814fe5e53c0dda7c552a699bde561de493a8feb6b0d4` (the manifest's `bundleSha256`), base `3fde9eb` (`reviewed/R38`), head `7223b34` (the unit branch after its rebase onto R38, before review). Every new file in full and every modified file as a function-context diff; `docs/decisions.md`, `docs/reviews/`, `docs/plan/`, and `pnpm-lock.yaml` excluded by construction. Prompt: `2026-11-22-R40-admission-readiness-ceiling-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer said it had no prior context and performed no lookups, and that it executed no tests. A self-report, not independently verifiable.
+- **Coverage, and any gap:** items 1 to 7 answered; item 2 (tautologies) answered that none was strictly tautological; item 4 (language escape hatches) answered as defensive hardening outside the stated attacker; item 7 (framing) answered, asking for the admission-time versus resume-time distinction to be stated.
+- **Citations:** line numbers are positions in the bundle's new side, not the repository, and are treated as hints.
+
+---
+
 BASE: 3fde9eb  
 HEAD: 7223b34  
 packages/vault/src/types.ts  
