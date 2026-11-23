@@ -3,7 +3,7 @@
  *
  * No published image carries the Codex CLI, so this package builds one
  * rather than pulling one. Every input is pinned: the base by digest, and the
- * CLI and each of its platform packages by `sha512` in `image/package-lock.json`,
+ * CLI and each of its platform packages by `sha512` in `image/cli-lock.json`,
  * which the image installs from and never by name (R53). A version number
  * names a release, not its contents; the lockfile names the contents, so a
  * version bump is a reviewed lockfile diff and cannot happen through the
@@ -40,7 +40,7 @@ export const CLI_PACKAGE = '@openai/codex';
 export const CLI_VERSION = '0.166.0';
 
 /** Every file of the build context, each hashed into the tag. */
-const CONTEXT_FILES = ['Dockerfile', 'package.json', 'package-lock.json', 'check-install.js', 'catalog.js'] as const;
+const CONTEXT_FILES = ['Dockerfile', 'package.json', 'cli-lock.json', 'check-install.js', 'catalog.js'] as const;
 
 /**
  * Where this host records the content ID of every image it built. A tag the
@@ -74,7 +74,7 @@ export function imageContext(): string {
 /** Why the image's manifest and lockfile do not pin `CLI_VERSION` by content, or none. */
 export function lockProblems(): string[] {
   const read = (file: string): unknown => JSON.parse(readFileSync(join(imageContext(), file), 'utf8'));
-  return harnessLockProblems(read('package.json'), read('package-lock.json'), { name: CLI_PACKAGE, version: CLI_VERSION });
+  return harnessLockProblems(read('package.json'), read('cli-lock.json'), { name: CLI_PACKAGE, version: CLI_VERSION });
 }
 
 export interface EnsureImageOptions {

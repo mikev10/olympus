@@ -53,7 +53,7 @@ interface Lock {
 }
 
 async function lock(dir: string): Promise<Lock> {
-  return JSON.parse(await readFile(join(dir, 'package-lock.json'), 'utf8')) as Lock;
+  return JSON.parse(await readFile(join(dir, 'cli-lock.json'), 'utf8')) as Lock;
 }
 
 /** A copy of the build context whose lockfile pins `pkg` at a hash its tarball does not have. */
@@ -65,7 +65,7 @@ async function alteredContext(pkg: string): Promise<string> {
   if (entry?.integrity === undefined) throw new Error(`the lockfile pins no ${pkg}`);
   // One character of the digest changed: still a well-formed sha512, of other bytes.
   const altered = entry.integrity.replace(/^sha512-(.)/, (_, c: string) => `sha512-${c === 'A' ? 'B' : 'A'}`);
-  await writeFile(join(dir, 'package-lock.json'), JSON.stringify({ ...locked, packages: { ...locked.packages, [`node_modules/${pkg}`]: { ...entry, integrity: altered } } }, null, 2));
+  await writeFile(join(dir, 'cli-lock.json'), JSON.stringify({ ...locked, packages: { ...locked.packages, [`node_modules/${pkg}`]: { ...entry, integrity: altered } } }, null, 2));
   return dir;
 }
 

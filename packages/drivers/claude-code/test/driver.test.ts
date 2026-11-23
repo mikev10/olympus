@@ -816,7 +816,8 @@ describe('the image pins the CLI by content (R53)', () => {
       .split('\n')
       .filter((line) => !line.trimStart().startsWith('#'))
       .join('\n');
-    expect(instructions).toMatch(/COPY package\.json package-lock\.json check-install\.js \/opt\/cli\//);
+    expect(instructions).toMatch(/COPY package\.json check-install\.js \/opt\/cli\//);
+    expect(instructions).toMatch(/COPY cli-lock\.json \/opt\/cli\/package-lock\.json/);
     expect(instructions).toMatch(/npm ci --no-fund --no-audit/);
     expect(instructions).toMatch(/node check-install\.js \/opt\/cli/);
     expect(instructions).not.toMatch(/npm (?:install|i|add|update)\b|\bnpx\b|\byarn\b|\bpnpm\b/);

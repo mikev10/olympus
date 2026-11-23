@@ -11871,3 +11871,12 @@ Started on `v2` at b79c699. Issue #169. Builds A-R53-01 (D-A-HI-01).
   - With the bundle taking the profile's image, a bundle was written for a
     build call whose record named none.
   - Without the Vault's checks, three Vault tests fail.
+- **The lockfile is committed as `image/cli-lock.json`.** Found by
+  `I9.packaged-host-runs`: a packed package never carries a file named
+  `package-lock.json` (`pnpm pack` shipped `image/Dockerfile`,
+  `check-install.js`, and `package.json` only). An installed host then
+  refused to start because it had no lockfile to check. The Dockerfile copies
+  the file in as `/opt/cli/package-lock.json`, where `npm ci` reads it.
+  *Rejected:* `npm-shrinkwrap.json`. Whether a packer ships one below the
+  package root is a rule this unit cannot pin. *Reverse:* rename it back and
+  add it to the package's `files`, if a packer is found that ships it.
