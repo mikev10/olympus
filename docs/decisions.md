@@ -11635,7 +11635,7 @@ merged and tagged `reviewed/*` (`git tag -l 'reviewed/*'`).
 ### D-R25-03: fast-check 4 only
 
 - **Chosen:** the slot is filled only for fast-check 4 declared beside
-  vitest 3 or 4.
+  vitest 4. Vitest 3 was not run either.
 - **Why:** fast-check 4 under vitest is what was run (D-R25-01). Jest and
   fast-check 3 were not run, and an unrun pairing is not claimed.
 - **Reverse:** add a major or a runner to the detector after running the
