@@ -414,8 +414,11 @@ const FIXTURES: Readonly<Record<string, Fixture>> = {
  */
 const NEGATIVE: Readonly<Record<string, { readonly fixture: string; readonly rests: readonly ProbeId[]; readonly names: RegExp; readonly via: ProbeEvidence['via'] }>> = {
   'build.pinned-manifest': { fixture: 'two-lockfiles', rests: [], names: /^several lockfiles are committed \(/u, via: 'static' },
-  'build.install': { fixture: 'stale-lockfile', rests: ['build.pinned-manifest'], names: / exited [1-9]\d*: /u, via: 'executed' },
-  'build.clean': { fixture: 'incremental-build-with-a-secret', rests: ['build.install'], names: / exited [1-9]\d*: /u, via: 'executed' },
+  // npm ci refuses a lockfile out of step with its manifest with its usage text, which the detail's 400-character
+  // tail keeps; an install that ran and failed (the network, a package) prints none of it (codex-3).
+  'build.install': { fixture: 'stale-lockfile', rests: ['build.pinned-manifest'], names: /^npm install from the lockfile exited 1: .*Run "npm help ci" for more info/u, via: 'executed' },
+  // The build fails for the one reason the fixture gives it: the prebuilt file is untracked, so the clean tree lacks it.
+  'build.clean': { fixture: 'incremental-build-with-a-secret', rests: ['build.install'], names: /^the build script in a fresh container exited 1: .*code: 'ENOENT', syscall: 'access', path: 'dist\/prebuilt\.js'/u, via: 'executed' },
   'testing.adapter': { fixture: 'no-framework', rests: ['build.install'], names: /^no test adapter for this stack: /u, via: 'static' },
   'testing.enumerate': { fixture: 'no-tests', rests: ['build.install', 'testing.adapter'], names: / adapter enumerated no test files$/u, via: 'static' },
   'testing.green-at-base': { fixture: 'skipped-and-unmeasured', rests: ['build.install', 'testing.enumerate'], names: / exited 0 and no test passed: /u, via: 'executed' },
