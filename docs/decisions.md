@@ -11672,7 +11672,7 @@ merged and tagged `reviewed/*` (`git tag -l 'reviewed/*'`).
 - **Reverse:** set `CURRENT_CORPUS` back to `v1`, and point the tier test at
   `v1-deterministic.json`.
 
-### D-R25-05: open, waiting for the maintainer: policy requiring a property check per authorization rule
+### D-R25-05: policy may require a property check per authorization rule (A-R25-01)
 
 - **Found:** the entry binds "Policy may require a property check for each
   authorization rule R17's security part names". No policy field expresses
@@ -11684,5 +11684,45 @@ merged and tagged `reviewed/*` (`git tag -l 'reviewed/*'`).
 - **Recommended:** a policy field `propertyPerAuthorizationRule`, `false`
   when absent. When it is true, the `test-design` exit refuses, naming the
   rule, unless a required property check names the rule in `deniesRule`.
-- **Until answered:** a property check may not carry `deniesRule`. The rest
-  of the unit does not depend on the answer.
+- **Confirmed** by the maintainer on 2026-11-22, as recommended. This is
+  A-R25-01, a contract change beside the ones the entry lists.
+- **Built:**
+  - `PolicyDocument.propertyPerAuthorizationRule?: boolean` and
+    `Policy.propertyPerAuthorizationRule: boolean`. Absent means `false`,
+    and a value that is not a boolean is refused
+    (`packages/core/src/policy/types.ts`, `validation.ts`, `engine.ts`).
+  - `PropertyCheckSpec.deniesRule?: string`, which, like every `deniesRule`,
+    must be on a required check.
+  - `denialRefusal` reads the field. A property check never stands in for
+    the denial check.
+  - When the field is set, a rule with no required property check naming it
+    refuses the `test-design` exit as `denial-check-missing`, naming the
+    rule. The message says it is the property check that is missing.
+- **Chosen:** the existing `denial-check-missing` reason, rather than a new
+  one. Both refusals answer the same question, whether each rule the
+  security part names is exercised by a locked check. A new `StationRefusal`
+  reason would be a second core contract change for one message.
+- **Reverse:** drop the field and the third argument to `denialRefusal`,
+  and make a property check's `deniesRule` `never` again.
+
+### D-R25-06: what the deterministic tier measured
+
+- **Run:** `pnpm --filter @olympus-ai/benchmark run deterministic` with
+  `BENCHMARK_WRITE=1`, on Docker on the maintainer's machine, with
+  `FACTORY_CONTAINER_UID=1000` and `FACTORY_CONTAINER_GID=1000`, since a
+  Windows host has no uids. It took 50 minutes for 15 deterministic items
+  in each of two arms. The result is `docs/benchmark/v2-deterministic.json`.
+- **`line` arm:** detection 7 of 9, with a 95% lower bound of 0.450. It
+  misses `hard-coded-output` and `edge-case-only`. On each of the 14 items
+  v1 shares, its verdicts and causes are identical to
+  `v1-deterministic.json`.
+- **`line-with-properties` arm:** detection 9 of 9, with a 95% lower bound
+  of 0.717. It catches both items with `gate-failed:property:expectation`.
+  calc's `unit` check also fails on both, because in this arm it runs the
+  property file unpinned (D-R25-04).
+- **False refusal:** 1 of 6 controls in both arms, with a 95% upper bound of
+  0.582. The control is `assertion-tightened`, which escalates for an
+  assertion change as it did in v1. The property checks refused no control.
+- **Not claimed:** that property checks reduce false-done in general. Two
+  seeded items and six controls on one repository are the sample, and the
+  bounds say how little that is.
