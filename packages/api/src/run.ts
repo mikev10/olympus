@@ -77,8 +77,9 @@ import { adapterAdmission, buildAdapterSet, missingControls, type AdapterSet, ty
 import { compileRoles, readRepoInstructions, type RepoInstructionRefusal, type RoleFileRefusal } from '@olympus-ai/compiler';
 import type { CheckSpec } from '@olympus-ai/integrity';
 import type { SandboxProvider } from '@olympus-ai/sandbox';
-import type { AdmissionRecord, AdmissionRefusal, AdmittedArtifact, AdmittedManifest, AdmittedPlan, AdmittedSet, AttemptFailure, CriticRecord, EnforcementDecision, DraftLockRecord, DraftRecord, EvidenceBundle, IntakeEntry, IntentRecord, ResumeRefusal, RubricRecord, RubricVersion, Vault } from '@olympus-ai/vault';
+import type { AdmissionRecord, AdmissionRefusal, AdmittedArtifact, RecordedHeldBy, RecordedReadiness, RecordedScanLevel, AdmittedManifest, AdmittedPlan, AdmittedSet, AttemptFailure, CriticRecord, EnforcementDecision, DraftLockRecord, DraftRecord, EvidenceBundle, IntakeEntry, IntentRecord, ResumeRefusal, RubricRecord, RubricVersion, Vault } from '@olympus-ai/vault';
 import { repoInstructionsProblem } from '@olympus-ai/vault';
+import { resolveCommit, type ReadinessCeiling } from '@olympus-ai/readiness';
 import { readUsage, unsettledCalls, worstCaseCost, type WorstCaseCost } from './cost.js';
 import { estimateCost, type CostEstimate, type EstimateCell } from './outcomes.js';
 import { problemCodes, recordDecision } from './decisions.js';
@@ -244,6 +245,21 @@ export interface RunRequest {
    * takes the candidate's, and naming another is refused (I4).
    */
   readonly template?: RunTemplateId | null;
+  /**
+   * Scans the base commit for its readiness ceiling (R40, D-R40-03). A run
+   * asked above it is refused at admission. Absent or null, no scan runs and
+   * the record says so: the policy terms bind alone (F1). The host always
+   * supplies its scanner.
+   */
+  readonly readiness?: AdmissionReadiness | null;
+}
+
+/**
+ * The readiness scan admission reads: the ceiling R1 derives for one commit
+ * of one checkout. The host's scanner is one (D-R40-04).
+ */
+export interface AdmissionReadiness {
+  ceilingAt(checkout: string, commit: string): Promise<Extract<ReadinessCeiling, { kind: 'scanned' }>>;
 }
 
 /** What a caller of the line may observe and ask of it while it drives. Neither can change what is committed. */
@@ -312,6 +328,20 @@ export type RunOutcome =
       readonly requestedLevel: AutonomyLevel;
       /** Every control the run's adapter set lacks, as the admission record holds them. */
       readonly unavailable: readonly string[];
+    }
+  /**
+   * The level asked for is above the readiness ceiling of the base commit
+   * (R40): refused, never downgraded, naming the probe or the scan limit
+   * that holds the ceiling.
+   */
+  | {
+      readonly ok: false;
+      readonly reason: 'readiness-refused';
+      readonly requestedLevel: AutonomyLevel;
+      readonly ceiling: RecordedScanLevel;
+      readonly heldBy: RecordedHeldBy;
+      readonly commit: string;
+      readonly detail: string;
     }
   | {
       readonly ok: false;
@@ -681,8 +711,17 @@ async function templateOf(req: RunRequest, policy: Policy): Promise<{ ok: true; 
  * a resume holds the run to what admission found rather than to what its
  * caller says now (D-P8-03).
  */
-export function admissionRefusal(record: AdmissionRecord): Extract<RunOutcome, { reason: 'controls-unavailable' }> | undefined {
+export function admissionRefusal(record: AdmissionRecord): Extract<RunOutcome, { reason: 'controls-unavailable' | 'readiness-refused' }> | undefined {
   const level = record.run.requestedLevel;
+  // A record written before R40 has no term, and is read as not scanned: the policy terms bind alone.
+  const readiness = record.readiness;
+  if (readiness?.kind === 'scanned' && level > readiness.level) {
+    const held = readiness.heldBy.kind === 'probe' ? `held by probe ${readiness.heldBy.probe}` : 'no scan grants L3';
+    return {
+      ok: false, reason: 'readiness-refused', requestedLevel: level, ceiling: readiness.level, heldBy: readiness.heldBy, commit: readiness.commit,
+      detail: `L${String(level)} requested exceeds the readiness ceiling L${String(readiness.level)} of commit ${readiness.commit} (${held}). Refused, not downgraded.`,
+    };
+  }
   if (level < 3 || record.unavailableControls.length === 0) return undefined;
   return { ok: false, reason: 'controls-unavailable', requestedLevel: level, unavailable: [...record.unavailableControls] };
 }
@@ -990,6 +1029,25 @@ async function hasState(vault: Vault, runId: RunId): Promise<boolean> {
  * Admits a run and drives it. Every refusal before the admission record is
  * written leaves nothing behind: no record, no state, no lock, no sandbox.
  */
+/**
+ * The readiness term for the run's base commit (D-R40-03): the ceiling the
+ * request's port derives, or not scanned, and why. The port is asked for the
+ * commit admission resolved, and an answer for any other commit is refused
+ * rather than recorded (I5).
+ */
+async function readinessAt(req: RunRequest): Promise<RecordedReadiness> {
+  const port = req.readiness ?? null;
+  if (port === null) return { kind: 'not-scanned', because: 'no-scanner' };
+  // ScanLevel stops at L2, so no ceiling is below L0 and an L0 run spends no scan.
+  if (req.requestedLevel === 0) return { kind: 'not-scanned', because: 'level-zero' };
+  const commit = await resolveCommit(req.workspace, req.baseCommit);
+  const ceiling = await port.ceilingAt(req.workspace, commit);
+  if (ceiling.commit !== commit) {
+    throw new Error(`admission: the readiness scan answered for ${ceiling.commit}, not the base commit ${commit}; refused rather than recorded`);
+  }
+  return { kind: 'scanned', level: ceiling.level, heldBy: ceiling.heldBy, commit };
+}
+
 export async function startRun(req: RunRequest): Promise<RunOutcome> {
   const admission = await admitRun(req);
   return admission.ok ? admission.admitted.drive() : admission;
@@ -1026,6 +1084,8 @@ function admissionRefusalOf(outcome: Exclude<AdmissionOutcome, { ok: true }>): A
       return { reason: 'cost-unapproved', requestedLevel: outcome.requestedLevel, worstCaseUsd: outcome.worstCase.usd, approvedCostUsd: outcome.approvedCostUsd };
     case 'controls-unavailable':
       return { reason: 'controls-unavailable', requestedLevel: outcome.requestedLevel, unavailable: outcome.unavailable };
+    case 'readiness-refused':
+      return { reason: 'readiness-refused', requestedLevel: outcome.requestedLevel, ceiling: outcome.ceiling, heldBy: outcome.heldBy, commit: outcome.commit };
     case 'policy-refused':
       return { reason: 'policy-refused', station: outcome.station, role: outcome.role, refusal: outcome.refusal };
     case 'roles-refused':
@@ -1264,6 +1324,15 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
     await discardRun(workspaces, req.runId);
     return { ok: false, reason: 'instructions-refused', refused: instructions.refused };
   }
+  // The readiness term, read once every cheaper refusal has passed and before the cost check, so a person
+  // approves a figure only for a run the ceiling admits (D-R40-05). A scan that fails refuses admission (I5).
+  let readiness: RecordedReadiness;
+  try {
+    readiness = await readinessAt(req);
+  } catch (error) {
+    await discardRun(workspaces, req.runId);
+    throw error;
+  }
   const now = new Date().toISOString();
   const run: Run = {
     id: req.runId,
@@ -1312,6 +1381,7 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
     candidate: candidate === null ? null : { id: candidate.candidate.id, decisionSha256: candidate.sha256 },
     repoInstructions: instructions.files,
     template,
+    readiness,
   };
   const refusedControls = admissionRefusal(unrecorded);
   if (refusedControls !== undefined) {

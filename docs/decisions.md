@@ -11602,3 +11602,29 @@ admission by throwing, after discarding the base, as other faults do.
 `resolveWithReadiness`. The ceiling is the repository's, not a station's,
 and the policy terms are already refused earlier with their own
 attribution; folding them changes refusals other units record.
+
+### D-R40-06: what proves it, and each shown failing
+
+- `I5.admission-refuses-above-the-readiness-ceiling`,
+  `I5.resume-holds-the-recorded-readiness-ceiling`: with the readiness
+  branch of `admissionRefusal` disabled, both fail; restored, both pass.
+- `packages/api/test/admission-readiness.test.ts`: with the server passing
+  `readiness: null` instead of its scanner, the refusal test fails (the run
+  reaches the cost check); restored, it passes. Its order proves D-R40-05:
+  the run is refused as `readiness-refused` on the create that has no
+  approved cost.
+- `I4.readiness-absence-is-recorded`, `I4.readiness-ceiling-never-grants-at-admission`,
+  `I5.readiness-answer-for-another-commit-refuses`: each names the property
+  that, deleted, would let a run through unrecorded, granted, or recorded
+  against another commit.
+- `admission:readiness-refused` in the P14 decision table: the closed
+  `CauseKey` record would not compile without it.
+- #38: `packages/conformance/test/negative-fixture.test.ts` builds the
+  `indeterminate` gitleaks start-up failure D-R2-10 names; the old predicate
+  (`supported` or missing fails) passes it, `negativeFailure` refuses it.
+  The Docker fixture run passes with every probe `absent` for its intended
+  failure, so the stricter check found no fixture leaning on an
+  indeterminate result.
+- The fake ports in conformance answer for whatever commit they are asked,
+  so they prove the wiring, not a scan; the scan itself is R1's suite, run
+  in full here.

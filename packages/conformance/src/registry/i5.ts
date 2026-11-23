@@ -38,6 +38,7 @@ import { R20_I5 } from './roles.js';
 import { R13A_I5 } from './nightly.js';
 import { R34_I5 } from './install.js';
 import { R36A_I5 } from './first-run.js';
+import { R40_I5 } from './admission-readiness.js';
 import { R37_I5 } from './gate-retry.js';
 import { R36B_I5 } from './init.js';
 import { R29_I5 } from './stacks.js';
@@ -92,6 +93,7 @@ export const I5: InvariantEntry = {
     ...R29_I5,
     // R34: a lockfile an install cannot verify, or an install that fails a hash, starts no check.
     ...R34_I5,
+    ...R40_I5,
     ...R8A_I5,
     ...R8B_I5,
     ...R8A_REVIEW_I5,

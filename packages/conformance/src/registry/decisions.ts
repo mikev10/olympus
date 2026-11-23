@@ -371,6 +371,14 @@ export const DECISION_TABLE: Readonly<Record<CauseKey, Row>> = {
     const { startRun } = await api();
     await startRun(await rig.request(await realComponents(rig), { requestedLevel: 3, policy: await realPolicy(3) }));
   }),
+  'admission:readiness-refused': admissionRow('admission:readiness-refused', 'p14-readiness-', async (rig) => {
+    const { startRun } = await api();
+    const readiness = {
+      ceilingAt: (_checkout: string, commit: string) =>
+        Promise.resolve({ kind: 'scanned' as const, level: 0 as const, heldBy: { kind: 'probe' as const, probe: 'testing.adapter' as const }, commit }),
+    };
+    await startRun(await rig.request(await rig.components(), { requestedLevel: 1, readiness }));
+  }),
   'admission:policy-refused': admissionRow('admission:policy-refused', 'p14-policy-', async (rig) => {
     const { startRun } = await api();
     await startRun(await rig.request(await rig.components(), { policy: await linePolicy({}, { stationCaps: { build: 0 } }) }));
