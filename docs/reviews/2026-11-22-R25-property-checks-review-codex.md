@@ -1,3 +1,23 @@
+# External review of R25, codex, 2026-11-22
+
+This is the Codex family's review of R25, property checks: the new `property` check kind, the fast-check adapter slot and its preload, admission, the base run and `verify`, the policy field `propertyPerAuthorizationRule`, and corpus v2. It is triaged in `2026-11-22-R25-property-checks-triage.md`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex. A headless `codex exec` run under a read-only sandbox, with recorded approval policy `never`, in an empty scratch working directory and a scratch config home holding only `auth.json`, with an environment of `CODEX_HOME` alone. The manifest's `cleanRoom` holds the pre-run listing of both.
+- **Cross-family agreement:** gemini raised codex-1, as gemini-1 and again in gemini-4. codex-3 and gemini-3 concern the same function, `propertyBaseCause`, from opposite directions: codex-3 says it is too lenient, and gemini-3 says it is too strict for a new module. Only codex raised codex-2, codex-4, and codex-5.
+- **Date:** 2026-11-22
+- **Bundle:** `2026-11-22-R25-property-checks-review-bundle.txt`, SHA-256 `0f835f16bc14dffef8402f0ce7ed39e561e38552c19e882f01707f560d451922`. Base `3fde9eb` (`reviewed/R38`), head `34d5616`, the unit branch's tip before the review. It held every new file in full and every modified file as a function-context diff. Excluded: `docs/decisions.md`, `docs/reviews/`, `docs/plan/`, and `pnpm-lock.yaml`. Prompt: `2026-11-22-R25-property-checks-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer said it had none and performed no external lookups. That is a self-report, and it cannot be verified independently.
+- **Coverage, and any gap:**
+  - Items 1, 3, and 5 are answered by codex-1 to codex-4.
+  - Item 2 is answered by codex-5.
+  - Item 4 is answered: no type-level bypass was found.
+  - Item 6 lists three mechanisms the reviewer found sound.
+  - Item 7 is answered: the framing is right, with a note that sampling cannot establish universal correctness.
+  - No item came back empty.
+- **Citations:** line numbers are positions in the bundle's new-side diffs, not in the repository. Each finding was located by its construct.
+
 BASE: 3fde9eb  
 HEAD: 34d5616  
 packages/vault/test/local.test.ts  

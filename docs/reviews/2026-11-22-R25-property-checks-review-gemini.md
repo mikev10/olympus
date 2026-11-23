@@ -1,3 +1,22 @@
+# External review of R25, gemini, 2026-11-22
+
+This is the Gemini family's review of R25, property checks: the new `property` check kind, the fast-check adapter slot and its preload, admission, the base run and `verify`, the policy field `propertyPerAuthorizationRule`, and corpus v2. It is triaged in `2026-11-22-R25-property-checks-triage.md`.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini. A direct `generateContent` API call to `gemini-3.1-pro-preview`, offering no tools. `cleanRoom` is `null`, because an API call loads no local configuration.
+- **Cross-family agreement:** gemini-1, with gemini-4 as its tradeoff form, is codex-1. gemini-3 concerns the same function codex-3 does, `propertyBaseCause`, from the opposite direction. Only gemini raised gemini-2.
+- **Date:** 2026-11-22
+- **Bundle:** `2026-11-22-R25-property-checks-review-bundle.txt`, SHA-256 `0f835f16bc14dffef8402f0ce7ed39e561e38552c19e882f01707f560d451922`. Base `3fde9eb` (`reviewed/R38`), head `34d5616`, the unit branch's tip before the review. It held every new file in full and every modified file as a function-context diff. Excluded: `docs/decisions.md`, `docs/reviews/`, `docs/plan/`, and `pnpm-lock.yaml`. Prompt: `2026-11-22-R25-property-checks-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer said it had none and performed no external lookups. That is a self-report, and it cannot be verified independently.
+- **Coverage, and any gap:**
+  - Items 1, 3, and 5 are answered by gemini-1 to gemini-3.
+  - Item 6 is answered in gemini-4.
+  - Item 7 is answered: the framing is right.
+  - Item 2 (tautological checks) came back empty.
+  - Item 4 (language escape hatches) is answered only in passing: "sound against generic erasure and typing bypasses".
+- **Citations:** line numbers are positions in the bundle's new-side diffs, not in the repository. Each finding was located by its construct.
+
 I had no prior context about this project and I did not perform any external lookups.
 
 BASE: 3fde9eb

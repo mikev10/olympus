@@ -11726,3 +11726,31 @@ merged and tagged `reviewed/*` (`git tag -l 'reviewed/*'`).
 - **Not claimed:** that property checks reduce false-done in general. Two
   seeded items and six controls on one repository are the sample, and the
   bounds say how little that is.
+
+## R25 amendment: external adversarial review
+
+Both families counted on the first run. Full record:
+`docs/reviews/2026-11-22-R25-property-checks-triage.md`.
+
+- **Fixed (codex-2), 12e1bd3:** admission refuses a use of fast-check's
+  `assert` that the parse cannot locate. That covers a computed access, the
+  namespace used as a value, and an `assert` not called where it is named.
+  Reverse: drop the reference checks in `FastCheckAdapter.registrations`.
+- **Fixed (codex-3, gemini-3, codex-5), 2cfa4ba:**
+  - The preload reports that it configured the framework, and evidence
+    without that report is unreadable.
+  - Base `fails` is met by a failed run whose other reports are sound, or by
+    a file that never reached a property (no report, non-zero exit), as an
+    acceptance check's import failure is.
+  - `propertyOutcome` never holds over an empty registration set.
+
+  This replaces D-R25-02's rule that a property check must report a failed
+  run on the base. Reverse: restore that rule, and drop the ready line.
+- **Known limit (codex-1, gemini-1, gemini-4):** the code under test can
+  forge reports from inside the check's process, as D-R25-02 recorded. Filed
+  as #216, which also covers acceptance checks. No unit owns it yet.
+- **No change (gemini-2):** a fast-check swapped through the lockfile is a
+  config change, and it escalates at `integrate`.
+- **Rejected (codex-4):** a `deniesRule` on a tautology satisfies the policy
+  just as R17's denial checks are satisfied by naming the rule. Whether a
+  check is adequate is the critic's to judge.
