@@ -185,14 +185,16 @@ export interface DraftRef {
 
 /**
  * Why a draft went back, recorded with the attempt it ended (R19). `runtime`:
- * the runtime's own problems with it, as paths and codes. `critic`: an
+ * the runtime's own problems with it, as paths and codes, and the
+ * validator's message where one read the draft alone (A-R36b-01); a record
+ * written before that has none. `critic`: an
  * independent critic's findings, held in the critic record. `base-run`: its
  * checks did not do on the base what they declared, held in the base record.
  * `principal`: a person rejected it, with notes at `spec` or a reason from a
  * fixed set at `test-design`, never both (D-A-DS-02).
  */
 export type DraftSendBack =
-  | { readonly by: 'runtime'; readonly problems: ReadonlyArray<{ readonly path: string; readonly code: string }> }
+  | { readonly by: 'runtime'; readonly problems: ReadonlyArray<{ readonly path: string; readonly code: string; readonly message?: string }> }
   | { readonly by: 'critic' }
   | { readonly by: 'base-run' }
   | {

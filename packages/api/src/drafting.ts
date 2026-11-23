@@ -479,10 +479,18 @@ async function draft(ctx: LineContext, station: DraftStation, current: DraftAtte
   return undefined;
 }
 
+/**
+ * A runtime problem with a draft: a path and a code, and the validator's
+ * message where the validator read the draft alone, so it can name only what
+ * the drafter wrote (A-R36b-01). A problem judged against the base or the
+ * verification manifest carries no message (A-R19-11).
+ */
+type DraftProblem = { path: string; code: string; message?: string };
+
 interface ReadDraft {
   readonly files: DraftFile[];
   readonly discarded: string[];
-  readonly problems: Array<{ path: string; code: string }>;
+  readonly problems: DraftProblem[];
 }
 
 async function fileAt(root: string, path: string): Promise<DraftFile | undefined> {
@@ -504,7 +512,7 @@ async function readSpecDraft(ctx: LineContext, start: string, work: string): Pro
   const paths = specDraftPaths(ctx.run.id);
   const all = specDraftFiles(ctx);
   const files: DraftFile[] = [];
-  const problems: Array<{ path: string; code: string }> = [];
+  const problems: DraftProblem[] = [];
   for (const path of all) {
     const file = await fileAt(work, path);
     if (file === undefined) problems.push({ path, code: 'missing' });
@@ -520,7 +528,7 @@ async function readSpecDraft(ctx: LineContext, start: string, work: string): Pro
     }
     if (text.trim() === '' && !problems.some((p) => p.path === paths.spec)) problems.push({ path: paths.spec, code: 'empty' });
   }
-  const parse = (path: string, parser: (value: unknown) => { ok: boolean; problems?: ReadonlyArray<{ path: string; code: string }> }): void => {
+  const parse = (path: string, parser: (value: unknown) => { ok: boolean; problems?: ReadonlyArray<{ path: string; code: string; message: string }> }): void => {
     const file = files.find((f) => f.path === path);
     if (file === undefined) return;
     const json = jsonOf(file);
@@ -529,7 +537,7 @@ async function readSpecDraft(ctx: LineContext, start: string, work: string): Pro
       return;
     }
     const parsed = parser(json);
-    if (!parsed.ok) for (const p of parsed.problems ?? []) problems.push({ path: `${path}#${p.path}`, code: p.code });
+    if (!parsed.ok) for (const p of parsed.problems ?? []) problems.push({ path: `${path}#${p.path}`, code: p.code, message: p.message });
   };
   parse(paths.security, (v) => parseSecurityPart(v));
   parse(paths.runRequirements, (v) => parseRunRequirements(v, 'runRequirements'));
@@ -574,7 +582,7 @@ async function readTestDraft(ctx: LineContext, start: string, work: string): Pro
     const file = await fileAt(work, path);
     if (file !== undefined) files.push(file);
   }
-  const problems: Array<{ path: string; code: string }> = [];
+  const problems: DraftProblem[] = [];
   const tests = files.filter((f) => f.path !== manifestPath && f.path !== planPath).map((f) => f.path);
   if (planPath !== null) {
     // A drafted plan is held to the shape a supplied one is held to at admission (D-A-OB-11).
@@ -584,7 +592,7 @@ async function readTestDraft(ctx: LineContext, start: string, work: string): Pro
     else if (json === undefined) problems.push({ path: planPath, code: 'not-json' });
     else {
       const parsed = parsePlan(json, 'plan');
-      if (!parsed.ok) for (const p of parsed.problems) problems.push({ path: `${planPath}#${p.path}`, code: p.code });
+      if (!parsed.ok) for (const p of parsed.problems) problems.push({ path: `${planPath}#${p.path}`, code: p.code, message: p.message });
     }
   }
   if (tests.length === 0) problems.push({ path: testDir, code: 'missing' });
@@ -624,7 +632,7 @@ async function readTestDraft(ctx: LineContext, start: string, work: string): Pro
 }
 
 /** The drafted manifest's checks, held alone to a manifest's shape; null where it is not one, its problems added. */
-function draftedChecks(manifest: DraftFile, problems: Array<{ path: string; code: string }>): CheckSpec[] | undefined {
+function draftedChecks(manifest: DraftFile, problems: DraftProblem[]): CheckSpec[] | undefined {
   const json = jsonOf(manifest);
   if (json === undefined) {
     problems.push({ path: manifest.path, code: 'not-json' });
@@ -632,7 +640,7 @@ function draftedChecks(manifest: DraftFile, problems: Array<{ path: string; code
   }
   const parsed = parseManifest(json, { alone: false });
   if (!parsed.ok) {
-    for (const p of parsed.problems) problems.push({ path: `${manifest.path}#${p.path}`, code: p.code });
+    for (const p of parsed.problems) problems.push({ path: `${manifest.path}#${p.path}`, code: p.code, message: p.message });
     return undefined;
   }
   return parsed.checks;
