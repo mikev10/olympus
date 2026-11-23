@@ -12183,3 +12183,287 @@ From the triage (`docs/reviews/2026-11-22-R53-harness-integrity-triage.md`).
   bump that adds a lifecycle script, or changes this one, re-reads it. A
   version bump is a reviewed lockfile diff, and `hasInstallScript` shows in
   that diff.
+
+### D-A-FO-01: every finding R28 measures names what it cites, and outcomes are runtime records (A-R28-01)
+
+R28 (#109) asks for an outcome on every finding the line raises, derived by
+the runtime, and for R2 to publish rates per reviewer family and per seat
+kind. Checked against `v2` at 809dac5 before R28 began, the entry assumes
+inputs the code does not have.
+
+- **Verified:**
+  - A review seat raises no findings. The reviewer's result is recorded as a
+    `TaskResult`, whose claim is free text, and the task is marked `passed`
+    whatever it says (`packages/api/src/line.ts:1952-1956`). That is
+    deliberate: the runtime does not interpret a reviewer's verdict (D-P4-07),
+    since a status derived from it would be the model reporting status (I2).
+    The security seat is the same task path (`line.ts:1899`).
+  - A critic's findings are a bare list of strings, cited to nothing
+    (`CriticRecord.findings`, `packages/vault/src/types.ts:632`; read by
+    `readCriticResult`, `packages/api/src/drafting.ts:721-734`).
+  - A nightly reviewer's finding names a file and line, or a record of the
+    day reviewed (`ReviewFinding`, `packages/vault/src/types.ts:1215`), and
+    one it cannot locate is refused (R13b).
+  - A run's evidence holds one changed-line coverage number per bundle
+    (`TamperReport.coverageDelta`, `packages/integrity/src/types.ts:291`),
+    from `CoverageAdapter.changedLineCoverage`, which returns a number
+    (`packages/adapters/src/types.ts:65`). Nothing records which lines ran,
+    so "a check covering it passes" has no input. The TypeScript and Python
+    adapters both implement it (`packages/adapters/src/coverage.ts`,
+    `packages/adapters/src/python/coverage.ts`).
+  - A closed set of dismissal causes, with no text, already exists for
+    intake candidates: `DismissalCause` (`packages/vault/src/types.ts:857`),
+    taken over HTTP at `POST /intake/:id/dismiss`
+    (`packages/api/src/http/wire.ts:45`, `server.ts:240`).
+  - No Vault operation stores an outcome, and `src/types.ts` in every package
+    is a gate path (`.github/protected-paths.txt`), so each change below is a
+    contract change R28 must declare.
+- **Chosen** by the maintainer, 2026-11-23, as A-R28-01. R28 builds all of it,
+  so both review families see each type beside the code that fills it, as
+  A-R53-01 was built by R53:
+  1. **Review seats return located findings.** The reviewer and the security
+     seat end with `{"findings": [{ "category", "path", "line" }, …]}`, read
+     strictly as R13b reads a nightly reviewer's. A finding naming a file the
+     reviewed tree does not hold, or a line that file does not have, is
+     refused with its cause, never stored as a finding. A result that cannot
+     be read is recorded as unreadable, never as no findings (I5). The
+     findings are recorded beside the result, and the task is `passed`
+     exactly as before: no finding sets or blocks a status (I2, D-P4-07
+     unchanged). The reviewer's note, if any, stays in its claim and enters
+     no prompt (I7).
+  2. **Critic findings cite a draft file.** A critic's result becomes
+     `{"findings": [{ "path", "note" }, …]}`, where `path` is one of the
+     draft's files; one naming another path is refused as unlocated. The
+     note is what is sent back today, so D-A-DS-07's exception is unchanged.
+     A critic finding is `resolved` when the file it cites differs, by hash,
+     between the draft it was raised against and the draft that was approved
+     and locked, and, at `test-design`, the locked draft has a base record.
+     No check covers a spec file, so a `spec` critic finding is never
+     `resolved`: it is `open` or `dismissed`.
+  3. **A code finding is resolved by covered change.** A finding citing a
+     file and line is `resolved` by a later run whose change merged, whose
+     diff changed a hunk holding the cited line (mapped through the history
+     between the finding's commit and that run's base), and whose pinned
+     coverage check passed with at least one changed line of that hunk
+     executed. Coverage evidence therefore records the changed lines each
+     file had executed and not executed, beside `coverageDelta`, and both
+     adapters report them. A run with no coverage check, a line the history
+     between the two commits rewrote, or a report that cannot be read
+     resolves nothing; the finding stays `open` (I5). A finding citing a
+     record, not code, is never `resolved`.
+  4. **Outcomes are write-once runtime records.** `open` is never written: a
+     finding with no outcome record is open, so an unknown outcome is never
+     read as resolved. `resolved` and `dismissed` are each a content-addressed
+     record naming the finding by its source record and index, written with
+     `collectedBy: 'runtime'` and refused if the finding already has one. A
+     dismissal is a person's, through the API and the CLI, with a cause from
+     `DismissalCause` and no text, as A-R16-05 is for candidates. R2 derives
+     the resolved, dismissed, and open rates over findings raised, per
+     reviewer family and per seat kind (`review`, `security`, `critic`, and
+     each nightly reviewer job), each with its sample and bound.
+- **Rejected:**
+  - *R28 measures only the findings that exist (nightly and critic).* The
+    unit's point is per-seat rates, and the seat that raises most findings
+    would have none.
+  - *A critic finding is never resolved.* A cited file that changed before
+    the draft was locked is evidence the runtime holds; ignoring it would
+    understate every critic.
+  - *Any passing required check in a run that touched the cited path.* A
+    check can pass without running the line, which is the "will fix later"
+    measurement #109 rejects.
+  - *Recording `open` outcomes.* An open record would have to be replaced or
+    shadowed when the finding resolves, which a write-once store cannot do
+    without a precedence rule a reader could get wrong.
+- **Must hold:** no model reports an outcome; every outcome comes from the
+  diff, the coverage evidence, the draft records, or a person's dismissal
+  (I2). A finding the runtime cannot locate, a report it cannot read, and a
+  history it cannot map leave the finding open, never resolved (I5). Review
+  findings never change a task's status (I2). Each claim above maps to a
+  conformance assertion that fails when the behaviour is deleted (I8).
+- **Left to R28,** each verified against the code and recorded there:
+  - The commit a review seat's finding is read against. Recommended: the
+    commit the reviewed tree was built from, named in the findings record.
+  - When resolutions are derived. Recommended: when a run's `integrate`
+    merges, over the target's open code findings, so a change that never
+    merges resolves nothing.
+  - The role text that asks each seat for the new shape (R20's format), and
+    whether nightly findings join through their candidate id or directly.
+  - Known limit to record: a finding fixed outside Olympus, or on a line
+    rewritten in between, stays open until a person dismisses it.
+- **Reverse:** revert this entry and the R28 entry in `DECOMPOSITION.md`.
+  Nothing is built by it.
+
+## R40: Admission enforces the readiness ceiling
+
+Started on `v2` at eb93b71 as `unit/r40` and rebased onto 3fde9eb (R38, #204) before shipping; R38 touches no file R40 changes but `docs/decisions.md`, whose tail both appended to. Issues #129, #38. The start-unit
+session stopped once, before any code, because the unit entry declared no
+contract change and enforcing the ceiling needs one (CLAUDE.md, working rule
+6). The maintainer confirmed amendment A-R40-01 and the scan source
+(D-R40-03) on 2026-11-22; the entry now carries both, its acceptance, and its
+gate paths.
+
+### D-R40-01: boundary, verified
+
+- **Deliverables:**
+  - A-R40-01: `AdmissionRefusal` gains `readiness-refused`; `AdmissionRecord`
+    gains `readiness`, the term admission read (scanned, or not scanned and
+    why).
+  - Admission scans the base commit through a readiness port on the run
+    request and refuses a run requested above the derived ceiling, naming the
+    probe (or the scan limit) that holds it, before anything but the refusal
+    is recorded. A resume re-reads the refusal from the record.
+  - The host passes its scanner to admission; the scanner caches a report by
+    checkout, commit, and protected paths, and rescans when branch protection
+    no longer reads as it did.
+  - `I8.ceiling-bearing-probe-check-is-exercised` requires each negative
+    fixture's probe to be `absent`, with a detail naming the failure the
+    fixture was built to cause (#38).
+- **Out of scope (verbatim):** changing how the ceiling is derived (R43
+  changes how readiness installs, not what it concludes).
+- **Acceptance:** `pnpm -r typecheck`, `pnpm -r lint`, `pnpm -r test` pass,
+  the readiness conformance suite included (needs Docker). Each new assertion
+  is shown failing with its check deleted.
+- **Invariants:** I4 (the ceiling only adds a refusal: it never raises a
+  level, grants a capability, or admits a run policy refused); I5 (a run
+  above the ceiling is refused, not downgraded or warned about; a scan that
+  throws refuses admission; an indeterminate probe no longer passes a
+  fixture); I2 (the recorded ceiling is the runtime's derivation, never a
+  caller's); I8 (each wiring has an assertion that fails when it is deleted).
+- **Pending registry entries owed:** none name R40. The baseline is
+  unchanged.
+- **Gate paths:** `packages/vault/src/types.ts` (A-R40-01),
+  `packages/conformance/`. The PR needs the `gate-change` label and the
+  squash body `Gate-Change: acknowledged`.
+
+### D-R40-02: assumptions, each verified
+
+- Dependencies shipped: tags `reviewed/R1`, `reviewed/P4`, `reviewed/P14`,
+  `reviewed/R36b` exist (`git tag -l`).
+- No admission path reads readiness: `policyRefusal`
+  (`packages/api/src/run.ts:860`) resolves only the policy terms, and
+  `resolveWithReadiness` (`packages/readiness/src/resolve.ts:39`) has no
+  caller outside the readiness package and conformance (`grep -rn`).
+- A refusal at admission is recorded as `AdmissionRefusal`, a closed union
+  in a protected contract file (`packages/vault/src/types.ts:227`,
+  `.github/protected-paths.txt`), so a readiness refusal needs a new arm:
+  the reason for A-R40-01.
+- The decision table is `Record<CauseKey, Row>` over
+  `admission:${AdmissionRefusal['reason']}`
+  (`packages/conformance/src/registry/decisions.ts:51,342`), so the new arm
+  fails to compile until it has a recorded-decision scenario.
+- `vault` depends on `core`, `integrity`, `sandbox` and not `readiness`
+  (`packages/vault/package.json`), so the recorded term is a structural type
+  in the Vault, and the API checks at compile time that readiness's ceiling
+  is assignable to it.
+- The host already builds a scanner over `FACTORY_REPOSITORY` and hands it
+  to the server (`packages/api/src/host/main.ts:127`); the server builds
+  every run request (`packages/api/src/http/server.ts:468`).
+- A scan resolves its revision itself (`packages/readiness/src/scan.ts:119`)
+  and reports the full commit; `resolveCommit` is exported
+  (`packages/readiness/src/tree.ts:27`).
+- A scan's inputs beyond the commit's tree are the policy's protected paths
+  and the branch-protection checker (`scan.ts:140,144`); the images and
+  registries are fixed constants of the host.
+- An L0 request cannot exceed any ceiling: `ScanLevel` is 0 to 2
+  (`packages/readiness/src/types.ts:15`).
+- The I8 fixture check fails only on `supported` or a missing probe
+  (`packages/conformance/src/registry/readiness.ts:480`), as #38 says.
+
+### D-R40-03: where the ceiling comes from
+
+- **Chosen (confirmed by the maintainer):** admission scans the commit it
+  snapshots, through an optional port on the run request. The host always
+  supplies one. A request with no port, and an L0 request, are recorded as
+  not scanned, with the reason, and leave the policy terms unchanged (F1:
+  the term is present only when a scan ran, and absence is explicit).
+- **Rejected:** a ceiling the caller supplies. Whoever sends the request
+  could send any ceiling, and the record would hold a claim, not a
+  derivation (I2).
+- **Rejected:** refusing every run that has no port. F1 says an absent scan
+  leaves the other three terms unchanged; refusing would make readiness a
+  grant gate the spine does not state.
+- **Reverse by:** making the port required on `RunRequest`.
+
+### D-R40-04: the scan cache
+
+A scan installs and runs the suite, so it takes minutes, and a person's
+first admission is refused for an unapproved cost and sent again. The host's
+scanner keeps each report in memory, keyed by checkout, full commit, and the
+policy's protected paths. A commit's tree cannot change; branch protection
+can, so on a hit the scanner asks the checker again and rescans unless it
+reads as the cached probe recorded it. Nothing is stored in the Vault (R1
+§5: storing a result is an amendment owed to the first unit that stores
+one). **Residual:** an image or registry change under a fixed tag is not
+seen until the host restarts. **Reverse by:** dropping the cache, at a
+scan per admission.
+
+### D-R40-05: where the check sits
+
+After every check that reads only the request, the policy, and the base,
+and before the cost check, as the controls check is: a person approves a
+figure only for a run nothing else refuses (#145). The refusal is derived
+from the record admission is about to write, as `admissionRefusal` derives
+the controls refusal (D-P8-03), so a resume holds the run to what admission
+read. A scan that throws (no sandbox, an unreadable policy) refuses
+admission by throwing, after discarding the base, as other faults do.
+**Alternative rejected:** resolving each station through
+`resolveWithReadiness`. The ceiling is the repository's, not a station's,
+and the policy terms are already refused earlier with their own
+attribution; folding them changes refusals other units record.
+
+### D-R40-06: what proves it, and each shown failing
+
+- `I5.admission-refuses-above-the-readiness-ceiling`,
+  `I5.resume-holds-the-recorded-readiness-ceiling`: with the readiness
+  branch of `admissionRefusal` disabled, both fail; restored, both pass.
+- `packages/api/test/admission-readiness.test.ts`: with the server passing
+  `readiness: null` instead of its scanner, the refusal test fails (the run
+  reaches the cost check); restored, it passes. Its order proves D-R40-05:
+  the run is refused as `readiness-refused` on the create that has no
+  approved cost.
+- `I4.readiness-absence-is-recorded`, `I4.readiness-ceiling-never-grants-at-admission`,
+  `I5.readiness-answer-for-another-commit-refuses`: each names the property
+  that, deleted, would let a run through unrecorded, granted, or recorded
+  against another commit.
+- `admission:readiness-refused` in the P14 decision table: the closed
+  `CauseKey` record would not compile without it.
+- #38: `packages/conformance/test/negative-fixture.test.ts` builds the
+  `indeterminate` gitleaks start-up failure D-R2-10 names; the old predicate
+  (`supported` or missing fails) passes it, `negativeFailure` refuses it.
+  The Docker fixture run passes with every probe `absent` for its intended
+  failure, so the stricter check found no fixture leaning on an
+  indeterminate result.
+- The fake ports in conformance answer for whatever commit they are asked,
+  so they prove the wiring, not a scan; the scan itself is R1's suite, run
+  in full here.
+
+### D-R40-07: correction, a commit's tree could change
+
+D-R40-04 rested on "a commit's tree cannot change". Under a replace ref in the
+target repository it could: one object name read as another commit's content
+(codex-2, gemini-1; shown in the triage). Every git read in the readiness
+package now passes `--no-replace-objects` (4c8de92), which makes the
+assumption true for both the base snapshot and the scan. **Reverse by:**
+dropping the flag, which reopens the two-tree read.
+
+### D-R40-08: the ceiling binds at admission
+
+The readiness term is read at admission and re-read from the record on
+resume, as the adapter controls are (D-P8-03). A resume does not rescan, so
+a branch-protection change while a run is stopped is not seen by it (Codex's
+framing note). Recorded, not changed: rescanning at resume is a new
+behaviour for the units that own resume and integration. **Reverse by:**
+calling the port again in `resumeRun` and refusing on a lower answer.
+
+### D-R40-09: for the maintainer, whether a scan is required above L0
+
+Both families read fail-closed as requiring a scan for any run above L0
+(codex-1, gemini-2, gemini-3). F1 says the opposite in terms: absence
+"leaves the other three unchanged", recorded explicitly. D-R40-03 followed
+F1. The production host always wires a scanner
+(`packages/api/src/host/main.ts:127`), so the gap is a library caller or a
+server built without one. Changing it is a spine amendment. **Recommended:**
+amend F1 so admission above L0 refuses when no scan ran, with `level-zero`
+the only `not-scanned` admission, and every in-process caller (the
+conformance rigs, the API tests) given a scan port. **Alternative:** keep
+F1 as it is and record the library path as unenforced by design.

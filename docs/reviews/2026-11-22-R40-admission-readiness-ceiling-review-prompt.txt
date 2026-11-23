@@ -1,0 +1,93 @@
+The code under review is in the file
+`2026-11-22-R40-admission-readiness-ceiling-review-bundle.txt` (SHA-256 770c345227f3584e4cef814fe5e53c0dda7c552a699bde561de493a8feb6b0d4) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing the admission path of a software-factory runtime, where a run's requested autonomy level is checked against a readiness ceiling, together with a conformance check over readiness probes, in a
+TypeScript project. You have the source and nothing else — no design documents,
+no author reasoning, no prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The runtime admits "runs" (model-driven code changes against a git repository) at an autonomy level from L0 (manual) to L3 (autonomous). A separate readiness package scans one commit of the repository with probes (does it install from a lockfile, does it have tests, is the integration branch protected, and so on) and derives a ceiling from L0 to L2, naming the probe that holds it. This change makes admission (`admitRun` in packages/api/src/run.ts) scan the run's base commit through a port on the run request and refuse a run whose requested level exceeds that ceiling. It records the ceiling, or that no scan ran and why, in the admission record in the Vault (the runtime's append-only record store), and records the refusal in the enforcement record. The host's scanner (packages/api/src/readiness-scan.ts) caches reports, and the HTTP server hands it to every admission. Separately, a conformance assertion that each ceiling-bearing probe refuses over a fixture built to defeat it now requires the probe to report `absent` for the fixture's intended reason, not merely "not supported".
+
+It must hold against a capable, motivated party trying to get a run admitted, or resumed, at a level above the readiness ceiling of the commit it runs on, or to have the record state a ceiling the scan did not derive. Assume no deceptive intent — only
+that the easiest path gets taken.
+
+That party controls the body of a run request sent to the HTTP API (workspace path, base commit, requested level, artifacts, approved cost), the contents and history of the target repository, and when the process stops. It does not control the components the runtime is wired with — the Vault, the sandbox provider, the drivers, and the readiness scanner the host builds are runtime-selected and trusted, even where a function takes one as an argument — and it does not control code running inside the runtime's own process. A library caller of `admitRun` may omit the readiness port; whether that is acceptable is part of the question.
+
+The invariants at stake:
+
+Default deny: a capability not granted in policy is not available. The readiness ceiling only subtracts: it may lower the effective level or leave it alone, never raise a level, grant a capability policy withheld, or admit a run policy refused. Its absence must be an explicit state, never an undefined value that disappears in a comparison and reads as clearance.
+
+Fail closed: a missing required check, an absent capability, an unsupported stack, or a check that did not run is a refusal — never a silent downgrade, never a warning that lets the run continue.
+
+The runtime derives status; the model never reports it. A recorded ceiling must be the runtime's derivation from probes that ran, not a value a caller supplied.
+
+Every capability claim maps to an executable assertion that fails when the capability is deleted.
+
+The mechanisms that matter most:
+
+- `readinessAt` and the readiness branch of `admissionRefusal` in run.ts: where the scan is asked, which commit it is asked about, how its answer is checked, and how the refusal is derived from the record (including on resume).
+- Where in `admission` the scan sits relative to the other refusals, the base snapshot, and the cost check, and what a thrown scan leaves behind.
+- `ceilingAt` and `protectionStands` in readiness-scan.ts: the cache key, and when a cached report is trusted.
+- `negativeFailure` and the NEGATIVE table in packages/conformance/src/registry/readiness.ts, and the new assertions in packages/conformance/src/registry/admission-readiness.ts.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+Changing how the ceiling is derived (R43 changes how readiness installs, not what it concludes).
+
+R43 is a later piece of work; it and any other unit or decision identifiers you see mean nothing outside the project and need no resolving. The probe derivation rules themselves are not under review.
+
+THE QUESTION
+
+How would a run reach the line at a level above the readiness ceiling of the commit it actually runs on — through the request, the repository, a cached report, a resume, or a caller that omits the port — and how would the conformance checks still pass while that holds?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.

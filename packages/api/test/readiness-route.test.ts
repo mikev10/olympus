@@ -39,6 +39,9 @@ async function serve(readiness: ReadinessScanner | null): Promise<void> {
   url = await server.listen(0, '127.0.0.1');
 }
 
+/** The route never asks for a ceiling; admission does (R40). */
+const unusedCeiling = (): never => { throw new Error("the route asked for a ceiling"); };
+
 async function get(path: string): Promise<{ status: number; type: string | null; text: string }> {
   const res = await fetch(`${url}${path}`, { headers: { authorization: `Bearer ${TOKEN}` } });
   return { status: res.status, type: res.headers.get('content-type'), text: await res.text() };
@@ -47,7 +50,7 @@ async function get(path: string): Promise<{ status: number; type: string | null;
 describe('GET /readiness', () => {
   test('streams the commit, then the report for the revision asked for', async () => {
     const asked: string[] = [];
-    await serve({ resolve: (rev) => { asked.push(rev); return Promise.resolve(COMMIT); }, scan: (commit) => Promise.resolve({ ...REPORT, commit }) });
+    await serve({ ceilingAt: unusedCeiling, resolve: (rev) => { asked.push(rev); return Promise.resolve(COMMIT); }, scan: (commit) => Promise.resolve({ ...REPORT, commit }) });
     const res = await get('/readiness?revision=main');
     expect(res.status).toBe(200);
     expect(res.type).toMatch(/^text\/event-stream/u);
@@ -58,14 +61,14 @@ describe('GET /readiness', () => {
 
   test('scans HEAD when no revision is named', async () => {
     const asked: string[] = [];
-    await serve({ resolve: (rev) => { asked.push(rev); return Promise.resolve(COMMIT); }, scan: () => Promise.resolve(REPORT) });
+    await serve({ ceilingAt: unusedCeiling, resolve: (rev) => { asked.push(rev); return Promise.resolve(COMMIT); }, scan: () => Promise.resolve(REPORT) });
     expect((await get('/readiness')).status).toBe(200);
     expect(asked).toEqual(['HEAD']);
   });
 
   test('a revision that names no commit is refused before anything is scanned', async () => {
     let scanned = false;
-    await serve({ resolve: () => Promise.reject(new Error("readiness: /repo has no commit 'nope'")), scan: () => { scanned = true; return Promise.resolve(REPORT); } });
+    await serve({ ceilingAt: unusedCeiling, resolve: () => Promise.reject(new Error("readiness: /repo has no commit 'nope'")), scan: () => { scanned = true; return Promise.resolve(REPORT); } });
     const res = await get('/readiness?revision=nope');
     expect(res.status).toBe(400);
     expect(JSON.parse(res.text)).toMatchObject({ error: 'bad-request', message: expect.stringContaining('no commit') as unknown });
@@ -73,7 +76,7 @@ describe('GET /readiness', () => {
   });
 
   test('a scan that fails ends the stream with failed, never a report', async () => {
-    await serve({ resolve: () => Promise.resolve(COMMIT), scan: () => Promise.reject(new Error('the policy file is refused')) });
+    await serve({ ceilingAt: unusedCeiling, resolve: () => Promise.resolve(COMMIT), scan: () => Promise.reject(new Error('the policy file is refused')) });
     const res = await get('/readiness');
     expect(res.text).toContain('event: failed');
     expect(res.text).not.toContain('event: report');
@@ -87,7 +90,7 @@ describe('GET /readiness', () => {
   });
 
   test('the route needs the token, and only GET', async () => {
-    await serve({ resolve: () => Promise.resolve(COMMIT), scan: () => Promise.resolve(REPORT) });
+    await serve({ ceilingAt: unusedCeiling, resolve: () => Promise.resolve(COMMIT), scan: () => Promise.resolve(REPORT) });
     expect((await fetch(`${url}/readiness`)).status).toBe(401);
     expect((await fetch(`${url}/readiness`, { method: 'POST', headers: { authorization: `Bearer ${TOKEN}` } })).status).toBe(405);
   });

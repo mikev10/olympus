@@ -474,6 +474,8 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
       policy: policy.policy,
       roles: options.rolesDirectory,
       components,
+      // The host's scanner, so a run above its base commit's ceiling is refused (R40); none, and the record says no scan ran.
+      readiness: options.readiness ?? null,
     });
     if (!admission.ok) throw new HttpError(refusalStatus(admission), 'refused', `run refused: ${admission.reason}`, admission);
     const { admitted } = admission;

@@ -384,7 +384,7 @@ export const ADAPTER_REFUSAL_ENFORCED_AT_ADMISSION: LocalAssertion = runtime({
       }
       const at = (level: 0 | 1 | 2 | 3, controls: readonly string[]): AdmissionRecord => ({ ...record, run: { ...record.run, requestedLevel: level }, unavailableControls: controls });
       const refused = admissionRefusal(at(3, record.unavailableControls));
-      if (refused?.unavailable.join(',') !== record.unavailableControls.join(',')) {
+      if (refused?.reason !== 'controls-unavailable' || refused.unavailable.join(',') !== record.unavailableControls.join(',')) {
         throw new Error('I5: an L3 admission with unavailable controls was not refused naming each one');
       }
       for (const level of [0, 1, 2] as const) {

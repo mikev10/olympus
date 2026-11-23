@@ -4,11 +4,11 @@
  * These need git and no Docker daemon.
  */
 import { execFile } from 'node:child_process';
-import { lstat, mkdir, mkdtemp, readdir, readlink, rm } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { materialize } from '../src/tree.js';
+import { materialize, resolveCommit } from '../src/tree.js';
 
 /** A tree node: a blob's text, a symlink's target, or a subtree. Names are bytes, so they can be invalid UTF-8. */
 type Node =
@@ -78,6 +78,19 @@ async function outside(): Promise<string[]> {
 }
 
 describe('materialize', () => {
+  // A replace ref makes one object name read as another object's content, so two reads of one commit at two
+  // moments could see two trees: admission's base snapshot and its readiness scan (R40, codex-2, gemini-1).
+  it('reads the commit it names, never a replacement for it', async () => {
+    const real = await commitOf([['f.txt', { blob: 'real\n' }]]);
+    const other = await commitOf([['f.txt', { blob: 'replacement\n' }], ['g.txt', { blob: 'added\n' }]]);
+    await git([], 'replace', real, other);
+    const dest = join(base, 'dest');
+    const { files } = await materialize(repo, real, dest);
+    expect(files).toEqual(['f.txt']);
+    expect(await readFile(join(dest, 'f.txt'), 'utf8')).toBe('real\n');
+    await expect(resolveCommit(repo, real)).resolves.toBe(real);
+  });
+
   it('reproduces regular files and a symlink that stays inside the tree', async () => {
     const commit = await commitOf([
       ['src', { tree: [[Buffer.from('a.js'), { blob: 'export {};\n' }]] }],

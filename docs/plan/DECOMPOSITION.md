@@ -622,7 +622,7 @@ order between them is settled before any of them is picked up.
 | R24 | Repository instructions as granted context | M2 | P1, P4, R10, R20, R23 | — |
 | R25 | Property checks | M3 | P6, P8, R7, R15, R19 | — |
 | R26 | Driver: Codex | M2 | P5, P10, P12, P13, R23 | — |
-| R28 | Finding outcomes, derived by the runtime ([#109](https://github.com/mikev10/olympus/issues/109)) | M2 | P14, R2, R9, R13b, R19 | — |
+| R28 | Finding outcomes, derived by the runtime ([#109](https://github.com/mikev10/olympus/issues/109)) | M2 | P14, R2, R9, R13b, R19, R29 | — |
 | R29 | Adapter sets beyond TypeScript, Python first ([#113](https://github.com/mikev10/olympus/issues/113)) | M2 | P8, R1, R18, R34 | — |
 | R30 | Hosting-platform integration ([#111](https://github.com/mikev10/olympus/issues/111)) | M3 | R8a, R8b, R22, P10, P11 | — |
 | R31 | Multi-seat review panel ([#112](https://github.com/mikev10/olympus/issues/112)) | M3 | R9, R14, R20 | — |
@@ -2353,16 +2353,59 @@ raised at `review` by the reviewer and security seats (R9), at `spec` and
 Nothing records what happened to one afterwards, so the line cannot say
 whether a family's or a seat's findings are worth acting on.
 
-- Every finding gets an outcome the runtime derives; no model reports it.
-  `resolved`: a later change touches what the finding cited and a check
-  covering it passes, derived from the diff and check results. `dismissed`: a
-  human dismissed it with a cause from a closed set, no free text. `open`:
-  neither; an unknown outcome is open, never read as resolved.
-- Outcome records are write-once and content-addressed, like the other Vault
-  records. R2 derives resolved, dismissed, and open rates per reviewer family
-  and per seat kind.
+**Amendment:** A-R28-01 (D-A-FO-01). Checked against the code, a review seat
+raises no findings (its task passes whatever its claim says, D-P4-07), a
+critic's findings cite nothing, and no evidence records which lines a check
+ran. The unit therefore gives every source a located finding before it
+measures one.
 
-**Out of scope:** changing which reviewers are seated based on the rate (R11's).
+Deliverables:
+
+- **Located review findings.** The reviewer and the security seat end with
+  `{"findings": [{ "category", "path", "line" }, …]}`, read strictly. An
+  unlocated finding is refused with its cause, an unreadable result is
+  recorded as unreadable and never as no findings (I5), and the findings are
+  recorded beside the result. The task's status is unchanged by them (I2).
+- **Located critic findings.** A critic's finding names one of the draft's
+  files and carries a note, which is what is sent back today.
+- **Line coverage in the evidence.** The coverage adapters, TypeScript and
+  Python, report each changed file's executed and unexecuted changed lines,
+  and the evidence records them beside `coverageDelta`.
+- **Derived outcomes.** `resolved` for a code finding: a later run's merged
+  change altered a hunk holding the cited line, mapped through the history
+  since the finding's commit, and its pinned coverage check passed with a
+  changed line of that hunk executed. `resolved` for a critic finding: its
+  file changed between the draft it was raised against and the locked draft,
+  and at `test-design` the locked draft has a base record; a `spec` critic
+  finding is never resolved. A finding citing a record is never resolved.
+  `dismissed`: a person's, through the API and the CLI, with a
+  `DismissalCause` and no text. `open`: no outcome record; an unknown outcome
+  is open, never read as resolved.
+- **Write-once records.** `resolved` and `dismissed` are content-addressed
+  Vault records with `collectedBy: 'runtime'`, naming the finding by its
+  source record and index, refused when the finding already has one.
+- **Rates.** R2 derives resolved, dismissed, and open over findings raised,
+  per reviewer family and per seat kind (`review`, `security`, `critic`, each
+  nightly reviewer job), each with its sample and bound.
+
+**Contract amendments, owed by the unit's pull request:** the review and
+critic result shapes; a findings record for a review seat; `CoverageAdapter`
+gains the changed-line report, and the evidence holds it; an outcome record
+type with its Vault write and read; the dismissal on the wire; R2's rate
+fields.
+
+**Out of scope:** changing which reviewers are seated based on the rate
+(R11's); turning a review finding into a status or a send-back (M3's rubric
+and panel); resolving a finding fixed outside Olympus, which stays open until
+a person dismisses it.
+
+**Acceptance criteria:** `pnpm typecheck`, `pnpm lint`, `pnpm test`, and
+`pnpm conformance`, with a passing assertion for each sentence under
+Deliverables, each failing when its behaviour is deleted (I8). Among them: an
+unlocated review finding is refused; a review finding leaves its task's
+status unchanged; a finding with no outcome record reads as open; a run with
+no coverage check, or an unreadable report, resolves nothing; a second
+outcome for one finding is refused; a dismissal with text is refused.
 
 **Why M2:** it measures what R9 and R13b already produce, and R11 and R31 read it.
 
@@ -3020,6 +3063,21 @@ negative fixtures accept an indeterminate probe as proof its check ran
   R1: it never grants what policy withheld.
 - An indeterminate probe is not proof a check ran; the fixtures that accept
   one are refused.
+- **Amendment A-R40-01** (confirmed by the maintainer, 2026-11-22): the Vault's
+  `AdmissionRefusal` gains a `readiness-refused` arm carrying the requested
+  level, the ceiling, the probe or scan limit that holds it, and the commit;
+  `AdmissionRecord` gains the readiness term admission read, scanned or
+  explicitly not scanned, so a resume reads it rather than rescanning.
+
+**Acceptance:** a run requested above the scanned ceiling of its base commit
+is refused before anything is recorded but the refusal, naming the holding
+probe; one at or below it is admitted with the ceiling in its record; a run
+admitted with no scan records that no scan ran. Each R1 negative fixture
+fails on an `indeterminate` probe. Each assertion fails when its check is
+deleted.
+
+**Gate paths:** `packages/vault/src/types.ts` (A-R40-01) and
+`packages/conformance/`.
 
 **Out of scope:** changing how the ceiling is derived (R43 changes how
 readiness installs, not what it concludes).

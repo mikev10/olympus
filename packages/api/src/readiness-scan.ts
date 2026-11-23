@@ -2,15 +2,18 @@
  * Readiness reachable from the host (R35, #125): R1's scan over the host's
  * working copy at one revision, with the host's own sandbox provider, check
  * image, limits, and sandbox user, the policy's protected paths, and a GitHub
- * branch-protection checker. It writes nothing, and admission does not read
- * its ceiling: enforcing it there is its own decision (out of scope).
+ * branch-protection checker. It writes nothing. Admission reads its ceiling
+ * through `ceilingAt` (R40), which keeps each report in memory so a run sent
+ * again after its cost was approved is not scanned twice (D-R40-04).
  */
+import { createHash } from 'node:crypto';
 import { NPM_REGISTRY, PYPI_REGISTRIES, resolveCommit, scan, SECRET_SCAN_IMAGE, type BranchProtectionChecker, type ReadinessReport } from '@olympus-ai/readiness';
 import type { BuiltGraph } from './graph.js';
+import type { AdmissionReadiness } from './run.js';
 import { loadPolicyFile } from './policy-file.js';
 
 /** Resolves a revision first, so a bad one is refused before a stream opens, then scans that commit. */
-export interface ReadinessScanner {
+export interface ReadinessScanner extends AdmissionReadiness {
   resolve(revision: string): Promise<string>;
   scan(commit: string): Promise<ReadinessReport>;
 }
@@ -30,30 +33,78 @@ const TIMEOUTS = { installMs: 300_000, probeMs: 180_000, coldProvisionMs: 60_000
 export function readinessScanner(options: ReadinessScannerOptions): ReadinessScanner {
   const { profile } = options.components;
   if (profile === null) throw new Error('readiness: the host has no sandbox profile, so a scan has no image to run in');
+  const scanAt = (checkout: string, commit: string, protectedPaths: readonly string[]): Promise<ReadinessReport> =>
+    scan({
+      checkout,
+      revision: commit,
+      provider: options.components.sandbox,
+      // Node with npm and corepack: the image the line's checks run the stack's tools in.
+      image: profile.checkImage,
+      secretScanImage: SECRET_SCAN_IMAGE,
+      limits: profile.limits,
+      user: options.components.workspaces.user,
+      timeouts: TIMEOUTS,
+      registries: NPM_REGISTRY,
+      pythonRegistries: PYPI_REGISTRIES,
+      protectedPaths,
+      branchProtection: options.branchProtection,
+      });
+  // Each report by checkout, commit, and protected paths: the three inputs a scan reads that a commit does not fix.
+  const reports = new Map<string, ReadinessReport>();
   return {
     resolve: (revision) => resolveCommit(options.repository, revision),
-    scan: async (commit) => {
-      const loaded = await loadPolicyFile(options.policyFile);
-      // No policy, no protected paths to probe against: refused rather than scanned against none (I5).
-      if (!loaded.ok) throw new Error(`readiness: the policy file is refused (${loaded.code}): ${loaded.message}`);
-      const { policy } = loaded;
-      return scan({
-        checkout: options.repository,
-        revision: commit,
-        provider: options.components.sandbox,
-        // Node with npm and corepack: the image the line's checks run the stack's tools in.
-        image: profile.checkImage,
-        secretScanImage: SECRET_SCAN_IMAGE,
-        limits: profile.limits,
-        user: options.components.workspaces.user,
-        timeouts: TIMEOUTS,
-        registries: NPM_REGISTRY,
-        pythonRegistries: PYPI_REGISTRIES,
-        protectedPaths: policy.protectedPaths,
-        branchProtection: options.branchProtection,
-      });
+    scan: async (commit) => scanAt(options.repository, commit, await protectedPathsOf(options.policyFile)),
+    ceilingAt: async (checkout, commit) => {
+      const protectedPaths = await protectedPathsOf(options.policyFile);
+      const key = createHash('sha256').update(JSON.stringify([checkout, commit, protectedPaths])).digest('hex');
+      const cached = reports.get(key);
+      // Branch protection is the one input that changes under a fixed key: a hit stands only while it reads as recorded.
+      if (cached !== undefined && (await protectionStands(cached, options.branchProtection))) return cached.ceiling;
+      reports.delete(key);
+      const report = await scanAt(checkout, commit, protectedPaths);
+      remember(reports, key, report, MAX_REPORTS);
+      return report.ceiling;
     },
   };
+}
+
+/** Reports kept at once: a few runs' worth of commits, so the cache saves the re-sent admission and cannot grow without bound (gemini-4). */
+const MAX_REPORTS = 64;
+
+/** Sets `key`, then drops the oldest entries until at most `max` remain. A Map iterates in insertion order. */
+export function remember<K, V>(map: Map<K, V>, key: K, value: V, max: number): void {
+  map.delete(key);
+  map.set(key, value);
+  for (const oldest of map.keys()) {
+    if (map.size <= max) break;
+    map.delete(oldest);
+  }
+}
+
+async function protectedPathsOf(policyFile: string): Promise<readonly string[]> {
+  const loaded = await loadPolicyFile(policyFile);
+  // No policy, no protected paths to probe against: refused rather than scanned against none (I5).
+  if (!loaded.ok) throw new Error(`readiness: the policy file is refused (${loaded.code}): ${loaded.message}`);
+  return loaded.policy.protectedPaths;
+}
+
+/**
+ * Whether a cached report's branch-protection probe still reads as it did:
+ * the checker answers now as the probe recorded it. A checker that fails, or
+ * a probe the report holds no answer for, does not stand, and the commit is
+ * scanned again (I5).
+ */
+export async function protectionStands(report: ReadinessReport, checker: BranchProtectionChecker | null): Promise<boolean> {
+  const probe = report.probes.find((p) => p.probe === 'integrate.branch-protection');
+  if (probe === undefined) return false;
+  if (checker === null) return probe.outcome === 'indeterminate';
+  if (probe.outcome === 'indeterminate') return false;
+  try {
+    const answer = await checker.check();
+    return answer.protected === (probe.outcome === 'supported');
+  } catch {
+    return false;
+  }
 }
 
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;

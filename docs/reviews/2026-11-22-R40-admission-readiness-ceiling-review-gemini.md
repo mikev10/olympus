@@ -1,3 +1,19 @@
+# External review of R40, gemini, 2026-11-22
+
+The Gemini family's review of R40 (admission enforces the readiness ceiling), as the runner wrote it, below this header. Triage: `2026-11-22-R40-admission-readiness-ceiling-triage.md`.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini. A direct `generateContent` API call to `gemini-3.1-pro-preview`, offering no tools; `cleanRoom` is `null` because an API call loads no local configuration. Ingestion 54,907 input tokens against a floor of 39,211; all four markers echoed.
+- **Cross-family agreement:** gemini-1 with codex-2 (the base commit read twice); gemini-2 and gemini-3 with codex-1 (no scanner, no enforcement). gemini-4 was raised by gemini alone.
+- **Date:** 2026-11-22
+- **Bundle:** `2026-11-22-R40-admission-readiness-ceiling-review-bundle.txt`, SHA-256 `770c345227f3584e4cef814fe5e53c0dda7c552a699bde561de493a8feb6b0d4` (the manifest's `bundleSha256`), base `3fde9eb` (`reviewed/R38`), head `7223b34` (the unit branch after its rebase onto R38, before review). Every new file in full and every modified file as a function-context diff; `docs/decisions.md`, `docs/reviews/`, `docs/plan/`, and `pnpm-lock.yaml` excluded by construction. Prompt: `2026-11-22-R40-admission-readiness-ceiling-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer said it had no prior context and performed no lookups. A self-report, not independently verifiable.
+- **Coverage, and any gap:** items 1, 3, 6, and 7 answered. Item 2 (tautologies) is answered only through gemini-3, which calls the absence assertions tautological in the sense of encoding the behaviour; items 4 (language escape hatches) and 5 (configuration satisfied without effect) came back empty.
+- **Citations:** line numbers are positions in the bundle's new side, not the repository, and are treated as hints.
+
+---
+
 BASE: 3fde9eb
 HEAD: 7223b34
 packages/vault/src/types.ts
