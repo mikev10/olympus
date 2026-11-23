@@ -652,6 +652,7 @@ order between them is settled before any of them is picked up.
 | R54 | The `deep` tier's model, chosen by the benchmark ([#171](https://github.com/mikev10/olympus/issues/171)) | M2 | R7, R14, P13, R52 | — |
 | R55 | An operator can read a draft, and the host refuses a rejected key ([#175](https://github.com/mikev10/olympus/issues/175), [#176](https://github.com/mikev10/olympus/issues/176)) | M2 | R19, R36b | — |
 | R56 | The relay forwards only the tools a task was granted ([#189](https://github.com/mikev10/olympus/issues/189)) (opens with a contract amendment) | M2 | P12, P13, R26 | — |
+| R57 | A build runs the locked acceptance tests in its own sandbox before it claims done ([#220](https://github.com/mikev10/olympus/issues/220)) | M2 | R37, R36b | — |
 
 ### R1 — Readiness
 
