@@ -5,6 +5,7 @@
  * that none ran, rather than reading as cleared (F1).
  */
 import type { RunRequest } from '@olympus-ai/api';
+import type { RunId } from '@olympus-ai/core';
 import { isNoRunState, type AdmissionRecord } from '@olympus-ai/vault';
 import { runtime } from '../kit/assert.js';
 import type { LocalAssertion } from '../kit/types.js';
@@ -136,7 +137,7 @@ export const READINESS_ANSWER_FOR_ANOTHER_COMMIT_REFUSES: LocalAssertion = runti
 export const RESUME_HOLDS_THE_RECORDED_CEILING: LocalAssertion = runtime({
   id: 'I5.resume-holds-the-recorded-readiness-ceiling',
   title:
-    'the admission refusal a resume repeats reads the readiness ceiling from the admission record: a record above its scanned ceiling is refused naming it, one at it, one not scanned, and one written before R40 are not',
+    'the admission refusal a resume repeats reads the readiness ceiling from the admission record: a record above its scanned ceiling is refused naming it, one at it, one not scanned, and one written before R40 are not; and resumeRun over a record above its ceiling is refused before the line runs',
   run: async () => {
     await withLine('r40-resume-', async (rig) => {
       const { admitRun, admissionRefusal } = await api();
@@ -156,6 +157,23 @@ export const RESUME_HOLDS_THE_RECORDED_CEILING: LocalAssertion = runtime({
         ['written before R40', undefined],
       ] as const) {
         if (admissionRefusal(at(readiness)) !== undefined) throw new Error(`I5: a record ${name} was refused`);
+      }
+      // The resume itself, not only the helper it calls (codex-4): a run whose record holds a ceiling below its
+      // level is refused by resumeRun before the line runs, and its state is left as it stood.
+      const { resumeRun } = await api();
+      const components = await rig.components();
+      const state = await rig.state();
+      // The Vault admits a run once, so the lowered record is another run's only admission, with this run's state.
+      const runId = `${rig.runId}-lowered` as RunId;
+      const lowered = await components.vault.recordAdmission({ ...at({ ...record.readiness, level: 0 }), run: { ...record.run, id: runId } });
+      const before = await components.vault.commitRunState({ ...state, runId, admission: lowered, version: '0' }, '0');
+      const resumed = await resumeRun({ runId, components });
+      if (resumed.ok || resumed.reason !== 'readiness-refused' || resumed.ceiling !== 0) {
+        throw new Error(`I5: a resume over a record above its ceiling was ${resumed.ok ? 'driven' : resumed.reason}`);
+      }
+      const after = await components.vault.readRunState(runId);
+      if (after.station !== 'intake' || Object.keys(after.tasks).length > 0 || after.version !== before.version) {
+        throw new Error(`I5: the refused resume moved the run (station ${after.station}, ${String(Object.keys(after.tasks).length)} tasks)`);
       }
     });
   },
