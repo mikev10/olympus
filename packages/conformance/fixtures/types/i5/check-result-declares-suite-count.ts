@@ -12,6 +12,7 @@ export const omitted: CheckResult = { // expect-error TS2741: Property 'suiteCou
   stderr: result.stderr,
   expectation: result.expectation,
   findings: result.findings,
+  property: result.property,
   durationMs: result.durationMs,
   startedAt: result.startedAt,
 };
@@ -21,3 +22,5 @@ export const optional: CheckResult = { ...result, suiteCount: undefined }; // ex
 // R17: a security check's findings are stated the same way, null when its report could not be read.
 export const findingsOptional: CheckResult = { ...result, findings: undefined }; // expect-error TS2322: Type 'undefined' is not assignable to type 'readonly Finding[] | null'
 
+// R25: a property check's runs are stated the same way, null when no report could be read.
+export const propertyOptional: CheckResult = { ...result, property: undefined }; // expect-error TS2322: Type 'undefined' is not assignable to type 'PropertyEvidence | null'
