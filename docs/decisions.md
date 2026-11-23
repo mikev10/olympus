@@ -11864,3 +11864,112 @@ Both families counted on the first run. Full record:
 - **Rejected (codex-4):** a `deniesRule` on a tautology satisfies the policy
   just as R17's denial checks are satisfied by naming the rule. Whether a
   check is adequate is the critic's to judge.
+
+### D-A-FO-01: every finding R28 measures names what it cites, and outcomes are runtime records (A-R28-01)
+
+R28 (#109) asks for an outcome on every finding the line raises, derived by
+the runtime, and for R2 to publish rates per reviewer family and per seat
+kind. Checked against `v2` at 809dac5 before R28 began, the entry assumes
+inputs the code does not have.
+
+- **Verified:**
+  - A review seat raises no findings. The reviewer's result is recorded as a
+    `TaskResult`, whose claim is free text, and the task is marked `passed`
+    whatever it says (`packages/api/src/line.ts:1952-1956`). That is
+    deliberate: the runtime does not interpret a reviewer's verdict (D-P4-07),
+    since a status derived from it would be the model reporting status (I2).
+    The security seat is the same task path (`line.ts:1899`).
+  - A critic's findings are a bare list of strings, cited to nothing
+    (`CriticRecord.findings`, `packages/vault/src/types.ts:632`; read by
+    `readCriticResult`, `packages/api/src/drafting.ts:721-734`).
+  - A nightly reviewer's finding names a file and line, or a record of the
+    day reviewed (`ReviewFinding`, `packages/vault/src/types.ts:1215`), and
+    one it cannot locate is refused (R13b).
+  - A run's evidence holds one changed-line coverage number per bundle
+    (`TamperReport.coverageDelta`, `packages/integrity/src/types.ts:291`),
+    from `CoverageAdapter.changedLineCoverage`, which returns a number
+    (`packages/adapters/src/types.ts:65`). Nothing records which lines ran,
+    so "a check covering it passes" has no input. The TypeScript and Python
+    adapters both implement it (`packages/adapters/src/coverage.ts`,
+    `packages/adapters/src/python/coverage.ts`).
+  - A closed set of dismissal causes, with no text, already exists for
+    intake candidates: `DismissalCause` (`packages/vault/src/types.ts:857`),
+    taken over HTTP at `POST /intake/:id/dismiss`
+    (`packages/api/src/http/wire.ts:45`, `server.ts:240`).
+  - No Vault operation stores an outcome, and `src/types.ts` in every package
+    is a gate path (`.github/protected-paths.txt`), so each change below is a
+    contract change R28 must declare.
+- **Chosen** by the maintainer, 2026-11-23, as A-R28-01. R28 builds all of it,
+  so both review families see each type beside the code that fills it, as
+  A-R53-01 was built by R53:
+  1. **Review seats return located findings.** The reviewer and the security
+     seat end with `{"findings": [{ "category", "path", "line" }, …]}`, read
+     strictly as R13b reads a nightly reviewer's. A finding naming a file the
+     reviewed tree does not hold, or a line that file does not have, is
+     refused with its cause, never stored as a finding. A result that cannot
+     be read is recorded as unreadable, never as no findings (I5). The
+     findings are recorded beside the result, and the task is `passed`
+     exactly as before: no finding sets or blocks a status (I2, D-P4-07
+     unchanged). The reviewer's note, if any, stays in its claim and enters
+     no prompt (I7).
+  2. **Critic findings cite a draft file.** A critic's result becomes
+     `{"findings": [{ "path", "note" }, …]}`, where `path` is one of the
+     draft's files; one naming another path is refused as unlocated. The
+     note is what is sent back today, so D-A-DS-07's exception is unchanged.
+     A critic finding is `resolved` when the file it cites differs, by hash,
+     between the draft it was raised against and the draft that was approved
+     and locked, and, at `test-design`, the locked draft has a base record.
+     No check covers a spec file, so a `spec` critic finding is never
+     `resolved`: it is `open` or `dismissed`.
+  3. **A code finding is resolved by covered change.** A finding citing a
+     file and line is `resolved` by a later run whose change merged, whose
+     diff changed a hunk holding the cited line (mapped through the history
+     between the finding's commit and that run's base), and whose pinned
+     coverage check passed with at least one changed line of that hunk
+     executed. Coverage evidence therefore records the changed lines each
+     file had executed and not executed, beside `coverageDelta`, and both
+     adapters report them. A run with no coverage check, a line the history
+     between the two commits rewrote, or a report that cannot be read
+     resolves nothing; the finding stays `open` (I5). A finding citing a
+     record, not code, is never `resolved`.
+  4. **Outcomes are write-once runtime records.** `open` is never written: a
+     finding with no outcome record is open, so an unknown outcome is never
+     read as resolved. `resolved` and `dismissed` are each a content-addressed
+     record naming the finding by its source record and index, written with
+     `collectedBy: 'runtime'` and refused if the finding already has one. A
+     dismissal is a person's, through the API and the CLI, with a cause from
+     `DismissalCause` and no text, as A-R16-05 is for candidates. R2 derives
+     the resolved, dismissed, and open rates over findings raised, per
+     reviewer family and per seat kind (`review`, `security`, `critic`, and
+     each nightly reviewer job), each with its sample and bound.
+- **Rejected:**
+  - *R28 measures only the findings that exist (nightly and critic).* The
+    unit's point is per-seat rates, and the seat that raises most findings
+    would have none.
+  - *A critic finding is never resolved.* A cited file that changed before
+    the draft was locked is evidence the runtime holds; ignoring it would
+    understate every critic.
+  - *Any passing required check in a run that touched the cited path.* A
+    check can pass without running the line, which is the "will fix later"
+    measurement #109 rejects.
+  - *Recording `open` outcomes.* An open record would have to be replaced or
+    shadowed when the finding resolves, which a write-once store cannot do
+    without a precedence rule a reader could get wrong.
+- **Must hold:** no model reports an outcome; every outcome comes from the
+  diff, the coverage evidence, the draft records, or a person's dismissal
+  (I2). A finding the runtime cannot locate, a report it cannot read, and a
+  history it cannot map leave the finding open, never resolved (I5). Review
+  findings never change a task's status (I2). Each claim above maps to a
+  conformance assertion that fails when the behaviour is deleted (I8).
+- **Left to R28,** each verified against the code and recorded there:
+  - The commit a review seat's finding is read against. Recommended: the
+    commit the reviewed tree was built from, named in the findings record.
+  - When resolutions are derived. Recommended: when a run's `integrate`
+    merges, over the target's open code findings, so a change that never
+    merges resolves nothing.
+  - The role text that asks each seat for the new shape (R20's format), and
+    whether nightly findings join through their candidate id or directly.
+  - Known limit to record: a finding fixed outside Olympus, or on a line
+    rewritten in between, stays open until a person dismisses it.
+- **Reverse:** revert this entry and the R28 entry in `DECOMPOSITION.md`.
+  Nothing is built by it.
