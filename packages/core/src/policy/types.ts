@@ -200,6 +200,13 @@ export interface PolicyDocument {
    * declares dependencies is refused (I4).
    */
   installRegistries?: string[];
+  /**
+   * Whether every authorization rule a spec's security part names needs a
+   * required property check naming it in `deniesRule`, as well as the
+   * denial check every rule needs today (R25, D-R25-05). Absent, false: a
+   * property requirement is policy's to set, and nothing sets it by default.
+   */
+  propertyPerAuthorizationRule?: boolean;
 }
 
 /**
@@ -223,6 +230,8 @@ export interface Policy {
   concurrency: { maxParallelTasks: number; maxConflictRetries: number };
   /** The registries the runtime's dependency install may reach; empty unless granted (A-R34-01, I4). */
   installRegistries: string[];
+  /** Whether each authorization rule needs a required property check naming it, beside its denial check; false unless set (R25). */
+  propertyPerAuthorizationRule: boolean;
 }
 
 export interface PolicyRefusal {

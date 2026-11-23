@@ -2269,6 +2269,13 @@ at admission; the same seed reproduces the same verdict; a property check
 edited after `test-design` is `lock-tamper`; and R7's `hard-coded-output`
 item is caught by a property check where its acceptance check misses.
 
+**Acceptance criteria** (added at the start of the unit, D-R25-01):
+`pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm conformance`, with a
+passing assertion for each conformance sentence above; and
+`pnpm --filter @olympus-ai/benchmark run deterministic`, which needs Docker
+and the npm registry, reproducing `docs/benchmark/v2-deterministic.json`
+byte for byte with R7's detection and false-refusal rates in both arms.
+
 **Why M3:** it needs R7's corpus to show it works, R19's drafter to write
 properties at scale, and R15's base run. M2 does not need it to make its
 claim.

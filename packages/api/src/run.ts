@@ -93,6 +93,7 @@ import { unsafeComponents, type UnsafeDeclaration } from './safety.js';
 import { parseSecurityPart, type SecurityPart, type SecurityScanners } from './security.js';
 import { mergedCheckProblems, parseGraph, parseManifest, reproductionProblems, requestProblems, securityProblems, type RequestProblem } from './validate.js';
 import { suiteBindingProblems } from './verification.js';
+import { propertyAdmissionProblems } from './property.js';
 import { planInstall } from './install.js';
 import { BaseExists, BaseRefusal, basePath, discardRun, existsIn, hashAt, snapshotBase, treeDigest, within, writeFiles, type WorkspaceStore } from './workspace.js';
 
@@ -1245,6 +1246,8 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
     return { ok: false, reason: 'invalid-request', problems: [{ path: 'workspace', code: 'not-installable', message: `workspace: ${installable.reason}` }] };
   }
   const unbound = await suiteBindingProblems(admitted.admitted.checks, basePath(workspaces, req.runId), supplied, installable.kind === 'install');
+  // A property check needs the base's property framework, and each of its locked files must register a property (R25, I5).
+  if (unbound.length === 0) unbound.push(...(await propertyAdmissionProblems(admitted.admitted.checks, basePath(workspaces, req.runId))));
   if (unbound.length > 0) {
     await discardRun(workspaces, req.runId);
     return { ok: false, reason: 'invalid-request', problems: unbound };

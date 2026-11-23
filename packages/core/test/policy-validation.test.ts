@@ -396,3 +396,16 @@ describe('the nightly block (R13a, A-R13a-06)', () => {
     expect(lines(refuse(document)).join('\n')).toContain('job template');
   });
 });
+
+describe('propertyPerAuthorizationRule (R25, D-R25-05)', () => {
+  test('is false when a document leaves it out, and read as given when it is a boolean', () => {
+    const absent = authored();
+    delete absent.propertyPerAuthorizationRule;
+    expect(accept(absent).propertyPerAuthorizationRule).toBe(false);
+    expect(accept({ ...authored(), propertyPerAuthorizationRule: true }).propertyPerAuthorizationRule).toBe(true);
+  });
+
+  test('anything but a boolean is refused, naming the key', () => {
+    expect(refuse({ ...authored(), propertyPerAuthorizationRule: 'yes' }).map((d) => d.path)).toContain('propertyPerAuthorizationRule');
+  });
+});

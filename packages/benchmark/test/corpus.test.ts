@@ -23,7 +23,7 @@ afterEach(async () => {
 describe('the shipped corpus', () => {
   test('matches its manifest, and every item names a repository, a group, and a change', async () => {
     const corpus = await loadCorpus();
-    expect(corpus.version).toBe('v1');
+    expect(corpus.version).toBe('v2');
     expect(corpus.digest).toMatch(/^[0-9a-f]{64}$/);
     expect(corpus.items.length).toBeGreaterThan(0);
     for (const item of corpus.items) {

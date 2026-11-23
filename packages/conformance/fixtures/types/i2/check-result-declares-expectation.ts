@@ -15,6 +15,7 @@ export const omitted: CheckResult = { // expect-error TS2741: Property 'expectat
   stderr: result.stderr,
   suiteCount: result.suiteCount,
   findings: result.findings,
+  property: result.property,
   durationMs: result.durationMs,
   startedAt: result.startedAt,
 };

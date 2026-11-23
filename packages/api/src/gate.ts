@@ -35,9 +35,9 @@ export function requiredShortfall(check: CheckSpec, result: CheckResult | undefi
 }
 
 /** The kinds whose result is a suite run, and so the ones a suite count is recorded for and required of. */
-export const SUITE_KINDS: ReadonlySet<CheckSpec['kind']> = new Set(['unit', 'acceptance']);
+export const SUITE_KINDS: ReadonlySet<CheckSpec['kind']> = new Set(['unit', 'acceptance', 'property']);
 
 /** How many suites a check's result must show ran: every test an acceptance check names, or the count a check pins. */
 export function requiredSuites(check: CheckSpec): number | undefined {
-  return check.kind === 'acceptance' ? check.tests.length : check.expectedSuiteCount;
+  return check.kind === 'acceptance' || check.kind === 'property' ? check.tests.length : check.expectedSuiteCount;
 }

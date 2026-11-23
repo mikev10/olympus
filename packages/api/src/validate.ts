@@ -22,6 +22,8 @@ import type { RequestedArtifacts } from './run.js';
 export type RequestProblemCode =
   /** A required list has no entries. */
   | 'missing'
+  /** A property check's file registers no property with the base's property framework (R25). */
+  | 'no-property'
   /** An admitted artifact's bytes changed between being read and being written into the base (D-R36a-10). */
   | 'changed'
   /** An admitted artifact the base commit holds with other bytes than the workspace does (D-R36a-10, #154). */
@@ -299,7 +301,7 @@ export function parseManifest(value: unknown, options: { readonly alone: boolean
   return {
     ok: true,
     checks: (checks as CheckSpec[]).map((check): CheckSpec => {
-      if (check.kind === 'acceptance') {
+      if (check.kind === 'acceptance' || check.kind === 'property') {
         const [first, ...rest] = check.tests;
         const tests: readonly [string, ...string[]] = [first, ...rest];
         return { ...check, tests };
@@ -311,7 +313,25 @@ export function parseManifest(value: unknown, options: { readonly alone: boolean
   };
 }
 
-const CHECK_KINDS: ReadonlySet<string> = new Set<CheckKind>(['compile', 'typecheck', 'lint', 'unit', 'acceptance', 'behavioral', 'coverage', 'mutation', 'secret-scan', 'static-analysis']);
+const CHECK_KINDS: ReadonlySet<string> = new Set<CheckKind>(['compile', 'typecheck', 'lint', 'unit', 'acceptance', 'behavioral', 'coverage', 'mutation', 'property', 'secret-scan', 'static-analysis']);
+
+/** The range of a property check's seed: a 32-bit signed integer, the generator's own. */
+const SEED_MIN = -(2 ** 31);
+const SEED_MAX = 2 ** 31 - 1;
+
+/**
+ * A property check's pin: the seed, a 32-bit signed integer, and the cases
+ * every property must run, a positive integer (R25). Neither is defaulted:
+ * a seed the runtime chose would not be the one a rerun reaches.
+ */
+function propertyPinProblems(c: { seed?: unknown; numRuns?: unknown }, at: string, report: Report): void {
+  if (!(typeof c.seed === 'number' && Number.isInteger(c.seed) && c.seed >= SEED_MIN && c.seed <= SEED_MAX)) {
+    report(`${at}.seed`, 'not-integer', `${at}.seed must be a 32-bit signed integer; a property check pins the seed its verdict is reproduced from`);
+  }
+  if (!(typeof c.numRuns === 'number' && Number.isInteger(c.numRuns) && c.numRuns > 0)) {
+    report(`${at}.numRuns`, 'not-integer', `${at}.numRuns must be a positive integer; a property check pins the cases every property must run`);
+  }
+}
 
 /** The kinds a scanner runs, whose invocation is the runtime's and whose image and rules the manifest pins (D-R17-01). */
 const SECURITY_KINDS: ReadonlySet<string> = new Set<SecurityCheckKind>(['secret-scan', 'static-analysis']);
@@ -460,7 +480,7 @@ function checkProblems(checks: unknown, report: Report, alone: boolean): void {
     }
     // A suite check's result is a test runner's, and the runner is the runtime's to start: a pinned
     // command could be anything, and the suites counted would then be an inventory of the tree (D-R15-04).
-    const suite = c.kind === 'unit' || c.kind === 'acceptance';
+    const suite = c.kind === 'unit' || c.kind === 'acceptance' || c.kind === 'property';
     const security = typeof c.kind === 'string' && SECURITY_KINDS.has(c.kind);
     if (suite && c.command !== undefined) {
       report(`${at}.command`, 'not-applicable', `${at} is a ${String(c.kind)} check, which pins no command: the runtime runs the base's test framework itself`);
@@ -476,8 +496,8 @@ function checkProblems(checks: unknown, report: Report, alone: boolean): void {
     }
     const denies = (check as { deniesRule?: unknown }).deniesRule;
     if (denies !== undefined) {
-      if (c.kind !== 'acceptance' && c.kind !== 'behavioral') {
-        report(`${at}.deniesRule`, 'not-applicable', `${at}.deniesRule is named on a check that is neither an acceptance nor a behavioral check; a denial is exercised by a locked acceptance check`);
+      if (c.kind !== 'acceptance' && c.kind !== 'behavioral' && c.kind !== 'property') {
+        report(`${at}.deniesRule`, 'not-applicable', `${at}.deniesRule is named on a check that is not an acceptance, behavioral, or property check; a denial is exercised by a locked check`);
       } else if (!isNonEmptyString(denies)) report(`${at}.deniesRule`, 'empty', `${at}.deniesRule must name an authorization rule of the spec's security part`);
       // An optional denial check can fail every verify and stop nothing, yet still satisfy test-design (codex-2, gemini-1).
       else if (c.required === false) report(`${at}.required`, 'not-required', `${at} names a rule it denies, so it must be required; an optional check holds the gate to nothing`);
@@ -490,24 +510,31 @@ function checkProblems(checks: unknown, report: Report, alone: boolean): void {
       } else if (repro !== true) report(`${at}.reproduces`, 'not-true', `${at}.reproduces is true or absent`);
       else if (c.onBase !== 'fails') report(`${at}.onBase`, 'not-fails', `${at} declares that it reproduces the defect, so it declares onBase 'fails'`);
     }
-    if (c.kind === 'acceptance') testsProblems(c.tests, `${at}.tests`, report);
+    if (c.kind === 'acceptance' || c.kind === 'property') testsProblems(c.tests, `${at}.tests`, report);
     else if (c.tests !== undefined) {
-      report(`${at}.tests`, 'not-applicable', `${at}.tests is named on a check that is not an acceptance check; no other kind runs named tests`);
+      report(`${at}.tests`, 'not-applicable', `${at}.tests is named on a check that is neither an acceptance nor a property check; no other kind runs named tests`);
+    }
+    const pin = check as { seed?: unknown; numRuns?: unknown };
+    if (c.kind === 'property') propertyPinProblems(pin, at, report);
+    else {
+      for (const field of ['seed', 'numRuns'] as const) {
+        if (pin[field] !== undefined) report(`${at}.${field}`, 'not-applicable', `${at}.${field} is named on a check that is not a property check`);
+      }
     }
     if (typeof c.required !== 'boolean') {
       report(`${at}.required`, 'not-boolean', `${at}.required must be a boolean, not ${typeof c.required}`);
     } else if (c.required) required += 1;
     const count = c.expectedSuiteCount;
-    if (c.kind === 'acceptance' && count !== undefined) {
-      report(`${at}.expectedSuiteCount`, 'not-applicable', `${at}.expectedSuiteCount restates its tests: an acceptance check's runner must load every test it names`);
+    if ((c.kind === 'acceptance' || c.kind === 'property') && count !== undefined) {
+      report(`${at}.expectedSuiteCount`, 'not-applicable', `${at}.expectedSuiteCount restates its tests: a ${c.kind} check's runner must load every test it names`);
     } else if (count !== undefined && !(typeof count === 'number' && Number.isInteger(count) && count >= 0)) {
       report(`${at}.expectedSuiteCount`, 'not-integer', `${at}.expectedSuiteCount must be a non-negative integer when present`);
     }
     // I5: no default. A check that may pass on the base is a guard and says so; silence is not a declaration.
-    const declarable = c.kind === 'acceptance' || c.kind === 'behavioral';
+    const declarable = c.kind === 'acceptance' || c.kind === 'property' || c.kind === 'behavioral';
     if (!declarable && c.onBase !== undefined) {
-      report(`${at}.onBase`, 'not-declarable', `${at}.onBase is declared on a check that is neither an acceptance nor a behavioral check; no other kind runs on the base`);
-    } else if (c.kind === 'acceptance' || c.onBase !== undefined || denies !== undefined) {
+      report(`${at}.onBase`, 'not-declarable', `${at}.onBase is declared on a check that is not an acceptance, property, or behavioral check; no other kind runs on the base`);
+    } else if (c.kind === 'acceptance' || c.kind === 'property' || c.onBase !== undefined || denies !== undefined) {
       // A denial check gets the base run any acceptance check gets, so it declares what the base does (codex-2).
       if (c.onBase !== 'fails' && c.onBase !== 'passes') {
         report(`${at}.onBase`, 'undeclared', `${at} must declare onBase as 'fails' or 'passes'; there is no default`);

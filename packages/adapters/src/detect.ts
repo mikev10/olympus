@@ -12,6 +12,7 @@ import { IstanbulCoverageAdapter } from './coverage.js';
 import { jestDiscovery, vitestDiscovery } from './discovery.js';
 import { JestAdapter, VitestAdapter } from './framework.js';
 import { ConfigManifestAdapter } from './manifest.js';
+import { FastCheckAdapter } from './property.js';
 import { declaredRange, readPackageManifest, type PackageManifest } from './manifest-file.js';
 import { AdapterRefusal } from './refusal.js';
 import { declaresPytest, isPythonProject } from './python/config.js';
@@ -21,12 +22,13 @@ import { PytestAdapter } from './python/framework.js';
 import { PYTHON_IMAGE } from './python/install.js';
 import { STATIC_ANALYSIS_SCANNER, type SecurityScanner } from './security.js';
 import { DEPENDENCY_TREES, NODE_DEPENDENCY_TREES, PYTHON_DEPENDENCY_TREES } from './trees.js';
-import type { AdapterSet, BehavioralAdapter, CoverageAdapter, ManifestAdapter, MutationAdapter, TestFrameworkAdapter } from './types.js';
+import type { AdapterSet, BehavioralAdapter, CoverageAdapter, ManifestAdapter, MutationAdapter, PropertyAdapter, TestFrameworkAdapter } from './types.js';
+import { majorOf } from './versions.js';
 
 /** Every kind `BehavioralAdapter.kind` admits. A set missing one names it. */
 export const BEHAVIORAL_KINDS: ReadonlyArray<BehavioralAdapter['kind']> = ['cli', 'http', 'browser'];
 
-export type Control = 'test' | 'coverage' | 'mutation' | 'manifest' | 'static-analysis' | `behavioral:${BehavioralAdapter['kind']}`;
+export type Control = 'test' | 'coverage' | 'mutation' | 'manifest' | 'static-analysis' | 'property' | `behavioral:${BehavioralAdapter['kind']}`;
 
 export interface AdapterSetOptions {
   /** The provider behavioral scenarios run through, or null to build a set with no behavioral adapter. HTTP needs one with a probe. */
@@ -63,6 +65,7 @@ export class StackAdapterSet implements AdapterSet {
   readonly behavioral: BehavioralAdapter[];
   readonly manifest: ManifestAdapter | null;
   readonly staticAnalysis: SecurityScanner | null;
+  readonly property: PropertyAdapter | null;
   readonly dependencyTrees: readonly string[];
   readonly checkImage: string | null;
   /** Why each unavailable control is unavailable, in words a maintainer can act on. */
@@ -74,11 +77,13 @@ export class StackAdapterSet implements AdapterSet {
     behavioral: BehavioralAdapter[];
     manifest: ManifestAdapter | null;
     staticAnalysis: SecurityScanner | null;
+    property: PropertyAdapter | null;
     dependencyTrees: readonly string[];
     checkImage: string | null;
     reasons: ReadonlyMap<Control, string>;
   }) {
     this.staticAnalysis = parts.staticAnalysis;
+    this.property = parts.property;
     this.stack = parts.test?.stack ?? 'unsupported';
     this.test = parts.test;
     this.coverage = parts.coverage;
@@ -118,6 +123,29 @@ async function testAdapter(root: string, manifest: PackageManifest, reasons: Map
   }
   reasons.set('test', 'neither vitest nor jest is declared in package.json');
   return null;
+}
+
+/**
+ * The property framework, or null with the reason recorded: fast-check 4,
+ * declared beside vitest 4, which is the pairing whose preload was run
+ * (D-R25-03). Its absence is a reason, not a missing control.
+ */
+function propertyAdapter(manifest: PackageManifest | null, test: TestFrameworkAdapter | null, reasons: Map<Control, string>): PropertyAdapter | null {
+  const range = manifest === null ? undefined : declaredRange(manifest, 'fast-check');
+  if (range === undefined) {
+    reasons.set('property', 'fast-check is not declared in package.json');
+    return null;
+  }
+  if (test?.stack !== 'vitest@4') {
+    reasons.set('property', `fast-check runs under vitest 4 only, and the test framework is ${test?.stack ?? 'none'}`);
+    return null;
+  }
+  const major = majorOf(range);
+  if (major !== 4) {
+    reasons.set('property', `fast-check is declared as '${range}', and only fast-check 4 is supported`);
+    return null;
+  }
+  return new FastCheckAdapter(major);
 }
 
 /** The manifest, or null with every manifest-dependent control's reason recorded. */
@@ -201,8 +229,12 @@ export async function buildAdapterSet(root: string, options: AdapterSetOptions):
     reasons.set('static-analysis', 'the repository has neither a package.json nor a pyproject.toml or requirements file, and the static-analysis scanner this package carries reads TypeScript, JavaScript, and Python');
   }
 
+  const property = stack === 'node' ? propertyAdapter(manifest, test, reasons) : null;
+  if (stack !== 'node') reasons.set('property', 'property checks are supported on Node.js with fast-check only');
+
   return new StackAdapterSet({
     test,
+    property,
     coverage,
     behavioral,
     manifest: hasManifest ? new ConfigManifestAdapter() : null,
