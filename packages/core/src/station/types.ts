@@ -153,7 +153,8 @@ export type BaseRefusalPart =
 /**
  * A typed part of a drafter's retry, carried in the request's variable
  * suffix and never in its stable prefix or role (D-A-DS-02). The runtime's
- * own problems with a draft are paths and codes; `notes` exist at `spec`
+ * own problems with a draft are paths and codes, with the validator's
+ * message where one read the draft alone (A-R36b-01); `notes` exist at `spec`
  * alone, and a `test-design` rejection carries a reason and no text.
  * `base-refusal` carries nothing: at `test-design` it is the one fact a test
  * drafter learns of the repository, that its draft did not hold there
@@ -161,7 +162,7 @@ export type BaseRefusalPart =
  */
 export type RetryPart =
   | { readonly kind: 'critic-findings'; readonly findings: readonly string[] }
-  | { readonly kind: 'runtime-problems'; readonly problems: ReadonlyArray<{ readonly path: string; readonly code: string }> }
+  | { readonly kind: 'runtime-problems'; readonly problems: ReadonlyArray<{ readonly path: string; readonly code: string; readonly message?: string }> }
   | { readonly kind: 'base-refusal' }
   | { readonly kind: 'rejection-reason'; readonly reason: RejectionReason }
   | { readonly kind: 'notes'; readonly notes: string };

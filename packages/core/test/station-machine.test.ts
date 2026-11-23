@@ -43,6 +43,8 @@ import {
   type Task,
   type TaskGraph,
   type TaskId,
+  RETRY_MESSAGE_LIMIT,
+  retrySuffix,
 } from '../src/index.js';
 
 const engine = new StrictPolicyEngine();
@@ -423,5 +425,29 @@ describe('nextStep', () => {
   test('leaving verify with unpassed tasks none of which can be built is a defect, not a loop', () => {
     const stuck = { a: 'passed', b: 'verifying', r: 'pending' } as RunState['tasks'];
     expect(() => nextStep(state({ station: 'verify', phase: 'exiting', tasks: stuck }), GRAPH, ONE_AT_A_TIME)).toThrow(/cannot finish/);
+  });
+});
+
+describe('retrySuffix', () => {
+  // A-R36b-01: a runtime problem carries the validator's message where one read the draft alone.
+  test('a runtime problem with a message is told with it, after its path and code', () => {
+    const suffix = retrySuffix('test-design', 2, [
+      { kind: 'runtime-problems', problems: [{ path: 'acceptance.json#checks[0].kind', code: 'not-a-kind', message: 'checks[0].kind must be one of acceptance, behavioral' }] },
+    ]);
+    expect(suffix).toContain('- acceptance.json#checks[0].kind: not-a-kind — checks[0].kind must be one of acceptance, behavioral');
+  });
+
+  test('a problem with no message, as every record before A-R36b-01, is told as before', () => {
+    const suffix = retrySuffix('spec', 2, [{ kind: 'runtime-problems', problems: [{ path: 'spec.md', code: 'empty' }] }]);
+    expect(suffix).toContain('- spec.md: empty');
+    expect(suffix).not.toContain('—');
+  });
+
+  test("a message longer than the limit is cut, so a drafter's long value cannot flood its retry", () => {
+    const long = 'x'.repeat(RETRY_MESSAGE_LIMIT * 3);
+    const suffix = retrySuffix('test-design', 2, [{ kind: 'runtime-problems', problems: [{ path: 'a', code: 'b', message: long }] }]);
+    const line = suffix.split('\n').find((l) => l.startsWith('- a: b — ')) ?? '';
+    expect(line.length).toBe('- a: b — '.length + RETRY_MESSAGE_LIMIT);
+    expect(line.endsWith('…')).toBe(true);
   });
 });

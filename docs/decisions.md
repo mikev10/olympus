@@ -11485,6 +11485,116 @@ source.
 
 Full record: `docs/reviews/2026-11-22-R38-driver-evidence-does-not-flake-triage.md`.
 
+### A-R36b-01: a runtime send-back carries the validator's message (#174)
+
+R36b's real run on my-recipes (run ed031f3a) sent its test draft back three
+times for the shape of `acceptance.json`. Each retry was told codes such as
+`not-a-kind` at a path, never the message `parseManifest` had already
+written (`checks[0].kind must be one of ...`), so the drafter could not
+correct a field it was never told about. D-R36b-08 fixed the role text that
+ships with `init`; this is the other half. Planned against `v2` at eb93b71
+and confirmed by the maintainer before any code (2026-11-22).
+
+- **Chosen:** a runtime problem gains an optional `message`, in
+  `DraftSendBack`'s `runtime` variant (`packages/core/src/run/types.ts`) and
+  in `RetryPart`'s `runtime-problems` (`packages/core/src/station/types.ts`).
+  The retry renders it as `- path: code — message`
+  (`packages/core/src/station/machine.ts`, `retrySuffix`), cut to 300
+  characters, since a message can quote the drafter's own value and a
+  retry's suffix is not the place for a long one.
+- **Which problems carry one:** only those a validator found by reading the
+  draft alone: `parseManifest` over the drafted manifest (`draftedChecks`),
+  `parseSecurityPart` and `parseRunRequirements` over a drafted spec's
+  parts, and `parsePlan` over a drafted observation plan
+  (`packages/api/src/drafting.ts`). Each already returns a `RequestProblem`
+  with a message, and none reads the base. Every problem judged against the
+  base or the verification manifest (`exists`, `unbound`, merged-check
+  collisions, a missing denial check) stays a path and a code, and at
+  `test-design` the base-derived ones still reach the drafter as one
+  `base-refusal` with nothing in it (A-R19-11). A message can name only
+  what the drafter wrote.
+- **Optional, not required:** send-backs recorded before this amendment
+  have no message and must still read and render, as A-R4-05 did for
+  `parkedFor`. A problem without one renders as before.
+- **Assertion:** `I3.retry-is-told-its-own-shape-mistakes`
+  (`packages/conformance/src/registry/drafting.ts`): a test draft whose
+  manifest names an unknown check kind is sent back by the runtime, the
+  record keeps the message, and the retry is told it beside the code. It
+  fails against the line before this change, which told the retry
+  `not-a-kind` alone. That base-derived problems still reach the drafter as
+  one contentless `base-refusal` stays held by
+  `I3.base-refusal-tells-the-drafter-nothing-of-the-repository`, unchanged,
+  and by `retryParts` filtering on code before any message is read.
+  `packages/core/test/station-machine.test.ts` covers the rendering, the
+  cut, and a problem with no message.
+- **Rejected:** carrying every validator's message. A message from a check
+  judged against the base could name what the base holds, a channel around
+  the black box. Making `message` required, which would break reading
+  earlier records.
+- **Reverse:** revert the commit. Records written with a message still read
+  under the earlier types, which ignore an extra field.
+
+### D-A-HI-01: the harness image a call ran in is its own field, recorded by the runtime
+
+R53 (#169) asks that the evidence name the image every driver call ran in,
+beside `driverProvenanceId`, and says the image ID needs a home before the
+build. Planned against `v2` at 9c63882.
+
+- **Verified:**
+  - `provenanceId()` is a constant per driver: `<id>@${CLI_VERSION}` for
+    Claude Code and Codex (`packages/drivers/claude-code/src/driver.ts:370`,
+    `packages/drivers/codex/src/driver.ts:210`), and the endpoint driver's
+    names its provider (`packages/drivers/openai-compatible/src/driver.ts:194`).
+    No driver knows which image it is run in.
+  - The same string is a key: the host maps it to a driver's image
+    (`packages/api/src/host/compose.ts:233`) and the line looks the image up
+    by it (`packages/api/src/graph.ts:52`). It is also the `driver` part of
+    a seat's identity, which the separation checks compare
+    (`packages/api/src/line.ts:1875`, `packages/api/src/nightly-review.ts:342`).
+  - Every sandboxed call is provisioned from an image the runtime chose
+    (`packages/api/src/line.ts:898`), the endpoint driver's included, which
+    runs in `buildImage`. A line with no sandbox profile provisions `'none'`.
+  - `ensureImage` returns the tag, never a content ID, and returns any image
+    the daemon holds under that tag (`packages/drivers/claude-code/src/image.ts:99-110`,
+    `packages/drivers/codex/src/image.ts:101`).
+- **Chosen** by the maintainer, 2026-11-22, as A-R53-01 below: a field of its
+  own on `EvidenceBundle` and `UsageRecord`. R53 builds it, so both review
+  families see the type beside the code that fills it, as A-R9-01 was built
+  by R9.
+- **Rejected:**
+  - *Fold the image ID into `provenanceId()`.* The driver cannot know the ID,
+    which exists only after the runtime resolved the image. And every rebuild
+    would change an image-lookup key and a seat's identity, so a separation
+    check would read a rebuilt image as a different seat.
+  - *Building the type in this amendment's pull request.* The writers would
+    record `not-recorded` until R53 filled them, and the Vault's refusal of
+    that value could not land without the collection it guards.
+- **Must hold:** the runtime reads the ID from the container engine, never
+  from a driver (I2). A call whose image ID cannot be read is refused, never
+  recorded without one (I5).
+- **Left to R53:** where the ID is read, either once by `ensureImage` against
+  the ID recorded at build or again at provision. Recommended: both, since a
+  tag can be moved between the two.
+- **Reverse:** drop A-R53-01 and the R53 entry's sentence that names it. R53
+  then has no home for the ID and stays blocked.
+
+### A-R53-01: `harnessImage` on `EvidenceBundle` and `UsageRecord`
+
+`packages/vault/src/types.ts` gains:
+
+- `HarnessImage = { readonly id: string } | 'no-sandbox' | 'not-recorded'`,
+  where `id` is the content ID (`sha256:` and 64 hex digits) of the image the
+  call's sandbox was started from;
+- `harnessImage: HarnessImage` on `UsageRecord`, for that call;
+- `harnessImage: HarnessImage` on `EvidenceBundle`, for the build call the
+  bundle verifies, beside `driverProvenanceId`.
+
+`'no-sandbox'` is a line with no sandbox profile, which provisions no image
+and says so. `'not-recorded'` is how a record written before R53 is read, the
+way `timing` reads before R12 (A-R12-01). The Vault refuses to write
+`'not-recorded'`, or an `id` that is not a content ID. `driverProvenanceId`
+and every key built from it are unchanged.
+
 ## R25: Property checks
 
 Started on `v2` at 3fde9eb. Issue #71 is folded in. The design and its
