@@ -87,6 +87,7 @@ import { parsePlan, planDraftPath } from './observation-plan.js';
 import { DRAFT_DIR, defectBytes, parseQuestions, parseReproduction, parseRunRequirements, type DefectPart, type RunRequirements } from './spec-parts.js';
 import { mergedCheckProblems, parseManifest, reproductionProblems } from './validate.js';
 import { suiteBindingProblems, taskResultProblems, writesOutsideGrant } from './verification.js';
+import { propertyAdmissionProblems } from './property.js';
 import { planInstall } from './install.js';
 import { basePath, copyOnly, copyTree, draftBaseRunPath, draftPaths, existsIn, ownDiff, scratchPath, treeDigest, writeFiles } from './workspace.js';
 
@@ -605,11 +606,12 @@ async function readTestDraft(ctx: LineContext, start: string, work: string): Pro
     const named = new Set<string>();
     checks.forEach((check, i) => {
       const at = `${manifestPath}#checks[${String(i)}]`;
-      if (check.kind !== 'acceptance' && check.kind !== 'behavioral') {
+      // A property check is written at test-design like an acceptance check, by the drafter or a person (R25).
+      if (check.kind !== 'acceptance' && check.kind !== 'property' && check.kind !== 'behavioral') {
         problems.push({ path: at, code: 'not-draftable' });
         return;
       }
-      const runs = check.kind === 'acceptance' ? [...check.tests] : check.command.filter((arg) => tests.includes(arg));
+      const runs = check.kind === 'behavioral' ? check.command.filter((arg) => tests.includes(arg)) : [...check.tests];
       for (const test of runs) {
         if (!tests.includes(test)) problems.push({ path: `${at}.tests`, code: 'unreferenced' });
         named.add(test);
@@ -617,7 +619,7 @@ async function readTestDraft(ctx: LineContext, start: string, work: string): Pro
     });
     for (const test of tests) if (!named.has(test)) problems.push({ path: test, code: 'unreferenced' });
     for (const p of mergedCheckProblems(ctx.checks, checks)) problems.push({ path: `${manifestPath}#${p.path}`, code: p.code });
-    const undenied = denialRefusal(ctx.securityPart, [...ctx.checks, ...checks]);
+    const undenied = denialRefusal(ctx.securityPart, [...ctx.checks, ...checks], ctx.policy.propertyPerAuthorizationRule);
     if (undenied?.reason === 'denial-check-missing') for (const rule of undenied.rules) problems.push({ path: `${manifestPath}#deniesRule:${rule}`, code: 'denial-check-missing' });
     // A bug fix's draft needs a required check declaring that it reproduces the defect; no other run's may declare one (A-R16-04).
     for (const p of reproductionProblems(checks, ctx.drafting.template === 'bug-fix', manifestPath, false)) problems.push({ path: p.path, code: p.code });
@@ -625,7 +627,9 @@ async function readTestDraft(ctx: LineContext, start: string, work: string): Pro
       // Each acceptance check's tests bound to the base's framework, over the base with the draft written in (D-R15-04).
       const tree = await draftTree(ctx, files);
       const installs = (await planInstall(tree, ctx.components.installers, ctx.policy.installRegistries)).kind === 'install';
-      for (const p of await suiteBindingProblems(checks, tree, tests, installs)) problems.push({ path: `${manifestPath}#${p.path}`, code: p.code });
+      const unbound = await suiteBindingProblems(checks, tree, tests, installs);
+      if (unbound.length === 0) unbound.push(...(await propertyAdmissionProblems(checks, tree)));
+      for (const p of unbound) problems.push({ path: `${manifestPath}#${p.path}`, code: p.code });
     }
   }
   return { files, discarded: await discardedOf(start, work, (p) => drafted(p)), problems };

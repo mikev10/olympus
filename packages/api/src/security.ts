@@ -125,19 +125,37 @@ export function specPartRefusal(part: SecurityPart | null): StationRefusal | und
 /**
  * The refusal of the `test-design` exit for each authorization rule the
  * security part names that no locked acceptance or behavioral check names
- * as the rule it denies.
+ * as the rule it denies. Where policy sets `propertyPerAuthorizationRule`,
+ * each rule also needs a required property check naming it, which never
+ * stands in for the denial check (R25, D-R25-05). Either shortfall is
+ * `denial-check-missing`, naming the rules, and the message says which.
  */
-export function denialRefusal(part: SecurityPart | null, checks: readonly CheckSpec[]): StationRefusal | undefined {
+export function denialRefusal(part: SecurityPart | null, checks: readonly CheckSpec[], propertyPerRule = false): StationRefusal | undefined {
   if (part === null || 'none' in part) return undefined;
+  const ids = part.authorizationRules.map((r) => r.id);
   const denied = new Set(checks.flatMap((c) => (c.kind === 'acceptance' || c.kind === 'behavioral') && c.deniesRule !== undefined ? [c.deniesRule] : []));
-  const [first, ...rest] = part.authorizationRules.map((r) => r.id).filter((id) => !denied.has(id));
-  if (first === undefined) return undefined;
-  const rules: [string, ...string[]] = [first, ...rest];
+  const missing = (named: ReadonlySet<string>): [string, ...string[]] | undefined => {
+    const [first, ...rest] = ids.filter((id) => !named.has(id));
+    return first === undefined ? undefined : [first, ...rest];
+  };
+  const undenied = missing(denied);
+  if (undenied !== undefined) {
+    return {
+      ok: false,
+      reason: 'denial-check-missing',
+      rules: undenied,
+      message: `no locked check exercises a caller refused by ${undenied.join(', ')}; each authorization rule the security part names needs a check that names it in deniesRule`,
+    };
+  }
+  if (!propertyPerRule) return undefined;
+  const stated = new Set(checks.flatMap((c) => (c.kind === 'property' && c.required && c.deniesRule !== undefined ? [c.deniesRule] : [])));
+  const unstated = missing(stated);
+  if (unstated === undefined) return undefined;
   return {
     ok: false,
     reason: 'denial-check-missing',
-    rules,
-    message: `no locked check exercises a caller refused by ${rules.join(', ')}; each authorization rule the security part names needs a check that names it in deniesRule`,
+    rules: unstated,
+    message: `no required property check names ${unstated.join(', ')} in deniesRule, and policy requires one for each authorization rule the security part names`,
   };
 }
 

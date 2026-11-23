@@ -109,6 +109,11 @@ export function scanPaths(store: WorkspaceStore, runId: RunId, label: string, in
   return { dir, tree: join(dir, 'tree'), config: join(dir, 'config') };
 }
 
+/** Where one property check's preload is written for one run of it: under the run's directory, never the Vault (R25). */
+export function propertyPaths(store: WorkspaceStore, runId: RunId, label: string, index: number): string {
+  return join(runDir(store, runId), 'properties', label, String(index));
+}
+
 export function attemptPaths(store: WorkspaceStore, runId: RunId, task: TaskId, iteration: number): { start: string; work: string } {
   const dir = join(runDir(store, runId), 'tasks', `${task}.${String(iteration)}`);
   return { start: join(dir, 'start'), work: join(dir, 'work') };

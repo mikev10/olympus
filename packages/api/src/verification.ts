@@ -7,7 +7,7 @@
 import picomatch from 'picomatch';
 import { buildAdapterSet, type TestFrameworkAdapter } from '@olympus-ai/adapters';
 import type { AgentClaim } from '@olympus-ai/core';
-import type { CheckSpec } from '@olympus-ai/integrity';
+import type { CheckSpec, SuiteCheckSpec } from '@olympus-ai/integrity';
 import type { DiffEntry } from '@olympus-ai/vault';
 import { isSecurityCheck } from './security.js';
 import type { RequestProblem } from './validate.js';
@@ -106,9 +106,14 @@ export function commandOf(check: CheckSpec, runner: TestFrameworkAdapter | null)
   if (isSecurityCheck(check)) {
     throw new Error(`${check.kind} check ${check.id} pins no command: the runtime runs the scanner its image is declared for`);
   }
-  if (check.kind !== 'acceptance' && check.kind !== 'unit') return check.command;
+  if (!isSuiteCheck(check)) return check.command;
   if (runner === null) throw new Error(`the base declares no supported test framework, so ${check.kind} check ${check.id} has no runner to start`);
-  return runner.invocation(check.kind === 'acceptance' ? check.tests : null);
+  return runner.invocation(check.kind === 'unit' ? null : check.tests);
+}
+
+/** A check whose result is a test runner's, and whose runner is the base's own (D-R15-04, R25). */
+export function isSuiteCheck(check: CheckSpec): check is SuiteCheckSpec {
+  return check.kind === 'acceptance' || check.kind === 'unit' || check.kind === 'property';
 }
 
 /**
@@ -118,7 +123,7 @@ export function commandOf(check: CheckSpec, runner: TestFrameworkAdapter | null)
  * reproduction. A test that never ran did not fail (I5).
  */
 export async function runnerMissing(check: CheckSpec, runner: TestFrameworkAdapter | null, tree: string): Promise<string | undefined> {
-  if (check.kind !== 'acceptance' && check.kind !== 'unit') return undefined;
+  if (!isSuiteCheck(check)) return undefined;
   if (runner === null) return `the base declares no supported test framework, so ${check.kind} check ${check.id} has no runner`;
   // The adapter knows where its runner lives: a node launcher, or an interpreter with pytest beside it (R29).
   return (await runner.missingRunner(tree)) ?? undefined;
@@ -137,21 +142,22 @@ export async function runnerMissing(check: CheckSpec, runner: TestFrameworkAdapt
  */
 export async function suiteBindingProblems(checks: readonly CheckSpec[], base: string, admittedTests: readonly string[], installed: boolean): Promise<RequestProblem[]> {
   const problems: RequestProblem[] = [];
-  const suiteChecks = checks.filter((c) => c.kind === 'acceptance' || c.kind === 'unit');
+  const suiteChecks = checks.filter(isSuiteCheck);
   if (suiteChecks.length === 0) return problems;
   const runner = await suiteRunner(base);
   const admitted = new Set(admittedTests);
   for (const [i, check] of checks.entries()) {
-    if (check.kind !== 'acceptance' && check.kind !== 'unit') continue;
+    if (!isSuiteCheck(check)) continue;
     const at = `manifest.checks[${String(i)}]`;
     const missing = installed && runner !== null ? undefined : await runnerMissing(check, runner, base);
     if (missing !== undefined) {
       problems.push({ path: at, code: 'unbound', message: `${at}: ${missing}; a suite check runs the base's own test framework or nothing` });
       continue;
     }
-    if (check.kind !== 'acceptance' || runner === null) continue;
+    if (check.kind === 'unit' || runner === null) continue;
     check.tests.forEach((test, j) => {
       if (!admitted.has(test)) {
+        // A property file is admitted and locked with the acceptance tests, and is one of them (R25, I3).
         problems.push({ path: `${at}.tests[${String(j)}]`, code: 'unbound', message: `${at}.tests[${String(j)}]: '${test}' is not an admitted acceptance test, so nothing locks what the check runs` });
       }
     });
@@ -187,7 +193,7 @@ export async function suiteBindingProblems(checks: readonly CheckSpec[], base: s
  */
 export async function suitesRun(check: CheckSpec, runner: TestFrameworkAdapter | null, tree: string): Promise<number | null> {
   try {
-    if (check.kind === 'acceptance') {
+    if (check.kind === 'acceptance' || check.kind === 'property') {
       if (runner === null) return null;
       // A suite the runner would also load, which the check does not name, ran uncounted; admission
       // refused one on the base, and the change can add one at `verify` (D-R15-07).

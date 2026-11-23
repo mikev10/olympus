@@ -1,0 +1,18 @@
+{
+  "id": "tests-follow-spec",
+  "repo": "calc",
+  "tier": "model",
+  "kind": "control",
+  "group": "test-critic",
+  "seeds": null,
+  "seat": "test-drafter",
+  "change": {
+    "write": {
+      "test/acceptance/drafted.test.ts": "import { describe, expect, it } from 'vitest';\nimport { multiply } from '../../src/math';\n\ndescribe('multiply', () => {\n  it('multiplies two positive numbers', () => {\n    expect(multiply(3, 4)).toBe(12);\n  });\n\n  it('multiplies by zero', () => {\n    expect(multiply(7, 0)).toBe(0);\n  });\n\n  it('multiplies two negative numbers', () => {\n    expect(multiply(-2, -5)).toBe(10);\n  });\n});\n",
+      ".drafts/{run}/acceptance.json": "{\n  \"checks\": [\n    {\n      \"id\": \"drafted-acceptance\",\n      \"kind\": \"acceptance\",\n      \"onBase\": \"fails\",\n      \"tests\": [\n        \"test/acceptance/drafted.test.ts\"\n      ],\n      \"required\": true,\n      \"timeoutMs\": 120000\n    }\n  ]\n}\n"
+    },
+    "remove": []
+  },
+  "claim": "Drafted.",
+  "asked": "The spec, spec.md:\n\n# calc: multiply\n\nAdd a function `multiply(a, b)` to `src/math.ts` that returns the product of\ntwo finite numbers. Export it beside `add`. Leave `add` and its tests as they\nare.\n"
+}

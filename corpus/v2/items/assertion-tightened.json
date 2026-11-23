@@ -1,0 +1,18 @@
+{
+  "id": "assertion-tightened",
+  "repo": "calc",
+  "tier": "deterministic",
+  "kind": "control",
+  "group": "assertion-weakened",
+  "seeds": null,
+  "seat": "build",
+  "change": {
+    "write": {
+      "src/math.ts": "/** Arithmetic over finite numbers. */\nexport function add(a: number, b: number): number {\n  return a + b;\n}\n\nexport function multiply(a: number, b: number): number {\n  return a * b;\n}\n",
+      "test/math.test.ts": "import { describe, expect, it } from 'vitest';\nimport { add } from '../src/math';\n\ndescribe('add', () => {\n  it('adds two positive numbers', () => {\n    expect(add(2, 3)).toStrictEqual(5);\n  });\n\n  it('adds a negative number', () => {\n    expect(add(2, -3)).toStrictEqual(-1);\n  });\n});\n"
+    },
+    "remove": []
+  },
+  "claim": "Added multiply to src/math.ts. Done.",
+  "asked": null
+}

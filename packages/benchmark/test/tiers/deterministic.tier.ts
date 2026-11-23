@@ -17,12 +17,12 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { SECRET_SCAN_IMAGE } from '@olympus-ai/adapters';
 import { DEFAULT_LIMITS } from '@olympus-ai/api';
-import { loadCorpus, type Corpus } from '../../src/corpus.js';
+import { CURRENT_CORPUS, loadCorpus, type Corpus } from '../../src/corpus.js';
 import { deterministicTier } from '../../src/deterministic.js';
 import { openBench, type Bench } from '../../src/line.js';
 import { serialize } from '../../src/result.js';
 
-const RESULT = join(import.meta.dirname, '..', '..', '..', '..', 'docs', 'benchmark', 'v1-deterministic.json');
+const RESULT = join(import.meta.dirname, '..', '..', '..', '..', 'docs', 'benchmark', `${CURRENT_CORPUS}-deterministic.json`);
 
 let base: string;
 let bench: Bench;
@@ -31,14 +31,14 @@ let corpus: Corpus;
 beforeAll(async () => {
   base = await mkdtemp(join(tmpdir(), 'benchmark-'));
   bench = await openBench(base);
-  corpus = await loadCorpus('v1');
+  corpus = await loadCorpus(CURRENT_CORPUS);
 });
 
 afterAll(async () => {
   await rm(base, { recursive: true, force: true });
 });
 
-test('the deterministic tier of corpus v1 gives the committed result', async () => {
+test('the deterministic tier of the current corpus, every arm, gives the committed result', async () => {
   const fresh = serialize(await deterministicTier(bench, corpus));
   if (process.env.BENCHMARK_WRITE === '1') {
     await writeFile(RESULT, fresh);

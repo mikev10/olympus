@@ -11595,6 +11595,276 @@ way `timing` reads before R12 (A-R12-01). The Vault refuses to write
 `'not-recorded'`, or an `id` that is not a content ID. `driverProvenanceId`
 and every key built from it are unchanged.
 
+## R25: Property checks
+
+Started on `v2` at 3fde9eb. Issue #71 is folded in. The design and its
+contract changes were confirmed in D-A-PC-01 on 2026-10-29. The entry lists
+those changes as owed by this unit's pull request, so building them is unit
+work and not a new amendment. Every dependency (P6, P8, R7, R15, R19) is
+merged and tagged `reviewed/*` (`git tag -l 'reviewed/*'`).
+
+### D-R25-01: boundary, verified
+
+- **Deliverables:**
+  - The contract changes. `CheckKind` gains `'property'`.
+    `PropertyCheckSpec` is a suite check, like an acceptance check: it names
+    locked tests, declares `onBase`, and pins `seed` and `numRuns`.
+    `AdapterSet.property` holds a `PropertyAdapter` or null. `CheckResult`
+    gains `property`, which records the seed, the cases run, and the shrunk
+    counterexample for each property, or null.
+  - `FastCheckAdapter`. It is selected when the base declares fast-check 4
+    beside vitest. It reads registered properties statically, writes the
+    runtime's preload, and reads the reports from the check's output.
+  - Admission refuses a pinned property check in three cases: the set has no
+    slot, a locked file registers no property, or a file has two
+    registrations on one line.
+  - `verify` and R15's base run execute property checks, record the
+    evidence, and judge them by the runtime's comparison.
+  - R19's test drafter may draft a property check.
+  - Corpus v2 adds `edge-case-only`, a property file, a manifest with a
+    property check, and a second arm. Its deterministic result is committed.
+  - The conformance assertions, and changesets.
+- **Out of scope, verbatim:** "machine-checked proof of any property, which
+  would be a later check kind with its own spec; properties a model writes
+  outside `test-design`; property checks for a stack without an adapter
+  slot; and a property requirement for every spec, which is policy's to set."
+- **Acceptance, as commands** (the entry gives none; proposed here):
+  `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm conformance` pass.
+  `pnpm --filter @olympus-ai/benchmark run deterministic` reproduces
+  `docs/benchmark/v2-deterministic.json` byte for byte. That file shows
+  `hard-coded-output` and `edge-case-only` missed in the `line` arm and
+  caught in the `line-with-properties` arm, and the controls' false-refusal
+  rate in both arms.
+- **Invariants touched:**
+  - I2: the verdict is the runtime's comparison of what the check's process
+    reported against the pinned seed and case count.
+  - I3: property files are admitted, locked, and hashed with the acceptance
+    tests, so editing one after `test-design` is `lock-tamper`.
+  - I5: no slot, no registered property, an unreported registration, fewer
+    cases than pinned, a different seed, or an unreadable report each refuse.
+  - I8: every rule above has an assertion.
+  - I1: the preload is one more read-only mount from a scratch path outside
+    the Vault, as the scanner's rules already are (`packages/api/src/scan.ts:131`).
+  - I10.
+- **Pending registry entries owed:** none. `grep R25` over
+  `packages/conformance/src` finds no owner.
+- **Gate paths:** the declared contract changes live in
+  `packages/integrity/src/types.ts` and `packages/adapters/src/types.ts`, and
+  the assertions live in `packages/conformance/`. All three are protected
+  (`.github/protected-paths.txt`), so the pull request carries
+  `gate-change`.
+
+**Assumptions, each verified:**
+
+- **The runtime can pin the seed and the case count without trusting the
+  file.** vitest 4.1.11 has no `--setupFiles` flag. Run, it fails with
+  `CACError: Unknown option --setupFiles`. Setting `NODE_OPTIONS=--import=<file>`
+  does work. It loads a runtime file in vitest's main process and in every
+  fork. That file imports the tree's own fast-check ESM build, resolved from
+  `node_modules/fast-check/package.json`'s `exports['.'].import.default`, so
+  it is the same instance the test imports. It then calls `configureGlobal`
+  with the seed, `numRuns`, and a reporter.
+  - Run with seed 42 and 37 runs on a scratch repository (fast-check 4.3.0,
+    vitest 4.1.11). A passing property reported `numRuns: 37`. A failing one
+    reported `failed: true` with the shrunk counterexample `[0]`, and vitest
+    exited non-zero.
+  - An `asyncProperty` reports through the same reporter.
+  - A file that passes `{ numRuns: 3, seed: 9 }` reports 3 runs, which the
+    runtime refuses.
+- **A report names its registration.** `new Error().stack` inside the
+  reporter carries the source-mapped `file:line:col` of the `fc.assert`
+  call. Run, it gave `test/mul.property.test.ts:4:29` and `:5:29`, matching
+  the source. So every statically found registration can be required to
+  report, and one that never ran is a refusal, not a silent pass.
+- **The check image runs it.** The pinned `node@sha256:83f487e0…` is Node
+  v22.23.2 (`docker run … node -e process.version`), which supports
+  `--import`.
+- **The sandbox can carry it.** `ExecOptions.env` exists
+  (`packages/sandbox/src/types.ts:251`), and read-only `others` mounts exist
+  (`scan.ts:131`).
+- **The only route from a check to the host is its exit code, stdout, and
+  stderr.** A check's tree is read-only, and no report reaches the host
+  (`packages/api/src/line.ts:1556-1567`, D-P7-05). The reports therefore
+  travel on stdout, each line tagged with a per-check nonce.
+- **A property check can reuse the suite machinery.** `commandOf`,
+  `suitesRun`, and `suiteBindingProblems`
+  (`packages/api/src/verification.ts`) bind an acceptance check's named
+  tests to the base's runner and to the admitted acceptance tests. A
+  property check is bound the same way.
+- **R15's base run includes it** once the check declares `onBase`
+  (`packages/api/src/base.ts:14`, `declaredChecks`).
+- **The drafter refuses every kind but acceptance and behavioral**
+  (`packages/api/src/drafting.ts:600`), so drafting a property check needs
+  that list widened.
+- **Corpus v1 is released and pinned by digest**
+  (`packages/benchmark/src/corpus.ts:119-121`), and `loadCorpus` refuses an
+  edited release. So `edge-case-only` goes into a new version, v2.
+- **A corpus repository can depend on fast-check.** It is installed from
+  the repository's lockfile with registry egress
+  (`packages/benchmark/src/line.ts:107-125`).
+
+**Where the code differs from the entry:**
+
+- **"`CheckResult` gains the seed, the cases run, and the counterexample."**
+  The verdict needs no new `FailedCheck` cause. A property check's result
+  carries an `expectation`, the runtime's comparison of the exit code, the
+  seed, and each registration's case count against what was pinned. That is
+  what `expectation` already means (A-P8-01), so a shortfall fails as
+  `expectation` and the evidence says which field.
+- **"How a run is counted."** The count is fast-check's own `numRuns` from
+  the reporter, keyed by call site. It is not an inventory of the tree.
+
+### D-R25-02: how the runtime pins and counts a property run
+
+- **Chosen:** `NODE_OPTIONS=--import=<runtime preload>`, under vitest, from
+  a read-only mount. Each report goes to stdout as
+  `PROPERTY-RUN <nonce> <json>`, keyed by the `file:line` of its
+  `assert` call. The verdict requires all of the following:
+  - exit code 0;
+  - at least one report from every registration the adapter found
+    statically;
+  - every report on the pinned seed;
+  - every passing report at or above the pinned case count;
+  - no report with `failed: true`.
+- **Rejected:**
+  - *A harness run by node itself, without vitest.* Node's type stripping
+    does not map the `.js` specifiers TypeScript projects use onto their
+    `.ts` sources, so it would refuse sound code for its imports.
+  - *A runtime vitest config passed with `--config`.* It replaces the base's
+    config, and with it the selection rule `selectSuites` mirrors.
+  - *Trusting fast-check's defaults in the file.* The file could set
+    `numRuns: 1`.
+- **Known limit:** the code under test runs in the same process as the
+  reporter, so it can forge a report line, as it can already exit 0 and pass
+  an acceptance check. The nonce stops an accidental match, not a forgery.
+  That gap is M3's coverage-the-suite-cannot-forge work (D-P7-05), not this
+  unit's.
+- **Reverse:** drop the `property` arm of `commandOf`'s environment, and the
+  kind falls back to refusing at admission.
+
+### D-R25-03: fast-check 4 only
+
+- **Chosen:** the slot is filled only for fast-check 4 declared beside
+  vitest 4. Vitest 3 was not run either.
+- **Why:** fast-check 4 under vitest is what was run (D-R25-01). Jest and
+  fast-check 3 were not run, and an unrun pairing is not claimed.
+- **Reverse:** add a major or a runner to the detector after running the
+  same probe on it.
+
+### D-R25-04: corpus v2 becomes current, and the tier runs two arms
+
+- **Chosen:** `corpus/v2` copies v1 and adds the following:
+  - `fast-check` in calc's lockfile;
+  - `test/property/multiply.property.test.ts` and `verify-property.json`
+    (`verify.json` plus a required property check declared `fails` on the
+    base), both under `arms/line-with-properties/calc/`. That overlay is
+    laid over calc for that arm alone. calc has no vitest config, so its
+    `unit` check runs every suite it holds. A property file in the shared
+    repository would therefore run in the `line` arm too, under fast-check's
+    own random seed, and that arm would no longer be without properties.
+    In the property arm, `unit` runs the file in the same way, unpinned,
+    beside the pinned property check;
+  - the `edge-case-only` item, `Math.abs(a * b)`. It is right on the three
+    acceptance inputs and wrong when the signs differ, which "the product of
+    two finite numbers" covers;
+  - a `gate-failed` group whose prefixes add `gate-failed:property`.
+
+  The manifest names two arms: `line`, over `verify.json`, and
+  `line-with-properties`, over `verify-property.json`. `CURRENT_CORPUS`
+  becomes `v2`. The tier test runs the current corpus and writes
+  `docs/benchmark/v2-deterministic.json`.
+- **Why:** the entry asks for detection with and without property checks
+  on the same items and controls. Two arms over one corpus give exactly
+  that, and v1's released result stays as it was committed.
+- **Rejected:** *editing v1 and re-pinning its release.* That defeats the
+  pin. *Running v1's tier beside v2's in CI.* It doubles the job, and v2's
+  `line` arm already reruns every v1 item.
+- **Reverse:** set `CURRENT_CORPUS` back to `v1`, and point the tier test at
+  `v1-deterministic.json`.
+
+### D-R25-05: policy may require a property check per authorization rule (A-R25-01)
+
+- **Found:** the entry binds "Policy may require a property check for each
+  authorization rule R17's security part names". No policy field expresses
+  that (`packages/core/src/policy/types.ts`). Today the rule that every
+  authorization rule needs a denial check is the runtime's, not policy's
+  (`packages/api/src/security.ts:130`). The entry's contract-amendment list
+  names no policy change. Building it needs one, which `CLAUDE.md` rule 6
+  says waits for the maintainer.
+- **Recommended:** a policy field `propertyPerAuthorizationRule`, `false`
+  when absent. When it is true, the `test-design` exit refuses, naming the
+  rule, unless a required property check names the rule in `deniesRule`.
+- **Confirmed** by the maintainer on 2026-11-22, as recommended. This is
+  A-R25-01, a contract change beside the ones the entry lists.
+- **Built:**
+  - `PolicyDocument.propertyPerAuthorizationRule?: boolean` and
+    `Policy.propertyPerAuthorizationRule: boolean`. Absent means `false`,
+    and a value that is not a boolean is refused
+    (`packages/core/src/policy/types.ts`, `validation.ts`, `engine.ts`).
+  - `PropertyCheckSpec.deniesRule?: string`, which, like every `deniesRule`,
+    must be on a required check.
+  - `denialRefusal` reads the field. A property check never stands in for
+    the denial check.
+  - When the field is set, a rule with no required property check naming it
+    refuses the `test-design` exit as `denial-check-missing`, naming the
+    rule. The message says it is the property check that is missing.
+- **Chosen:** the existing `denial-check-missing` reason, rather than a new
+  one. Both refusals answer the same question, whether each rule the
+  security part names is exercised by a locked check. A new `StationRefusal`
+  reason would be a second core contract change for one message.
+- **Reverse:** drop the field and the third argument to `denialRefusal`,
+  and make a property check's `deniesRule` `never` again.
+
+### D-R25-06: what the deterministic tier measured
+
+- **Run:** `pnpm --filter @olympus-ai/benchmark run deterministic` with
+  `BENCHMARK_WRITE=1`, on Docker on the maintainer's machine, with
+  `FACTORY_CONTAINER_UID=1000` and `FACTORY_CONTAINER_GID=1000`, since a
+  Windows host has no uids. It took 50 minutes for 15 deterministic items
+  in each of two arms. The result is `docs/benchmark/v2-deterministic.json`.
+- **`line` arm:** detection 7 of 9, with a 95% lower bound of 0.450. It
+  misses `hard-coded-output` and `edge-case-only`. On each of the 14 items
+  v1 shares, its verdicts and causes are identical to
+  `v1-deterministic.json`.
+- **`line-with-properties` arm:** detection 9 of 9, with a 95% lower bound
+  of 0.717. It catches both items with `gate-failed:property:expectation`.
+  calc's `unit` check also fails on both, because in this arm it runs the
+  property file unpinned (D-R25-04).
+- **False refusal:** 1 of 6 controls in both arms, with a 95% upper bound of
+  0.582. The control is `assertion-tightened`, which escalates for an
+  assertion change as it did in v1. The property checks refused no control.
+- **Not claimed:** that property checks reduce false-done in general. Two
+  seeded items and six controls on one repository are the sample, and the
+  bounds say how little that is.
+
+## R25 amendment: external adversarial review
+
+Both families counted on the first run. Full record:
+`docs/reviews/2026-11-22-R25-property-checks-triage.md`.
+
+- **Fixed (codex-2), 12e1bd3:** admission refuses a use of fast-check's
+  `assert` that the parse cannot locate. That covers a computed access, the
+  namespace used as a value, and an `assert` not called where it is named.
+  Reverse: drop the reference checks in `FastCheckAdapter.registrations`.
+- **Fixed (codex-3, gemini-3, codex-5), 2cfa4ba:**
+  - The preload reports that it configured the framework, and evidence
+    without that report is unreadable.
+  - Base `fails` is met by a failed run whose other reports are sound, or by
+    a file that never reached a property (no report, non-zero exit), as an
+    acceptance check's import failure is.
+  - `propertyOutcome` never holds over an empty registration set.
+
+  This replaces D-R25-02's rule that a property check must report a failed
+  run on the base. Reverse: restore that rule, and drop the ready line.
+- **Known limit (codex-1, gemini-1, gemini-4):** the code under test can
+  forge reports from inside the check's process, as D-R25-02 recorded. Filed
+  as #216, which also covers acceptance checks. No unit owns it yet.
+- **No change (gemini-2):** a fast-check swapped through the lockfile is a
+  config change, and it escalates at `integrate`.
+- **Rejected (codex-4):** a `deniesRule` on a tautology satisfies the policy
+  just as R17's denial checks are satisfied by naming the rule. Whether a
+  check is adequate is the critic's to judge.
+
 ## R40: Admission enforces the readiness ceiling
 
 Started on `v2` at eb93b71 as `unit/r40` and rebased onto 3fde9eb (R38, #204) before shipping; R38 touches no file R40 changes but `docs/decisions.md`, whose tail both appended to. Issues #129, #38. The start-unit
