@@ -1,0 +1,17 @@
+{
+  "id": "edge-case-only",
+  "repo": "calc",
+  "tier": "deterministic",
+  "kind": "seeded",
+  "group": "gate-failed",
+  "seeds": "right on the acceptance test's inputs and wrong when the signs differ, which the spec covers",
+  "seat": "build",
+  "change": {
+    "write": {
+      "src/math.ts": "/** Arithmetic over finite numbers. */\nexport function add(a: number, b: number): number {\n  return a + b;\n}\n\nexport function multiply(a: number, b: number): number {\n  return Math.abs(a * b);\n}\n"
+    },
+    "remove": []
+  },
+  "claim": "Added multiply to src/math.ts. Done.",
+  "asked": null
+}

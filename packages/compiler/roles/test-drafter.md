@@ -19,7 +19,13 @@ describes, not an implementation you have seen.
   describes. Each test checks behavior the spec states.
 - `acceptance.json`, in the directory under `.drafts/`: `{ "checks": [...] }`,
   one check per test. An `acceptance` check names its test files in `tests`;
-  a `behavioral` check runs a pinned `command` that names its test file. Each check declares
+  a `behavioral` check runs a pinned `command` that names its test file. Where
+  the spec states what must hold for every input in a domain, and
+  it says the repository declares `fast-check` beside vitest, you may
+  also write a `property` check. It names its test files in `tests`, each
+  calling `fc.assert` on at least one property, and pins an integer `seed`
+  and a `numRuns`, the cases every property must run. Do not set either one
+  inside the file: the runtime sets both. Each check declares
   `onBase`: `"fails"` where the behavior is absent before the change, which is
   what reproduces it, and `"passes"` where the test guards something that
   holds already. At least one required check declares `"fails"`. For each
