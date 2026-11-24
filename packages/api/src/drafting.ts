@@ -56,6 +56,7 @@ import type {
 } from '@olympus-ai/core';
 import type { CheckSpec } from '@olympus-ai/integrity';
 import { criticFindingsOf, draftDigest } from '@olympus-ai/vault';
+import { resolveCriticFindings } from './findings.js';
 import type { BaseRunRecord, CriticFinding, CriticRecord, DecisionCause, DraftFile, DraftLockRecord, DraftRecord, Vault } from '@olympus-ai/vault';
 import { baseMismatches, baseRefusal } from './base.js';
 import { recordDecision } from './decisions.js';
@@ -925,6 +926,11 @@ export async function lockApproved(ctx: LineContext, station: DraftStation, appr
   if (tampered.length > 0) return recordTamper(ctx, station, null, tampered, { phase: 'draft-lock' }, null);
   const digest = await treeDigest(base);
   if (digest !== lock.baseTreeSha256) throw new Error(`line: the base is ${digest} after ${station}'s draft was written, not the ${lock.baseTreeSha256} its lock recorded`);
+
+  // The critic findings the lock resolves, once it holds: derived from the draft records alone, and derived
+  // again by a resume, where each outcome already written is refused and nothing more is written (R28).
+  const lockRef = draftsOf(ctx.state, station).locked;
+  if (lockRef !== null) await resolveCriticFindings(vault, ctx.state, station, lockRef, lock, () => new Date().toISOString());
 
   applyLock(ctx, station, record);
   ctx.baseTreeSha256 = lock.baseTreeSha256;

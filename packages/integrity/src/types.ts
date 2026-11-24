@@ -291,11 +291,12 @@ export interface TamperReport {
   coverageDelta: number | null;
   /**
    * Each changed file's changed executable lines, executed and not, read from
-   * the same report as `coverageDelta` and null exactly when it is (R28). The
-   * line numbers are the head tree's. A finding's resolution reads these,
-   * never the fraction.
+   * the same report as `coverageDelta` and null exactly when it is (R28),
+   * naming the pinned coverage check whose report it is, so a reader judges
+   * that check's result beside it. The line numbers are the head tree's. A
+   * finding's resolution reads these, never the fraction.
    */
-  changedLines: ChangedLineCoverage[] | null;
+  changedLines: { check: string; files: ChangedLineCoverage[] } | null;
   protectedPathsTouched: string[];
 }
 

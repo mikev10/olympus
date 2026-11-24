@@ -50,6 +50,8 @@ describe('changedLineCoverage', () => {
     const adapter = await adapterFor({ '/workspace/src/a.ts': entry('/workspace/src/a.ts', { 1: 1, 2: 5, 3: 0 }) });
     // Lines 2 and 3 changed and are executable; line 2 ran and line 3 did not. The comment is not executable.
     expect(await adapter.changedLineCoverage(base, head)).toBe(0.5);
+    // R28: the same lines, named, in the head tree's numbering.
+    expect(await adapter.changedLineReport(base, head)).toEqual([{ path: 'src/a.ts', executed: [2], unexecuted: [3] }]);
   });
 
   test('a changed source file the report does not mention counts every executable changed line as uncovered', async () => {

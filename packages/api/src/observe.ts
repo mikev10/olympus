@@ -28,6 +28,7 @@ import {
   type BranchCommit, type ChangeInverse, type CommitDiff,
 } from './history.js';
 import { readIntegration } from './line.js';
+import { resolveCodeFindings } from './findings.js';
 import { judgePlan, parsePlan, planDraftPath, type CheckReader, type CheckRun } from './observation-plan.js';
 
 /** The checkout the walk reads and the branch runs merge into: the target's default branch. */
@@ -331,7 +332,15 @@ export async function walkHistory(vault: Vault, target: ObserveTarget | null, po
       }
       coverage.walked += 1;
       const run = pending.get(commit.commit);
-      if (run !== undefined) open.push(run);
+      if (run !== undefined) {
+        open.push(run);
+        // The code findings this run's merged change resolved, if its evidence shows it covered them (R28). One
+        // whose history cannot be read stays open, and the walk names it (I5).
+        if (run.runId !== null) {
+          const { unreadable } = await resolveCodeFindings(vault, checkout, run.runId, stamp);
+          if (unreadable.length > 0) refusals.push({ part: 'history', cause: 'history-unreadable', detail: `the history of findings ${unreadable.join(', ')} could not be read against run ${run.runId}, so each stays open` });
+        }
+      }
       else if (!merged.has(commit.commit) && !closedRuns.has(commit.commit) && !closedBaseline.has(commit.commit)) {
         // A change no run made: the baseline. Its window opens when the walk first sees it (D-R8a-09).
         const opened: OpenedChange = { change: commit.commit, firstSeen: stamp(), committedAt: commit.committedAt, leadTime: await leadTimeOf(checkout, commit) };

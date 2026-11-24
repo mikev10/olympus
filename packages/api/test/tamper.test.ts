@@ -171,7 +171,7 @@ test('a pinned coverage check whose report is missing refuses; none pinned is nu
   const pkg = frameworks[0][1];
   const base = await tree({ 'package.json': pkg, 'src/x.ts': 'export const x = 1;\n' });
   const head = await tree({ 'package.json': pkg, 'src/x.ts': 'export const x = 2;\n' });
-  await expect(analyzeTamper(base, head, { protectedPaths: [], coverage: { report: join(head, 'coverage.json'), sourceRoot: '/workspace' }, commands: [], markers: [] })).rejects.toThrow(AdapterRefusal);
+  await expect(analyzeTamper(base, head, { protectedPaths: [], coverage: { check: 'coverage', report: join(head, 'coverage.json'), sourceRoot: '/workspace' }, commands: [], markers: [] })).rejects.toThrow(AdapterRefusal);
   expect((await analyzeTamper(base, head, { protectedPaths: [], coverage: null, commands: [], markers: [] })).coverageDelta).toBeNull();
 });
 
