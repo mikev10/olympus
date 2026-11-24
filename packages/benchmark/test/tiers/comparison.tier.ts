@@ -9,7 +9,8 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { expect, test } from 'vitest';
-import { compareRuns, comparisonName, serializeComparison } from '../../src/comparison.js';
+import { compareRuns, comparisonName, coverage, serializeComparison } from '../../src/comparison.js';
+import { loadCorpus } from '../../src/corpus.js';
 import type { BenchmarkResult } from '../../src/result.js';
 
 const DOCS = join(import.meta.dirname, '..', '..', '..', '..', 'docs', 'benchmark');
@@ -21,7 +22,15 @@ async function named(variable: string): Promise<{ file: string; result: Benchmar
 }
 
 test('the candidate against the baseline, by the rule fixed before either ran', async () => {
-  const comparison = compareRuns(await named('BENCHMARK_BASELINE'), await named('BENCHMARK_CANDIDATE'));
-  await writeFile(join(DOCS, comparisonName(comparison)), serializeComparison(comparison));
-  expect(comparison.change).toBe(comparison.noWorse && comparison.costsLess);
+  const baseline = await named('BENCHMARK_BASELINE');
+  const candidate = await named('BENCHMARK_CANDIDATE');
+  // Each result is held to the committed corpus it names before anything is compared: both arms, every item.
+  const corpus = await loadCorpus(baseline.result.corpus.version);
+  coverage(corpus, baseline);
+  coverage(corpus, candidate);
+  const comparison = compareRuns(baseline, candidate);
+  const path = join(DOCS, comparisonName(comparison));
+  await writeFile(path, serializeComparison(comparison));
+  // What is on disk is what was computed; the rule itself is held by the package's suite, not restated here.
+  expect(await readFile(path, 'utf8')).toBe(serializeComparison(comparison));
 });
