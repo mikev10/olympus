@@ -21,6 +21,7 @@ import { refuse } from './refusal.js';
 import { isDependencyTree } from './trees.js';
 import { parseModule } from './static.js';
 import type { CoverageAdapter, TestFrameworkAdapter } from './types.js';
+import type { ChangedLineCoverage } from '@olympus-ai/integrity';
 
 /** A report for a large repository runs to tens of megabytes; this bounds what one may cost to read. */
 export const REPORT_CAP = 256 * 1024 * 1024;
@@ -145,6 +146,10 @@ export class IstanbulCoverageAdapter implements CoverageAdapter {
   }
 
   async changedLineCoverage(base: string, head: string): Promise<number> {
+    return coverageFraction(await this.changedLineReport(base, head));
+  }
+
+  async changedLineReport(base: string, head: string): Promise<ChangedLineCoverage[]> {
     const report = await this.#readReport();
     const tests = new Set((await this.#options.tests.enumerateSuites(head)).map((file) => toPosix(file)));
     const headPosix = toPosix(head).replace(/\/+$/, '');
@@ -154,8 +159,7 @@ export class IstanbulCoverageAdapter implements CoverageAdapter {
     const changes = await diffTrees(base, head, isSource, {
       skipDirectory: (name) => isDependencyTree(name) || VCS_DIRECTORIES.has(name),
     });
-    let total = 0;
-    let covered = 0;
+    const out: ChangedLineCoverage[] = [];
     for (const { path, change } of changes) {
       if (change === 'removed') continue;
       const after = await readRegularFile(join(head, path), SOURCE_FILE_CAP);
@@ -169,13 +173,20 @@ export class IstanbulCoverageAdapter implements CoverageAdapter {
       // (D-P8-09), and an ignore comment is one of them.
       const executable = executableLines(after, path);
       for (const line of hits?.keys() ?? []) executable.add(line);
-      for (const line of changed) {
-        if (!executable.has(line)) continue;
-        total++;
-        if ((hits?.get(line) ?? 0) > 0) covered++;
-      }
+      const lines = [...changed].filter((line) => executable.has(line)).sort((a, b) => a - b);
+      if (lines.length > 0) out.push({ path, executed: lines.filter((line) => (hits?.get(line) ?? 0) > 0), unexecuted: lines.filter((line) => (hits?.get(line) ?? 0) === 0) });
     }
-    // No executable line changed, so no changed line is uncovered.
-    return total === 0 ? 1 : covered / total;
+    return out.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   }
+}
+
+/** The changed-line fraction from the per-line report: executed over executable, and 1 where no executable line changed, so no changed line is uncovered. */
+export function coverageFraction(files: readonly ChangedLineCoverage[]): number {
+  let total = 0;
+  let covered = 0;
+  for (const f of files) {
+    total += f.executed.length + f.unexecuted.length;
+    covered += f.executed.length;
+  }
+  return total === 0 ? 1 : covered / total;
 }

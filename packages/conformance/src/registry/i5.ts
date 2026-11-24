@@ -43,6 +43,7 @@ import { R37_I5 } from './gate-retry.js';
 import { R36B_I5 } from './init.js';
 import { R29_I5 } from './stacks.js';
 import { R25_ASSERTIONS } from './property.js';
+import { R28_ASSERTIONS } from './findings.js';
 import { R8A_I5 } from './observe.js';
 import { R8B_I5 } from './observe-plan.js';
 import { R8A_REVIEW_I5 } from './observe-review.js';
@@ -96,6 +97,8 @@ export const I5: InvariantEntry = {
     // R29: every supported stack carries every control the TypeScript set does.
     ...R29_I5,
     ...R25_ASSERTIONS.I5,
+    // R28: an unreadable or unlocated finding is never a clean one, and an unknown outcome is open.
+    ...R28_ASSERTIONS.I5,
     // R34: a lockfile an install cannot verify, or an install that fails a hash, starts no check.
     ...R34_I5,
     ...R40_I5,

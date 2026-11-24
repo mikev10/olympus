@@ -12,7 +12,7 @@ export {
   type HttpInput,
 } from './http.js';
 export { CONFIG_FILE_GLOBS, isConfigFile } from './config-files.js';
-export { IstanbulCoverageAdapter, REPORT_CAP, type IstanbulCoverageOptions } from './coverage.js';
+export { coverageFraction, IstanbulCoverageAdapter, REPORT_CAP, type IstanbulCoverageOptions } from './coverage.js';
 export {
   BEHAVIORAL_KINDS,
   buildAdapterSet,

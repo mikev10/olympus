@@ -29,7 +29,11 @@ class FixedCritic extends StubDriver {
 
   override async runTask(req: TaskRequest): Promise<TaskResult> {
     const result = await super.runTask(req);
-    return { ...result, claim: { narrative: JSON.stringify({ findings: this.findings }), filesChanged: [] }, model: this.resolveModel(req.tier) };
+    // Each finding cites the first draft file the critic was shown, as the runtime renders it (`--- <path>`), so it is located (R28).
+    const path = /--- ([^\n]+)\n/.exec(`${req.stablePrefix}\n${req.variableSuffix}`)?.[1];
+    if (this.findings.length > 0 && path === undefined) throw new Error('benchmark: the critic was shown no draft file to cite');
+    const findings = this.findings.map((note) => ({ path, note }));
+    return { ...result, claim: { narrative: JSON.stringify({ findings }), filesChanged: [] }, model: this.resolveModel(req.tier) };
   }
 }
 

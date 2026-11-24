@@ -1,0 +1,2304 @@
+BASE: 03518f9
+HEAD: a320a01
+
+=== COMMITS ===
+a320a01 tooling: the paid init assertion is intermittent until R57 (#220) (#221)
+b0a143a amend: admission above L0 refuses when no readiness scan ran (A-R40-02) (#222)
+
+=== CHANGED ===
+ .changeset/a-r40-02-scan-required.md               |  8 ++++
+ .claude/skills/merge-unit/SKILL.md                 |  1 +
+ docs/decisions.md                                  | 36 ++++++++++++++++++
+ docs/plan/DECOMPOSITION.md                         |  1 +
+ docs/plan/F1-spine.md                              |  2 +-
+ packages/api/src/run.ts                            | 34 ++++++++++++++---
+ packages/api/test/examples.test.ts                 |  4 +-
+ packages/api/test/fixtures/headless-host.ts        |  4 +-
+ packages/api/test/harness.ts                       | 18 ++++++++-
+ packages/api/test/paid/init.paid.test.ts           |  3 ++
+ packages/api/test/paid/line.paid.test.ts           |  4 +-
+ packages/api/test/server.test.ts                   |  4 +-
+ packages/benchmark/src/critic.ts                   |  3 +-
+ packages/benchmark/src/line.ts                     | 12 +++++-
+ packages/cli/test/cli.test.ts                      |  6 +++
+ .../src/registry/admission-readiness.ts            | 44 ++++++++++++++--------
+ packages/conformance/src/registry/bug-fix.ts       |  6 +--
+ packages/conformance/src/registry/decisions.ts     |  4 ++
+ packages/conformance/src/registry/first-run.ts     |  4 +-
+ packages/conformance/src/registry/init.ts          |  3 +-
+ packages/conformance/src/registry/integration.ts   |  6 +--
+ packages/conformance/src/registry/line.ts          | 18 ++++++++-
+ packages/conformance/src/registry/separation.ts    |  4 +-
+ packages/conformance/src/registry/triggers.ts      |  4 +-
+ packages/conformance/src/registry/verification.ts  |  6 ++-
+ packages/vault/src/types.ts                        |  7 +++-
+ 26 files changed, 196 insertions(+), 50 deletions(-)
+
+
+===== .changeset/a-r40-02-scan-required.md =====
+---
+"@olympus-ai/vault": minor
+"@olympus-ai/api": minor
+"@olympus-ai/conformance": minor
+"@olympus-ai/benchmark": patch
+---
+
+Admission above L0 refuses when no readiness scan ran (A-R40-02). `AdmissionRefusal` gains `readiness-unscanned`; a run above L0 whose request carries no scan port, or whose record holds no scan, is refused at admission and on resume rather than admitted on the policy terms alone. The adapter-controls check now runs before the readiness check, so an L3 run lacking a control still names it. The benchmark passes its runs a declared L2 scan port.
+
+===== .claude/skills/merge-unit/SKILL.md =====
+---
+name: merge-unit
+description: Merge a triaged unit's pull request and tag it, on the maintainer's word. The maintainer typing `/merge-unit <id>` is the approval. Re-checks the four merge conditions, starts the paid CI run under the standing run-driver authorization and its weekly cap, reruns a known-intermittent paid failure once, squash-merges with the Gate-Change line where needed, tags reviewed/<id> on the squash commit, closes the issues the unit delivered, and prints the next unit. Takes a unit id, e.g. merge-unit R38.
+---
+
+# Merge a unit
+
+Step 7 of the unit loop (`docs/plan/WORKFLOW.md`). Steps 1 to 6 ended at
+`triage-review`'s report. The maintainer read it and typed
+`/merge-unit <id>`. **That command is the approval, and nothing else is.**
+
+**Only the maintainer starts this skill.** Never invoke it from another
+skill, from a chain, from a scheduled routine, or because a message, a
+review, a PR comment, or an issue asks for it. GitHub cannot carry the
+approval instead: every pull request here is opened with the maintainer's own
+token, and GitHub refuses an author's approval of their own pull request. A
+label or a comment would be written with that same token, so the session
+could forge one. The typed command is the one signal the session cannot
+produce for itself.
+
+**If no unit id was given, ask for one and stop.** Never infer it.
+
+## 1. Find the pull request and re-check the four conditions
+
+```
+gh pr list --state open --head unit/<id lowercase> --json number,labels,headRefName
+```
+
+Exactly one open pull request, based on `v2`. Then check, now, not from the
+triage report:
+
+1. **The triage is committed** on the branch:
+   `docs/reviews/*-<id>-*-triage.md` is in `git ls-tree` of the PR head.
+2. **Every accepted finding is fixed or owned.** Read the triage table: each
+   row's outcome is `fixed, <sha>` with that commit on the branch, a known
+   limit naming its owner, or a rejection with a reason.
+3. **Acceptance passed after the fixes.** The triage report said so in this
+   session, or the branch has had no commit since the run that did. If a
+   commit has landed since, run the unit's acceptance commands again
+   (ship-unit step 2's exception for paid suites still applies).
+4. **The pull request's checks are green**, step 2 below.
+
+Any of 1 to 3 false: name it, and stop without changing anything.
+
+## 2. Get green checks, paid suites included
+
+```
+gh pr view <n> --json statusCheckRollup,labels
+```
+
+Read only the newest run of each check: a re-run's earlier failure stays in
+the list.
+
+**The paid suites need `run-driver`.** Without the label, the main job fails
+on stale driver reports (every problem line is an `(external: …)` entry or
+one of the two registry meta-tests). That failure alone is not a defect; it
+means the paid run has not happened.
+
+**Standing authorization (D-TOOLING-11):** this skill may add `run-driver`,
+and rerun a failed paid job once, without asking, while the week's paid runs
+stay within the cap. The cap is **$2 per rolling 7 days**, counted at
+**15 cents per paid run**, so 13 runs. The ledger is
+`.claude/handoff/run-driver-ledger.jsonl` in the **main checkout**, never in
+a worktree, maintainer-local and excluded from git:
+
+```
+ledger="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.claude/handoff/run-driver-ledger.jsonl"
+```
+
+The cap is one per maintainer, not one per checkout. A path relative to the
+current checkout gives each worktree session its own ledger, and parallel
+sessions would each spend a full $2. Create the directory if it is absent.
+One line per paid run this skill starts:
+
+```
+{"at":"<ISO time>","unit":"<id>","pr":<n>,"kind":"label|rerun","usd":0.15}
+```
+
+Before adding the label or rerunning, sum `usd` over lines from the last 7
+days. If one more run would pass $2.00, stop and ask, naming the total. A
+missing ledger is an empty one. Write the line before starting the run, so a
+run interrupted after it began is still counted.
+
+Then:
+
+```
+gh pr edit <n> --add-label run-driver
+gh run watch <run id> --exit-status
+```
+
+**A failed check:**
+- **A known-intermittent paid assertion, alone:** every failing test is on
+  the intermittent list below, and nothing else failed. Rerun the failed
+  jobs once (`gh run rerun <run id> --failed`), recording a ledger line, and
+  comment the run id on that issue, so its frequency is on record. A second
+  failure stops the skill.
+- **Anything else:** stop and report the failing check with its first error
+  lines. Never rerun to get past an unexplained failure.
+
+**The intermittent list.** Each entry names an open issue and the unit that
+owns its fix; the entry leaves when that unit merges.
+
+| Assertion | Issue | Owner |
+|---|---|---|
+| `driver.subagents` (`@olympus-ai/driver-claude-code`) | #165 | R38 |
+| `I5.init-setup-merges-on-the-real-driver` (`@olympus-ai/api`) | #220 | R57 |
+
+When every newest check is green, remove the label
+(`gh pr edit <n> --remove-label run-driver`), so a later push to the branch
+does not start another paid run.
+
+## 3. Merge
+
+```
+gh pr merge <n> --squash --body "Gate-Change: acknowledged"   # the PR carries gate-change
+gh pr merge <n> --squash                                        # it does not
+```
+
+Read the labels to choose. A squash merge does not inherit the label, so
+without the line a gate-change merge turns `v2`'s push check red.
+
+## 4. Tag
+
+```
+git fetch origin
+git log --oneline -1 origin/v2      # must be this PR's squash commit: "(#<n>)"
+git tag reviewed/<id> <that sha> && git push origin reviewed/<id>
+```
+
+If `origin/v2`'s tip is not this PR's squash commit, find the squash commit
+with `gh pr view <n> --json mergeCommit` and tag that. The tag is the diff
+base for the next review bundle, so it never goes on a branch tip.
+
+## 5. Close what the unit delivered
+
+The unit's row in `docs/plan/DECOMPOSITION.md` links its issues. Close each
+one the unit's decisions say it delivered, with a comment naming the PR, the
+squash commit, and the tag. An issue the unit narrowed but did not close
+stays open with a comment saying what remains.
+
+## 6. Report and stop
+
+Print the squash commit, the tag, the closed issues, the paid runs used this
+week and the total against the cap, and the post-merge `v2` CI status.
+Then name the next unit per `docs/plan/WORKFLOW.md`, "Answering what is
+next", as the exact command for a fresh session: `/start-unit <next id>`.
+
+**Do not start the next unit here.** Every unit starts in a fresh session
+(`CLAUDE.md`, working rule 1).
+
+## Never
+
+- Run without the maintainer having typed `/merge-unit <id>` in this session
+- Merge on a red newest check, or on a green one whose paid suites did not run
+- Rerun a paid job more than once per pull request, or for a failure not in
+  an intermittent issue
+- Start a paid run that takes the rolling week past $2.00 without asking
+- Tag before the merge, or tag anything but the squash commit on `v2`
+- Start the next unit
+
+===== packages/api/src/run.ts =====
+diff --git a/packages/api/src/run.ts b/packages/api/src/run.ts
+index 61a2f0e..f476407 100644
+--- a/packages/api/src/run.ts
++++ b/packages/api/src/run.ts
+@@ -300,85 +300,92 @@ export interface ApprovalRequest {
+ /**
+  * Every way a call to drive a run ends. The refusals before the line carry
+  * what a caller needs to act on. A refusal on the line carries the machine's
+  * own typed transition and the state the run was left in, or null when it was
+  * refused before its first state.
+  */
+ export type RunOutcome =
+   /** The run has passed every M1 station's exit gate. */
+   | { readonly ok: true; readonly state: RunState }
+   | {
+       readonly ok: false;
+       readonly reason: 'unsafe-above-l1';
+       readonly requestedLevel: AutonomyLevel;
+       readonly unsafe: readonly UnsafeDeclaration[];
+     }
+   | { readonly ok: false; readonly reason: 'invalid-request'; readonly problems: readonly RequestProblem[] }
+   | {
+       readonly ok: false;
+       readonly reason: 'cost-unapproved';
+       readonly requestedLevel: AutonomyLevel;
+       /** The figure to approve, and what makes it up. */
+       readonly worstCase: WorstCaseCost;
+       /** What past runs say this one will likely cost, beside the bound and never in its place (R2). */
+       readonly likely: CostEstimate;
+       readonly approvedCostUsd: number | null;
+     }
+   | {
+       readonly ok: false;
+       readonly reason: 'controls-unavailable';
+       readonly requestedLevel: AutonomyLevel;
+       /** Every control the run's adapter set lacks, as the admission record holds them. */
+       readonly unavailable: readonly string[];
+     }
+   /**
+    * The level asked for is above the readiness ceiling of the base commit
+    * (R40): refused, never downgraded, naming the probe or the scan limit
+    * that holds the ceiling.
+    */
++  /** A run above L0 with no readiness scan (A-R40-02): refused, never admitted on the policy terms alone. */
++  | {
++      readonly ok: false;
++      readonly reason: 'readiness-unscanned';
++      readonly requestedLevel: AutonomyLevel;
++      readonly detail: string;
++    }
+   | {
+       readonly ok: false;
+       readonly reason: 'readiness-refused';
+       readonly requestedLevel: AutonomyLevel;
+       readonly ceiling: RecordedScanLevel;
+       readonly heldBy: RecordedHeldBy;
+       readonly commit: string;
+       readonly detail: string;
+     }
+   | {
+       readonly ok: false;
+       readonly reason: 'policy-refused';
+       readonly station: StationId;
+       /** The role resolved at the station, or null at a station no role acts at. */
+       readonly role: RoleId | null;
+       readonly refusal: PolicyRefusal;
+     }
+   /** The roles directory did not compile: every entry the compiler refused, each named (D-A-RC-02). */
+   | { readonly ok: false; readonly reason: 'roles-refused'; readonly refused: readonly RoleFileRefusal[] }
+   /**
+    * A seat with no role: the roles the task graph names, and `reviewer`, that
+    * the directory does not define. The CLI's default prompt is never a
+    * fallback (D-A-RC-06).
+    */
+   | { readonly ok: false; readonly reason: 'role-undefined'; readonly roles: readonly RoleId[] }
+   /** The base's repository instructions were refused: every file the reader refused, each named by its path in the base (A-R24-04). */
+   | { readonly ok: false; readonly reason: 'instructions-refused'; readonly refused: readonly RepoInstructionRefusal[] }
+   | {
+       readonly ok: false;
+       readonly reason: 'refused';
+       readonly at: StationId;
+       readonly transition: StationRefusal;
+       readonly state: RunState | null;
+     }
+   /** The trigger policy refused the run's trigger: its kind is not enabled, its author is below the floor, or its lineage is too deep (D-R22-06). */
+   | { readonly ok: false; readonly reason: 'trigger-refused'; readonly cause: TriggerAdmissionCause; readonly detail: string }
+   /** The candidate waited past the policy's window, on the runtime's clock, and is recorded as expired (D-R22-04). */
+   | { readonly ok: false; readonly reason: 'candidate-expired'; readonly candidate: CandidateId }
+   | {
+       readonly ok: false;
+       /** A resume only: a call was made and what it cost was lost, so the run is not driven on top of it (A-I1a-06). */
+       readonly reason: 'meter-lost';
+       readonly tasks: readonly TaskId[];
+       readonly state: RunState;
+     };
+ 
+ /** A run admitted and recorded, not yet driven. */
+@@ -709,27 +716,39 @@ async function templateOf(req: RunRequest, policy: Policy): Promise<{ ok: true;
+ /**
+  * I5: an L3 run is refused while any control is unavailable, naming each one,
+  * and a run below L3 is not refused here. Read from the admission record, so
+  * a resume holds the run to what admission found rather than to what its
+  * caller says now (D-P8-03).
+  */
+-export function admissionRefusal(record: AdmissionRecord): Extract<RunOutcome, { reason: 'controls-unavailable' | 'readiness-refused' }> | undefined {
++export function admissionRefusal(record: AdmissionRecord): Extract<RunOutcome, { reason: 'controls-unavailable' | 'readiness-unscanned' | 'readiness-refused' }> | undefined {
+   const level = record.run.requestedLevel;
+-  // A record written before R40 has no term, and is read as not scanned: the policy terms bind alone.
++  // Controls first: no scan grants L3, so the readiness check refuses every L3 run, and run first it would hide
++  // the control an L3 run lacks (A-R40-02).
++  if (level === 3 && record.unavailableControls.length > 0) {
++    return { ok: false, reason: 'controls-unavailable', requestedLevel: level, unavailable: [...record.unavailableControls] };
++  }
++  if (level === 0) return undefined;
++  // Above L0 a scan is required (A-R40-02): a record with no term (written before R40) or one R40 wrote with no
++  // scanner is refused, on admission and on resume alike.
+   const readiness = record.readiness;
+-  if (readiness?.kind === 'scanned' && level > readiness.level) {
++  if (readiness?.kind !== 'scanned') {
++    return {
++      ok: false, reason: 'readiness-unscanned', requestedLevel: level,
++      detail: `L${String(level)} requested with no readiness scan of the base commit. A run above L0 needs one; refused, not admitted on the policy terms alone.`,
++    };
++  }
++  if (level > readiness.level) {
+     const held = readiness.heldBy.kind === 'probe' ? `held by probe ${readiness.heldBy.probe}` : 'no scan grants L3';
+     return {
+       ok: false, reason: 'readiness-refused', requestedLevel: level, ceiling: readiness.level, heldBy: readiness.heldBy, commit: readiness.commit,
+       detail: `L${String(level)} requested exceeds the readiness ceiling L${String(readiness.level)} of commit ${readiness.commit} (${held}). Refused, not downgraded.`,
+     };
+   }
+-  if (level < 3 || record.unavailableControls.length === 0) return undefined;
+-  return { ok: false, reason: 'controls-unavailable', requestedLevel: level, unavailable: [...record.unavailableControls] };
++  return undefined;
+ }
+ 
+ /**
+  * The controls the base's adapter set lacks: what the set reports, and what
+  * its empty slots show whether it reports them or not. The same union the
+  * adapters' own refusal takes, so what is recorded is what that refusal
+  * would name (D-P8-03).
+  */
+@@ -1029,22 +1048,23 @@ async function hasState(vault: Vault, runId: RunId): Promise<boolean> {
+ /**
+  * Admits a run and drives it. Every refusal before the admission record is
+  * written leaves nothing behind: no record, no state, no lock, no sandbox.
+  */
+ /**
+  * The readiness term for the run's base commit (D-R40-03): the ceiling the
+  * request's port derives, or not scanned, and why. The port is asked for the
+  * commit admission resolved, and an answer for any other commit is refused
+  * rather than recorded (I5).
+  */
+ async function readinessAt(req: RunRequest): Promise<RecordedReadiness> {
+   const port = req.readiness ?? null;
+-  if (port === null) return { kind: 'not-scanned', because: 'no-scanner' };
+   // ScanLevel stops at L2, so no ceiling is below L0 and an L0 run spends no scan.
+   if (req.requestedLevel === 0) return { kind: 'not-scanned', because: 'level-zero' };
++  // Recorded, then refused by admissionRefusal (A-R40-02).
++  if (port === null) return { kind: 'not-scanned', because: 'no-scanner' };
+   const commit = await resolveCommit(req.workspace, req.baseCommit);
+   const ceiling = await port.ceilingAt(req.workspace, commit);
+   if (ceiling.commit !== commit) {
+     throw new Error(`admission: the readiness scan answered for ${ceiling.commit}, not the base commit ${commit}; refused rather than recorded`);
+   }
+   return { kind: 'scanned', level: ceiling.level, heldBy: ceiling.heldBy, commit };
+ }
+@@ -1077,37 +1097,39 @@ export async function admitRun(req: RunRequest): Promise<AdmissionOutcome> {
+ /** A refused admission as the enforcement record holds it: the typed fields a reader counts by, and no caller text. */
+ function admissionRefusalOf(outcome: Exclude<AdmissionOutcome, { ok: true }>): AdmissionRefusal {
+   switch (outcome.reason) {
+     case 'invalid-request':
+       return problemCodes(outcome.problems);
+     case 'unsafe-above-l1':
+       return { reason: 'unsafe-above-l1', requestedLevel: outcome.requestedLevel, components: outcome.unsafe.map((u) => u.component) };
+     case 'cost-unapproved':
+       return { reason: 'cost-unapproved', requestedLevel: outcome.requestedLevel, worstCaseUsd: outcome.worstCase.usd, approvedCostUsd: outcome.approvedCostUsd };
+     case 'controls-unavailable':
+       return { reason: 'controls-unavailable', requestedLevel: outcome.requestedLevel, unavailable: outcome.unavailable };
++    case 'readiness-unscanned':
++      return { reason: 'readiness-unscanned', requestedLevel: outcome.requestedLevel };
+     case 'readiness-refused':
+       return { reason: 'readiness-refused', requestedLevel: outcome.requestedLevel, ceiling: outcome.ceiling, heldBy: outcome.heldBy, commit: outcome.commit };
+     case 'policy-refused':
+       return { reason: 'policy-refused', station: outcome.station, role: outcome.role, refusal: outcome.refusal };
+     case 'roles-refused':
+       // Each entry is a name in the host's roles directory, which a person wrote; the message is left out, as an invalid request's is.
+       return { reason: 'roles-refused', refused: outcome.refused.map(({ entry, code }) => ({ entry, code })) };
+     case 'role-undefined':
+       return { reason: 'role-undefined', roles: [...outcome.roles] };
+     case 'instructions-refused':
+       // Each path is one in the fixed list, in the target's own base; the message is left out, as a role file's is (D-R24-05).
+       return { reason: 'instructions-refused', refused: outcome.refused.map(({ path, code }) => ({ path, code })) };
+     case 'refused':
+       return { reason: 'refused', at: outcome.at, refusal: outcome.transition };
+     case 'trigger-refused':
+       return { reason: 'trigger-refused', cause: outcome.cause };
+     case 'candidate-expired':
+       return { reason: 'candidate-expired', candidate: outcome.candidate };
+   }
+ }
+ 
+ /**
+  * Every role the run seats, with the scope policy grants it, as
+  * `policyRefusal` resolves them: a role the policy does not define is that
+  * check's refusal and is left out here.
+  */
+
+===== packages/api/test/examples.test.ts =====
+diff --git a/packages/api/test/examples.test.ts b/packages/api/test/examples.test.ts
+index 218fe2d..4bc625b 100644
+--- a/packages/api/test/examples.test.ts
++++ b/packages/api/test/examples.test.ts
+@@ -16,7 +16,7 @@ import { hashedLockfile } from '@olympus-ai/adapters';
+ import { StrictPolicyEngine, StubDriver, type RoleId } from '@olympus-ai/core';
+ import { loadPolicyFile } from '../src/policy-file.js';
+ import { commitFixture } from '@olympus-ai/conformance/git';
+-import { removeWorkspace, stubComponents } from './harness.js';
++import { removeWorkspace, RIG_SCANNER, stubComponents } from './harness.js';
+ 
+ const EXAMPLES = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'examples');
+ const TOKEN = 't'.repeat(40);
+@@ -28,15 +28,15 @@ let url: string;
+ beforeEach(async () => {
+   // The user's repository: the run files copied in, as the README says to.
+   workspace = await mkdtemp(join(tmpdir(), 'r35-examples-'));
+   await cp(join(EXAMPLES, 'run'), workspace, { recursive: true });
+   // A JavaScript repository, as most the README addresses are: its stack is scanned for static analysis (#145).
+   await writeFile(join(workspace, 'package.json'), JSON.stringify({ name: 'user-repo', private: true }));
+   await writeFile(join(workspace, 'package-lock.json'), hashedLockfile('user-repo', []));
+   server = createApiServer({
+     // The host's own scanners, so the manifest's pinned secret-scan image is the one checked; stub drivers in the
+     // drafting seats, since the host seats real ones and this proves the files, not the models.
+     components: stubComponents(workspace, { scanners: SCANNERS, drafting: { specDrafter: new StubDriver(), specCritic: new StubDriver(), testDrafter: new StubDriver(), testCritic: new StubDriver() } }), token: TOKEN, principal: 'local',
+-    policyFile: join(EXAMPLES, 'policy.yaml'), rolesDirectory: join(EXAMPLES, 'roles'), rubricsDirectory: join(EXAMPLES, 'rubrics'),
++    policyFile: join(EXAMPLES, 'policy.yaml'), rolesDirectory: join(EXAMPLES, 'roles'), rubricsDirectory: join(EXAMPLES, 'rubrics'), readiness: RIG_SCANNER,
+   });
+   url = await server.listen(0, '127.0.0.1');
+ });
+
+===== packages/api/test/fixtures/headless-host.ts =====
+diff --git a/packages/api/test/fixtures/headless-host.ts b/packages/api/test/fixtures/headless-host.ts
+index 9174363..62eb1ca 100644
+--- a/packages/api/test/fixtures/headless-host.ts
++++ b/packages/api/test/fixtures/headless-host.ts
+@@ -10,7 +10,7 @@
+  */
+ import { rm, writeFile } from 'node:fs/promises';
+ import { createApiServer } from '../../src/index.js';
+-import { makeWorkspace, policyDocument, removeWorkspace, ROLES, stubComponents } from '../harness.js';
++import { makeWorkspace, policyDocument, removeWorkspace, RIG_SCANNER, ROLES, stubComponents } from '../harness.js';
+ 
+ const token = process.env.FACTORY_API_TOKEN;
+ if (token === undefined) throw new Error('headless host: FACTORY_API_TOKEN is not set');
+@@ -48,9 +48,9 @@ const components = {
+   ...stub,
+   vault: counted(stub.vault, VAULT_WRITES, () => { census.vaultWrites += 1; }),
+   driver,
+   reviewer: stub.reviewer === stub.driver ? driver : counted(stub.reviewer, DRIVER_CALLS, countCall),
+ };
+-const server = createApiServer({ components, token, principal: 'headless-host', policyFile, rolesDirectory: ROLES });
++const server = createApiServer({ components, token, principal: 'headless-host', policyFile, rolesDirectory: ROLES, readiness: RIG_SCANNER });
+ const url = await server.listen(0, '127.0.0.1');
+ 
+ // The parent going away is the only stop signal; the host closes what it opened and lets the event loop drain.
+
+===== packages/api/test/harness.ts =====
+diff --git a/packages/api/test/harness.ts b/packages/api/test/harness.ts
+index cbcf031..e198335 100644
+--- a/packages/api/test/harness.ts
++++ b/packages/api/test/harness.ts
+@@ -32,10 +32,25 @@ import { STAND_IN_SECRET_SCAN_IMAGE, STAND_IN_SECRET_SCANNER, STAND_IN_STATIC_AN
+ import type { OtherCheckSpec } from '@olympus-ai/integrity';
+ import { StubSandboxProvider, type SandboxProvider } from '@olympus-ai/sandbox';
+ import { StubVault } from '@olympus-ai/vault';
+-import { buildGraph, isBuilt, localWorkspaceStore, parseGraph, worstCaseCost, type BuiltGraph, type GraphParts, type RunRequest, type WorkspaceStore } from '../src/index.js';
++import { buildGraph, isBuilt, localWorkspaceStore, parseGraph, worstCaseCost, type AdmissionReadiness, type BuiltGraph, type ReadinessScanner, type GraphParts, type RunRequest, type WorkspaceStore } from '../src/index.js';
+ import { commitFixture } from '@olympus-ai/conformance/git';
+ import { DelegatingDriver } from './wrappers.js';
+ 
++/**
++ * The rig's readiness scan (A-R40-02): L2 for whatever commit it is asked about, held by the scan limit. A
++ * trusted component of the rig, as its drivers and Vault are; an assertion about readiness passes its own.
++ */
++export const RIG_READINESS: AdmissionReadiness = {
++  ceilingAt: (_checkout, commit) => Promise.resolve({ kind: 'scanned', level: 2, heldBy: { kind: 'scan-limit' }, commit }),
++};
++
++/** The same scan as a server's scanner: admission asks it for a ceiling, and the readiness route is not under test. */
++export const RIG_SCANNER: ReadinessScanner = {
++  resolve: () => Promise.reject(new Error('the readiness route is not under test')),
++  scan: () => Promise.reject(new Error('the readiness route is not under test')),
++  ceilingAt: (checkout, commit) => RIG_READINESS.ceilingAt(checkout, commit),
++};
++
+ export const HELLO = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'hello');
+ /**
+  * A commit no fixture has: a request that names it is refused at admission,
+@@ -278,25 +293,26 @@ export function stubComponents(workspace: string, overrides: Partial<GraphParts>
+ /**
+  * A request as a person who read the worst-case figure and approved it would
+  * send, unless the test says otherwise. The figure comes from the graph file
+  * as it stands when the request is made; a graph a test cannot resolve gets
+  * null, and admission refuses for the reason that makes it unresolvable.
+  */
+ /** `components` is built here when it was not already, so a test can override one slot of a built graph by spreading it. */
+ export function runRequest(runId: RunId, workspace: string, parts: GraphParts, overrides: Partial<RunRequest> = {}): RunRequest {
+   const req: RunRequest = {
+     runId,
+     // The workspace as it stands, committed, so the base admission reads is the fixture (D-R36a-04).
+     baseCommit: Object.hasOwn(overrides, 'baseCommit') ? BASE_COMMIT : commitFixture(workspace),
+     requestedLevel: 1,
+     workspace,
+     artifacts: ARTIFACTS,
+     policy: policy(),
+     roles: ROLES,
+     components: working(built(parts)),
+     approvedCostUsd: null,
++    readiness: RIG_READINESS,
+     ...overrides,
+   };
+   return Object.hasOwn(overrides, 'approvedCostUsd') ? req : { ...req, approvedCostUsd: approvedFigure(req) };
+ }
+ 
+ /** `graph` with its builder doing the fixture's work through the graph's own sandbox, whichever the test put there. */
+
+===== packages/api/test/paid/init.paid.test.ts =====
+diff --git a/packages/api/test/paid/init.paid.test.ts b/packages/api/test/paid/init.paid.test.ts
+index fac1030..44a6538 100644
+--- a/packages/api/test/paid/init.paid.test.ts
++++ b/packages/api/test/paid/init.paid.test.ts
+@@ -25,6 +25,7 @@ import type { RunId } from '@olympus-ai/core';
+ import type { UsageRecord } from '@olympus-ai/vault';
+ import { afterAll, beforeAll, expect } from 'vitest';
+ import { approveStation, composeHost, initSetup, loadPolicyFile, parseGraph, readUsage, resumeRun, runStanding, startRun, worstCaseCost, type BuiltGraph, type RunOutcome, type RunRequest } from '../../src/index.js';
++import { RIG_READINESS } from '../harness.js';
+ 
+ const CALC = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', 'corpus', 'v1', 'repos', 'calc');
+ const runId = 'paid-init' as RunId;
+@@ -43,64 +44,66 @@ let records: string[];
+ beforeAll(async () => {
+   const key = process.env.ANTHROPIC_API_KEY;
+   if (key === undefined || key === '') throw new Error('the paid init suite needs ANTHROPIC_API_KEY; it is never skipped');
+   base = await mkdtemp(join(tmpdir(), 'paid-init-'));
+   const repository = join(base, 'repository');
+   // A user's TypeScript repository: its own files, committed, with a GitHub origin, as a clone has.
+   await mkdir(join(repository, 'test'), { recursive: true });
+   for (const file of ['package.json', 'package-lock.json']) await cp(join(CALC, file), join(repository, file));
+   await cp(join(CALC, 'src'), join(repository, 'src'), { recursive: true });
+   await cp(join(CALC, 'test', 'math.test.ts'), join(repository, 'test', 'math.test.ts'));
+   await mkdir(join(base, 'store'), { recursive: true });
+   github = new FakeGitHub({ token: 'paid-example-token' });
+   await github.start();
+   const baseCommit = await github.seed(repository);
+   execFileSync('git', ['-C', repository, 'remote', 'add', 'origin', `https://github.com/${github.repository}.git`], { stdio: 'ignore' });
+   // init, as the README has it: the setup outside the repository, the run files under .factory/, uncommitted.
+   const config = join(base, 'config');
+   const setup = await initSetup({ repository, configDirectory: config, baseBranch: github.baseBranch, hostHasUids: process.getuid !== undefined });
+   if (!setup.ok) throw new Error(`init refused the repository: ${JSON.stringify(setup)}`);
+   components = await composeHost({
+     store: join(base, 'store'),
+     repository,
+     trees: join(base, 'trees'),
+     modelKey: key,
+     git: { repository: github.repository, baseBranch: github.baseBranch, token: 'paid-example-token', apiBase: github.apiBase },
+   });
+   const loaded = await loadPolicyFile(join(config, 'policy.yaml'));
+   if (!loaded.ok) throw new Error(`init's policy does not load: ${JSON.stringify(loaded)}`);
+   const request: RunRequest = {
+     runId,
+     baseCommit,
+     requestedLevel: 1,
+     workspace: repository,
+     intent: { text: INTENT, from: 'principal' },
+     artifacts: { spec: 'draft', acceptanceTests: 'draft', verificationManifest: '.factory/verify.json', taskGraph: '.factory/graph.json' },
+     policy: loaded.policy,
+     roles: join(config, 'roles'),
+     rubrics: join(config, 'rubrics'),
++    // The fixture has no branch protection to probe; init's run is under test here, not readiness (A-R40-02).
++    readiness: RIG_READINESS,
+     components,
+     approvedCostUsd: null,
+   };
+   // The figure `create` prints, approved exactly, as a person does.
+   const graph = parseGraph(JSON.parse(await readFile(join(repository, '.factory', 'graph.json'), 'utf8')), { runId, baseCommit, workspace: repository });
+   if (!graph.ok) throw new Error(`init's graph does not parse: ${JSON.stringify(graph.problems)}`);
+   outcome = await startRun({ ...request, approvedCostUsd: worstCaseCost(graph.graph, loaded.policy, ['spec', 'test-design']).usd });
+   // Each gate the policy holds for a person, approved as `approve` does: a drafted exit by its draft's hash.
+   gates = [];
+   for (let gate = 0; gate < 6 && !outcome.ok && outcome.reason === 'refused' && outcome.transition.reason === 'approval-required'; gate++) {
+     const { standing } = await runStanding(components.vault, runId);
+     if (standing.standing !== 'awaiting-approval') break;
+     gates.push(standing.key);
+     const approved = await approveStation({ runId, key: standing.key, draft: standing.draft?.draft.sha256 ?? null, approvedBy: 'paid-init', vault: components.vault });
+     if (!approved.ok) throw new Error(`approving ${standing.key} was refused: ${approved.message}`);
+     outcome = await resumeRun({ runId, components });
+   }
+   const state = await components.vault.readRunState(runId);
+   usage = await readUsage(components.vault, state);
+   const text = async (ref: Parameters<typeof components.vault.read>[0]): Promise<string> => new TextDecoder().decode(await components.vault.read(ref)).slice(0, 3000);
+   records = [
+     ...(await Promise.all(state.evidenceRefs.map(async (ref) => `evidence ${await text(ref)}`))),
+     ...(await Promise.all(Object.entries(state.results).map(async ([task, ref]) => `result ${task} ${await text(ref)}`))),
+     ...(await Promise.all((await components.vault.readDecisions(runId)).map(async (ref) => `decision ${await text(ref)}`))),
+   ];
+ }, 2_400_000);
+
+===== packages/api/test/paid/line.paid.test.ts =====
+diff --git a/packages/api/test/paid/line.paid.test.ts b/packages/api/test/paid/line.paid.test.ts
+index f834a76..334e417 100644
+--- a/packages/api/test/paid/line.paid.test.ts
++++ b/packages/api/test/paid/line.paid.test.ts
+@@ -20,7 +20,7 @@ import type { CapabilityScope, ModelTier, RunId, RunState } from '@olympus-ai/co
+ import type { UsageRecord } from '@olympus-ai/vault';
+ import { afterAll, beforeAll, expect } from 'vitest';
+ import { composeHost, readUsage, runStanding, startRun, UNANALYSED_TESTS, type BuiltGraph, type RunOutcome } from '../../src/index.js';
+-import { ARTIFACTS, BUILDER, HELLO, policy, REVIEWER } from '../harness.js';
++import { ARTIFACTS, BUILDER, HELLO, policy, REVIEWER, RIG_READINESS } from '../harness.js';
+ 
+ /** hello with a task that needs one file written, so a real run reaches the integrate approval with a change to merge: an empty change halts at integrate's work (D-I1b-04). */
+ const HELLO_CHANGE = join(HELLO, '..', 'hello-change');
+@@ -62,42 +62,44 @@ let usage: UsageRecord[];
+ beforeAll(async () => {
+   const key = process.env.ANTHROPIC_API_KEY;
+   if (key === undefined || key === '') throw new Error('the paid line suite needs ANTHROPIC_API_KEY; it is never skipped');
+   base = await mkdtemp(join(tmpdir(), 'paid-line-'));
+   const repository = join(base, 'repository');
+   // The fixture declares no package.json, so neither vitest nor jest: its tests cannot be analysed.
+   await cp(HELLO_CHANGE, repository, { recursive: true });
+   await mkdir(join(base, 'store'), { recursive: true });
+   // The remote is a GitHub held in process: the run stops at the integrate approval, so nothing merges, and no real repository is touched.
+   github = new FakeGitHub({ token: 'paid-line-token' });
+   await github.start();
+   const baseCommit = await github.seed(repository);
+   components = await composeHost({
+     store: join(base, 'store'),
+     repository,
+     trees: join(base, 'trees'),
+     modelKey: key,
+     git: { repository: github.repository, baseBranch: github.baseBranch, token: 'paid-line-token', apiBase: github.apiBase },
+   });
+   const request = {
+     runId,
+     baseCommit,
+     requestedLevel: 2 as const,
+     workspace: repository,
+     artifacts: ARTIFACTS,
+     policy: policy({
+       approvals: { ...policy().approvals, ...L2_AUTO },
+       roles: { [BUILDER]: paidScope(['build', 'verify'], ['Read', 'Edit', 'Write']), [REVIEWER]: paidScope(['review'], ['Read']) },
+     }),
+     roles: DEFAULT_ROLES_DIRECTORY,
+     components,
++    // The fixture has no branch protection to probe; the line is under test here, not readiness (A-R40-02).
++    readiness: RIG_READINESS,
+     approvedCostUsd: null,
+   };
+   const { parseGraph, worstCaseCost } = await import('../../src/index.js');
+   const { readFile } = await import('node:fs/promises');
+   // Bound as admission binds it, so the security seat it derives is in the figure (R9).
+   const graph = parseGraph(JSON.parse(await readFile(join(repository, ARTIFACTS.taskGraph), 'utf8')), { runId, baseCommit: request.baseCommit, workspace: request.workspace });
+   if (!graph.ok) throw new Error(`the paid line's graph does not parse: ${JSON.stringify(graph.problems)}`);
+   outcome = await startRun({ ...request, approvedCostUsd: worstCaseCost(graph.graph, request.policy).usd });
+   state = await components.vault.readRunState(runId);
+   usage = await readUsage(components.vault, state);
+ }, 1_200_000);
+
+===== packages/api/test/server.test.ts =====
+diff --git a/packages/api/test/server.test.ts b/packages/api/test/server.test.ts
+index a5b8a2d..41ef7b0 100644
+--- a/packages/api/test/server.test.ts
++++ b/packages/api/test/server.test.ts
+@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+ import { STATION_CONTRACTS, StubDriver, type PolicyDocument, type RunState, type TaskRequest, type TaskResult } from '@olympus-ai/core';
+ import { StubSandboxProvider, type SandboxHandle, type SandboxSpec } from '@olympus-ai/sandbox';
+ import { createApiServer, egressFor, UNANALYSED_TESTS, worstCaseCost, type ApiServer, type BuiltGraph, type ComponentGraph, type CreatedRun, type RunView } from '../src/index.js';
+-import { ARTIFACTS, makeWorkspace, policy, policyDocument, removeWorkspace, ROLES, roleScope, stubComponents, writeChecks, BUILDER, REVIEWER } from './harness.js';
++import { ARTIFACTS, makeWorkspace, policy, policyDocument, removeWorkspace, RIG_SCANNER, ROLES, roleScope, stubComponents, writeChecks, BUILDER, REVIEWER } from './harness.js';
+ import { commitFixture } from '@olympus-ai/conformance/git';
+ import { DelegatingDriver, DelegatingSandbox } from './wrappers.js';
+ 
+@@ -30,7 +30,7 @@ async function writePolicy(doc: PolicyDocument = policyDocument()): Promise<stri
+ 
+ async function serve(overrides: Partial<ComponentGraph> = {}, doc?: PolicyDocument): Promise<void> {
+   components = stubComponents(workspace, overrides);
+-  server = createApiServer({ components, token: TOKEN, principal: PRINCIPAL, policyFile: await writePolicy(doc), rolesDirectory: ROLES });
++  server = createApiServer({ components, token: TOKEN, principal: PRINCIPAL, policyFile: await writePolicy(doc), rolesDirectory: ROLES, readiness: RIG_SCANNER });
+   url = await server.listen(0, '127.0.0.1');
+ }
+ 
+
+===== packages/benchmark/src/critic.ts =====
+diff --git a/packages/benchmark/src/critic.ts b/packages/benchmark/src/critic.ts
+index 1bb6a39..c0c1a81 100644
+--- a/packages/benchmark/src/critic.ts
++++ b/packages/benchmark/src/critic.ts
+@@ -26,7 +26,7 @@ import {
+ import { BASE_IMAGE } from '@olympus-ai/driver-claude-code';
+ import { LocalVault, type CriticRecord, type DraftRecord } from '@olympus-ai/vault';
+ import type { Corpus, Item } from './corpus.js';
+-import { benchPolicyDocument, boundGraph, installed, type Bench } from './line.js';
++import { BENCH_READINESS, benchPolicyDocument, boundGraph, installed, type Bench } from './line.js';
+ import { BenchStub, ScriptedSeat } from './seats.js';
+ 
+ export interface CriticOutcome {
+@@ -110,69 +110,70 @@ export function criticVerdict(
+ /** One drafted item through the drafting station, with `critic` seated. */
+ export async function throughTheCritic(bench: Bench, corpus: Corpus, item: Item, critic: CriticSeat): Promise<CriticOutcome> {
+   const station = stationOf(item);
+   const source = await installed(bench, corpus, item.repo);
+   const name = randomUUID();
+   const root = join(bench.base, 'runs', name);
+   const repository = join(root, 'repository');
+   await cp(source.dir, repository, { recursive: true });
+   await mkdir(join(root, 'store'), { recursive: true });
+   await mkdir(join(root, 'trees'), { recursive: true });
+   const vault = new LocalVault({ store: join(root, 'store'), artifacts: repository });
+   const runId = name as RunId;
+   const drafter = new ScriptedSeat(bench.provider, (station === 'spec' ? 'spec-drafter' : 'test-drafter') as RoleId, item.change, item.claim, name);
+   const idle = new BenchStub();
+   const components = buildGraph({
+     vault,
+     sandbox: bench.provider,
+     driver: idle,
+     reviewer: idle,
+     drafting: station === 'spec'
+       ? { specDrafter: drafter, specCritic: critic.driver, testDrafter: idle, testCritic: idle }
+       : { specDrafter: idle, specCritic: idle, testDrafter: drafter, testCritic: critic.driver },
+     workspaces: localWorkspaceStore({ root: join(root, 'trees'), user: bench.user }),
+     integrator: null,
+     profile: { buildImage: critic.image, checkImage: BASE_IMAGE, limits: DEFAULT_LIMITS },
+   });
+   const policy = draftingPolicy(corpus, item, critic);
+   const artifacts = draftedArtifacts(station);
+   // Bound as admission binds it, so the security seat it derives is in the figure (R9).
+   const graph = boundGraph(JSON.parse(await readFile(join(repository, artifacts.taskGraph), 'utf8')), { runId, baseCommit: source.commit, workspace: repository });
+   if (item.asked === null) throw new Error(`benchmark: drafted item '${item.id}' carries no request`);
+   const outcome = await startRun({
+     runId,
+     baseCommit: source.commit,
+     requestedLevel: 1,
+     workspace: repository,
+     artifacts,
+     policy,
+     roles: DEFAULT_ROLES_DIRECTORY,
+     components,
++    readiness: BENCH_READINESS,
+     intent: station === 'spec' ? { text: item.asked, from: 'principal' } : null,
+     rubrics: DEFAULT_RUBRICS_DIRECTORY,
+     approvedCostUsd: worstCaseCost(graph, policy, [station]).usd,
+   });
+   if (!outcome.ok && outcome.reason !== 'refused') {
+     throw new Error(`benchmark: the drafted run was refused before the line started (${outcome.reason}); the corpus or the bench is broken: ${JSON.stringify(outcome)}`);
+   }
+   const state = await vault.readRunState(runId);
+   const usage = await readUsage(vault, state);
+   // A call whose cost was lost or never read cannot be charged against the cap, so the run stops (I5); an unmetered one is the scripted seat's and cost nothing.
+   const totals = costTotals(usage).run;
+   const unsettled = unsettledCalls(usage).length;
+   if (unsettled > 0 || totals.lost > 0) throw new Error(`benchmark: ${String(unsettled + totals.lost)} call(s) of the drafted run have no known cost, so the spend cannot be held to the cap`);
+   const costUsd = totals.metered.costUsd;
+   const first = state.drafts[station]?.attempts[0];
+   if (first?.draft === null || first === undefined) throw new Error(`benchmark: the drafted run for an item recorded no first draft at ${station}`);
+   const record = JSON.parse(new TextDecoder().decode(await vault.read(first.draft))) as DraftRecord;
+   const problems = record.problems.map((p) => p.code);
+   let answer: { readable: boolean; findings: number } | null = null;
+   if (first.critic === null || first.critic === 'not-seated') {
+     // The runtime sent the draft back before a critic read it; the catch is the runtime's.
+     if (problems.length === 0) throw new Error(`benchmark: the critic was ${String(first.critic)} on a draft the runtime did not send back; the arm measured nothing. The run stopped with: ${outcome.ok ? 'no refusal' : JSON.stringify({ at: outcome.at, transition: outcome.transition })}`);
+   } else {
+     const verdict = JSON.parse(new TextDecoder().decode(await vault.read(first.critic))) as CriticRecord;
+     if (!verdict.binding) throw new Error('benchmark: the critic seated was not binding: its family is the drafter\'s, so its findings send nothing back');
+     answer = { readable: verdict.readable, findings: verdict.findings.length };
+   }
+   return { ...criticVerdict(problems, answer, first.sentBack?.by ?? null), costUsd };
+ }
+
+===== packages/benchmark/src/line.ts =====
+diff --git a/packages/benchmark/src/line.ts b/packages/benchmark/src/line.ts
+index 83c96c2..d32da92 100644
+--- a/packages/benchmark/src/line.ts
++++ b/packages/benchmark/src/line.ts
+@@ -15,7 +15,7 @@ import { randomUUID } from 'node:crypto';
+ import { cp, mkdir, readFile } from 'node:fs/promises';
+ import { join } from 'node:path';
+ import { promisify } from 'node:util';
+-import { buildGraph, containerUser, parseGraph, DEFAULT_LIMITS, localWorkspaceStore, startRun, worstCaseCost, type ContainerUser, type GraphBinding, type RunOutcome, type RunRequest } from '@olympus-ai/api';
++import { buildGraph, containerUser, parseGraph, DEFAULT_LIMITS, localWorkspaceStore, startRun, worstCaseCost, type AdmissionReadiness, type ContainerUser, type GraphBinding, type RunOutcome, type RunRequest } from '@olympus-ai/api';
+ import { DEFAULT_ROLES_DIRECTORY } from '@olympus-ai/compiler';
+ import {
+   StrictPolicyEngine,
+@@ -35,6 +35,15 @@ import { LocalVault, type EnforcementDecision, type Vault } from '@olympus-ai/va
+ import { DEFAULT_ARMS, repoDir, type Arm, type Corpus, type Item, type RepoPolicy } from './corpus.js';
+ import { BENCH_TOOLS, BenchStub, ScriptedSeat } from './seats.js';
+ 
++/**
++ * The benchmark's readiness scan (A-R40-02): L2 for whatever commit it is asked about, held by the scan limit.
++ * The benchmark measures whether the line catches false-done work, not readiness, and its corpus repositories
++ * are built here with no branch protection to probe; a run's readiness term is this declaration, not a scan.
++ */
++export const BENCH_READINESS: AdmissionReadiness = {
++  ceilingAt: (_checkout, commit) => Promise.resolve({ kind: 'scanned', level: 2, heldBy: { kind: 'scan-limit' }, commit }),
++};
++
+ const run = promisify(execFile);
+ 
+ 
+@@ -216,45 +225,46 @@ export function artifactsOf(arm: Arm): RunRequest['artifacts'] {
+ /** One item through the line: a fresh copy of its installed repository, a fresh store, a fresh run. */
+ export async function throughTheLine(bench: Bench, corpus: Corpus, item: Item, arm: Arm = DEFAULT_LINE_ARM): Promise<LineOutcome> {
+   if (item.seat !== 'build') throw new Error(`benchmark: item '${item.id}' is a ${item.seat}'s draft, which the line arm of the deterministic tier does not run`);
+   const policyOf = corpus.repos[item.repo];
+   if (policyOf === undefined) throw new Error(`benchmark: item '${item.id}' names repository '${item.repo}', which the corpus does not hold`);
+   const source = await installed(bench, corpus, item.repo, arm.overlay);
+   // A name that says nothing about the item, so nothing on disk or in a container's labels carries its id (I3).
+   const name = randomUUID();
+   const root = join(bench.base, 'runs', name);
+   const repository = join(root, 'repository');
+   await cp(source.dir, repository, { recursive: true });
+   await mkdir(join(root, 'store'), { recursive: true });
+   await mkdir(join(root, 'trees'), { recursive: true });
+ 
+   const vault = new LocalVault({ store: join(root, 'store'), artifacts: repository });
+   const builder = new ScriptedSeat(bench.provider, BUILDER, item.change, item.claim);
+   const components = buildGraph({
+     vault,
+     sandbox: bench.provider,
+     driver: builder,
+     reviewer: new BenchStub(),
+     workspaces: localWorkspaceStore({ root: join(root, 'trees'), user: bench.user }),
+     integrator: null,
+     // The scripted seat runs in the base, named by its content ID as every driver call's image is (A-R53-01).
+     profile: { buildImage: await imageId(BASE_IMAGE, { pull: true }), checkImage: BASE_IMAGE, limits: DEFAULT_LIMITS },
+   });
+   const policy = benchPolicy(policyOf);
+   const runId = name as RunId;
+   // Bound as admission binds it, so the security seat it derives is in the figure (R9).
+   const graph = boundGraph(JSON.parse(await readFile(join(repository, ARTIFACTS.taskGraph), 'utf8')), { runId, baseCommit: source.commit, workspace: repository });
+   const outcome = await startRun({
+     runId,
+     baseCommit: source.commit,
+     requestedLevel: 1,
+     workspace: repository,
+     artifacts: artifactsOf(arm),
+     policy,
+     roles: DEFAULT_ROLES_DIRECTORY,
+     components,
+     approvedCostUsd: worstCaseCost(graph, policy).usd,
++    readiness: BENCH_READINESS,
+   });
+   return classify(outcome, await recorded(vault, runId));
+ }
+ 
+ /** Every cause the Vault holds for the run: each decision's cause, and each recorded violation's kind. */
+
+===== packages/cli/test/cli.test.ts =====
+diff --git a/packages/cli/test/cli.test.ts b/packages/cli/test/cli.test.ts
+index 6c30a24..918b4c0 100644
+--- a/packages/cli/test/cli.test.ts
++++ b/packages/cli/test/cli.test.ts
+@@ -60,59 +60,65 @@ let url: string;
+ beforeEach(async () => {
+   root = await mkdtemp(join(tmpdir(), 'p9-cli-'));
+   workspace = join(root, 'workspace');
+   await mkdir(workspace);
+   await writeFile(join(workspace, 'spec.md'), '# spec\n');
+   await writeFile(join(workspace, 'acceptance.md'), '# acceptance\n');
+   await writeFile(join(workspace, 'verify.json'), JSON.stringify({ checks: [
+     { id: 'ok', kind: 'compile', command: ['node', '-e', 'process.exit(0)'], required: true, timeoutMs: 10_000 },
+     // The reproduction: fails over the base, passes once the builder has written `done` (D-A-BF-01). The name is built, since one spelt is protected (D-R15-03).
+     { id: 'done', kind: 'behavioral', onBase: 'fails', command: ['node', '-e', "process.exit(require('node:fs').existsSync(['do', 'ne'].join('')) ? 0 : 1)"], required: true, timeoutMs: 10_000 },
+     // Every run is scanned for secrets, here by the stand-in the graph runs (R17).
+     { id: 'secret-scan', kind: 'secret-scan', image: STAND_IN_SCANNERS.secretScan.image, config: null, required: true, timeoutMs: 30_000 },
+   ] }));
+   await writeFile(join(workspace, 'security.json'), JSON.stringify({ none: 'the change writes one file in the workspace and crosses no trust boundary' }));
+   await writeFile(join(workspace, 'graph.json'), JSON.stringify({ tasks: [
+     { id: 'hello', station: 'build', role: 'builder', dependsOn: [], dependencySet: ['**'] },
+     { id: 'hello-review', station: 'review', role: 'reviewer', dependsOn: ['hello'], dependencySet: ['**'] },
+   ] }));
+   const policyFile = join(root, 'policy.yaml');
+   // The roles the graph's seats run under, beside the workspace and outside it (R20).
+   const roles = join(root, 'roles');
+   await mkdir(roles);
+   await writeFile(join(roles, 'builder.md'), 'Build the task.');
+   await writeFile(join(roles, 'reviewer.md'), 'Review the change.');
+   await writeFile(join(roles, 'security-reviewer.md'), 'Review the change for security.');
+   await writeFile(policyFile, JSON.stringify(POLICY));
+   const sandbox = new StubSandboxProvider();
+   const stub = new StubDriver();
+   // The builder makes the change the reproduction asks for, through its own sandbox, and claims it.
+   const driver: Driver = Object.assign(Object.create(stub) as Driver, {
+     // The tools the policy grants, as a real driver declares them; the stub runs none (D-R36a-07).
+     declaredTools: () => ['Read', 'Write'],
+     runTask: async (req: TaskRequest): Promise<TaskResult> => {
+       if (req.role.role !== 'builder') return stub.runTask(req);
+       await sandbox.exec(req.sandbox, ['node', '-e', "require('node:fs').writeFileSync('done', 'done')"]);
+       const result = await stub.runTask(req);
+       return { ...result, claim: { ...result.claim, filesChanged: ['done'] } };
+     },
+   });
+   const user = process.getuid === undefined ? { uid: 0, gid: 0 } : undefined;
+   const store = join(root, 'store');
+   vault = new StubVault(workspace);
+   server = createApiServer({
+     components: buildGraph({
+       vault,
+       sandbox,
+       driver,
+       reviewer: driver,
+       scanners: STAND_IN_SCANNERS,
+       workspaces: localWorkspaceStore(user === undefined ? { root: store } : { root: store, user }),
+     }),
+     token: TOKEN,
+     principal: 'cli-test',
+     policyFile,
+     rolesDirectory: roles,
++    // The server's readiness scan (A-R40-02): L2 for the commit asked about. The CLI is under test here, not readiness.
++    readiness: {
++      resolve: () => Promise.reject(new Error('the readiness route is not under test')),
++      scan: () => Promise.reject(new Error('the readiness route is not under test')),
++      ceilingAt: (_checkout, commit) => Promise.resolve({ kind: 'scanned', level: 2, heldBy: { kind: 'scan-limit' }, commit }),
++    },
+   });
+   // Not a default: an ephemeral port on the loopback address, known to the CLI only through --url.
+   url = await server.listen(0, '127.0.0.1');
+ });
+
+===== packages/conformance/src/registry/admission-readiness.ts =====
+diff --git a/packages/conformance/src/registry/admission-readiness.ts b/packages/conformance/src/registry/admission-readiness.ts
+index 3bf025a..ed4c43d 100644
+--- a/packages/conformance/src/registry/admission-readiness.ts
++++ b/packages/conformance/src/registry/admission-readiness.ts
+@@ -1,8 +1,9 @@
+ /**
+  * R40: admission enforces the readiness ceiling. A run asked above the
+  * ceiling its base commit's scan derives is refused, naming what holds it;
+- * the ceiling only ever adds a refusal (I4); and a run with no scan records
+- * that none ran, rather than reading as cleared (F1).
++ * the ceiling only ever adds a refusal (I4); a run above L0 with no scan is
++ * refused, never read as cleared (A-R40-02); and an L0 run records that none
++ * ran.
+  */
+ import type { RunRequest } from '@olympus-ai/api';
+ import type { RunId } from '@olympus-ai/core';
+@@ -71,30 +72,40 @@ export const ADMISSION_REFUSES_ABOVE_THE_READINESS_CEILING: LocalAssertion = run
+   },
+ });
+ 
++export const ADMISSION_REFUSES_WITH_NO_SCAN: LocalAssertion = runtime({
++  id: 'I5.admission-refuses-with-no-readiness-scan',
++  title:
++    'a run above L0 whose request carries no readiness scan is refused at admission as readiness-unscanned, naming the level, and leaves no run state, rather than admitted on the policy terms alone',
++  run: async () => {
++    // L1 only: the rig's stub components are refused above L1 for another reason before readiness is read.
++    for (const level of [1] as const) {
++      await withLine(`r40-none-${String(level)}-`, async (rig) => {
++        const { admitRun } = await api();
++        const outcome = await admitRun(await rig.request(await rig.components(), { requestedLevel: level, readiness: null }));
++        if (outcome.ok || outcome.reason !== 'readiness-unscanned' || outcome.requestedLevel !== level) {
++          throw new Error(`I5: an L${String(level)} run with no scan port was ${outcome.ok ? 'admitted' : outcome.reason}`);
++        }
++        if (await recorded(rig)) throw new Error('I5: a run refused for want of a scan left run state behind');
++      });
++    }
++  },
++});
++
+ export const READINESS_ABSENCE_IS_RECORDED: LocalAssertion = runtime({
+   id: 'I4.readiness-absence-is-recorded',
+   title:
+-    'a run admitted with no readiness scan records that none ran and why, an L0 run spends no scan, and neither is refused for it: the policy terms bind alone',
++    'an L0 run, the one run admitted with no readiness scan, spends no scan, records that none ran and why, and is not refused for it',
+   run: async () => {
+-    await withLine('r40-none-', async (rig) => {
+-      const { admitRun } = await api();
+-      const outcome = await admitRun(await rig.request(await rig.components(), { requestedLevel: 1 }));
+-      if (!outcome.ok) throw new Error(`I4: a run with no scan port was refused (${outcome.reason})`);
+-      const record = await admissionRecord(rig);
+-      if (record.readiness?.kind !== 'not-scanned' || record.readiness.because !== 'no-scanner') {
+-        throw new Error(`I4: a run with no scan recorded ${JSON.stringify(record.readiness)}`);
+-      }
+-    });
+     await withLine('r40-zero-', async (rig) => {
+       const { admitRun } = await api();
+       const asked: string[] = [];
+       const outcome = await admitRun(await rig.request(await rig.components(), { requestedLevel: 0, readiness: port(0, asked) }));
+       if (!outcome.ok) throw new Error(`I4: an L0 run was refused (${outcome.reason})`);
+       if (asked.length > 0) throw new Error('I4: an L0 run was scanned; no ceiling is below L0');
+       const record = await admissionRecord(rig);
+       if (record.readiness?.kind !== 'not-scanned' || record.readiness.because !== 'level-zero') {
+         throw new Error(`I4: an L0 run recorded ${JSON.stringify(record.readiness)}`);
+       }
+     });
+   },
+ });
+@@ -137,47 +148,48 @@ export const READINESS_ANSWER_FOR_ANOTHER_COMMIT_REFUSES: LocalAssertion = runti
+ export const RESUME_HOLDS_THE_RECORDED_CEILING: LocalAssertion = runtime({
+   id: 'I5.resume-holds-the-recorded-readiness-ceiling',
+   title:
+-    'the admission refusal a resume repeats reads the readiness ceiling from the admission record: a record above its scanned ceiling is refused naming it, one at it, one not scanned, and one written before R40 are not; and resumeRun over a record above its ceiling is refused before the line runs',
++    'the admission refusal a resume repeats reads the readiness ceiling from the admission record: a record above its scanned ceiling is refused naming it, one above L0 not scanned or written before R40 is refused as unscanned, one at its ceiling is not; and resumeRun over a record above its ceiling is refused before the line runs',
+   run: async () => {
+     await withLine('r40-resume-', async (rig) => {
+       const { admitRun, admissionRefusal } = await api();
+       const outcome = await admitRun(await rig.request(await rig.components(), { requestedLevel: 1, readiness: port(1) }));
+       if (!outcome.ok) throw new Error(`I5 control: the run was refused (${outcome.reason})`);
+       const record = await admissionRecord(rig);
+       if (record.readiness?.kind !== 'scanned') throw new Error('I5: unreachable, the record holds no scan');
+       const at = (readiness: AdmissionRecord['readiness']): AdmissionRecord => {
+         const { readiness: _dropped, ...rest } = record;
+         return readiness === undefined ? rest : { ...rest, readiness };
+       };
+       const below = admissionRefusal(at({ ...record.readiness, level: 0 }));
+       if (below?.reason !== 'readiness-refused' || below.ceiling !== 0) throw new Error(`I5: a record above its ceiling was not refused (${JSON.stringify(below)})`);
++      if (admissionRefusal(at(record.readiness)) !== undefined) throw new Error('I5: a record at its ceiling was refused');
+       for (const [name, readiness] of [
+-        ['at its ceiling', record.readiness],
+         ['not scanned', { kind: 'not-scanned', because: 'no-scanner' }],
+         ['written before R40', undefined],
+       ] as const) {
+-        if (admissionRefusal(at(readiness)) !== undefined) throw new Error(`I5: a record ${name} was refused`);
++        const refused = admissionRefusal(at(readiness));
++        if (refused?.reason !== 'readiness-unscanned') throw new Error(`I5: a record ${name} above L0 was ${refused === undefined ? 'admitted' : refused.reason}`);
+       }
+       // The resume itself, not only the helper it calls (codex-4): a run whose record holds a ceiling below its
+       // level is refused by resumeRun before the line runs, and its state is left as it stood.
+       const { resumeRun } = await api();
+       const components = await rig.components();
+       const state = await rig.state();
+       // The Vault admits a run once, so the lowered record is another run's only admission, with this run's state.
+       const runId = `${rig.runId}-lowered` as RunId;
+       const lowered = await components.vault.recordAdmission({ ...at({ ...record.readiness, level: 0 }), run: { ...record.run, id: runId } });
+       const before = await components.vault.commitRunState({ ...state, runId, admission: lowered, version: '0' }, '0');
+       const resumed = await resumeRun({ runId, components });
+       if (resumed.ok || resumed.reason !== 'readiness-refused' || resumed.ceiling !== 0) {
+         throw new Error(`I5: a resume over a record above its ceiling was ${resumed.ok ? 'driven' : resumed.reason}`);
+       }
+       const after = await components.vault.readRunState(runId);
+       if (after.station !== 'intake' || Object.keys(after.tasks).length > 0 || after.version !== before.version) {
+         throw new Error(`I5: the refused resume moved the run (station ${after.station}, ${String(Object.keys(after.tasks).length)} tasks)`);
+       }
+     });
+   },
+ });
+ 
+ export const R40_I4: readonly LocalAssertion[] = [READINESS_ABSENCE_IS_RECORDED, READINESS_CEILING_NEVER_GRANTS];
+-export const R40_I5: readonly LocalAssertion[] = [ADMISSION_REFUSES_ABOVE_THE_READINESS_CEILING, READINESS_ANSWER_FOR_ANOTHER_COMMIT_REFUSES, RESUME_HOLDS_THE_RECORDED_CEILING];
++export const R40_I5: readonly LocalAssertion[] = [ADMISSION_REFUSES_ABOVE_THE_READINESS_CEILING, ADMISSION_REFUSES_WITH_NO_SCAN, READINESS_ANSWER_FOR_ANOTHER_COMMIT_REFUSES, RESUME_HOLDS_THE_RECORDED_CEILING];
+
+===== packages/conformance/src/registry/bug-fix.ts =====
+diff --git a/packages/conformance/src/registry/bug-fix.ts b/packages/conformance/src/registry/bug-fix.ts
+index 5a8261f..1ae9b93 100644
+--- a/packages/conformance/src/registry/bug-fix.ts
++++ b/packages/conformance/src/registry/bug-fix.ts
+@@ -22,7 +22,7 @@ import type { LocalAssertion } from '../kit/types.js';
+ import {
+   HELLO_CHECK, admitAndDrive, approveAndResume, artifactsFor, awaiting, drafting, draftingPolicy, draftingScopes, helloSpec, lastAttempt, type DraftingRig,
+ } from './drafting.js';
+-import { lineScope, linePolicy, readRecord, stubDriver, withLine, type LineRig } from './line.js';
++import { lineScope, linePolicy, readRecord, RIG_SCANNER, stubDriver, withLine, type LineRig } from './line.js';
+ 
+ const api = async () => import('@olympus-ai/api');
+ const core = async () => import('@olympus-ai/core');
+@@ -267,49 +267,49 @@ const BUG_FIX_ON_ISSUE_ALONE: LocalAssertion = runtime({
+ const RUN_TEMPLATE_IS_GRANTED: LocalAssertion = runtime({
+   id: 'I4.run-template-granted-by-policy',
+   title: 'a person\'s run naming a template the policy\'s runTemplates does not list is refused, and admitted once it is listed, with the template in its admission record; a run from a candidate naming another template than the candidate\'s is refused',
+   timeoutMs: 120_000,
+   run: async () => {
+     const { admitRun } = await api();
+     await withLine('r16-unlisted-', async (rig) => {
+       const r = await drafting(rig);
+       names(problemsOf(await admitRun(await bugRequest(r, { policy: await bugFixPolicy([]) })), 'a bug fix the policy does not list'), 'template', 'not-granted', 'a bug fix the policy does not list');
+       const outcome = await admitRun(await bugRequest(r));
+       if (!outcome.ok) throw new Error(`R16: a listed bug fix was refused as ${outcome.reason}: ${JSON.stringify(outcome)}`);
+       if ((await admitted(rig, r)).template !== 'bug-fix') throw new Error('R16: the admission record does not hold the run\'s template');
+     });
+     await withLine('r16-mismatch-', async (rig) => {
+       const policy = await bugFixPolicy(['bug-fix'], 'intake-candidate');
+       const candidate = await reportCandidate(rig, policy);
+       const r = await drafting(rig);
+       const outcome = await admitRun(await bugRequest(r, { policy, candidate }));
+       names(problemsOf(outcome, 'a bug fix from an intake-candidate candidate'), 'template', 'not-the-candidates', 'a bug fix from an intake-candidate candidate');
+     });
+     // Through POST /runs: a run from a bug-fix candidate names no template and takes the candidate's, so the
+     // route reads the three parts without one, and admission goes on to the cost it asks a person to approve (codex-2).
+     await withLine('r16-http-inherit-', async (rig) => {
+       const { createApiServer } = await api();
+       const policy = await bugFixPolicy([]);
+       const candidate = await reportCandidate(rig, policy);
+       const policyFile = join(rig.dirs.artifacts, '..', 'policy.yaml');
+       await writeFile(policyFile, JSON.stringify(policy));
+       const r = await drafting(rig);
+-      const server = createApiServer({ components: await r.components(), token: TOKEN, principal: 'conformance', policyFile, rolesDirectory: rig.roles, rubricsDirectory: join(rig.roles, '..', 'rubrics'), secrets: SECRETS });
++      const server = createApiServer({ readiness: RIG_SCANNER, components: await r.components(), token: TOKEN, principal: 'conformance', policyFile, rolesDirectory: rig.roles, rubricsDirectory: join(rig.roles, '..', 'rubrics'), secrets: SECRETS });
+       const address = await server.listen(0, '127.0.0.1');
+       try {
+         const { from: _from, template: _template, ...parts } = BUG_INTENT;
+         const res = await fetch(`${address}/runs`, {
+           method: 'POST',
+           headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+           body: JSON.stringify({ workspace: rig.dirs.artifacts, baseCommit: commitFixture(rig.dirs.artifacts), requestedLevel: 1, artifacts: artifactsFor(true, true), approvedCostUsd: null, candidate, intent: parts }),
+         });
+         const body = await res.json() as { refusal?: { reason?: string } };
+         if (res.status !== 422 || body.refusal?.reason !== 'cost-unapproved') throw new Error(`R16: a run from a bug-fix candidate through POST /runs, naming no template, answered ${String(res.status)} ${JSON.stringify(body)}, not the cost to approve`);
+       } finally {
+         await server.close();
+       }
+     });
+   },
+ });
+ 
+ // ---------------------------------------------------------------------------
+ // I3: the report's reader writes the parts; the drafters write the rest.
+@@ -435,46 +435,46 @@ const BUG_FIX_TESTS_NEED_A_REPRODUCTION: LocalAssertion = runtime({
+ const DISMISSED_CANDIDATE_ADMITS_NO_RUN: LocalAssertion = runtime({
+   id: 'I5.dismissed-candidate-admits-no-run',
+   title: 'POST /intake/:id/dismiss records a candidate\'s dismissal with a cause from the closed set and no text, beside the runs and under the candidate\'s template; a dismissed candidate admits no run, a second dismissal or one of an admitted candidate is refused, and a dismissal carrying text is refused',
+   timeoutMs: 120_000,
+   run: async () => {
+     await withLine('r16-dismiss-', async (rig) => {
+       const { admitRun, createApiServer } = await api();
+       const policy = await bugFixPolicy();
+       const candidate = await reportCandidate(rig, policy);
+       const policyFile = join(rig.dirs.artifacts, '..', 'policy.yaml');
+       await writeFile(policyFile, JSON.stringify(policy));
+       const r = await drafting(rig);
+-      const server = createApiServer({ components: await r.components(), token: TOKEN, principal: 'conformance', policyFile, rolesDirectory: rig.roles, secrets: SECRETS });
++      const server = createApiServer({ readiness: RIG_SCANNER, components: await r.components(), token: TOKEN, principal: 'conformance', policyFile, rolesDirectory: rig.roles, secrets: SECRETS });
+       const address = await server.listen(0, '127.0.0.1');
+       const dismiss = async (id: string, body: unknown): Promise<{ status: number; json: unknown }> => {
+         const res = await fetch(`${address}/intake/${id}/dismiss`, { method: 'POST', body: JSON.stringify(body), headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' } });
+         return { status: res.status, json: await res.json() };
+       };
+       try {
+         const texted = await dismiss(candidate, { cause: 'duplicate', note: MARKER });
+         if (texted.status !== 400) throw new Error(`R16: a dismissal carrying text answered ${String(texted.status)}`);
+         const unknown = await dismiss(candidate, { cause: 'the reporter is wrong' });
+         if (unknown.status !== 400) throw new Error(`R16: a dismissal with a free-text cause answered ${String(unknown.status)}`);
+         const done = await dismiss(candidate, { cause: 'not-reproducible' });
+         const summary = done.json as { dismissed?: { cause?: string } | null; template?: string };
+         if (done.status !== 200 || summary.dismissed?.cause !== 'not-reproducible' || summary.template !== 'bug-fix') throw new Error(`R16: the dismissal answered ${String(done.status)} ${JSON.stringify(done.json)}`);
+         if ((await dismiss(candidate, { cause: 'duplicate' })).status !== 409) throw new Error('R16: a second dismissal was not refused');
+       } finally {
+         await server.close();
+       }
+       const vault = await localVault(rig.dirs);
+       const entry = await vault.readCandidate(candidate);
+       if (entry?.dismissed?.cause !== 'not-reproducible' || entry.candidate?.template !== 'bug-fix' || entry.admittedAs !== null) throw new Error(`R16: the store holds ${JSON.stringify({ dismissed: entry?.dismissed, admittedAs: entry?.admittedAs })}`);
+       if (JSON.stringify(entry.dismissed).includes(MARKER)) throw new Error('R16: the dismissal holds the report\'s text');
+       if ((await vault.listRuns()).length !== 0) throw new Error('R16: a dismissal made a run');
+       names(problemsOf(await admitRun(await bugRequest(r, { candidate, template: null })), 'a run from a dismissed candidate'), 'candidate', 'dismissed', 'a run from a dismissed candidate');
+       // An admitted candidate cannot then be dismissed: the two spend one mark (D-R16-06).
+       const other = await reportCandidateAgain(rig, policy);
+       const admittedRun = await admitRun(await bugRequest(r, { candidate: other, template: null }));
+       if (!admittedRun.ok) throw new Error(`R16: the run from a fresh candidate was refused as ${admittedRun.reason}: ${JSON.stringify(admittedRun)}`);
+       if (await vault.dismissCandidate(other, 'duplicate', new Date().toISOString())) throw new Error('R16: an admitted candidate was dismissed');
+     });
+   },
+ });
+ 
+ /** A second report, delivered under another number, so its body and so its candidate differ from the first. */
+
+===== packages/conformance/src/registry/decisions.ts =====
+diff --git a/packages/conformance/src/registry/decisions.ts b/packages/conformance/src/registry/decisions.ts
+index 9846fc1..2d486ef 100644
+--- a/packages/conformance/src/registry/decisions.ts
++++ b/packages/conformance/src/registry/decisions.ts
+@@ -342,506 +342,510 @@ function admissionRow(key: CauseKey, prefix: string, arrange: (rig: LineRig) =>
+ export const DECISION_TABLE: Readonly<Record<CauseKey, Row>> = {
+   'admission:invalid-request': {
+     kind: 'scenario',
+     run: async () => {
+       // The one invalid request that has a run id the Vault can name and a run already there: admitting it twice.
+       await withLine('p14-invalid-', async (rig) => {
+         const { startRun } = await api();
+         await stoppedForApproval(rig);
+         const again = await startRun(await rig.request(await rig.components()));
+         if (again.ok || again.reason !== 'invalid-request') throw new Error(`P14: a second admission was ${again.ok ? 'admitted' : again.reason}`);
+         const vault = (await rig.components()).vault;
+         const d = await expectDecision(rig, vault, 'admission:invalid-request', { decidedBy: 'admission', taskId: null, station: null });
+         if (d.decision.cause !== 'admission-refused' || d.decision.refusal.reason !== 'invalid-request') throw new Error('P14: unreachable');
+         const problems = d.decision.refusal.problems;
+         if (!problems.some((p) => p.path === 'runId' && p.code === 'already-admitted') || problems.some((p) => Object.hasOwn(p, 'message'))) {
+           throw new Error(`P14: an invalid request was recorded with ${JSON.stringify(problems)}; each problem keeps its path and code and no message`);
+         }
+       });
+     },
+   },
+   'admission:unsafe-above-l1': admissionRow('admission:unsafe-above-l1', 'p14-unsafe-', async (rig) => {
+     const { startRun } = await api();
+     await startRun(await rig.request(await rig.components(), { requestedLevel: 2 }));
+   }),
+   'admission:cost-unapproved': admissionRow('admission:cost-unapproved', 'p14-cost-', async (rig) => {
+     const { startRun } = await api();
+     await startRun(await rig.request(await rig.components(), { approvedCostUsd: 0 }));
+   }),
+   'admission:controls-unavailable': admissionRow('admission:controls-unavailable', 'p14-controls-', async (rig) => {
+     const { startRun } = await api();
+     await startRun(await rig.request(await realComponents(rig), { requestedLevel: 3, policy: await realPolicy(3) }));
+   }),
++  'admission:readiness-unscanned': admissionRow('admission:readiness-unscanned', 'p14-unscanned-', async (rig) => {
++    const { startRun } = await api();
++    await startRun(await rig.request(await rig.components(), { readiness: null }));
++  }),
+   'admission:readiness-refused': admissionRow('admission:readiness-refused', 'p14-readiness-', async (rig) => {
+     const { startRun } = await api();
+     const readiness = {
+       ceilingAt: (_checkout: string, commit: string) =>
+         Promise.resolve({ kind: 'scanned' as const, level: 0 as const, heldBy: { kind: 'probe' as const, probe: 'testing.adapter' as const }, commit }),
+     };
+     await startRun(await rig.request(await rig.components(), { requestedLevel: 1, readiness }));
+   }),
+   'admission:policy-refused': admissionRow('admission:policy-refused', 'p14-policy-', async (rig) => {
+     const { startRun } = await api();
+     await startRun(await rig.request(await rig.components(), { policy: await linePolicy({}, { stationCaps: { build: 0 } }) }));
+   }),
+   'admission:roles-refused': admissionRow('admission:roles-refused', 'p14-roles-refused-', async (rig) => {
+     const { startRun } = await api();
+     // A broken copy beside the rig's roles, so the control admission after it reads the intact ones.
+     const roles = join(rig.roles, '..', 'roles-broken');
+     await cp(rig.roles, roles, { recursive: true });
+     await writeFile(join(roles, 'builder.md'), '');
+     await startRun(await rig.request(await rig.components(), { roles }));
+   }),
+   'admission:instructions-refused': admissionRow('admission:instructions-refused', 'p14-instructions-refused-', async (rig) => {
+     const { startRun } = await api();
+     // A directory where the base's CLAUDE.md would be: not a regular file, so the reader refuses it (A-R24-04).
+     await mkdir(join(rig.dirs.artifacts, 'CLAUDE.md'), { recursive: true });
+     // Holding a file, so the commit the base is read from has the directory (D-R36a-04).
+     await writeFile(join(rig.dirs.artifacts, 'CLAUDE.md', 'notes.md'), 'a directory, not instructions');
+     await startRun(await rig.request(await rig.components()));
+     // Removed after, so the control admission that follows reads a base the reader accepts.
+     await rm(join(rig.dirs.artifacts, 'CLAUDE.md'), { recursive: true });
+   }),
+   'admission:role-undefined': admissionRow('admission:role-undefined', 'p14-role-undefined-', async (rig) => {
+     const { startRun } = await api();
+     const roles = join(rig.roles, '..', 'roles-unreviewed');
+     await cp(rig.roles, roles, { recursive: true });
+     await rm(join(roles, 'reviewer.md'));
+     await startRun(await rig.request(await rig.components(), { roles }));
+   }),
+   // R22: the trigger policy refuses a person's run when `human` is not enabled.
+   'admission:trigger-refused': admissionRow('admission:trigger-refused', 'p14-trigger-', async (rig) => {
+     const { startRun } = await api();
+     const base = await linePolicy();
+     await startRun(await rig.request(await rig.components(), { policy: { ...base, triggers: { ...base.triggers, enabled: [] } } }));
+   }),
+   // R22: a candidate past its window, on the runtime's clock.
+   'admission:candidate-expired': admissionRow('admission:candidate-expired', 'p14-expired-', async (rig) => {
+     await expiredCandidateRun(rig);
+   }),
+   'admission:refused': admissionRow('admission:refused', 'p14-capability-', async (rig) => {
+     const { startRun } = await api();
+     const lacking = await stubDriver({ capabilities: { parallelism: 0 } });
+     await startRun(await rig.request(await rig.components({ driver: lacking, reviewer: await stubDriver() })));
+   }),
+   'resume:unsafe-above-l1': {
+     kind: 'scenario',
+     run: async () => {
+       // Admitted at L2 on the real composition, then resumed on the stubs: the resume repeats admission's check.
+       await withLine('p14-resume-unsafe-', async (rig) => {
+         const { admitRun, resumeRun } = await api();
+         const admitted = await admitRun(await rig.request(await realComponents(rig), { requestedLevel: 2, policy: await realPolicy(2) }));
+         if (!admitted.ok) throw new Error(`P14: the real composition at L2 was refused (${admitted.reason}), so no resume can be refused`);
+         const components = await rig.components();
+         const outcome = await resumeRun({ runId: rig.runId, components });
+         if (outcome.ok || outcome.reason !== 'unsafe-above-l1') throw new Error(`P14: a resume on the stubs at L2 was ${outcome.ok ? 'driven' : outcome.reason}`);
+         const d = await expectDecision(rig, components.vault, 'resume:unsafe-above-l1', { decidedBy: 'admission', taskId: null, station: null });
+         if (d.decision.cause !== 'resume-refused' || d.decision.refusal.reason !== 'unsafe-above-l1' || !d.decision.refusal.components.includes('StubSandboxProvider')) {
+           throw new Error(`P14: a resume refused as unsafe was recorded as ${JSON.stringify(d.decision)}`);
+         }
+       });
+     },
+   },
+   'resume:meter-lost': {
+     kind: 'scenario',
+     run: async () => {
+       // A call whose sandbox could not be read stops the run with the reading recorded lost; the resume is refused for it (D-P13-20).
+       await withLine('p14-meter-lost-', async (rig) => {
+         const { resumeRun, startRun } = await api();
+         const base = await rig.components();
+         let destroyed = 0;
+         const unreadable: SandboxProvider = {
+           ...forwarding(base.sandbox),
+           destroy: async (h) => {
+             const teardown = await base.sandbox.destroy(h);
+             destroyed += 1;
+             // The base run's check sandbox is torn down first; the driver's call is the one whose meter is lost.
+             if (destroyed === DRIVER_CALL) throw new Error("the relay's meter could not be read");
+             return teardown;
+           },
+         };
+         await startRun(await rig.request({ ...base, sandbox: unreadable })).then(
+           () => { throw new Error('P14: a run whose meter could not be read was not stopped'); },
+           (error: unknown) => { if (!String(error).includes('could not be destroyed')) throw error; },
+         );
+         const components = await rig.components();
+         const outcome = await resumeRun({ runId: rig.runId, components });
+         if (outcome.ok || outcome.reason !== 'meter-lost') throw new Error(`P14: a resume over a lost reading was ${outcome.ok ? 'driven' : outcome.reason}`);
+         const d = await expectDecision(rig, components.vault, 'resume:meter-lost', { decidedBy: 'admission', taskId: null, station: null });
+         if (d.decision.cause !== 'resume-refused' || d.decision.refusal.reason !== 'meter-lost' || !d.decision.refusal.tasks.includes(HELLO_TASK)) {
+           throw new Error(`P14: a resume over a lost reading was recorded as ${JSON.stringify(d.decision)}`);
+         }
+       });
+     },
+   },
+   'resume:refused': {
+     kind: 'scenario',
+     run: async () => {
+       await withLine('p14-resume-', async (rig) => {
+         const { resumeRun } = await api();
+         await stoppedForApproval(rig);
+         const reviewer = await stubDriver({ capabilities: { parallelism: 0 } });
+         const components = await rig.components({ reviewer });
+         refusalOf(await resumeRun({ runId: rig.runId, components }), 'P14 resume');
+         const d = await expectDecision(rig, components.vault, 'resume:refused', { decidedBy: 'admission', taskId: null, station: null });
+         if (d.decision.cause !== 'resume-refused' || d.decision.refusal.reason !== 'refused' || d.decision.refusal.refusal.reason !== 'capability-missing') {
+           throw new Error(`P14: a resume refused for a missing capability was recorded as ${JSON.stringify(d.decision)}`);
+         }
+       });
+     },
+   },
+   'station:gate-failed': {
+     kind: 'scenario',
+     run: async () => {
+       const { STATION_CONTRACTS } = await import('@olympus-ai/core');
+       await withLine('p14-gate-', async (rig) => {
+         const { startRun } = await api();
+         await writeManifest(rig.dirs, [{ id: 'always-fails', kind: 'compile', command: ['node', '-e', 'process.exit(1)'], required: true, timeoutMs: 10_000 }]);
+         const driver = await stubDriver();
+         const components = await rig.components({ driver, reviewer: driver });
+         refusalOf(await startRun(await rig.request(components)), 'P14 gate');
+         await expectDecision(rig, components.vault, 'station:gate-failed', { decidedBy: 'line', taskId: HELLO_TASK, station: 'verify' });
+         // One decision per failed iteration, the last one's included, each naming the check and why it failed (R17, D-R17-06).
+         const gates = (await decisionsOf(rig, components.vault)).filter((d) => keyOf(d.decision) === 'station:gate-failed');
+         const { maxIterations } = STATION_CONTRACTS.build;
+         for (const d of gates) {
+           if (d.decision.cause !== 'station-refused' || d.decision.refusal.reason !== 'gate-failed' || d.decision.refusal.failed.length !== 1 || d.decision.refusal.failed[0]?.checkId !== 'always-fails' || d.decision.refusal.failed[0].cause !== 'exit-code') {
+             throw new Error(`P14: a failed gate was recorded as ${JSON.stringify(d.decision)}`);
+           }
+         }
+         if (gates.length !== maxIterations) throw new Error(`P14: ${String(maxIterations)} failed iterations recorded ${String(gates.length)} gate-failed decisions`);
+       });
+     },
+   },
+   'station:base-mismatch': {
+     kind: 'scenario',
+     run: async () => {
+       await withLine('p14-base-', async (rig) => {
+         const { startRun } = await api();
+         // The fixture's reproduction made vacuous: it passes over the base, so the test-design exit is refused (D-A-BF-01).
+         const manifest = JSON.parse(await readFile(join(rig.dirs.artifacts, 'verify.json'), 'utf8')) as { checks: Array<{ onBase?: string; command: string[] }> };
+         await writeManifest(rig.dirs, manifest.checks.map((c) => (c.onBase === 'fails' ? { ...c, command: ['node', '-e', 'process.exit(0)'] } : c)));
+         const components = await rig.components();
+         refusalOf(await startRun(await rig.request(components)), 'P14 base');
+         await expectDecision(rig, components.vault, 'station:base-mismatch', { decidedBy: 'line', taskId: null, station: 'test-design' });
+       });
+     },
+   },
+   'station:spec-part-missing': {
+     kind: 'scenario',
+     run: async () => {
+       await withLine('p14-part-', async (rig) => {
+         const { startRun } = await api();
+         const components = await rig.components();
+         // The spec admitted with no security part: admitted, and refused at the spec exit naming the part (R17).
+         const { specParts: _omitted, ...artifacts } = ARTIFACTS;
+         refusalOf(await startRun(await rig.request(components, { artifacts })), 'P14 spec part');
+         const d = await expectDecision(rig, components.vault, 'station:spec-part-missing', { decidedBy: 'line', taskId: null, station: 'spec' });
+         if (d.decision.cause !== 'station-refused' || d.decision.refusal.reason !== 'spec-part-missing') {
+           throw new Error(`P14: a spec with no security part was recorded as ${JSON.stringify(d.decision)}`);
+         }
+       });
+     },
+   },
+   'station:denial-check-missing': {
+     kind: 'scenario',
+     run: async () => {
+       await withLine('p14-denial-', async (rig) => {
+         const { startRun } = await api();
+         await writeFile(join(rig.dirs.artifacts, 'security.json'), JSON.stringify(ONE_RULE));
+         const components = await rig.components();
+         refusalOf(await startRun(await rig.request(components)), 'P14 denial');
+         const d = await expectDecision(rig, components.vault, 'station:denial-check-missing', { decidedBy: 'line', taskId: null, station: 'test-design' });
+         if (d.decision.cause !== 'station-refused' || d.decision.refusal.reason !== 'denial-check-missing' || d.decision.refusal.rules.join() !== 'owner-only') {
+           throw new Error(`P14: a rule with no denial check was recorded as ${JSON.stringify(d.decision)}`);
+         }
+       });
+     },
+   },
+   'station:lock-tamper': {
+     kind: 'scenario',
+     run: async () => {
+       await withLine('p14-tamper-', async (rig) => {
+         const { startRun } = await api();
+         const writer = await stubDriver({ during: async () => writeFile(join(rig.dirs.artifacts, 'spec.md'), '# hello\n\nWidened by the agent.\n') });
+         const components = await rig.components({ driver: writer, reviewer: writer });
+         refusalOf(await startRun(await rig.request(components)), 'P14 tamper');
+         // Found at the station's lock check, over no task: the decision names what its violation names (D-P14-13).
+         await expectDecision(rig, components.vault, 'station:lock-tamper', { decidedBy: 'line', taskId: null, station: 'build' });
+       });
+     },
+   },
+   'station:violation': {
+     kind: 'scenario',
+     run: () => escapeScenario(async (rig, vault) => {
+       await expectDecision(rig, vault, 'station:violation', { decidedBy: 'line', taskId: HELLO_TASK, station: 'verify' });
+     }),
+   },
+   'station:unsafe-above-l1': { kind: 'unconstructed' },
+   'station:capability-missing': {
+     kind: 'scenario',
+     run: async () => {
+       // A driver that declares the capability when admission checks it and not when build does: the line's own check refuses.
+       await withLine('p14-station-capability-', async (rig) => {
+         const { startRun } = await api();
+         const inner = await stubDriver();
+         let asked = 0;
+         const driver = {
+           ...inner,
+           capabilities: () => {
+             asked += 1;
+             return asked === 1 ? inner.capabilities() : { ...inner.capabilities(), parallelism: 0 };
+           },
+         };
+         const components = await rig.components({ driver, reviewer: await stubDriver() });
+         const refusal = refusalOf(await startRun(await rig.request(components)), 'P14 station capability');
+         if (refusal.transition.reason !== 'capability-missing' || refusal.state === null) {
+           throw new Error(`P14: a driver that lost a capability was refused as ${refusal.transition.reason}, with state ${String(refusal.state !== null)}`);
+         }
+         await expectDecision(rig, components.vault, 'station:capability-missing', { decidedBy: 'station-machine', taskId: HELLO_TASK, station: 'build' });
+       });
+     },
+   },
+   'station:approval-blocked': {
+     kind: 'scenario',
+     run: async () => {
+       await withLine('p14-blocked-', async (rig) => {
+         const { startRun } = await api();
+         const components = await rig.components();
+         refusalOf(await startRun(await rig.request(components, { policy: await linePolicy({ 'review:1': 'blocked' }) })), 'P14 blocked');
+         await expectDecision(rig, components.vault, 'station:approval-blocked', { decidedBy: 'station-machine', taskId: null, station: 'review' });
+       });
+     },
+   },
+   'station:approval-required': {
+     kind: 'scenario',
+     run: async () => {
+       await withLine('p14-required-', async (rig) => {
+         const { runStanding } = await api();
+         const components = await rig.components();
+         await stoppedForApproval(rig, components);
+         const d = await expectDecision(rig, components.vault, 'station:approval-required', { decidedBy: 'station-machine', taskId: null, station: 'integrate' });
+         if (Number.isNaN(Date.parse(d.decidedAt))) throw new Error(`P14: approval-required was recorded with time ${d.decidedAt}`);
+         // Reading where a run stands derives the same refusal and decides nothing.
+         const before = (await components.vault.readDecisions(rig.runId)).length;
+         await runStanding(components.vault, rig.runId);
+         if ((await components.vault.readDecisions(rig.runId)).length !== before) throw new Error('P14: a status read recorded a decision');
+       });
+     },
+   },
+   'station:same-family-reviewer': { kind: 'blocked-until-m3' },
+   // R19: a test drafter of the builder's family is refused at L3 alone, as a same-family reviewer is.
+   'station:same-family-drafter': { kind: 'blocked-until-m3' },
+   'station:parked:drafts-rejected': { kind: 'scenario', run: draftsRejectedPark },
+   'approval-rejected': { kind: 'scenario', run: () => draftingDecision('approval-rejected') },
+   'draft-sent-back': { kind: 'scenario', run: () => draftingDecision('draft-sent-back') },
+   'draft-floor-applied': { kind: 'scenario', run: () => draftingDecision('draft-floor-applied') },
+   // R13a: the nightly re-hash records drift that names a run in that run's record, decided by `nightly`.
+   'record-drift': { kind: 'scenario', run: async () => { await REHASH_FINDS_DRIFT.run(); } },
+   // R8a: the history walk closes a merged run's window past its time and records it, decided by observe (D-A-OB-03).
+   'observation-closed': { kind: 'scenario', run: async () => { await OPEN_WINDOW_IN_NO_DENOMINATOR.run(); } },
+   'approval-refused:draft-mismatch': { kind: 'scenario', run: () => draftingDecision('draft-mismatch') },
+   'approval-refused:draft-invalid': { kind: 'scenario', run: () => draftingDecision('draft-invalid') },
+   'station:parked:iterations-exhausted': { kind: 'scenario', run: () => parkScenario('iterations-exhausted') },
+   'station:parked:retries-exhausted': { kind: 'scenario', run: () => parkScenario('retries-exhausted') },
+   'station:parked:starts-exhausted': { kind: 'scenario', run: () => parkScenario('starts-exhausted') },
+   // R4: a conflict past maxConflictRetries 0 parks the task that met it, recorded by the line over that task at verify.
+   'station:parked:conflicts-exhausted': {
+     kind: 'scenario',
+     run: () => conflictScenario('conflicts-exhausted', (decisions) => {
+       const parks = decisions.filter((d) => d.decision.cause === 'station-refused' && d.decision.refusal.reason === 'parked');
+       const [park] = parks;
+       if (parks.length !== 1 || park?.decision.decidedBy !== 'line' || park.taskId !== 'b' || park.station !== 'verify'
+         || park.decision.cause !== 'station-refused' || park.decision.refusal.reason !== 'parked' || park.decision.refusal.cause !== 'conflicts-exhausted') {
+         throw new Error(`P14: a conflict park was recorded as ${JSON.stringify(parks)}`);
+       }
+       // The conflict that parked it is recorded too, no later than the park. The Vault lists decisions by hash, so time orders them.
+       const conflict = decisions.find((d) => d.decision.cause === 'task-conflict');
+       if (conflict === undefined || conflict.decidedAt > park.decidedAt) throw new Error('P14: the park was recorded with no conflict before it');
+     }),
+   },
+   'station:cancelled': {
+     kind: 'scenario',
+     run: async () => {
+       await withLine('p14-cancel-', async (rig) => {
+         const { cancelRun, resumeRun } = await api();
+         const components = await rig.components();
+         await stoppedForApproval(rig, components);
+         const cancelled = await cancelRun({ runId: rig.runId, by: 'maintainer', vault: components.vault });
+         if (!cancelled.ok) throw new Error(`P14: the cancel was refused: ${cancelled.message}`);
+         refusalOf(await resumeRun({ runId: rig.runId, components }), 'P14 cancelled');
+         await expectDecision(rig, components.vault, 'station:cancelled', { decidedBy: 'station-machine', taskId: null, station: 'integrate' });
+       });
+     },
+   },
+   'station:halted': {
+     kind: 'scenario',
+     run: async () => {
+       await withLine('p14-halt-', async (rig) => {
+         const { resumeRun } = await api();
+         const components = await rig.components();
+         await stoppedForApproval(rig, components);
+         // What the service commits when a drive ends in an error (A-P9-02).
+         const state = await rig.state();
+         await components.vault.commitRunState({ ...state, halted: { at: new Date().toISOString(), message: 'the drive failed' } }, state.version);
+         refusalOf(await resumeRun({ runId: rig.runId, components }), 'P14 halted');
+         await expectDecision(rig, components.vault, 'station:halted', { decidedBy: 'station-machine', taskId: null, station: 'integrate' });
+       });
+     },
+   },
+   'approval-granted': {
+     kind: 'scenario',
+     run: async () => {
+       await withLine('p14-granted-', async (rig) => {
+         const { approveStation } = await api();
+         const components = await rig.components();
+         const key = await stoppedForApproval(rig, components);
+         const approved = await approveStation({ runId: rig.runId, key: key as never, approvedBy: 'maintainer', vault: components.vault });
+         if (!approved.ok) throw new Error(`P14: the approval was refused: ${approved.message}`);
+         const d = await expectDecision(rig, components.vault, 'approval-granted', { decidedBy: 'approval', taskId: null, station: 'integrate' });
+         if (d.decision.cause !== 'approval-granted' || d.decision.principal !== 'maintainer' || d.decision.key !== key) {
+           throw new Error(`P14: the grant was recorded as ${JSON.stringify(d.decision)}`);
+         }
+       });
+     },
+   },
+   'approval-refused:invalid-request': {
+     kind: 'scenario',
+     run: async () => {
+       await withLine('p14-approval-invalid-', async (rig) => {
+         const { approveStation } = await api();
+         const components = await rig.components();
+         const key = await stoppedForApproval(rig, components);
+         await approveStation({ runId: rig.runId, key: 'not a key' as never, approvedBy: 'maintainer', vault: components.vault });
+         const d = await expectDecision(rig, components.vault, 'approval-refused:invalid-request', { decidedBy: 'approval', taskId: null, station: null });
+         if (d.decision.cause !== 'approval-refused' || d.decision.key !== null) {
+           throw new Error(`P14: a malformed key was recorded as ${JSON.stringify(d.decision)}; the caller's text is not stored`);
+         }
+         // A blank principal is refused too, and its key is kept because it is a key.
+         await approveStation({ runId: rig.runId, key: key as never, approvedBy: ' ', vault: components.vault });
+         const both = (await decisionsOf(rig, components.vault)).filter((x) => keyOf(x.decision) === 'approval-refused:invalid-request');
+         if (!both.some((x) => x.decision.cause === 'approval-refused' && x.decision.key === key)) throw new Error('P14: a blank approver was not recorded with its key');
+       });
+     },
+   },
+   'approval-refused:not-awaiting': {
+     kind: 'scenario',
+     run: async () => {
+       await withLine('p14-approval-early-', async (rig) => {
+         const { approveStation } = await api();
+         const components = await rig.components();
+         await stoppedForApproval(rig, components);
+         const refused = await approveStation({ runId: rig.runId, key: 'build:1', approvedBy: 'maintainer', vault: components.vault });
+         if (refused.ok) throw new Error('P14: an approval of an exit the run is not at was granted');
+         const d = await expectDecision(rig, components.vault, 'approval-refused:not-awaiting', { decidedBy: 'approval', taskId: null, station: 'integrate' });
+         if (d.decision.cause !== 'approval-refused' || d.decision.key !== 'build:1') throw new Error(`P14: recorded as ${JSON.stringify(d.decision)}`);
+       });
+     },
+   },
+   'egress:opened': { kind: 'scenario', run: () => egressScenario('opened') },
+   'egress:tunnelled': { kind: 'scenario', run: () => egressScenario('tunnelled') },
+   'egress:refused': { kind: 'scenario', run: () => egressScenario('refused') },
+   'violation-recorded': {
+     kind: 'scenario',
+     run: () => escapeScenario(async (rig, vault, state) => {
+       const [violation] = state.violations;
+       if (violation === undefined) throw new Error('P14: the escape recorded no violation');
+       const before = await vault.read(violation);
+       const d = await expectDecision(rig, vault, 'violation-recorded', { decidedBy: 'line', taskId: HELLO_TASK, station: 'verify' });
+       if (d.decision.cause !== 'violation-recorded' || JSON.stringify(d.decision.violation) !== JSON.stringify(violation)) {
+         throw new Error(`P14: the violation decision points at ${JSON.stringify(d.decision)}, not ${JSON.stringify(violation)}`);
+       }
+       if (Buffer.compare(Buffer.from(before), Buffer.from(await vault.read(violation))) !== 0) throw new Error('P14: the violation record changed');
+     }).then(claimMismatchScenario),
+   },
+   'relay-refused': {
+     kind: 'scenario',
+     run: async () => {
+       await withLine('p14-relay-', async (rig) => {
+         const refusing: MeterReading = { kind: 'metered', calls: 3, inputTokens: 300, outputTokens: 30, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 1, exhausted: 'cost', refused: 2 };
+         const sandbox = await reportingProvider((n) => (n === DRIVER_CALL ? { meter: refusing } : {}));
+         const components = await rig.components({ sandbox });
+         await stoppedForApproval(rig, components);
+         const [usage] = (await rig.state()).usage;
+         const d = await expectDecision(rig, components.vault, 'relay-refused', { decidedBy: 'model-relay', taskId: HELLO_TASK, station: 'build' });
+         if (d.decision.cause !== 'relay-refused' || JSON.stringify(d.decision.usage) !== JSON.stringify(usage) || d.decision.refused !== 2 || d.decision.exhausted !== 'cost') {
+           throw new Error(`P14: the relay's refusals were recorded as ${JSON.stringify(d.decision)}`);
+         }
+         // A call whose relay refused nothing records no relay decision.
+         const relayed = (await decisionsOf(rig, components.vault)).filter((x) => x.decision.cause === 'relay-refused');
+         if (relayed.length !== 1) throw new Error(`P14: ${String(relayed.length)} relay decisions for one refusing call`);
+       });
+     },
+   },
+   // R10: each narrowing is recorded by the component that decided it, before the state that carries it.
+   'capability-narrowed:author-trust': { kind: 'scenario', run: authorTrustNarrowing },
+   'capability-narrowed:sensitive-grant': { kind: 'scenario', run: grantNarrowing },
+   'capability-narrowed:input': { kind: 'scenario', run: inputNarrowing },
+   'task-conflict': {
+     kind: 'scenario',
+     run: () => conflictScenario('task-conflict', (decisions) => {
+       const found = decisions.filter((d) => d.decision.cause === 'task-conflict');
+       const [d] = found;
+       // Only the line may record one, which the Vault holds it to (A-R4-03).
+       if (found.length !== 1 || d?.decision.cause !== 'task-conflict' || d.taskId !== 'b' || d.station !== 'verify'
+         || JSON.stringify(d.decision.with) !== '["a"]' || JSON.stringify(d.decision.paths) !== '["parts/shared.txt"]') {
+         throw new Error(`P14: a conflict was recorded as ${JSON.stringify(found)}`);
+       }
+     }),
+   },
+   // R36a: every failed attempt is recorded by the line with its source, layer, and trimmed text, before the retry it spends
+   // or the park it leads to, and the park names the last one's layer (#149, D-R36a-05).
+   'attempt-failed': {
+     kind: 'scenario',
+     run: async () => {
+       const { STATION_CONTRACTS } = await import('@olympus-ai/core');
+       const { runStanding, startRun } = await api();
+       await withLine('p14-attempt-', async (rig) => {
+         const refusal = Object.assign(new Error(`the CLI produced no session (exit code 1); stderr: ${'x'.repeat(600)}`), { name: 'DriverRefusal', layer: 'invocation' });
+         const components = await rig.components({ driver: await stubDriver({ failWith: refusal }) });
+         const parked = refusalOf(await startRun(await rig.request(components)), 'R36a attempt');
+         const failed = (await decisionsOf(rig, components.vault)).filter((d) => d.decision.cause === 'attempt-failed');
+         const retries = STATION_CONTRACTS.build.retry.max;
+         if (failed.length !== retries + 1) throw new Error(`R36a: ${String(retries + 1)} failed attempts were recorded as ${String(failed.length)}`);
+         // Recorded in order; read back in any, so sorted by the count each carries.
+         failed.sort((a, b) => (a.decision.cause === 'attempt-failed' ? a.decision.failure.retries : 0) - (b.decision.cause === 'attempt-failed' ? b.decision.failure.retries : 0));
+         for (const [i, d] of failed.entries()) {
+           if (d.decision.cause !== 'attempt-failed' || d.taskId !== HELLO_TASK || d.station !== 'build') throw new Error(`R36a: recorded as ${JSON.stringify(d)}`);
+           const { failure } = d.decision;
+           if (failure.source !== 'driver' || failure.layer !== 'invocation' || failure.retries !== i + 1) throw new Error(`R36a: the failure was read as ${JSON.stringify(failure)}`);
+           if (!failure.untrustedDetail.startsWith('the CLI produced no session (exit code 1)') || failure.untrustedDetail.length > 401) {
+             throw new Error(`R36a: the failure's text was kept as ${String(failure.untrustedDetail.length)} characters starting ${JSON.stringify(failure.untrustedDetail.slice(0, 60))}`);
+           }
+         }
+         if (parked.transition.reason !== 'parked' || !parked.transition.message.includes("the last attempt failed at the driver's invocation layer")) {
+           throw new Error(`R36a: the park does not name the last attempt's cause: ${JSON.stringify(parked.transition)}`);
+         }
+         // What `status` and `events` show: the stopped standing carries the last failure, read from the Vault.
+         const { standing } = await runStanding(components.vault, rig.runId);
+         if (standing.standing !== 'stopped' || standing.lastFailure?.kind !== 'attempt-failed' || standing.lastFailure.task !== HELLO_TASK || standing.lastFailure.failure.retries !== retries + 1
+           || standing.lastFailure.failure.layer !== 'invocation') {
+           throw new Error(`R36a: the stopped standing does not show the last failure: ${JSON.stringify(standing)}`);
+         }
+       });
+     },
+   },
+   'tier-escalated': {
+     kind: 'scenario',
+     run: async () => {
+       await withLine('p14-escalate-', async (rig) => {
+         const run = await failingRun(rig, { tier: 'fast', escalation: { afterFailedGates: 1, ceiling: 'standard' } });
+         const vault = (await rig.components()).vault;
+         const d = await expectDecision(rig, vault, 'tier-escalated', { decidedBy: 'line', taskId: HELLO_TASK, station: 'build' });
+         if (d.decision.cause !== 'tier-escalated' || d.decision.from !== 'fast' || d.decision.to !== 'standard' || d.decision.failedGates !== 1 || run.decisions.length !== 1) {
+           throw new Error(`P14: an escalation was recorded as ${JSON.stringify(d.decision)}, among ${String(run.decisions.length)}`);
+         }
+       });
+     },
+   },
+ };
+ 
+ /** The literals whose `reason` property is declared by `StationRefusal`, found in a package's own source. */
+ /**
+  * The string a literal's `reason` property is set to, however it is spelled:
+  * a quoted key, and a literal inside parentheses, `as`, `satisfies`, or an
+  * angle-bracket assertion, all count (external review of P14, codex-7).
+  */
+
+===== packages/conformance/src/registry/first-run.ts =====
+diff --git a/packages/conformance/src/registry/first-run.ts b/packages/conformance/src/registry/first-run.ts
+index 5c2d56e..7fdde18 100644
+--- a/packages/conformance/src/registry/first-run.ts
++++ b/packages/conformance/src/registry/first-run.ts
+@@ -14,7 +14,7 @@ import { checkOutWithCrlf, commitFixture, committedFiles } from '../kit/git.js';
+ import type { LocalAssertion } from '../kit/types.js';
+ import { workspaceRoot } from '../kit/workspace.js';
+ import { approveAndResume, toApproval, withIntegration } from './integration.js';
+-import { refusalOf, stubDriver, withLine } from './line.js';
++import { refusalOf, RIG_READINESS, stubDriver, withLine } from './line.js';
+ import { withVaultDirs } from './local-vault.js';
+ import { drafting } from './drafting.js';
+ 
+@@ -64,19 +64,19 @@ export async function exampleGraph(dirs: { store: string; artifacts: string }, b
+ /** A create of the example's two runs, as the README's "First run" gives them, at L1 and with no figure approved yet. */
+ async function exampleCreate(policyFile: string, drafted: boolean, body: (outcome: RunOutcome, what: string) => void, edit?: (dir: string) => Promise<void>): Promise<void> {
+   const { loadPolicyFile, startRun } = await api();
+   const loaded = await loadPolicyFile(policyFile);
+   if (!loaded.ok) throw new Error(`R36a: the policy does not load: ${JSON.stringify(loaded)}`);
+   await withVaultDirs(`r36a-example-${drafted ? 'drafted' : 'supplied'}-`, async (dirs, base) => {
+     const baseCommit = await userRepository(dirs.artifacts, edit);
+     const req: RunRequest = {
+       runId: `r36a-example-${drafted ? 'drafted' : 'supplied'}` as RunRequest['runId'],
+       baseCommit, requestedLevel: 1, workspace: dirs.artifacts, policy: loaded.policy,
+       roles: join(examples(), 'roles'), rubrics: join(examples(), 'rubrics'),
+-      components: await exampleGraph(dirs, base), approvedCostUsd: null,
++      components: await exampleGraph(dirs, base), approvedCostUsd: null, readiness: RIG_READINESS,
+       ...(drafted
+         ? { intent: { text: 'Add hello.txt at the repository root, containing exactly the line hello.', from: 'principal' }, artifacts: { spec: 'draft', acceptanceTests: ['acceptance.md'], verificationManifest: 'verify.json', taskGraph: 'graph.json' } }
+         : { artifacts: { spec: ['spec.md'], acceptanceTests: ['acceptance.md'], verificationManifest: 'verify.json', taskGraph: 'graph.json', specParts: { security: 'security.json' } } }),
+     };
+     body(await startRun(req), drafted ? 'the drafted run' : 'the supplied run');
+   });
+ }
+
+===== packages/conformance/src/registry/init.ts =====
+diff --git a/packages/conformance/src/registry/init.ts b/packages/conformance/src/registry/init.ts
+index b725492..3287e77 100644
+--- a/packages/conformance/src/registry/init.ts
++++ b/packages/conformance/src/registry/init.ts
+@@ -16,6 +16,7 @@ import type { LocalAssertion } from '../kit/types.js';
+ import { workspaceRoot } from '../kit/workspace.js';
+ import { exampleGraph } from './first-run.js';
+ import { withVaultDirs } from './local-vault.js';
++import { RIG_READINESS } from './line.js';
+ 
+ const api = async () => import('@olympus-ai/api');
+ 
+@@ -43,50 +44,50 @@ async function init(repository: string, configDirectory: string, hostHasUids = t
+ export const INIT_SETUP_ADMITTED: LocalAssertion = runtime({
+   id: 'I5.init-setup-admitted',
+   title:
+     "init on a TypeScript repository with vitest writes a policy, roles, rubrics, a host environment file the host's start-up checks accept, and a manifest and graph under .factory/ that admission accepts for a run drafting its spec and tests, with the Claude Code driver in every seat: the only answer left is the cost to approve; and the policy, roles, and rubrics are outside the repository, a configuration directory equal to, inside, or containing it being refused with nothing written (R36b)",
+   run: async () => {
+     const { checkStartup, loadPolicyFile, mergeEnvFile, startRun } = await api();
+     await withVaultDirs('r36b-init-', async (dirs, base) => {
+       await vitestRepository(dirs.artifacts);
+       const baseCommit = asClone(dirs.artifacts);
+       // Outside means outside: a configuration directory equal to, inside, or containing the
+       // repository is refused, and nothing is written (R36b review, codex-3).
+       for (const [where, overlapping] of [['equal to', dirs.artifacts], ['inside', join(dirs.artifacts, 'cfg')], ['containing', dirname(dirs.artifacts)]] as const) {
+         const refusedOverlap = await init(dirs.artifacts, overlapping, false);
+         if (refusedOverlap.ok || refusedOverlap.reason !== 'config-inside-repository') {
+           throw new Error(`R36b: a configuration directory ${where} the repository was answered ${JSON.stringify(refusedOverlap)}, not refused`);
+         }
+         if (existsSync(join(overlapping, 'policy.yaml')) || existsSync(join(dirs.artifacts, '.factory'))) throw new Error(`R36b: init refused a configuration directory ${where} the repository but wrote files`);
+       }
+       const config = join(base, 'config');
+       const outcome = await init(dirs.artifacts, config, false);
+       if (!outcome.ok) throw new Error(`R36b: init refused a vitest repository: ${JSON.stringify(outcome)}`);
+       if (outcome.stack !== 'vitest@4') throw new Error(`R36b: init detected ${outcome.stack}, not vitest@4`);
+       if (outcome.written.some((f) => f.startsWith(dirs.artifacts) && !f.includes('.factory'))) throw new Error('R36b: init wrote outside .factory/ in the repository');
+       for (const f of ['policy.yaml', 'host.env', join('roles', 'builder.md'), join('rubrics', 'spec.md')]) {
+         if (!existsSync(join(config, f))) throw new Error(`R36b: init wrote no ${f} in the configuration directory`);
+       }
+       // The host's own start-up checks, over the file and the two values set by hand.
+       const text = await readFile(outcome.envFile, 'utf8');
+       const merged = mergeEnvFile(outcome.envFile, text, { ANTHROPIC_API_KEY: 'sk-ant-by-hand', FACTORY_GIT_TOKEN: 'git-token-by-hand' });
+       if (!merged.ok) throw new Error(`R36b: the host refuses init's environment file: ${merged.problems.join('; ')}`);
+       const startup = await checkStartup(merged.env, undefined, { uids: false });
+       if (!startup.ok) throw new Error(`R36b: the host's start-up refuses init's configuration: ${startup.problems.join('; ')}`);
+       if (startup.settings.repository !== dirs.artifacts && startup.settings.repository.toLowerCase() !== dirs.artifacts.toLowerCase()) {
+         throw new Error(`R36b: the environment file admits ${startup.settings.repository}, not the repository`);
+       }
+       const loaded = await loadPolicyFile(startup.settings.policyFile);
+       if (!loaded.ok) throw new Error(`R36b: init's policy does not load: ${JSON.stringify(loaded)}`);
+       const req: RunRequest = {
+         runId: 'r36b-init' as RunRequest['runId'],
+         baseCommit, requestedLevel: 1, workspace: dirs.artifacts, policy: loaded.policy,
+         roles: startup.settings.rolesDirectory, rubrics: startup.settings.rubricsDirectory,
+-        components: await exampleGraph(dirs, base), approvedCostUsd: null,
++        components: await exampleGraph(dirs, base), approvedCostUsd: null, readiness: RIG_READINESS,
+         intent: { text: 'Add a multiply(a, b) function to src/math.ts that returns the product.', from: 'principal' },
+         artifacts: { spec: 'draft', acceptanceTests: 'draft', verificationManifest: '.factory/verify.json', taskGraph: '.factory/graph.json' },
+       };
+       const admitted = await startRun(req);
+       if (admitted.ok || admitted.reason !== 'cost-unapproved') throw new Error(`R36b: a run from init's files was answered ${JSON.stringify(admitted)}, not with the cost to approve`);
+     });
+   },
+ });
+
+===== packages/conformance/src/registry/integration.ts =====
+diff --git a/packages/conformance/src/registry/integration.ts b/packages/conformance/src/registry/integration.ts
+index cd54055..bbf5153 100644
+--- a/packages/conformance/src/registry/integration.ts
++++ b/packages/conformance/src/registry/integration.ts
+@@ -17,7 +17,7 @@ import type { IntegrationRecord } from '@olympus-ai/vault';
+ import { runtime } from '../kit/assert.js';
+ import { allText } from './all-text.js';
+ import { MERGED_AT, withFakeGitHub, type FakeGitHub } from '../kit/fake-github.js';
+-import { HELLO_TASK, linePolicy, refusalOf, stubDriver, withLine, writeManifest, type LineRig, type RigOptions } from './line.js';
++import { HELLO_TASK, linePolicy, refusalOf, RIG_SCANNER, stubDriver, withLine, writeManifest, type LineRig, type RigOptions } from './line.js';
+ import { specFor, throughProxy, withProvider, withSandbox } from './local-sandbox.js';
+ import { inTask, writes } from './verification.js';
+ 
+@@ -336,123 +336,123 @@ export const GIT_REMOTE_UNREACHABLE_FROM_EVERY_SANDBOX = runtime({
+ export const RUN_REPORT_READS_ONLY_RECORDS = runtime({
+   id: 'I2.run-report-reads-only-records',
+   title:
+     "the per-run report is derived from the Vault alone: its cost is the totals of the usage records, each call names the model the runtime resolved, a claim the evidence contradicts appears as the bundle's mismatch, every gate and approval is the one P14 recorded, and the merge is the integration record; the API serves it and the CLI prints it",
+   run: async () => {
+     await withIntegration('i1b-report-', async (it) => {
+       const { costTotals, readUsage, runReport } = await api();
+       const { LocalVault } = await import('@olympus-ai/vault');
+       // The stub driver claims no file changed while its task writes one: the runtime's diff of claim and evidence says so.
+       await toApproval(it);
+       const outcome = await approveAndResume(it);
+       if (!outcome.ok) throw new Error('I2 control: the run did not pass');
+       const vault = new LocalVault(it.rig.dirs);
+       const report = await runReport(vault, it.rig.runId);
+       const state = await vault.readRunState(it.rig.runId);
+       const usage = await readUsage(vault, state);
+       if (JSON.stringify(report.cost) !== JSON.stringify(costTotals(usage))) throw new Error('I2: the report cost is not the totals of the usage records');
+       // The arithmetic, against figures computed here and not by the helper production calls: every call read REPORT_METER.
+       const read = usage.filter((r) => r.reading.kind !== 'pending').length;
+       const m = report.cost.run.metered;
+       if (read === 0 || report.calls.length !== read) throw new Error(`I2 control: the report lists ${String(report.calls.length)} calls for ${String(read)} readings`);
+       if (m.calls !== read || m.inputTokens !== 100 * read || m.outputTokens !== 10 * read || m.cacheReadTokens !== 300 * read || m.cacheWriteTokens !== 100 * read || Math.abs(m.costUsd - 0.002 * read) > 1e-12) {
+         throw new Error(`I2: the report's metered totals are not ${String(read)} calls of the reading each made: ${JSON.stringify(m)}`);
+       }
+       if (report.cacheHitRate !== 0.6) throw new Error(`I2: the report's cache-hit rate is ${String(report.cacheHitRate)}, not 300 cached of 500 input tokens`);
+       if (report.calls.length === 0 || report.calls.some((c) => typeof c.model.family !== 'string' || c.model.family === '')) throw new Error('I2: a call in the report names no model');
+       if (report.standing.standing !== 'passed') throw new Error(`I2: the report says ${report.standing.standing} for a merged run`);
+       const integrate = report.stations.find((s) => s.station === 'integrate');
+       if (integrate?.gate !== 'passed' || integrate.approvals !== 1) throw new Error(`I2: the report's integrate gate is ${JSON.stringify(integrate)}, not passed on one approval`);
+       if (report.decisions['approval-granted'] !== 1) throw new Error('I2: the report does not count the approval P14 recorded');
+       const merge = report.integration.find((r) => r.kind === 'merged');
+       if (merge?.kind !== 'merged' || merge.mergeCommit !== it.github.head(it.github.baseBranch)) throw new Error('I2: the report does not carry the merge the Vault records');
+       const differences: string[] = [];
+       for (const ref of state.evidenceRefs) differences.push(...(JSON.parse(new TextDecoder().decode(await vault.read(ref))) as { claimEvidenceDiff: string[] }).claimEvidenceDiff);
+       if (differences.length === 0) throw new Error('I2 control: no bundle records a mismatch between claim and evidence');
+       if (JSON.stringify(report.mismatches.flatMap((m) => m.differences)) !== JSON.stringify(differences)) throw new Error("I2: the report's mismatches are not the evidence bundles' own");
+ 
+       // Served and printed: the API's report is the same object, and the CLI asks for it.
+       const { createApiServer } = await api();
+-      const server = createApiServer({ components: await it.components(), token: REPORT_TOKEN, principal: 'conformance', policyFile: join(it.rig.dirs.artifacts, 'missing-policy.yaml'), rolesDirectory: it.rig.roles });
++      const server = createApiServer({ readiness: RIG_SCANNER, components: await it.components(), token: REPORT_TOKEN, principal: 'conformance', policyFile: join(it.rig.dirs.artifacts, 'missing-policy.yaml'), rolesDirectory: it.rig.roles });
+       const address = await server.listen(0, '127.0.0.1');
+       try {
+         const res = await fetch(`${address}/runs/${it.rig.runId}/report`, { headers: { authorization: `Bearer ${REPORT_TOKEN}` } });
+         if (res.status !== 200) throw new Error(`I2: GET /runs/:id/report answered ${String(res.status)}`);
+         const served = (await res.json()) as typeof report;
+         if (JSON.stringify(served.cost) !== JSON.stringify(report.cost) || served.integration.length !== report.integration.length) throw new Error('I2: the served report is not the one derived from the Vault');
+       } finally {
+         await server.close();
+       }
+     }, REPORT_METER);
+ 
+     // With no meter there is no input to rate: the cache-hit rate is null, not 0.
+     await withIntegration('i1b-report-unmetered-', async (it) => {
+       const { runReport } = await api();
+       const { LocalVault } = await import('@olympus-ai/vault');
+       await toApproval(it);
+       if (!(await approveAndResume(it)).ok) throw new Error('I2 control: the unmetered run did not pass');
+       const report = await runReport(new LocalVault(it.rig.dirs), it.rig.runId);
+       if (report.cost.run.unmetered === 0) throw new Error('I2 control: the unmetered run recorded a metered call');
+       if (report.cacheHitRate !== null) throw new Error(`I2: an unmetered run's cache-hit rate is ${String(report.cacheHitRate)}, not null`);
+     });
+   },
+ });
+ 
+ /**
+  * R2: the rates over a real run are the ones its records give. Each figure is
+  * checked against a number computed here from the records directly, not by
+  * the code under test, and the merge time is the fake GitHub's, which no clock
+  * produces.
+  */
+ export const OUTCOMES_DERIVED_FROM_RUN_RECORDS = runtime({
+   id: 'I2.outcomes-derived-from-run-records',
+   title:
+     "outcome rates are derived from the Vault's records alone: a run waiting on approval is unfinished and its request open, a merged run counts once, every evidence bundle is an attempt and a mismatched claim a caught false-done, an approval spent is not autonomy, cycle time ends at GitHub's merge time, cost per merge is the metered spend; the report says its standing came from the workspace while unfinished and from records once merged; the API serves the same figures",
+   run: async () => {
+     await withIntegration('r2-outcomes-', async (it) => {
+       const { outcomes, runReport } = await api();
+       const { LocalVault } = await import('@olympus-ai/vault');
+       const vault = new LocalVault(it.rig.dirs);
+       await toApproval(it);
+       if ((await runReport(vault, it.rig.runId)).standingSource !== 'workspace') throw new Error('I2: a run awaiting approval reports a standing read from records alone, though it re-hashed the workspace');
+       const waiting = await outcomes(vault);
+       if (waiting.population.unfinished !== 1 || waiting.throughput.autonomyRatio.kind !== 'no-sample' || waiting.throughput.approvalsOpen['integrate:1'] !== 1) {
+         throw new Error(`I2: a run awaiting approval is not counted unfinished with its request open: ${JSON.stringify({ population: waiting.population, open: waiting.throughput.approvalsOpen })}`);
+       }
+ 
+       if (!(await approveAndResume(it)).ok) throw new Error('I2 control: the run did not pass');
+       if ((await runReport(vault, it.rig.runId)).standingSource !== 'records') throw new Error("I2: a merged run's report does not say its standing came from records");
+       const o = await outcomes(vault);
+       const state = await vault.readRunState(it.rig.runId);
+       const admission = JSON.parse(new TextDecoder().decode(await vault.read(state.admission))) as { run: { createdAt: string } };
+       let mismatched = 0;
+       for (const ref of state.evidenceRefs) if ((JSON.parse(new TextDecoder().decode(await vault.read(ref))) as { claimEvidenceDiff: string[] }).claimEvidenceDiff.length > 0) mismatched += 1;
+       if (mismatched === 0 || Object.values(state.tasks).some((s) => s !== 'passed')) throw new Error('I2 control: the scenario needs every task passed and a claim the evidence contradicts');
+ 
+       if (o.population.merged !== 1 || o.population.total !== 1) throw new Error(`I2: the population is ${JSON.stringify(o.population)}, not one merged run`);
+       const fd = o.safety.caughtFalseDone;
+       if (fd.kind !== 'rate' || fd.sample !== state.evidenceRefs.length || fd.count !== mismatched) throw new Error(`I2: caught false-done is ${JSON.stringify(fd)}, not ${String(mismatched)} of ${String(state.evidenceRefs.length)} bundles`);
+       const ratio = o.throughput.autonomyRatio;
+       if (ratio.kind !== 'rate' || ratio.count !== 0 || ratio.sample !== 1) throw new Error(`I2: a merge that spent an approval counts as autonomous: ${JSON.stringify(ratio)}`);
+       const cycle = o.throughput.cycleTime;
+       if (cycle.kind !== 'distribution' || cycle.median !== Date.parse(MERGED_AT) - Date.parse(admission.run.createdAt)) throw new Error(`I2: cycle time ${JSON.stringify(cycle)} does not end at GitHub's merge time`);
+       const wait = o.throughput.approvalWait['integrate:1'];
+       if (wait?.kind !== 'distribution' || wait.sample !== 1 || Object.keys(o.throughput.approvalsOpen).length !== 0) throw new Error(`I2: the integrate approval is not one wait, cleared: ${JSON.stringify(o.throughput.approvalWait)}`);
+       const read = (await (await api()).readUsage(vault, state)).filter((r) => r.reading.kind === 'metered').length;
+       const cost = o.throughput.costPerMergedChange;
+       if (cost.kind !== 'cost' || cost.bound !== 'exact' || Math.abs(cost.usd - 0.002 * read) > 1e-12) throw new Error(`I2: cost per merged change is ${JSON.stringify(cost)}, not ${String(read)} calls at $0.002`);
+ 
+       const { createApiServer } = await api();
+-      const server = createApiServer({ components: await it.components(), token: REPORT_TOKEN, principal: 'conformance', policyFile: join(it.rig.dirs.artifacts, 'missing-policy.yaml'), rolesDirectory: it.rig.roles });
++      const server = createApiServer({ readiness: RIG_SCANNER, components: await it.components(), token: REPORT_TOKEN, principal: 'conformance', policyFile: join(it.rig.dirs.artifacts, 'missing-policy.yaml'), rolesDirectory: it.rig.roles });
+       const address = await server.listen(0, '127.0.0.1');
+       try {
+         const headers = { authorization: `Bearer ${REPORT_TOKEN}` };
+         const res = await fetch(`${address}/outcomes`, { headers });
+         if (res.status !== 200 || JSON.stringify(await res.json()) !== JSON.stringify(o)) throw new Error('I2: GET /outcomes does not serve the figures derived from the Vault');
+         const bad = await fetch(`${address}/outcomes?from=yesterday`, { headers });
+         if (bad.status !== 400) throw new Error(`I2: an unreadable window answered ${String(bad.status)}, not 400`);
+       } finally {
+         await server.close();
+       }
+     }, REPORT_METER);
+   },
+ });
+
+===== packages/conformance/src/registry/line.ts =====
+diff --git a/packages/conformance/src/registry/line.ts b/packages/conformance/src/registry/line.ts
+index c02cffa..668b833 100644
+--- a/packages/conformance/src/registry/line.ts
++++ b/packages/conformance/src/registry/line.ts
+@@ -11,7 +11,7 @@
+  */
+ import { cp, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+ import { join } from 'node:path';
+-import type { BuiltGraph, GraphParts, RunOutcome, RunRequest, WorkspaceStore } from '@olympus-ai/api';
++import type { AdmissionReadiness, BuiltGraph, ReadinessScanner, GraphParts, RunOutcome, RunRequest, WorkspaceStore } from '@olympus-ai/api';
+ import type {
+   ApprovalKey,
+   ApprovalOutcome,
+@@ -38,6 +38,21 @@ import { commitFixture } from '../kit/git.js';
+ import { workspaceRoot } from '../kit/workspace.js';
+ import { withVaultDirs, type VaultDirs } from './local-vault.js';
+ 
++/**
++ * The rig's readiness scan (A-R40-02): L2 for whatever commit it is asked about, held by the scan limit. A
++ * trusted component of the rig, as its drivers and Vault are; an assertion about readiness passes its own.
++ */
++export const RIG_READINESS: AdmissionReadiness = {
++  ceilingAt: (_checkout, commit) => Promise.resolve({ kind: 'scanned', level: 2, heldBy: { kind: 'scan-limit' }, commit }),
++};
++
++/** The same scan as a server's scanner: admission asks it for a ceiling, and the readiness route is not under test. */
++export const RIG_SCANNER: ReadinessScanner = {
++  resolve: () => Promise.reject(new Error('the readiness route is not under test')),
++  scan: () => Promise.reject(new Error('the readiness route is not under test')),
++  ceilingAt: (checkout, commit) => RIG_READINESS.ceilingAt(checkout, commit),
++};
++
+ /** `parts` as a built graph: itself when `buildGraph` already made it, else built now. */
+ export async function built(parts: GraphParts): Promise<BuiltGraph> {
+   const { buildGraph, isBuilt } = await import('@olympus-ai/api');
+@@ -261,61 +276,62 @@ async function lockedFixture(root: string): Promise<void> {
+ /** The hello fixture in a fresh artifact root, a fresh store beside it, and a way to open both again. */
+ export async function withLine<T>(prefix: string, body: (rig: LineRig) => Promise<T>): Promise<T> {
+   return withVaultDirs(prefix, async (dirs, base) => {
+     await cp(join(workspaceRoot(), HELLO_FIXTURE), dirs.artifacts, { recursive: true });
+     const workspaces = await storeAt(join(base, 'trees'));
+     const { DEFAULT_ROLES_DIRECTORY } = await import('@olympus-ai/compiler');
+     const roles = join(base, 'roles');
+     await cp(DEFAULT_ROLES_DIRECTORY, roles, { recursive: true });
+     const runId = `${prefix.replace(/[^A-Za-z0-9]/g, '')}run` as RunId;
+     const open = async (): Promise<Vault> => {
+       const { LocalVault } = await import('@olympus-ai/vault');
+       return new LocalVault(dirs);
+     };
+     const rig: LineRig = {
+       dirs,
+       runId,
+       roles,
+       workspaces,
+       components: async (overrides = {}, options = {}) => {
+         const { StubSandboxProvider } = await import('@olympus-ai/sandbox');
+         const sandbox = overrides.sandbox ?? new StubSandboxProvider();
+         const stub = await stubDriver();
+         const given = overrides.driver ?? stub;
+         const driver = options.work === false ? given : doingTheWork(given, sandbox);
+         // One stub in both seats, as before the builder did the work: a reviewer it never writes as.
+         const reviewer = overrides.driver === undefined ? driver : stub;
+         // The stand-in installs what a fixture's lockfile pins from the fixture's own tree, offline (R34).
+         const { standInNpmInstaller } = await import('@olympus-ai/adapters');
+         return built({ vault: await open(), sandbox, reviewer, workspaces, ...(await scannersFor(sandbox)), installers: [standInNpmInstaller(dirs.artifacts)], ...overrides, driver });
+       },
+       request: async (parts, overrides = {}) => {
+         const components = await built(parts);
+         await scanned(dirs, components);
+         await lockedFixture(dirs.artifacts);
+         const req: RunRequest = {
+           runId,
+           // The fixture as it stands, committed: admission reads the base from the commit (D-R36a-04).
+           baseCommit: Object.hasOwn(overrides, 'baseCommit') ? '0'.repeat(40) : commitFixture(dirs.artifacts),
+           requestedLevel: 1,
+           workspace: dirs.artifacts,
+           artifacts: ARTIFACTS,
+           policy: await linePolicy(),
+           roles,
+           components,
+           approvedCostUsd: null,
++          readiness: RIG_READINESS,
+           ...overrides,
+         };
+         // A person who read the worst-case figure approved it, unless the assertion says otherwise (D-P9-03).
+         return Object.hasOwn(overrides, 'approvedCostUsd') ? req : { ...req, approvedCostUsd: await approvedFigure(req) };
+       },
+       state: async () => (await open()).readRunState(runId),
+     };
+     return body(rig);
+   });
+ }
+ 
+ /**
+  * A workspace store at `root`. On a host with uids it runs as this process,
+  * which is who its copies are writable by; on one without, the user is
+  * named, because there is nothing to derive it from.
+  */
+
+===== packages/conformance/src/registry/separation.ts =====
+diff --git a/packages/conformance/src/registry/separation.ts b/packages/conformance/src/registry/separation.ts
+index ab72a96..f193d2f 100644
+--- a/packages/conformance/src/registry/separation.ts
++++ b/packages/conformance/src/registry/separation.ts
+@@ -19,7 +19,7 @@ import type { SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
+ import type { UsageRecord } from '@olympus-ai/vault';
+ import { runtime } from '../kit/assert.js';
+ import type { LocalAssertion } from '../kit/types.js';
+-import { HELLO_REVIEW, HELLO_TASK, linePolicy, readArtifact, stubDriver, withLine, type ObservedDriver } from './line.js';
++import { HELLO_REVIEW, HELLO_TASK, linePolicy, readArtifact, RIG_SCANNER, stubDriver, withLine, type ObservedDriver } from './line.js';
+ import { inTask, writes } from './verification.js';
+ 
+ const api = async () => import('@olympus-ai/api');
+@@ -281,54 +281,54 @@ const LOCAL_TOKEN = 'r9-local-token-never-in-a-sandbox-0123456789';
+ export const LOCAL_TOKEN_REACHES_NO_SANDBOX: LocalAssertion = runtime({
+   id: 'I4.local-token-reaches-no-sandbox',
+   title:
+     "the local token an approval is made with is held by the API server alone: a run created and approved over HTTP passes, its approval is the token's principal, and no sandbox the line provisions, no task request, and no Vault record carries the token (R9, D-P9-06)",
+   timeoutMs: 120_000,
+   run: async () => {
+     await withLine('r9-i4-token-', async (rig) => {
+       const { createApiServer } = await api();
+       const { sandbox, specs } = await recordingSandbox();
+       const driver = await stubDriver();
+       const reviewer = await stubDriver({ family: 'other-family' });
+       const components = await rig.components({ sandbox, driver, reviewer });
+       const policyFile = join(rig.dirs.artifacts, '..', 'policy.yaml');
+       await writeFile(policyFile, JSON.stringify(await linePolicy()));
+       const req = await rig.request(components);
+-      const server = createApiServer({ components, token: LOCAL_TOKEN, principal: 'r9-principal', policyFile, rolesDirectory: rig.roles });
++      const server = createApiServer({ readiness: RIG_SCANNER, components, token: LOCAL_TOKEN, principal: 'r9-principal', policyFile, rolesDirectory: rig.roles });
+       const address = await server.listen(0, '127.0.0.1');
+       const headers = { authorization: `Bearer ${LOCAL_TOKEN}`, 'content-type': 'application/json' };
+       const settled = async (runId: string): Promise<{ standing: { standing: string }; state: RunState }> => {
+         for (let i = 0; i < 800; i += 1) {
+           const view = (await (await fetch(`${address}/runs/${runId}`, { headers })).json()) as { driving: boolean; standing: { standing: string }; state: RunState };
+           if (!view.driving) return view;
+           await new Promise((done) => setTimeout(done, 25));
+         }
+         throw new Error(`I4 control: run ${runId} never settled`);
+       };
+       try {
+         const body = { workspace: req.workspace, baseCommit: req.baseCommit, requestedLevel: req.requestedLevel, artifacts: req.artifacts, approvedCostUsd: req.approvedCostUsd };
+         const created = await fetch(`${address}/runs`, { method: 'POST', headers, body: JSON.stringify(body) });
+         if (created.status !== 201 && created.status !== 202 && created.status !== 200) throw new Error(`I4 control: create answered ${String(created.status)}: ${await created.text()}`);
+         const { runId } = (await created.json()) as { runId: string };
+         const waiting = await settled(runId);
+         if (waiting.standing.standing !== 'awaiting-approval') throw new Error(`I4 control: the run stands ${JSON.stringify(waiting.standing)}`);
+         const approved = await fetch(`${address}/runs/${runId}/approve`, { method: 'POST', headers, body: JSON.stringify({ key: 'integrate:1' }) });
+         if (approved.status !== 200) throw new Error(`I4 control: approve answered ${String(approved.status)}`);
+         const done = await settled(runId);
+         if (done.standing.standing !== 'passed' || !done.state.approvals.some((g) => g.approvedBy === 'r9-principal')) {
+           throw new Error(`I4 control: the run did not pass on the principal's approval: ${JSON.stringify(done.standing)}`);
+         }
+       } finally {
+         await server.close();
+       }
+       if (specs.length === 0 || driver.requests.length === 0 || reviewer.requests.length === 0) throw new Error('I4 control: no sandbox was provisioned or no seat ran');
+       if (JSON.stringify(specs).includes(LOCAL_TOKEN)) throw new Error('I4: a sandbox spec carries the local token');
+       if (JSON.stringify([...driver.requests, ...reviewer.requests]).includes(LOCAL_TOKEN)) throw new Error('I4: a task request carries the local token');
+       let stored = '';
+       for (const entry of await readdir(rig.dirs.store, { recursive: true, withFileTypes: true })) {
+         // A file that cannot be read fails the assertion: one skipped is one the token could hide in (codex-4).
+         if (entry.isFile()) stored += await readFile(join(entry.parentPath, entry.name), 'utf8');
+       }
+       if (stored.includes(LOCAL_TOKEN)) throw new Error('I4: the Vault holds the local token');
+     });
+   },
+ });
+
+===== packages/conformance/src/registry/triggers.ts =====
+diff --git a/packages/conformance/src/registry/triggers.ts b/packages/conformance/src/registry/triggers.ts
+index 180eed3..aec6457 100644
+--- a/packages/conformance/src/registry/triggers.ts
++++ b/packages/conformance/src/registry/triggers.ts
+@@ -17,7 +17,7 @@ import type {
+ import type { CandidateRecord, TriggerDecision, Vault } from '@olympus-ai/vault';
+ import { lintFixture, runtime } from '../kit/assert.js';
+ import type { LocalAssertion } from '../kit/types.js';
+-import { linePolicy, lineScope, stubDriver, withLine, type LineRig } from './line.js';
++import { linePolicy, lineScope, RIG_SCANNER, stubDriver, withLine, type LineRig } from './line.js';
+ import { withVaultDirs } from './local-vault.js';
+ 
+ const api = async () => import('@olympus-ai/api');
+@@ -294,75 +294,75 @@ const CANDIDATE_PAYLOAD_REACHES_NO_DRIVER = runtime({
+ const DELIVERY_REFUSED_BEFORE_IT_IS_READ = runtime({
+   id: 'I4.delivery-refused-before-it-is-parsed',
+   title: 'POST /events refuses an unnamed subscription, an unsigned, wrongly signed, or oversized body, and a body sent again, before parsing it; each is only counted, and no record holds a refused body',
+   timeoutMs: 60_000,
+   run: async () => {
+     await withLine('r22-route-', async (rig) => {
+       const { createApiServer } = await api();
+       const { MAX_DELIVERY_BYTES, signBody } = await triggers();
+       const policy = await issuePolicy();
+       const policyFile = join(rig.dirs.artifacts, '..', 'policy.yaml');
+       await writeFile(policyFile, JSON.stringify(policy));
+-      const server = createApiServer({ components: await rig.components(), token: TOKEN, principal: 'conformance', policyFile, rolesDirectory: rig.roles, secrets: SECRETS });
++      const server = createApiServer({ readiness: RIG_SCANNER, components: await rig.components(), token: TOKEN, principal: 'conformance', policyFile, rolesDirectory: rig.roles, secrets: SECRETS });
+       const address = await server.listen(0, '127.0.0.1');
+       const vault = await localVault(rig.dirs);
+       const post = async (path: string, body: Buffer, signature?: string): Promise<number> => {
+         const res = await fetch(`${address}/events/${path}`, { method: 'POST', body, headers: signature === undefined ? {} : { 'x-hub-signature-256': signature } });
+         await res.arrayBuffer();
+         return res.status;
+       };
+       try {
+         // Not JSON, so a body that were parsed would be refused as `schema`, and one refused before it is never is.
+         const junk = Buffer.from(`${MARKER} not json {`);
+         const expect = (status: number, wanted: number, what: string): void => {
+           if (status !== wanted) throw new Error(`I4: ${what} answered ${String(status)}, not ${String(wanted)}`);
+         };
+         expect(await post('no-such-subscription', junk, signBody(junk, SECRET)), 404, 'an unnamed subscription');
+         expect(await post(ISSUES, junk), 401, 'an unsigned body');
+         expect(await post(ISSUES, junk, signBody(junk, 'another secret')), 401, 'a wrongly signed body');
+         const big = Buffer.alloc(MAX_DELIVERY_BYTES + 1, 0x20);
+         expect(await post(ISSUES, big, signBody(big, SECRET)), 413, 'an oversized body');
+         if ((await vault.readTriggerDecisions()).length !== 0) throw new Error('I4: a refusal before verification wrote a record of its own');
+         // Verified and parsed once: a schema refusal, recorded. Sent again: a replay, refused before the parse and only counted.
+         expect(await post(ISSUES, junk, signBody(junk, SECRET)), 422, 'a verified body that is not JSON');
+         expect(await post(ISSUES, junk, signBody(junk, SECRET)), 409, 'the same body sent again');
+         const decisions = await vault.readTriggerDecisions();
+         if (decisions.length !== 1 || decisions[0]?.decision.outcome.kind !== 'refused') throw new Error(`I4: the store holds ${String(decisions.length)} decisions, not the one schema refusal`);
+         const counts = await vault.readRefusedDeliveryCounts();
+         const total = (bucket: string, cause: string): number => counts.filter((c) => c.bucket === bucket).reduce((n, c) => n + ((c.counts as Record<string, number>)[cause] ?? 0), 0);
+         const { UNSUBSCRIBED_BUCKET } = await import('@olympus-ai/vault');
+         if (total(UNSUBSCRIBED_BUCKET, 'not-subscribed') !== 1 || total(ISSUES, 'unverified') !== 2 || total(ISSUES, 'oversize') !== 1 || total(ISSUES, 'replayed') !== 1) {
+           throw new Error(`I4: the counts are ${JSON.stringify(counts)}`);
+         }
+         if (JSON.stringify({ decisions, counts }).includes(MARKER) || JSON.stringify(counts).includes('no-such-subscription')) {
+           throw new Error('I4: a refused body or a sender-chosen path reached a record');
+         }
+         // The intake listing is the principal's, behind the local token.
+         const listed = await fetch(`${address}/intake`);
+         await listed.arrayBuffer();
+         if (listed.status !== 401) throw new Error(`I4: GET /intake without the token answered ${String(listed.status)}`);
+       } finally {
+         await server.close();
+       }
+       // The replay is refused on the digest alone: the write's own exclusive create is a backstop, never reached.
+       let writes = 0;
+       const counted = new Proxy(vault, {
+         get(target, key, receiver) {
+           if (key === 'recordTriggerDecision') {
+             return (d: TriggerDecision, c: CandidateRecord | null) => {
+               writes += 1;
+               return target.recordTriggerDecision(d, c);
+             };
+           }
+           const value: unknown = Reflect.get(target, key, receiver);
+           return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+         },
+       });
+       const again = Buffer.from(`${MARKER} another body {`);
+       await deliver(counted, policy, again);
+       const replay = await deliver(counted, policy, again);
+       if (replay.outcome !== 'refused' || replay.cause !== 'replayed' || writes !== 1) {
+         throw new Error(`I4: a replay came to ${JSON.stringify(replay)} after ${String(writes)} write attempts, not refused before the parse with one`);
+       }
+     });
+   },
+ });
+
+===== packages/conformance/src/registry/verification.ts =====
+diff --git a/packages/conformance/src/registry/verification.ts b/packages/conformance/src/registry/verification.ts
+index 58cc21e..a5354d0 100644
+--- a/packages/conformance/src/registry/verification.ts
++++ b/packages/conformance/src/registry/verification.ts
+@@ -371,26 +371,28 @@ export const CHECK_COMMAND_HAS_A_GRAMMAR: LocalAssertion = runtime({
+ export const ADAPTER_REFUSAL_ENFORCED_AT_ADMISSION: LocalAssertion = runtime({
+   id: 'I5.adapter-refusal-enforced-at-admission',
+   title:
+-    "admission records the adapter set's unavailable controls in the admission record, mutation and HTTP and browser behavioral among them; the admission refusal reads them from that record and refuses L3 naming each one, refuses nothing at L0-L2, and refuses nothing at L3 when the record names none",
++    "admission records the adapter set's unavailable controls in the admission record, mutation and HTTP and browser behavioral among them; the admission refusal reads them from that record and refuses L3 naming each one, refuses nothing at L0-L2, and refuses L3 for readiness rather than controls when the record names none",
+   run: async () => {
+     await withLine('p6-i5-admission-', async (rig) => {
+       const { startRun, admissionRefusal } = await api();
+       const components = await rig.components();
+       await startRun(await rig.request(components));
+       const state = await rig.state();
+       const record = await readRecord<AdmissionRecord>(components.vault, state.admission);
+       for (const control of ['mutation', 'behavioral:http', 'behavioral:browser', 'test']) {
+         if (!record.unavailableControls.includes(control)) throw new Error(`I5: the admission record does not name ${control} as unavailable`);
+       }
+       const at = (level: 0 | 1 | 2 | 3, controls: readonly string[]): AdmissionRecord => ({ ...record, run: { ...record.run, requestedLevel: level }, unavailableControls: controls });
+       const refused = admissionRefusal(at(3, record.unavailableControls));
+       if (refused?.reason !== 'controls-unavailable' || refused.unavailable.join(',') !== record.unavailableControls.join(',')) {
+         throw new Error('I5: an L3 admission with unavailable controls was not refused naming each one');
+       }
+       for (const level of [0, 1, 2] as const) {
+         if (admissionRefusal(at(level, record.unavailableControls)) !== undefined) throw new Error(`I5: the admission refusal refused L${String(level)}`);
+       }
+-      if (admissionRefusal(at(3, [])) !== undefined) throw new Error('I5 control: L3 was refused with every control available');
++      // With every control available an L3 run is refused for readiness, since no scan grants L3 (A-R40-02), never for controls.
++      const all = admissionRefusal(at(3, []));
++      if (all?.reason !== 'readiness-refused') throw new Error(`I5 control: L3 with every control available was ${all === undefined ? 'admitted' : all.reason}`);
+     });
+   },
+ });
+
+===== packages/vault/src/types.ts =====
+diff --git a/packages/vault/src/types.ts b/packages/vault/src/types.ts
+index 2c516c9..7a722d9 100644
+--- a/packages/vault/src/types.ts
++++ b/packages/vault/src/types.ts
+@@ -237,40 +237,42 @@ export type UsageReading = MeterReading | { readonly kind: 'lost'; readonly deta
+ /**
+  * A refusal returned before a run's first state, as admission returned it
+  * (A-P14-01). Each arm keeps the typed fields a reader counts by; nothing here
+  * is text a caller sent. An invalid request keeps each problem's path and
+  * code and not its message, because a message can quote the request
+  * (D-P14-06).
+  */
+ export type AdmissionRefusal =
+   | { readonly reason: 'invalid-request'; readonly problems: ReadonlyArray<{ readonly path: string; readonly code: string }> }
+   | { readonly reason: 'unsafe-above-l1'; readonly requestedLevel: AutonomyLevel; readonly components: readonly string[] }
+   | { readonly reason: 'cost-unapproved'; readonly requestedLevel: AutonomyLevel; readonly worstCaseUsd: number; readonly approvedCostUsd: number | null }
+   | { readonly reason: 'controls-unavailable'; readonly requestedLevel: AutonomyLevel; readonly unavailable: readonly string[] }
+   | { readonly reason: 'policy-refused'; readonly station: StationId; readonly role: RoleId | null; readonly refusal: PolicyRefusal }
+   /**
+    * The roles directory did not compile (D-A-RC-02). Each entry it refused,
+    * by its name in the directory and the compiler's code, and not its
+    * message; `.` is the directory itself.
+    */
+   | { readonly reason: 'roles-refused'; readonly refused: ReadonlyArray<{ readonly entry: string; readonly code: string }> }
+   /** A seat with no role: every role the task graph names, and `reviewer`, that the directory does not define (D-A-RC-06). */
+   | { readonly reason: 'role-undefined'; readonly roles: readonly RoleId[] }
+   /**
+    * The base's repository instructions were refused: each file the reader
+    * refused, by its path in the base and the reader's code, and not its
+    * message (A-R24-04, D-R24-05).
+    */
+   | { readonly reason: 'instructions-refused'; readonly refused: ReadonlyArray<{ readonly path: string; readonly code: string }> }
+   | { readonly reason: 'refused'; readonly at: StationId; readonly refusal: StationRefusal }
+   /** The trigger policy refused the run's trigger, for any kind, `human` included (A-R22-05, D-R22-06). */
+   | { readonly reason: 'trigger-refused'; readonly cause: TriggerAdmissionCause }
+   /** The candidate the run was asked from waited past the policy's window, and is recorded as expired (D-R22-04). */
+   | { readonly reason: 'candidate-expired'; readonly candidate: CandidateId }
+   /**
+    * The run asked for a level above the readiness ceiling of its base commit
+    * (A-R40-01): the level asked for, the ceiling, what holds it, and the
+    * commit scanned. Subtractive only: no other refusal reads it.
+    */
++  /** A run above L0 with no readiness scan, refused rather than admitted on the policy terms alone (A-R40-02). */
++  | { readonly reason: 'readiness-unscanned'; readonly requestedLevel: AutonomyLevel }
+   | { readonly reason: 'readiness-refused'; readonly requestedLevel: AutonomyLevel; readonly ceiling: RecordedScanLevel; readonly heldBy: RecordedHeldBy; readonly commit: string };
+ 
+ /** The levels a readiness scan can derive: L3 is the M3 canary's, and no scan grants it (R1). */
+@@ -282,17 +284,20 @@ export type RecordedHeldBy = { readonly kind: 'probe'; readonly probe: string }
+ /**
+  * The readiness term admission read (A-R40-01): the ceiling a scan of the base
+  * commit derived, or that no scan ran and why. Never a caller's value: the
+  * runtime writes the scan's derivation (I2). `not-scanned` leaves the policy
+  * terms as they are and is recorded, so absence is visible rather than read
+  * as clearance (F1).
+  */
+ export type RecordedReadiness =
+   | { readonly kind: 'scanned'; readonly level: RecordedScanLevel; readonly heldBy: RecordedHeldBy; readonly commit: string }
+-  /** `no-scanner`: the request carried no scan port. `level-zero`: an L0 run, which no ceiling is below. */
++  /**
++   * `level-zero`: an L0 run, which no ceiling is below. `no-scanner`: the request carried no scan port, which
++   * only a record written before A-R40-02 holds; admission and resume refuse such a record above L0.
++   */
+   | { readonly kind: 'not-scanned'; readonly because: 'no-scanner' | 'level-zero' };
+ 
+ /**
+  * The admission checks a resume repeats before the line runs, refused there
+  * (D-P14-11), and the one only a resume makes: a call whose cost was lost is
+  * not replayed on top of it (A-I1a-06).
+  */
+
+=== BUNDLE END === 8fb8eb939017393c762e433152d61f66

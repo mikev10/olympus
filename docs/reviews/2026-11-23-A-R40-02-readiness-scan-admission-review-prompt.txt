@@ -1,0 +1,85 @@
+The code under review is in the file
+`2026-11-23-A-R40-02-readiness-scan-admission-review-bundle.txt` (SHA-256 984dd867eadd930237fc519155e289fa913b4313f8627ad1fb5525c07cf0e0e9) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing a change to run admission in a TypeScript software-factory runtime. You have the source and nothing else — no design documents,
+no author reasoning, no prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+A run is admitted at an autonomy level from L0 (manual) to L3 (autonomous). The level it may run at is the minimum of what was requested, two policy caps, and a ceiling derived by a readiness scan of the target repository. A scan can only lower the level, never raise it. This change makes admission refuse any run above L0 for which no scan ran — previously the missing scan left the level unchanged — records that refusal in the admission record, applies the same rule when a stopped run is resumed from its record, and reorders admission's checks so a missing control is reported before readiness. The test rigs, the benchmark, and the paid tests are given a scan port that answers a fixed ceiling. The range also carries one tooling change listing a paid test as intermittent.
+
+It must hold against a capable, motivated party trying to get a run admitted, or resumed, above L0 without a readiness scan having bounded it. Assume no deceptive intent — only that the easiest path gets taken.
+
+That party controls the run request (its requested level, its artifacts, its policy where the caller supplies one), the target repository's contents, and when the process stops and is resumed. It does not control the components the runtime is wired with — the Vault (the runtime's record store), the scan port when the host provides one, the sandbox provider, and the drivers are runtime-selected and trusted, even where a function takes one as an argument — and it does not control code running inside the runtime's own process.
+
+The invariants at stake:
+
+- Default deny. A capability not granted in policy is unavailable; a derived number may only subtract from the level, never grant one.
+- Fail closed. A missing check, a missing capability, or an unsupported stack is a refusal — never a silent degrade, never a warning that lets the run continue. A caller that omits the scan is a missing check.
+- The runtime derives status; the model never reports it. The admission record is the runtime's, and a resume reads the requested level and the readiness term from it, never from its caller.
+- The runtime is a service; the CLI is a client.
+
+The mechanisms that matter most:
+
+- admissionRefusal and the readiness term it reads from the admission record, on admission and on resume, including records written before this change.
+- The order of the controls and readiness checks.
+- The scan ports given to test rigs, the benchmark, and paid tests, and whether any production path can reach one.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+A way for a scan to grant L3; until one exists, L3 is unreachable through admission. Runs stopped above L0 before this change are refused on resume and must be started again; that is accepted.
+
+THE QUESTION
+
+How would I get a run admitted, or resumed, at a level above L0 without a readiness scan having bounded it — or get a refusal reported under the wrong cause so a check it should have tripped never runs?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.

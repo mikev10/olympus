@@ -89,6 +89,17 @@ function describe(error: unknown): string {
   return typeof error === 'string' ? error : 'unknown error';
 }
 
+/**
+ * R2's figures over settled runs, without the findings (R28): a finding's
+ * outcome is written after its run settles, by a person or a later merge, so
+ * its rates move with no run changing and are no drift. They are R2's to
+ * report, never this snapshot's to compare.
+ */
+function settledFigures(runs: readonly RunRecords[]): Omit<ReturnType<typeof deriveOutcomes>, 'findings'> {
+  const { findings: _findings, ...figures } = deriveOutcomes(runs);
+  return figures;
+}
+
 /** Every leaf of a JSON value, by its dotted path, as JSON: two snapshots compare figure by figure. */
 export function flattenFigures(value: unknown, prefix = '', out: Record<string, string> = {}): Record<string, string> {
   if (value !== null && typeof value === 'object') {
@@ -299,7 +310,7 @@ export class NightlyJobs {
             again.push(run);
           }
         }
-        const figures = flattenFigures(deriveOutcomes(again));
+        const figures = flattenFigures(settledFigures(again));
         for (const rate of new Set([...Object.keys(priorRates.figures), ...Object.keys(figures)])) {
           const before = priorRates.figures[rate] ?? 'absent';
           const now = figures[rate] ?? 'absent';
@@ -307,7 +318,7 @@ export class NightlyJobs {
         }
       }
       const settled = [...records.values()].filter(settledForRates);
-      rates = { runs: settled.map((r) => r.runId).sort(), figures: flattenFigures(deriveOutcomes(settled)) };
+      rates = { runs: settled.map((r) => r.runId).sort(), figures: flattenFigures(settledFigures(settled)) };
     }
 
     // Drift that names a run is also in that run's P14 record (A-R13a-04).

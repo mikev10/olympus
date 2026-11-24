@@ -27,6 +27,7 @@ import { admitRun, approveStation, cancelRun, rejectDraft, resumeRun, runStandin
 import { imageFor, type BuiltGraph } from '../graph.js';
 import { runReport, type RunReport } from '../report.js';
 import { outcomes, type OutcomeWindow } from '../outcomes.js';
+import { dismissFinding, listFindings } from '../findings.js';
 import { telemetryOf, type TelemetryExport } from '../telemetry.js';
 import type { ApproveBody, BugFixIntentBody, CandidateSummary, CandidateView, CreateRunBody, DismissBody, CreatedRun, DeliveryAnswer, DriveEnd, ErrorBody, ErrorCode, RejectBody, RunEvent, RunView } from './wire.js';
 
@@ -661,6 +662,21 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
     if (parts[0] === 'intake' && parts.length <= 2) {
       if (method !== 'GET') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
       send(res, 200, parts.length === 1 ? await listIntake() : await readIntake(decodeURIComponent(parts[1] ?? '')));
+      return;
+    }
+    // A finding's outcome (R28): listed for a person to read, and dismissed by one, with a cause and no text.
+    if (parts[0] === 'findings' && parts.length === 1) {
+      if (method !== 'GET') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
+      send(res, 200, await listFindings(components.vault));
+      return;
+    }
+    if (parts[0] === 'findings' && parts.length === 3 && parts[2] === 'dismiss') {
+      if (method !== 'POST') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
+      const id = decodeURIComponent(parts[1] ?? '');
+      const done = await dismissFinding(components.vault, id, dismissBody(await readJson(req)).cause, new Date().toISOString());
+      if (done.kind === 'unknown') throw new HttpError(404, 'not-found', `no located finding ${id}`);
+      if (done.kind === 'decided') throw new HttpError(409, 'conflict', `finding ${id} is already ${done.outcome.kind}; a finding has one outcome`);
+      send(res, 200, done.finding);
       return;
     }
     if (parts[0] === 'nightly' && parts.length === 1) {
