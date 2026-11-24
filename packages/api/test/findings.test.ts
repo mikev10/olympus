@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { RunId } from '@olympus-ai/core';
 import {
-  deriveOutcomes, findingId, holdingHunk, mapLine, parseFindingId, parseHunkRanges, readSeatFindings, type FindingInput, type HunkRange, type RunRecords,
+  deriveOutcomes, findingId, holdingHunk, mapLine, parseFindingId, parseHunkRanges, readSeatFindings, type FindingGapInput, type FindingInput, type HunkRange, type RunRecords,
 } from '../src/index.js';
 import { pathHunks } from '../src/history.js';
 
@@ -160,6 +160,22 @@ describe('finding rates (R28)', () => {
     expect(deriveOutcomes([run({})], {}, null, items).findings.bySeat.review?.resolved).toEqual({ kind: 'unmeasured', cause: 'no-line-coverage' });
     expect(deriveOutcomes([run({ lineCoverage: true })], {}, null, items).findings.bySeat.review?.resolved).toMatchObject({ kind: 'rate', count: 0, sample: 2 });
     expect(deriveOutcomes([run({})], {}, null, items).findings.bySeat.review?.dismissed).toMatchObject({ kind: 'rate', count: 1, sample: 2 });
+  });
+
+  it('say how many findings each group refused and how many results it could not read, beside the rates (R28 triage, codex-2, gemini-1)', () => {
+    const gaps: FindingGapInput[] = [{ seat: 'review', family: 'gpt', kind: 'refused' }, { seat: 'review', family: 'gpt', kind: 'unreadable' }, { seat: 'security', family: 'gpt', kind: 'refused' }];
+    const { findings } = deriveOutcomes([run({})], {}, null, [f('review', 'gpt', true, 'open')], { gaps });
+    expect(findings.bySeat.review).toMatchObject({ raised: 1, refused: 1, unreadable: 1 });
+    expect(findings.bySeat.security).toMatchObject({ raised: 0, refused: 1, unreadable: 0, resolved: { kind: 'no-sample' } });
+    expect(findings.byFamily.gpt).toMatchObject({ raised: 1, refused: 2, unreadable: 1 });
+  });
+
+  it('measure a resolved rate where a resolution exists or any run in the store recorded line coverage, not only runs in the window (R28 triage, codex-5)', () => {
+    const items = [f('review', 'gpt', true, 'resolved'), f('review', 'gpt', true, 'open')];
+    expect(deriveOutcomes([run({})], {}, null, items).findings.bySeat.review?.resolved).toMatchObject({ kind: 'rate', count: 1, sample: 2 });
+    const open = [f('review', 'gpt', true, 'open')];
+    expect(deriveOutcomes([run({})], {}, null, open, { lineCoverage: true }).findings.bySeat.review?.resolved).toMatchObject({ kind: 'rate', count: 0, sample: 1 });
+    expect(deriveOutcomes([run({ lineCoverage: true })], {}, null, open, { lineCoverage: false }).findings.bySeat.review?.resolved).toEqual({ kind: 'unmeasured', cause: 'no-line-coverage' });
   });
 
   it('are empty where nothing was raised', () => {

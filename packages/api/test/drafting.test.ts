@@ -20,18 +20,26 @@ import {
 
 describe('a critic\'s result (D-A-DS-07)', () => {
   const paths = new Set(['spec.md']);
-  it('is a list of located findings with no severity, and anything else is one refused finding', () => {
+  it('is a list of located findings with no severity; any other envelope is one unreadable finding, and any other element one unrecordable finding', () => {
     expect(readCriticResult('{"findings": []}', paths)).toEqual({ readable: true, findings: [] });
     expect(readCriticResult('```json\n{"findings": [{"path": "spec.md", "note": "statement 2 is not testable"}]}\n```', paths))
       .toEqual({ readable: true, findings: [{ kind: 'located', path: 'spec.md', note: 'statement 2 is not testable' }] });
-    for (const narrative of [
-      'Looks good!', '{"findings": [], "severity": "low"}', '{"findings": ["statement 2 is not testable"]}', '{"findings": [{"path": "spec.md", "note": ""}]}',
-      '{"findings": [{"path": "spec.md", "note": "x", "severity": "low"}]}', '{"findings": [{"note": "x"}]}', '{"findings": "none"}', '[]', '',
-    ]) {
+    for (const narrative of ['Looks good!', '{"findings": [], "severity": "low"}', '{"findings": "none"}', '[]', '']) {
       const read = readCriticResult(narrative, paths);
       expect(read.readable).toBe(false);
       expect(read.findings).toEqual([{ kind: 'refused', cause: 'unreadable' }]);
     }
+    for (const narrative of [
+      '{"findings": ["statement 2 is not testable"]}', '{"findings": [{"path": "spec.md", "note": ""}]}',
+      '{"findings": [{"path": "spec.md", "note": "x", "severity": "low"}]}', '{"findings": [{"note": "x"}]}',
+    ]) {
+      expect(readCriticResult(narrative, paths), narrative).toEqual({ readable: true, findings: [{ kind: 'refused', cause: 'unrecordable' }] });
+    }
+  });
+
+  it('refuses a malformed element on its own and keeps the located findings beside it (R28 triage, codex-2)', () => {
+    expect(readCriticResult('{"findings": [{"path": "spec.md", "note": "y"}, {"path": "spec.md"}, "loose text"]}', paths))
+      .toEqual({ readable: true, findings: [{ kind: 'located', path: 'spec.md', note: 'y' }, { kind: 'refused', cause: 'unrecordable' }, { kind: 'refused', cause: 'unrecordable' }] });
   });
 
   it('refuses a finding naming a file the draft does not hold as unlocated, and keeps it (R28)', () => {

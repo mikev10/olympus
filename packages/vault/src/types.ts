@@ -663,12 +663,14 @@ export interface DraftRecord {
  * of the draft's files and carries the critic's note, which is what its
  * drafter is sent (D-A-DS-07). `refused` is never measured as a finding:
  * `unlocated` named no file of the draft, `unreadable` stands for a result the
- * runtime could not read (I5), and `recorded-before` is a finding stored
- * before R28, which cited nothing.
+ * runtime could not read (I5), `unrecordable` one element that was not a
+ * path and a note, refused on its own so the located findings beside it
+ * are kept, and `recorded-before` is a finding stored before R28, which
+ * cited nothing.
  */
 export type CriticFinding =
   | { readonly kind: 'located'; readonly path: string; readonly note: string }
-  | { readonly kind: 'refused'; readonly cause: 'unlocated' | 'unreadable' | 'recorded-before' };
+  | { readonly kind: 'refused'; readonly cause: 'unlocated' | 'unrecordable' | 'unreadable' | 'recorded-before' };
 
 /**
  * A critic's result for one draft (R19). `findings` is the list the critic

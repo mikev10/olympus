@@ -651,7 +651,7 @@ function isCriticFinding(f: unknown): boolean {
   if (!isRecord(f)) return false;
   if (f.kind === 'located') return hasString(f, 'path') && f.path !== '' && hasString(f, 'note') && (f.note as string).trim() !== '';
   // `recorded-before` is how a reader names a finding stored before R28; it is never written (D-R28-01).
-  return f.kind === 'refused' && (f.cause === 'unlocated' || f.cause === 'unreadable');
+  return f.kind === 'refused' && (f.cause === 'unlocated' || f.cause === 'unrecordable' || f.cause === 'unreadable');
 }
 
 /**

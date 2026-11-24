@@ -178,7 +178,32 @@ function decodeJson(bytes: Uint8Array): unknown {
  * nightly reviewer's. The store names the set, never a caller.
  */
 export async function raisedFindings(vault: Vault): Promise<RaisedFinding[]> {
+  return (await collectFindings(vault)).raised;
+}
+
+/**
+ * What a seat returned that R28 could not measure (R28 triage, codex-2,
+ * gemini-1): a refused finding, or a result it could not read, whose
+ * cardinality is unknown. Never in a rate's denominator, since it names
+ * nothing an outcome could be derived for; counted beside the rates so a
+ * seat that emits what cannot be located is seen, not hidden.
+ */
+export interface FindingGap {
+  readonly seat: string;
+  readonly family: string;
+  readonly runId: RunId | null;
+  readonly date: string | null;
+  readonly kind: 'refused' | 'unreadable';
+}
+
+/** Every refused finding and unreadable result the store holds, from the same records `raisedFindings` reads. */
+export async function findingGaps(vault: Vault): Promise<FindingGap[]> {
+  return (await collectFindings(vault)).gaps;
+}
+
+async function collectFindings(vault: Vault): Promise<{ raised: RaisedFinding[]; gaps: FindingGap[] }> {
   const out: RaisedFinding[] = [];
+  const gaps: FindingGap[] = [];
   for (const runId of await vault.listRuns()) {
     let state: RunState;
     try {
@@ -191,8 +216,12 @@ export async function raisedFindings(vault: Vault): Promise<RaisedFinding[]> {
     for (const ref of await vault.readReviewFindings(runId)) {
       const record = decodeJson(await vault.read(ref)) as ReviewFindingsRecord;
       if (!Object.hasOwn(state.results, record.taskId) || state.results[record.taskId]?.hash !== record.result.hash) continue;
+      if (!record.readable) gaps.push({ seat: record.seat, family: record.reviewer.family, runId, date: null, kind: 'unreadable' });
       record.findings.forEach((f, index) => {
-        if (f.kind !== 'located') return;
+        if (f.kind !== 'located') {
+          gaps.push({ seat: record.seat, family: record.reviewer.family, runId, date: null, kind: 'refused' });
+          return;
+        }
         const finding: FindingRef = { source: { kind: 'review', record: ref }, index };
         out.push({ ref: finding, id: findingId(finding), seat: record.seat, family: record.reviewer.family, runId, date: null, cites: { kind: 'code', path: f.path, line: f.line, commit: merged?.commit ?? null } });
       });
@@ -203,7 +232,10 @@ export async function raisedFindings(vault: Vault): Promise<RaisedFinding[]> {
         const ref = attempt.critic;
         const critic = decodeJson(await vault.read(ref)) as CriticRecord;
         criticFindingsOf(critic.findings).forEach((f, index) => {
-          if (f.kind !== 'located') return;
+          if (f.kind !== 'located') {
+            gaps.push({ seat: 'critic', family: critic.critic.family, runId, date: null, kind: f.cause === 'unreadable' ? 'unreadable' : 'refused' });
+            return;
+          }
           const finding: FindingRef = { source: { kind: 'critic', record: ref }, index };
           out.push({ ref: finding, id: findingId(finding), seat: 'critic', family: critic.critic.family, runId, date: null, cites: { kind: 'draft', station, path: f.path } });
         });
@@ -215,14 +247,20 @@ export async function raisedFindings(vault: Vault): Promise<RaisedFinding[]> {
     if (review?.seat == null) continue;
     const family = review.seat.reviewer.model.family;
     const commit = review.subject?.kind === 'tree' ? review.subject.commit : null;
+    const seat = `nightly:${entry.record.template}`;
+    const { outcome } = entry.record;
+    if (outcome.kind === 'refused' && outcome.refusals.some((r) => r.cause === 'result-unreadable')) gaps.push({ seat, family, runId: null, date: entry.record.date, kind: 'unreadable' });
     review.findings.forEach((f, index) => {
-      if (f.kind === 'refused') return;
+      if (f.kind === 'refused') {
+        gaps.push({ seat, family, runId: null, date: entry.record.date, kind: 'refused' });
+        return;
+      }
       const finding: FindingRef = { source: { kind: 'nightly', record: entry.sha256 }, index };
       const cites: Citation = f.kind === 'tree' ? { kind: 'code', path: f.path, line: f.line, commit } : { kind: 'record' };
-      out.push({ ref: finding, id: findingId(finding), seat: `nightly:${entry.record.template}`, family, runId: null, date: entry.record.date, cites });
+      out.push({ ref: finding, id: findingId(finding), seat, family, runId: null, date: entry.record.date, cites });
     });
   }
-  return out;
+  return { raised: out, gaps };
 }
 
 /** Every outcome, by its finding's key. A finding with none is open (D-A-FO-01). */

@@ -717,6 +717,7 @@ function renderDraft(record: DraftRecord): string {
 /** What the runtime says in place of a finding it could not read, as the drafter is told it (D-A-DS-07). */
 const UNREADABLE_CRITIC = 'the critic returned no result the runtime could read as a list of findings';
 const UNLOCATED_CRITIC = 'the critic named a file the draft does not hold, so its finding could not be located';
+const UNRECORDABLE_CRITIC = 'the critic returned a finding that was not a file of the draft and a note';
 const RECORDED_BEFORE_CRITIC = 'the critic raised a finding that named no file of the draft';
 
 /**
@@ -726,7 +727,12 @@ const RECORDED_BEFORE_CRITIC = 'the critic raised a finding that named no file o
  */
 export function criticNote(f: CriticFinding): string {
   if (f.kind === 'located') return `${f.path}: ${f.note}`;
-  return f.cause === 'unreadable' ? UNREADABLE_CRITIC : f.cause === 'unlocated' ? UNLOCATED_CRITIC : RECORDED_BEFORE_CRITIC;
+  switch (f.cause) {
+    case 'unreadable': return UNREADABLE_CRITIC;
+    case 'unlocated': return UNLOCATED_CRITIC;
+    case 'unrecordable': return UNRECORDABLE_CRITIC;
+    case 'recorded-before': return RECORDED_BEFORE_CRITIC;
+  }
 }
 
 /**
@@ -752,9 +758,17 @@ export function readCriticResult(narrative: string, paths: ReadonlySet<string>):
   if (keys.length !== 1 || !Array.isArray(findings)) return unreadable;
   const out: CriticFinding[] = [];
   for (const element of findings as unknown[]) {
-    if (typeof element !== 'object' || element === null || Array.isArray(element)) return unreadable;
+    // One element that is not a path and a note is refused on its own: the located findings beside it are kept,
+    // and the draft still goes back, since a refused finding is not a clean one (I5; R28 triage, codex-2).
+    if (typeof element !== 'object' || element === null || Array.isArray(element)) {
+      out.push({ kind: 'refused', cause: 'unrecordable' });
+      continue;
+    }
     const { path, note, ...rest } = element as Record<string, unknown>;
-    if (Object.keys(rest).length > 0 || typeof path !== 'string' || typeof note !== 'string' || note.trim() === '') return unreadable;
+    if (Object.keys(rest).length > 0 || typeof path !== 'string' || typeof note !== 'string' || note.trim() === '') {
+      out.push({ kind: 'refused', cause: 'unrecordable' });
+      continue;
+    }
     out.push(paths.has(path) ? { kind: 'located', path, note } : { kind: 'refused', cause: 'unlocated' });
   }
   return { readable: true, findings: out };
