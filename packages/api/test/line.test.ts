@@ -26,6 +26,7 @@ import {
   runRequest,
   STATIC_ANALYSIS_CHECK,
   stubComponents,
+  TEST_TOOLS,
   writeChecks,
 } from './harness.js';
 import { DelegatingDriver, DelegatingSandbox, DelegatingVault } from './wrappers.js';
@@ -919,10 +920,12 @@ describe('the line provisions what the graph and the policy name (D-I1a-01, A-I1
   const BUILD_IMAGE = `sha256:${'b'.repeat(64)}`;
   const PROFILE = { buildImage: BUILD_IMAGE, checkImage: 'check-image', limits: { cpus: 1, memoryMb: 512, pids: 64 } };
   const PRICE = { inputPerMTok: 1, outputPerMTok: 5, cacheReadPerMTok: 0.1, cacheWritePerMTok: 1.25, cacheWrite1hPerMTok: 2 };
-  const RELAY: Omit<RelaySpec, 'budget'> = { upstream: 'https://models.example', paths: ['/v1/messages'], header: 'x-api-key', scheme: 'raw', credential: 'model', urlVariable: 'MODEL_URL', meter: { dialect: 'anthropic-messages', prices: { stub: PRICE, 'another-model': PRICE } } };
+  const RELAY: Omit<RelaySpec, 'budget'> = { upstream: 'https://models.example', paths: ['/v1/messages'], header: 'x-api-key', scheme: 'raw', credential: 'model', urlVariable: 'MODEL_URL', meter: { dialect: 'anthropic-messages', prices: { stub: PRICE, 'another-model': PRICE } }, serverTools: [] };
 
   class RelayingDriver extends ChosenDriver {
-    override relayRequest(): typeof RELAY {
+    readonly asked: Array<readonly string[]> = [];
+    override relayRequest(tools: readonly string[]): typeof RELAY {
+      this.asked.push([...tools]);
       return RELAY;
     }
   }
@@ -946,6 +949,15 @@ describe('the line provisions what the graph and the policy name (D-I1a-01, A-I1
     await startRun(runRequest(runId, workspace, { ...components, sandbox, driver, reviewer: new ChosenDriver({ family: 'other' }), profile: PROFILE }));
     const build = sandbox.specs.find((s) => s.relay !== undefined);
     expect(Object.keys(build?.relay?.meter.prices ?? {})).toStrictEqual(['stub']);
+  });
+
+  test("each call's relay is asked for with that call's granted tools and no others (A-R56-01)", async () => {
+    const sandbox = new RecordingSandbox(new StubSandboxProvider());
+    const driver = new RelayingDriver({ narrative: 'built' });
+    await startRun(runRequest(runId, workspace, { ...components, sandbox, driver, reviewer: new ChosenDriver({ family: 'other' }), profile: PROFILE }));
+    // The stub provider refuses the relay, so no call is made; what the driver was asked is what the scope grants.
+    expect(driver.asked.length).toBeGreaterThan(0);
+    for (const tools of driver.asked) expect(tools).toStrictEqual([...TEST_TOOLS]);
   });
 
   test('a resolved model the relay has no price for is never provisioned', async () => {

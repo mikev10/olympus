@@ -141,7 +141,7 @@ export async function withHarness<T>(body: (h: Harness) => Promise<T>, endpoint:
           egress: { mode: 'deny-all', allow: [] },
           limits: { cpus: 0.5, memoryMb: 256, pids: 64, wallClockMs: BUDGET.maxWallClockMs },
           user: { uid: 0, gid: 0 },
-          relay: { ...driver.relayRequest(), budget: { maxTokens: BUDGET.maxTokens, maxCostUsd: BUDGET.maxCostUsd } },
+          relay: { ...driver.relayRequest([]), budget: { maxTokens: BUDGET.maxTokens, maxCostUsd: BUDGET.maxCostUsd } },
         });
         live.push(handle);
         const relay = relayOf(provider.appliedControls(handle).egress);

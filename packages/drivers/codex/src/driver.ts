@@ -107,6 +107,8 @@ export const MODEL_RELAY: Readonly<Omit<RelaySpec, 'budget'>> = Object.freeze({
   credential: MODEL_CREDENTIAL,
   urlVariable: RELAY_URL_VARIABLE,
   meter: MODEL_METER,
+  // A-R56-01: none. This dialect refuses every tool the API runs itself (D-P13-12), and `web_search` is off.
+  serverTools: [],
 });
 
 /**
@@ -233,8 +235,8 @@ export class CodexDriver implements Driver {
     return DECLARED_TOOLS_VIEW;
   }
 
-  relayRequest(): Omit<RelaySpec, 'budget'> {
-    return { ...MODEL_RELAY, paths: [...MODEL_RELAY.paths] };
+  relayRequest(_tools: readonly string[]): Omit<RelaySpec, 'budget'> {
+    return { ...MODEL_RELAY, paths: [...MODEL_RELAY.paths], serverTools: [] };
   }
 
   /** I6: `family` is `FAMILY`, assigned. Nothing here reads the tier, the model, or `this.id` to produce it. */

@@ -37,6 +37,7 @@ const RELAY: Omit<RelaySpec, 'budget'> = {
   credential: 'model',
   urlVariable: 'MODEL_URL',
   meter: { dialect: 'anthropic-messages', prices: { 'stub-fast': PRICE, 'stub-standard': PRICE, 'stub-deep': PRICE } },
+  serverTools: [],
 };
 
 interface TierOptions extends DriverOptions {

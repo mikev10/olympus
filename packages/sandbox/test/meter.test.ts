@@ -77,6 +77,7 @@ function relaySpec(overrides: Partial<RelaySpec> = {}): RelaySpec {
     urlVariable: URL_VARIABLE,
     budget: TEST_BUDGET,
     meter: TEST_METER,
+    serverTools: [],
     ...overrides,
   };
 }
@@ -239,6 +240,59 @@ afterEach(async () => {
   for (const name of upstreams.splice(0)) await run('docker', ['rm', '--force', '--volumes', name]).catch(() => undefined);
   for (const name of networks.splice(0)) await run('docker', ['network', 'rm', name]).catch(() => undefined);
   await rm(base, { recursive: true, force: true });
+});
+
+describe('the relay forwards only the server tools its grant names, and charges each use (A-R56-01)', () => {
+  const SEARCH = { type: 'web_search_20250305', name: 'web_search', max_uses: 8 };
+  const GRANT = [{ type: 'web_search_20250305', perUseUsd: 0.01 }];
+  const usage = { input: 1000, output: 100, cacheRead: 0, cacheWrite: 0 };
+
+  test('with no grant, a typed tool, mcp_servers, or a container is refused unsent, and tools the client runs pass', async () => {
+    const { handle, upstream } = await metered(TEST_BUDGET, {}, { serverTools: [] });
+    const answers = await send(handle, [
+      message(usage, { tools: [SEARCH] }),
+      message(usage, { tools: [{ name: 'Read', input_schema: {} }, { type: 'bash_20250124', name: 'bash' }] }),
+      message(usage, { mcp_servers: [{ type: 'url', url: 'https://example.invalid/mcp', name: 'x' }] }),
+      message(usage, { container: 'container_1' }),
+      message(usage, { tools: 'web_search' }),
+      message(usage, { tools: [null] }),
+      message(usage, { tools: [{ name: 'Read', input_schema: {} }, { type: 'custom', name: 'c', input_schema: {} }], mcp_servers: null, container: null }),
+    ].map((body) => ({ body })));
+    expect(answers.map((a) => a.status)).toStrictEqual([400, 400, 400, 400, 400, 400, 200]);
+    expect(answers[0]?.body).toContain('web_search_20250305');
+    expect(answers[0]?.body).toContain('not granted');
+    expect(answers[2]?.body).toContain('mcp_servers');
+    expect(postsTo(await upstreamLog(upstream))).toHaveLength(1);
+    expect(meteredReading(await destroyed(handle))).toMatchObject({ calls: 1, refused: 6, exhausted: 'none' });
+  });
+
+  test('a granted search passes and is charged each use it reports, or max_uses when a success reports none; another version or no max_uses is refused', async () => {
+    const { handle, upstream } = await metered(TEST_BUDGET, {}, { serverTools: GRANT });
+    const answers = await send(handle, [
+      message(usage, { tools: [SEARCH] }, { searches: 3 }),
+      message(usage, { tools: [SEARCH], stream: true }, { searches: 2 }),
+      message(usage, { tools: [SEARCH] }),
+      message(usage, { tools: [{ ...SEARCH, type: 'web_search_20260209' }] }, { searches: 1 }),
+      message(usage, { tools: [{ type: 'web_search_20250305', name: 'web_search' }] }, { searches: 1 }),
+      message(usage, { tools: [{ ...SEARCH, max_uses: 0 }] }, { searches: 1 }),
+      message(usage, { tools: [SEARCH] }, { searches: 5, status: 529 }),
+    ].map((body) => ({ body })));
+    expect(answers.map((a) => a.status)).toStrictEqual([200, 200, 200, 400, 400, 400, 529]);
+    expect(answers[4]?.body).toContain('max_uses');
+    expect(postsTo(await upstreamLog(upstream))).toHaveLength(4);
+    const reading = meteredReading(await destroyed(handle));
+    expect(reading).toMatchObject({ calls: 4, refused: 3, exhausted: 'none' });
+    // Three searches, two, and the unreported eight, at a cent each; the failed call is charged nothing.
+    expect(reading.costUsd).toBeCloseTo(3 * priced(usage) + (3 + 2 + 8) * 0.01, 12);
+  });
+
+  test('the fees count toward maxCostUsd', async () => {
+    const { handle } = await metered({ maxTokens: 1_000_000_000, maxCostUsd: 0.05 }, {}, { serverTools: GRANT });
+    const answers = await send(handle, [message(usage, { tools: [SEARCH] }, { searches: 5 }), message(usage)].map((body) => ({ body })));
+    expect(answers.map((a) => a.status)).toStrictEqual([200, 402]);
+    expect(answers[1]?.body).toContain('maxCostUsd');
+    expect(meteredReading(await destroyed(handle))).toMatchObject({ calls: 1, exhausted: 'cost' });
+  });
 });
 
 describe('the budget binds whatever calls the relay', () => {

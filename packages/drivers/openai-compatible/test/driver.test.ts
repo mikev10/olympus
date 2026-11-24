@@ -65,7 +65,7 @@ describe('the configuration is the operator\'s, stated in full (D-R6-02)', () =>
     // A key is still allowed to a local endpoint that asks for one.
     expect(checkConfig({ ...local, scheme: 'bearer' }).scheme).toBe('bearer');
     const provider = await LocalDockerProvider.create({ vaultPaths: [], dockerHostPorts: [11434] });
-    const request = new OpenAICompatibleDriver({ provider, endpoint: local }).relayRequest();
+    const request = new OpenAICompatibleDriver({ provider, endpoint: local }).relayRequest([]);
     expect(request).toStrictEqual({
       upstream: { local: 'docker-host', port: 11434 },
       paths: [CONFIG.path],
@@ -74,13 +74,14 @@ describe('the configuration is the operator\'s, stated in full (D-R6-02)', () =>
       credential: null,
       urlVariable: RELAY_URL_VARIABLE,
       meter: { dialect: 'openai-chat', prices: CONFIG.prices },
+      serverTools: [],
     });
     expect(checkRelay({ ...request, budget: { maxTokens: 1, maxCostUsd: 1 } }, new Set(), new Set([11434])).credential).toBeNull();
   });
 
   test('the relay request is the endpoint, its one path, the declared scheme, and the openai-chat meter', () => {
     return withHarness((h) => {
-      expect(h.driver.relayRequest()).toStrictEqual({
+      expect(h.driver.relayRequest([])).toStrictEqual({
         upstream: CONFIG.upstream,
         paths: [CONFIG.path],
         header: 'authorization',
@@ -88,6 +89,7 @@ describe('the configuration is the operator\'s, stated in full (D-R6-02)', () =>
         credential: ENDPOINT_CREDENTIAL,
         urlVariable: RELAY_URL_VARIABLE,
         meter: { dialect: 'openai-chat', prices: CONFIG.prices },
+        serverTools: [],
       });
       return Promise.resolve();
     });

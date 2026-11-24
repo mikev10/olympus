@@ -34,7 +34,7 @@
 import { createSandboxNetwork, dockerCli } from './docker.js';
 import { normalizeHost } from './egress.js';
 import { refuse, withLeftovers } from './refusal.js';
-import type { LocalUpstream, MeterReading, ModelPrice, RelayBudget, RelayDialect, RelayMeter, RelayScheme, RelaySpec } from '../types.js';
+import type { LocalUpstream, MeterReading, ModelPrice, RelayBudget, RelayDialect, RelayMeter, RelayScheme, RelaySpec, ServerToolGrant } from '../types.js';
 
 /** The port the relay listens on, inside its own container. Nothing is published to the host. */
 export const RELAY_PORT = 8080;
@@ -81,6 +81,11 @@ export const METER_PREFIX = 'model-relay-meter ';
  *   `model` and `max_tokens`, and forwarded byte for byte; a model the price
  *   table does not name is refused before anything is sent (D-P13-04). The
  *   response is streamed back unchanged while a copy is read for its usage.
+ * - A request offering a typed tool its grant's `serverTools` does not name,
+ *   or naming `mcp_servers` or a `container`, is refused before anything is
+ *   sent; so is one offering a granted tool with no positive `max_uses`. Each
+ *   use `usage.server_tool_use` reports is charged at its grant's price, and a
+ *   success reporting none is charged `max_uses` (A-R56-01).
  * - `POST /v1/messages/count_tokens`, `GET`, and `HEAD` cost nothing upstream
  *   and are forwarded unmetered. Every other request is refused: a write whose
  *   cost the meter cannot count is spend the budget cannot see (D-P13-12).
@@ -112,7 +117,8 @@ export const METER_PREFIX = 'model-relay-meter ';
  *
  * This source runs as one `docker run` argument, so its length counts toward
  * the host's command-line limit, 32767 characters on Windows. Explanation
- * belongs in this comment, which is outside it, rather than inside it.
+ * belongs in this comment, which is outside it, rather than inside it. What
+ * runs is `RELAY_SOURCE`, stripped of whole-line comments and indentation.
  * - Under the `openai-responses` dialect (A-R26-01) the same rules hold with
  *   that API's names: a `POST` to a granted path ending `/responses` is
  *   metered and a `GET` is free; the ceiling is the larger of the model's
@@ -130,7 +136,15 @@ export const METER_PREFIX = 'model-relay-meter ';
  *   which is then charged by the rules above — and writes a `closed` line, the
  *   provider's proof that the log it reads is complete.
  */
-export const RELAY_SOURCE = `'use strict';
+/**
+ * The server tools the relay knows how to count, each by the exact `type` a
+ * request names and the field of `usage.server_tool_use` that reports its uses
+ * (A-R56-01). Closed: a grant naming any other type is refused, because a use
+ * the relay could not count is spend the budget cannot see (D-P13-12).
+ */
+export const COUNTED_SERVER_TOOLS: Readonly<Record<string, string>> = Object.freeze({ web_search_20250305: 'web_search_requests' });
+
+const RELAY_SOURCE_TEXT = `'use strict';
 const http = require('node:http');
 const https = require('node:https');
 const tls = require('node:tls');
@@ -156,9 +170,12 @@ try { upstream = new URL(String(process.env.RELAY_UPSTREAM || '')); } catch (err
 const paths = parsed('RELAY_PATHS');
 const budget = parsed('RELAY_BUDGET');
 const meter = parsed('RELAY_METER');
+const tools = parsed('RELAY_TOOLS');
+const COUNTED = ${JSON.stringify(COUNTED_SERVER_TOOLS)};
 
 function positive(n) { return typeof n === 'number' && Number.isFinite(n) && n > 0; }
 function price(n) { return typeof n === 'number' && Number.isFinite(n) && n >= 0; }
+function own(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
 const PRICE_FIELDS = ['inputPerMTok', 'outputPerMTok', 'cacheReadPerMTok', 'cacheWritePerMTok', 'cacheWrite1hPerMTok'];
 
 if (local !== '' && local !== 'docker-host') fail('a local upstream other than the docker host');
@@ -205,6 +222,11 @@ if (prices === null || typeof prices !== 'object' || Array.isArray(prices) || Ob
     })) {
   fail('no price table the relay can charge from');
 }
+// A-R56-01: the server tools forwarded, each one the relay can count, and none outside the Messages dialect.
+const toolPrice = {};
+if (!Array.isArray(tools) || (tools.length > 0 && meter.dialect !== 'anthropic-messages') || !tools.every(function (t) {
+  return t !== null && typeof t === 'object' && own(COUNTED, t.type) && price(t.perUseUsd) && !own(toolPrice, t.type) && (toolPrice[t.type] = t.perUseUsd) >= 0;
+})) fail('no server-tool grant it can count');
 if (!Number.isInteger(port) || port <= 0) fail('no listen port');
 
 // One path segment: no dot segment, no percent-encoding, nothing an upstream
@@ -298,7 +320,7 @@ function refuseSpent(res) {
 // The usage a response reports. input_tokens read is 'any'; output_tokens
 // read where the dialect puts the final count is 'final'.
 function usageReader() {
-  const u = { any: false, final: false, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, write5m: null, write1h: null, offTier: false };
+  const u = { any: false, final: false, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, write5m: null, write1h: null, offTier: false, uses: {} };
   function count(v) { return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null; }
   u.take = function (usage, final) {
     if (usage === null || typeof usage !== 'object') return;
@@ -315,6 +337,8 @@ function usageReader() {
     }
     const output = count(usage.output_tokens);
     if (output !== null) { u.output = output; if (final) u.final = true; }
+    const s = usage.server_tool_use;
+    if (s !== null && typeof s === 'object') Object.keys(s).forEach(function (k) { if (count(s[k]) !== null) u.uses[k] = s[k]; });
   };
   // openai-chat: an answer served at a tier other than the default is not at the table's rate.
   u.tierOpenai = function (tier) {
@@ -410,7 +434,7 @@ function bodyParser(u) {
   };
 }
 
-function charge(model, maxTokens, u, success) {
+function charge(model, maxTokens, offered, u, success) {
   const p = prices[model];
   let charged = 'read';
   let input = 0, output = 0, cacheRead = 0, cacheWrite = 0, write5m = 0, write1h = 0;
@@ -428,8 +452,16 @@ function charge(model, maxTokens, u, success) {
     else { charged = 'ceiling'; output = Math.max(maxTokens, u.output); }
     if (u.offTier) charged = 'off-tier';
   }
+  // A-R56-01: each use of a granted server tool at its price, or its max_uses where a success did not report the count.
+  let uses = 0, toolUsd = 0;
+  if (success) Object.keys(offered).forEach(function (t) {
+    const read = u.uses[COUNTED[t]];
+    if (read === undefined && charged === 'read') charged = 'ceiling';
+    const n = read === undefined ? offered[t] : read;
+    uses += n; toolUsd += n * toolPrice[t];
+  });
   const costUsd = (input * p.inputPerMTok + output * p.outputPerMTok + cacheRead * p.cacheReadPerMTok +
-    write5m * p.cacheWritePerMTok + write1h * p.cacheWrite1hPerMTok) / 1e6;
+    write5m * p.cacheWritePerMTok + write1h * p.cacheWrite1hPerMTok) / 1e6 + toolUsd;
   totals.calls += 1;
   totals.inputTokens += input;
   totals.outputTokens += output;
@@ -441,7 +473,7 @@ function charge(model, maxTokens, u, success) {
   if (totals.costUsd >= budget.maxCostUsd) exhaust('cost');
   meterLine({
     event: 'call', model: model, charged: charged,
-    inputTokens: input, outputTokens: output, cacheReadTokens: cacheRead, cacheWriteTokens: cacheWrite, costUsd: costUsd,
+    inputTokens: input, outputTokens: output, cacheReadTokens: cacheRead, cacheWriteTokens: cacheWrite, costUsd: costUsd, serverToolUses: uses,
   });
 }
 
@@ -529,11 +561,7 @@ function responsesCeiling(request, model) {
 // budget cannot see, and is refused as P13 refuses any cost it cannot count (D-P13-12).
 // Only tools the client runs, function and custom, are let through (codex-1, gemini-1).
 const CLIENT_TOOLS = ['function', 'custom'];
-function responsesUnmeterable(request) {
-  if (Object.prototype.hasOwnProperty.call(request, 'prompt') && request.prompt !== null) return 'the request names a stored prompt';
-  const tier = request.service_tier;
-  if (tier !== undefined && tier !== null && tier !== 'default') return 'the request asks for the service tier ' + JSON.stringify(String(tier).slice(0, 40));
-  const tools = request.tools;
+function hosted(tools) {
   if (tools === undefined || tools === null) return null;
   if (!Array.isArray(tools)) return 'the request names tools that are not a list';
   for (let i = 0; i < tools.length; i += 1) {
@@ -543,6 +571,12 @@ function responsesUnmeterable(request) {
   }
   return null;
 }
+function responsesUnmeterable(request) {
+  if (Object.prototype.hasOwnProperty.call(request, 'prompt') && request.prompt !== null) return 'the request names a stored prompt';
+  const tier = request.service_tier;
+  if (tier !== undefined && tier !== null && tier !== 'default') return 'the request asks for the service tier ' + JSON.stringify(String(tier).slice(0, 40));
+  return hosted(request.tools);
+}
 
 // What an openai-chat request asks for that costs more than its tokens, or null (#88).
 function chatUnmeterable(request) {
@@ -550,15 +584,8 @@ function chatUnmeterable(request) {
   if (tier !== undefined && tier !== null && tier !== 'default') return 'the request asks for the service tier ' + JSON.stringify(String(tier).slice(0, 40));
   if (request.web_search_options !== undefined && request.web_search_options !== null) return 'the request asks for a web search';
   if (request.audio !== undefined && request.audio !== null) return 'the request asks for audio output';
-  const tools = request.tools;
-  if (tools !== undefined && tools !== null) {
-    if (!Array.isArray(tools)) return 'the request names tools that are not a list';
-    for (let i = 0; i < tools.length; i += 1) {
-      const t = tools[i];
-      const type = t !== null && typeof t === 'object' ? t.type : undefined;
-      if (CLIENT_TOOLS.indexOf(type) === -1) return 'the request offers the hosted tool ' + JSON.stringify(String(type).slice(0, 40));
-    }
-  }
+  const hostedTool = hosted(request.tools);
+  if (hostedTool !== null) return hostedTool;
   const modalities = request.modalities;
   if (modalities !== undefined && modalities !== null) {
     if (!Array.isArray(modalities)) return 'the request names modalities that are not a list';
@@ -578,6 +605,28 @@ function chatUnmeterable(request) {
     }
   }
   return null;
+}
+
+// A-R56-01: what a Messages request offers that the API runs itself. A tool with no type, or custom, the client runs.
+// Any other type passes only if granted, with a max_uses to charge when its count is unreadable; mcp_servers and
+// container reach the API's own servers and no grant names them. Returns [why, reason] to refuse, or the uses offered.
+function anthropicTools(request) {
+  if (request.mcp_servers !== undefined && request.mcp_servers !== null) return ['the request names mcp_servers, which no grant names', 'ungranted'];
+  if (request.container !== undefined && request.container !== null) return ['the request names a container, which no grant names', 'ungranted'];
+  const offered = {};
+  const t = request.tools;
+  if (t === undefined || t === null) return offered;
+  if (!Array.isArray(t)) return ['the request names tools that are not a list', 'ungranted'];
+  for (let i = 0; i < t.length; i += 1) {
+    const type = t[i] !== null && typeof t[i] === 'object' && !Array.isArray(t[i]) ? t[i].type : null;
+    if (type === undefined || type === 'custom') continue;
+    const name = JSON.stringify(String(type).slice(0, 40));
+    if (typeof type !== 'string' || !own(toolPrice, type)) return ['the request offers the tool type ' + name + ', which the task was not granted', 'ungranted'];
+    const most = t[i].max_uses;
+    if (!Number.isInteger(most) || most <= 0) return ['the request offers ' + name + ' with no positive integer max_uses, so its uses have no ceiling to charge', 'unreadable-request'];
+    offered[type] = (offered[type] || 0) + most;
+  }
+  return offered;
 }
 
 // One metered call at a time (D-P13-13).
@@ -634,6 +683,12 @@ function metered(req, res, target, path) {
         release();
         return;
       }
+      const offered = responses || openai ? {} : anthropicTools(request);
+      if (Array.isArray(offered)) {
+        refuseWith(res, 400, 'invalid_request_error', offered[0] + ', so it is not sent', offered[1]);
+        release();
+        return;
+      }
       const unmeterable = responses ? responsesUnmeterable(request) : openai ? chatUnmeterable(request) : null;
       if (unmeterable !== null) {
         refuseWith(res, 400, 'invalid_request_error', unmeterable + ', which is billed outside the usage this meter reads, so it is not sent', 'unmeterable');
@@ -655,7 +710,7 @@ function metered(req, res, target, path) {
         // its whole request was sent before it failed, so either is charged as unreadable.
         // Only a failure before the request left the relay is provably free.
         const status = answer === null ? 0 : answer.statusCode || 0;
-        charge(model, maxTokens, u, answer === null ? call.cut || call.sent : status >= 200 && status < 300);
+        charge(model, maxTokens, offered, u, answer === null ? call.cut || call.sent : status >= 200 && status < 300);
         inFlight.delete(call);
         release();
         if (closing && inFlight.size === 0) finish();
@@ -762,6 +817,14 @@ server.listen(port, '0.0.0.0', function () {
 `;
 
 /**
+ * The relay as it is run: `RELAY_SOURCE_TEXT` less its whole-line comments and
+ * its indentation, which are for the reader and count toward the command-line
+ * limit (R56). No line of the source is a string continued from the line
+ * before, so a line that begins `//` is always a comment.
+ */
+export const RELAY_SOURCE = RELAY_SOURCE_TEXT.split('\n').filter((line) => !/^\s*\/\//u.test(line)).map((line) => line.trimStart()).join('\n');
+
+/**
  * A relay request as the provider will apply it: validated, normalised, and
  * carrying the credential's name alone. The value is looked up at start time
  * and never stored beside the plan.
@@ -780,6 +843,8 @@ export interface RelayPlan {
   readonly urlVariable: string;
   readonly budget: RelayBudget;
   readonly meter: RelayMeter;
+  /** The server tools the relay forwards and charges (A-R56-01). */
+  readonly serverTools: readonly ServerToolGrant[];
 }
 
 /** What one sandbox's relay was applied with, and the evidence for it. Holds the credential's name and never its value. */
@@ -803,6 +868,8 @@ export interface AppliedRelay {
   readonly budget: RelayBudget;
   /** The dialect it reads usage in, and the prices it charges. */
   readonly meter: RelayMeter;
+  /** The server tools it forwards, and what each use is charged (A-R56-01). */
+  readonly serverTools: readonly ServerToolGrant[];
   /** `host:port`, as the sandbox reaches it. */
   readonly endpoint: string;
   /** The internal network the relay shares with the sandbox. */
@@ -936,6 +1003,7 @@ export function checkRelay(relay: RelaySpec, held: ReadonlySet<string>, hostPort
   }
   const budget = checkBudget(relay.budget);
   const meter = checkMeter(relay.meter);
+  const serverTools = checkServerTools((relay as { serverTools?: unknown }).serverTools, meter.dialect);
   if (credential !== null && !held.has(credential)) {
     refuse(
       'relay',
@@ -954,7 +1022,36 @@ export function checkRelay(relay: RelaySpec, held: ReadonlySet<string>, hostPort
     urlVariable: relay.urlVariable,
     budget,
     meter,
+    serverTools,
   };
+}
+
+/** I4, I5: a grant of server tools the relay can count and charge, under the one dialect that forwards any; refused whole otherwise. */
+function checkServerTools(grant: unknown, dialect: RelayDialect): readonly ServerToolGrant[] {
+  if (!Array.isArray(grant)) {
+    refuse('relay', `relay.serverTools must be a list of { type, perUseUsd }, empty to grant none, not ${shown(grant)}; an absent grant is never read as none or as all`);
+  }
+  const seen = new Set<string>();
+  const out: ServerToolGrant[] = [];
+  for (const entry of grant as unknown[]) {
+    if (!isRecord(entry) || Object.keys(entry).some((k) => k !== 'type' && k !== 'perUseUsd')) {
+      refuse('relay', `relay.serverTools holds ${shown(entry)}; each entry is { type, perUseUsd } and names nothing else`);
+    }
+    const { type, perUseUsd } = entry;
+    if (typeof type !== 'string' || !Object.prototype.hasOwnProperty.call(COUNTED_SERVER_TOOLS, type)) {
+      refuse('relay', `relay.serverTools names ${shown(type)}, a server tool this relay cannot count; it counts ${Object.keys(COUNTED_SERVER_TOOLS).join(', ')}, and a use it could not count is spend the budget cannot see (D-P13-12)`);
+    }
+    if (typeof perUseUsd !== 'number' || !Number.isFinite(perUseUsd) || perUseUsd < 0) {
+      refuse('relay', `relay.serverTools prices ${type} at ${shown(perUseUsd)}; a use's price is a non-negative finite number of US dollars`);
+    }
+    if (seen.has(type)) refuse('relay', `relay.serverTools names ${type} twice`);
+    seen.add(type);
+    out.push({ type, perUseUsd });
+  }
+  if (out.length > 0 && dialect !== 'anthropic-messages') {
+    refuse('relay', `relay.serverTools grants ${[...seen].join(', ')} under the ${dialect} dialect, which refuses every tool the API runs itself (D-P13-12); a grant the relay would ignore is not started`);
+  }
+  return out;
 }
 
 /**
@@ -1192,6 +1289,7 @@ export async function startRelay(
       '--env', `RELAY_PORT=${String(RELAY_PORT)}`,
       '--env', `RELAY_BUDGET=${JSON.stringify(plan.budget)}`,
       '--env', `RELAY_METER=${JSON.stringify(plan.meter)}`,
+      '--env', `RELAY_TOOLS=${JSON.stringify(plan.serverTools)}`,
       // Names only: the values are on the `docker` process, never in this argv.
       ...Object.keys(secrets).flatMap((name) => ['--env', name]),
       '--read-only',
@@ -1219,6 +1317,7 @@ export async function startRelay(
       urlVariable: plan.urlVariable,
       budget: plan.budget,
       meter: plan.meter,
+      serverTools: plan.serverTools,
       endpoint: `${RELAY_ALIAS}:${String(RELAY_PORT)}`,
       internalNetwork: internal,
       outboundNetwork: outbound,

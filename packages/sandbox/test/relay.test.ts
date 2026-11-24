@@ -84,6 +84,7 @@ function relaySpec(overrides: Partial<RelaySpec> = {}): RelaySpec {
     urlVariable: URL_VARIABLE,
     budget: TEST_BUDGET,
     meter: TEST_METER,
+    serverTools: [],
     ...overrides,
   };
 }
@@ -853,6 +854,27 @@ describe('a relay that cannot be applied exactly is refused (I5)', () => {
     }
   });
 
+  test('a server-tool grant is refused unless every entry is one the relay can count, priced, named once, under the Messages dialect (A-R56-01)', () => {
+    const held = new Set([CREDENTIAL]);
+    const search = { type: 'web_search_20250305', perUseUsd: 0.01 };
+    const { serverTools: _absent, ...absent } = relaySpec();
+    for (const [spec, cause] of [
+      [absent, /never read as none or as all/u],
+      [relaySpec({ serverTools: 'web_search_20250305' as unknown as RelaySpec['serverTools'] }), /must be a list/u],
+      [relaySpec({ serverTools: [{ type: 'web_search_20260209', perUseUsd: 0.01 }] }), /cannot count/u],
+      [relaySpec({ serverTools: [{ type: 'code_execution_20250825', perUseUsd: 0 }] }), /cannot count/u],
+      [relaySpec({ serverTools: [{ ...search, perUseUsd: -1 }] }), /non-negative finite/u],
+      [relaySpec({ serverTools: [{ ...search, perUseUsd: Number.NaN }] }), /non-negative finite/u],
+      [relaySpec({ serverTools: [{ ...search, maxUses: 3 } as RelaySpec['serverTools'][number]] }), /names nothing else/u],
+      [relaySpec({ serverTools: [search, search] }), /twice/u],
+      [relaySpec({ serverTools: [search], meter: { ...TEST_METER, dialect: 'openai-chat' } }), /openai-chat dialect/u],
+    ] as const) {
+      expect(() => checkRelay(spec as RelaySpec, held, NO_PORTS), JSON.stringify(spec)).toThrow(cause);
+    }
+    expect(checkRelay(relaySpec({ serverTools: [search] }), held, NO_PORTS).serverTools).toStrictEqual([search]);
+    expect(checkRelay(relaySpec(), held, NO_PORTS).serverTools).toStrictEqual([]);
+  });
+
   test('the relay\'s own start refuses an undeclared http upstream or a missing credential, and starts on a declared local one', async () => {
     const port = await new Promise<number>((done) => {
       const probe = createServer().listen(0, '127.0.0.1', () => {
@@ -869,6 +891,7 @@ describe('a relay that cannot be applied exactly is refused (I5)', () => {
       RELAY_PORT: String(port),
       RELAY_BUDGET: JSON.stringify({ maxTokens: 10, maxCostUsd: 1 }),
       RELAY_METER: JSON.stringify(TEST_OPENAI_METER),
+      RELAY_TOOLS: '[]',
     };
     const start = (given: Record<string, string>): Promise<string> =>
       new Promise((done) => {
@@ -926,7 +949,7 @@ describe('a relay that cannot be applied exactly is refused (I5)', () => {
   test('the relay itself refuses to start without a credential or a grant', async () => {
     const valid: Record<string, string> = {
       RELAY_CREDENTIAL: 'x', RELAY_UPSTREAM: UPSTREAM_ORIGIN, RELAY_PATHS: '["/v1/messages"]', RELAY_HEADER: 'x-api-key', RELAY_SCHEME: 'raw', RELAY_PORT: '8080',
-      RELAY_BUDGET: JSON.stringify(TEST_BUDGET), RELAY_METER: JSON.stringify(TEST_METER),
+      RELAY_BUDGET: JSON.stringify(TEST_BUDGET), RELAY_METER: JSON.stringify(TEST_METER), RELAY_TOOLS: '[{"type":"web_search_20250305","perUseUsd":0.01}]',
     };
     const flagsFor = (env: Record<string, string>): string[] => Object.entries(env).flatMap(([name, value]) => ['--env', `${name}=${value}`]);
 
@@ -951,6 +974,12 @@ describe('a relay that cannot be applied exactly is refused (I5)', () => {
       [Object.fromEntries(Object.entries(valid).filter(([name]) => name !== 'RELAY_SCHEME')), 'no scheme'],
       [{ ...valid, RELAY_SCHEME: 'basic' }, 'no scheme'],
       [{ ...valid, RELAY_METER: JSON.stringify({ ...TEST_METER, prices: { m: { ...TEST_METER.prices[TEST_MODEL], outputPerMTok: -1 } } }) }, 'no price table'],
+      // A-R56-01: no grant, a type it cannot count, an unpriced use, a type twice, or a grant under a dialect that forwards none.
+      [Object.fromEntries(Object.entries(valid).filter(([name]) => name !== 'RELAY_TOOLS')), 'no server-tool grant'],
+      [{ ...valid, RELAY_TOOLS: '[{"type":"code_execution_20250825","perUseUsd":0.01}]' }, 'no server-tool grant'],
+      [{ ...valid, RELAY_TOOLS: '[{"type":"web_search_20250305","perUseUsd":-1}]' }, 'no server-tool grant'],
+      [{ ...valid, RELAY_TOOLS: '[{"type":"web_search_20250305","perUseUsd":0.01},{"type":"web_search_20250305","perUseUsd":0}]' }, 'no server-tool grant'],
+      [{ ...valid, RELAY_METER: JSON.stringify(TEST_OPENAI_METER) }, 'no server-tool grant'],
     ];
     for (const [env, named] of attempts) {
       const outcome = await run('docker', ['run', '--rm', ...LABEL_ARGS, ...flagsFor(env), EGRESS_PROXY_IMAGE, 'node', '--eval', RELAY_SOURCE]).then(

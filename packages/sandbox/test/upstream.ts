@@ -98,7 +98,7 @@ export async function makeCertificate(): Promise<Certificate> {
  * reads (P13). What it answers is steered by `relay_test` in the request body,
  * which the relay forwards unchanged like the rest: `usage` (the four counts),
  * `omit` (`'final'` drops the output count, `'all'` every count), `status`,
- * `encoding` (`'gzip'`), `hold` (milliseconds before answering), and `hangup`
+ * `searches` (the web searches `server_tool_use` reports), `encoding` (`'gzip'`), `hold` (milliseconds before answering), and `hangup`
  * (`true` reads the whole request and closes without answering). `stream:
  * true` answers in server-sent events. It logs
  * the SHA-256 of every body it received and sent, so a suite can prove both
@@ -209,6 +209,8 @@ function answer(s, request, t, body, echo) {
     cache_creation: { ephemeral_5m_input_tokens: counts.cacheWrite, ephemeral_1h_input_tokens: 0 },
   };
   if (usage !== undefined && t.omit !== 'final') usage.output_tokens = counts.output;
+  // A-R56-01: the uses of a server tool, reported where the final output count is.
+  if (usage !== undefined && t.omit !== 'final' && t.searches !== undefined) usage.server_tool_use = { web_search_requests: t.searches };
   let payload;
   let type;
   if (status !== 200) {
@@ -226,7 +228,7 @@ function answer(s, request, t, body, echo) {
       ['content_block_stop', { type: 'content_block_stop', index: 0 }],
     ];
     if (t.omit !== 'final' && t.omit !== 'all') {
-      events.push(['message_delta', { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: counts.output } }]);
+      events.push(['message_delta', { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: counts.output, server_tool_use: usage === undefined ? undefined : usage.server_tool_use } }]);
       events.push(['message_stop', { type: 'message_stop' }]);
     }
     payload = events.map(function (e) { return 'event: ' + e[0] + '\\ndata: ' + JSON.stringify(e[1]) + '\\n\\n'; }).join('');

@@ -71,7 +71,7 @@ export class StubDriver implements Driver {
   }
 
   /** No model is called, so there is nothing to relay. */
-  relayRequest(): null {
+  relayRequest(_tools: readonly string[]): null {
     return null;
   }
 

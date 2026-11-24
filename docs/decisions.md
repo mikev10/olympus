@@ -12646,3 +12646,28 @@ second consumer to land ahead of.
   reading field would be a contract change nothing reads.
 - **The price is the driver's,** beside its model prices (`MODEL_METER`), at
   $0.01 a use from the published rate.
+
+### D-R56-04: judgment calls made during the work
+
+- **The relay's shipped source is stripped.** With the new checks,
+  `RELAY_SOURCE` grew to 33,042 characters, past the 32,767 Windows allows
+  for the whole command line. `RELAY_SOURCE_TEXT` keeps the readable source,
+  and `RELAY_SOURCE`, what runs, drops whole-line comments and indentation
+  (25,745 characters). This is safe because no line of the source is a string
+  continued from the one before, and the source holds no template literal.
+  The relay tests start the stripped copy. Rejected: passing the source in the
+  relay container's environment, which changes how the relay is started
+  (D-P12) for a size problem the stripping solves. Reverse by exporting the
+  text unchanged once the source shrinks.
+- **The OpenAI dialects share one hosted-tool loop** (`hosted`), the same
+  check that was written out twice, to make room. Behaviour is unchanged, and
+  the existing tests for both dialects pass.
+- **Refusal reasons.** An ungranted tool, `mcp_servers`, or `container` is
+  logged as `ungranted`. A granted tool with no `max_uses` is logged as
+  `unreadable-request`, beside a missing `max_tokens`. Both count in
+  `refused`, which the line records as a `relay-refused` decision (D-P14-05).
+- **An unreported count is a `ceiling` charge,** the label a missing final
+  output count already uses. It never exhausts the budget the way
+  `unreadable` does.
+- **The DECOMPOSITION entry had no out-of-scope line.** It gains the one
+  D-R56-01 states, derived from #189's scope note and R57's entry.
