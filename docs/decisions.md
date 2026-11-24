@@ -12667,3 +12667,48 @@ Started on `v2` at 03518f9. Issue #171.
   changes no existing one.
 - **Reverse:** delete the workflow file; the tier still runs locally with a
   key.
+
+### D-R54-06: the result, and the tier map stays as it was
+
+Run 45316704752 on pull request #225, 2026-11-24, started by the
+`run-benchmark` label, which the session added on the maintainer's
+instruction. Corpus v2, `deep`, three repetitions. Both runs finished.
+
+| | `claude-opus-5-5` | `claude-fable-5-2` |
+|---|---|---|
+| Driver alone: seeded false-dones let through, of every trial | 15 of 36 | 2 of 36 |
+| Driver alone: clean work refused, of every trial | 19 of 24 | 10 of 24 |
+| Driver alone: answers nobody could read | 28 of 60 | 0 of 60 |
+| Critic: seeded drafts let through | 0 of 9 | 0 of 9 |
+| Critic: clean drafts sent back | 6 of 6 | 6 of 6 |
+| Spent | $5.10 | $11.23 |
+
+- **The rule's answer: no change.** Fable was no worse in either arm and
+  better in one, and its run cost 2.2 times as much. The rule needs both
+  (D-R54-04, C1), and it was fixed before either run. `TIER_MODELS.deep`
+  stays `claude-opus-5-5`.
+- **The vendor's claim did not hold here.** Anthropic reported about half
+  the cost per task. On these tasks, at the CLI's default effort for each
+  model, Fable cost more than twice as much. Its price per token is twice
+  Opus's, and it did not use fewer tokens.
+- **Most of Opus's misses are unreadable answers, not wrong ones.** Of the
+  answers that could be read, Opus caught 21 of 21 seeded items and refused
+  6 of 11 controls. The driver-alone arm wants strict JSON and counts
+  anything else against the model (D-R7-17). So this run says Opus at
+  `deep` often does not answer in the shape asked. It does not say Opus
+  judges worse. Fable answered in the shape every time.
+- **Both models' critics sent back every clean draft**, on findings of their
+  own, in all six trials. Every seeded draft was caught too, so at `deep`
+  the critic arm cannot tell a model that finds real faults from one that
+  always finds something. It is filed as an issue and is not this unit's to
+  fix.
+- **Not decided here, and the maintainer's:** whether a model that judges
+  this much better is worth twice the cost in the `deep` seats. The entry's
+  criterion says no. Changing the criterion is an amendment to the entry,
+  not a reading of this result.
+- **Known limits:** three repetitions, so the driver-alone samples are 36
+  and 24 trials and the critic's are 9 and 6. One corpus. Effort was the
+  CLI's default for each model (C3). Iterations and parks are not measured
+  (D-R54-03).
+- **Verified by this run:** the pinned CLI (2.1.330) accepts
+  `claude-fable-5-2`, which D-R54-02 left open.
