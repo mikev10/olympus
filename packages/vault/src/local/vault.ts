@@ -35,7 +35,7 @@ import type { CandidateId, RunId, RunState, StationId, TaskResult, VaultRef, Vau
 import type { IntegrityViolation } from '@olympus-ai/integrity';
 import type {
   AdmissionRecord, BaseRunRecord, CandidateRecord, CountedRefusalCause, CriticRecord, DecisionCause, DraftLockRecord, DraftRecord, EnforcementDecision, EvidenceBundle, IntakeEntry, IntegrationRecord, IntentRecord, NightlyEntry, NightlyRecord, RefusedDeliveryCount, StoredObject, TriggerDecision,
-  LockEntry, LockManifest, LockVerdict, NoRunState, ObservationEntry, ObservationRecord, RubricRecord, UsageRecord, Vault, DismissalCause,
+  LockEntry, LockManifest, LockVerdict, NoRunState, ObservationEntry, ObservationRecord, RubricRecord, UsageRecord, Vault, DismissalCause, CriticFinding, FindingOutcomeEntry, FindingOutcomeRecord, FindingRef, ReviewFindingsRecord,
 } from '../types.js';
 
 /** Repeated from `DISMISSAL_CAUSES` in the contract: this module carries no value import (header). */
@@ -82,7 +82,7 @@ const KINDS: readonly VaultRefKind[] = [
   'spec', 'acceptance-tests', 'task-graph', 'lock-manifest', 'policy',
   'verification-manifest', 'evidence', 'violation', 'run-state', 'rubric', 'learning',
   'admission', 'task-result', 'usage', 'decision', 'integration', 'base-run',
-  'intent', 'draft', 'critic-result', 'draft-lock',
+  'intent', 'draft', 'critic-result', 'draft-lock', 'review-findings',
 ];
 
 /** The one admission record a run may have. Named, not hash-addressed, so its exclusive create is what makes it once-only. */
@@ -111,6 +111,13 @@ const NIGHTLY_JOB_SCHEMAS: ReadonlySet<string> = new Set(['nightly-finding', 'ni
 
 /** Where nightly records are kept: beside the runs, under none (A-R13a-02). */
 const NIGHTLY_DIR = 'nightly';
+
+/**
+ * Where finding outcomes are kept, beside the runs (R28): each named once by
+ * its finding under `by-finding/`, which is the write-once mark, and once by
+ * its hash.
+ */
+const FINDING_OUTCOMES_DIR = 'finding-outcomes';
 
 /** Where observations are kept: `runs/<id>/observations/` for a run's, and this directory beside the runs for the rest (D-R8a-03). */
 const OBSERVATIONS_DIR = 'observations';
@@ -196,7 +203,7 @@ const CONTENT_NAME = /^([0-9a-f]{64})\.json$/;
 function contentNamed(parts: readonly string[]): boolean {
   const name = parts.at(-1) ?? '';
   if (!CONTENT_NAME.test(name)) return false;
-  if (parts.length === 2 && (parts[0] === NIGHTLY_DIR || parts[0] === OBSERVATIONS_DIR)) return true;
+  if (parts.length === 2 && (parts[0] === NIGHTLY_DIR || parts[0] === OBSERVATIONS_DIR || parts[0] === FINDING_OUTCOMES_DIR)) return true;
   if (parts.length === 4 && parts[0] === 'runs' && parts[2] === OBSERVATIONS_DIR) return true;
   return parts.length === 5 && parts[0] === 'runs' && parts[2] === 'objects' && KINDS.includes(parts[3] as VaultRefKind);
 }
@@ -632,11 +639,114 @@ function criticProblem(r: unknown): string | undefined {
   if (r.grade !== 'different-family' && r.grade !== 'different-model' && r.grade !== 'same-model') return 'its grade is not a grade';
   if (r.binding !== (r.grade === 'different-family')) return 'only a critic of another family than the drafter is binding (D-A-DS-06)';
   if (typeof r.readable !== 'boolean') return 'it does not say whether the result was readable';
-  if (!Array.isArray(r.findings) || !r.findings.every((f) => typeof f === 'string' && f !== '')) return 'its findings are not a list of text';
-  if (!r.readable && r.findings.length === 0) return 'an unreadable result counts as a finding (I5)';
+  if (!Array.isArray(r.findings) || !r.findings.every(isCriticFinding)) return 'its findings are not located or refused critic findings';
+  if (!r.readable && !(r.findings.length === 1 && isRecord(r.findings[0]) && r.findings[0].cause === 'unreadable')) return 'an unreadable result is one refused finding (I5)';
+  if (r.readable && r.findings.some((f) => isRecord(f) && f.cause === 'unreadable')) return 'only an unreadable result holds an unreadable finding';
   if (typeof r.rubric !== 'string' || !SHA256_HEX.test(r.rubric)) return 'it names no rubric hash';
   if (!isRoleVersion(r.role)) return 'it names no role and version the critic ran under';
   return undefined;
+}
+
+function isCriticFinding(f: unknown): boolean {
+  if (!isRecord(f)) return false;
+  if (f.kind === 'located') return hasString(f, 'path') && f.path !== '' && hasString(f, 'note') && (f.note as string).trim() !== '';
+  // `recorded-before` is how a reader names a finding stored before R28; it is never written (D-R28-01).
+  return f.kind === 'refused' && (f.cause === 'unlocated' || f.cause === 'unreadable');
+}
+
+/**
+ * A critic record's findings as R28 reads them. A record stored before R28
+ * holds strings, which cite nothing: each is a refused `recorded-before`,
+ * never measured, and still a finding for send-back (D-R28-01).
+ */
+export function criticFindingsOf(findings: readonly unknown[]): CriticFinding[] {
+  return findings.map((f): CriticFinding => (typeof f === 'string' ? { kind: 'refused', cause: 'recorded-before' } : (f as CriticFinding)));
+}
+
+const SEAT_FINDING_CAUSES: ReadonlySet<string> = new Set(['unlocated', 'unrecordable']);
+
+function isFieldDefects(value: unknown): boolean {
+  return Array.isArray(value) && value.every((d) => isRecord(d) && hasString(d, 'field') && hasString(d, 'problem'));
+}
+
+/** R28: a review seat's findings, whole. An unreadable result holds no finding, and is recorded as unreadable, never as none (I5). */
+export function reviewFindingsProblem(r: unknown): string | undefined {
+  if (!isRecord(r) || !hasString(r, 'runId') || !hasString(r, 'taskId')) return 'it names no run and task';
+  if (r.collectedBy !== 'runtime') return "collectedBy is not 'runtime'";
+  if (r.seat !== 'review' && r.seat !== 'security') return 'its seat is neither review nor security';
+  if (!isRef(r.result) || (r.result as VaultRef).kind !== 'task-result' || (r.result as VaultRef).runId !== r.runId) return "it names no task result of its run";
+  if (!isModel(r.reviewer)) return 'it names no reviewer model';
+  if (r.tree !== null && (typeof r.tree !== 'string' || !SHA256_HEX.test(r.tree))) return 'its tree is neither a digest nor null';
+  if (typeof r.readable !== 'boolean') return 'it does not say whether the result was readable';
+  if (!Array.isArray(r.findings)) return 'its findings are not a list';
+  if (!r.readable && r.findings.length > 0) return 'an unreadable result holds no finding';
+  for (const f of r.findings as unknown[]) {
+    if (!isRecord(f)) return 'a finding is not an object';
+    if (f.kind === 'located') {
+      if (!hasString(f, 'category') || !hasString(f, 'path') || f.path === '' || !Number.isSafeInteger(f.line) || (f.line as number) < 1) return 'a located finding names no category, path, and line';
+    } else if (f.kind !== 'refused' || typeof f.cause !== 'string' || !SEAT_FINDING_CAUSES.has(f.cause) || !isFieldDefects(f.defects)) {
+      return 'a finding is neither located nor refused with its cause';
+    }
+  }
+  return undefined;
+}
+
+/** A finding's key: the same finding always names the same file, so its outcome's exclusive create is what makes it once-only (R28). */
+export function findingKeyOf(f: FindingRef): string {
+  const source = f.source.kind === 'nightly' ? ['nightly', f.source.record] : [f.source.kind, f.source.record.runId, f.source.record.kind, f.source.record.hash];
+  return createHash('sha256').update([...source, String(f.index)].join('\0'), 'utf8').digest('hex');
+}
+
+function isFindingRef(f: unknown): boolean {
+  if (!isRecord(f) || !Number.isSafeInteger(f.index) || (f.index as number) < 0) return false;
+  const source = f.source;
+  if (!isRecord(source)) return false;
+  if (source.kind === 'nightly') return typeof source.record === 'string' && SHA256_HEX.test(source.record);
+  const kind = source.kind === 'review' ? 'review-findings' : source.kind === 'critic' ? 'critic-result' : null;
+  return kind !== null && isRef(source.record) && (source.record as VaultRef).kind === kind && SHA256_HEX.test((source.record as VaultRef).hash);
+}
+
+const isLine = (n: unknown): boolean => Number.isSafeInteger(n) && (n as number) >= 1;
+
+function resolutionProblem(r: unknown, source: unknown): string | undefined {
+  if (!isRecord(r) || !isRecord(source)) return 'it carries no resolution';
+  if (r.kind === 'covered-change') {
+    if (source.kind === 'critic') return 'a critic finding is resolved by its draft, never by a change';
+    if (!hasString(r, 'runId') || typeof r.mergeCommit !== 'string' || !COMMIT.test(r.mergeCommit)) return 'it names no resolving run and merge commit';
+    if (!hasString(r, 'path') || r.path === '' || !isLine(r.line)) return 'it names no cited path and line';
+    const h = r.hunk;
+    if (!isRecord(h) || !isLine(h.oldStart) || !isLine(h.oldLines) || !isCount(h.newStart, 0) || !isLine(h.newLines)) return 'its hunk holds no base-side line and no head-side line';
+    const line = r.line as number;
+    if (line < (h.oldStart as number) || line >= (h.oldStart as number) + (h.oldLines as number)) return 'its hunk does not hold the cited line';
+    const lo = h.newStart as number;
+    const hi = lo + (h.newLines as number);
+    if (!Array.isArray(r.executed) || r.executed.length === 0 || !r.executed.every((n) => isLine(n) && (n as number) >= lo && (n as number) < hi)) return 'it names no executed line of the hunk';
+    if (!isRef(r.evidence) || (r.evidence as VaultRef).kind !== 'evidence' || (r.evidence as VaultRef).runId !== r.runId) return "it names no evidence of the resolving run";
+    return undefined;
+  }
+  if (r.kind === 'draft-changed') {
+    if (source.kind !== 'critic') return 'only a critic finding is resolved by its draft';
+    if (!isRef(r.lock) || (r.lock as VaultRef).kind !== 'draft-lock') return 'it names no draft lock';
+    if (typeof r.raised !== 'string' || !SHA256_HEX.test(r.raised) || typeof r.locked !== 'string' || !SHA256_HEX.test(r.locked)) return "it names no file hash at each end";
+    if (r.raised === r.locked) return 'a file that did not change resolves nothing';
+    return undefined;
+  }
+  return 'its resolution is of no known kind';
+}
+
+/** R28: an outcome, whole. `open` is never written; a dismissal carries a cause and no text (A-R16-05). */
+export function findingOutcomeProblem(r: unknown): string | undefined {
+  if (!isRecord(r) || r.collectedBy !== 'runtime') return "collectedBy is not 'runtime'";
+  if (!isFindingRef(r.finding)) return 'it names no finding by its source record and index';
+  if (!isTime(r.at)) return 'it carries no time';
+  const outcome = r.outcome;
+  if (!isRecord(outcome)) return 'it carries no outcome';
+  if (outcome.kind === 'dismissed') {
+    if (Object.keys(outcome).some((k) => k !== 'kind' && k !== 'cause')) return 'a dismissal carries a cause and nothing else';
+    return typeof outcome.cause === 'string' && LOCAL_DISMISSAL_CAUSES.has(outcome.cause as DismissalCause) ? undefined : 'its cause is not a dismissal cause';
+  }
+  if (outcome.kind === 'resolved') return resolutionProblem(outcome.resolution, (r.finding as { source: unknown }).source);
+  return 'an outcome is resolved or dismissed; open is never written';
 }
 
 /** R19: an approved draft's lock, whole. */
@@ -1063,6 +1173,16 @@ export class LocalVault implements Vault {
     return storeObject(this.#store, r.runId, 'critic-result', r);
   }
 
+  recordReviewFindings(r: ReviewFindingsRecord): Promise<VaultRef> {
+    const problem = reviewFindingsProblem(r);
+    if (problem !== undefined) return Promise.reject(new Error(`LocalVault: refusing a review findings record: ${problem}`));
+    return storeObject(this.#store, r.runId, 'review-findings', r);
+  }
+
+  readReviewFindings(runId: RunId): Promise<readonly VaultRef[]> {
+    return this.#objects(runId, 'review-findings');
+  }
+
   /**
    * Once per run and station, by an exclusive create: an approved draft is
    * locked once (R19). The same record again returns its ref, so a resume
@@ -1252,6 +1372,45 @@ export class LocalVault implements Vault {
     return out.sort((a, b) => a.record.date.localeCompare(b.record.date) || a.record.schedule.localeCompare(b.record.schedule) || a.sha256.localeCompare(b.sha256));
   }
 
+  /**
+   * The mark first: the finding's exclusive create under `by-finding/` is
+   * what refuses a second outcome, and a stop between the two writes leaves
+   * the mark and its bytes, which the reader reads (R28).
+   */
+  async recordFindingOutcome(r: FindingOutcomeRecord): Promise<string | null> {
+    const problem = findingOutcomeProblem(r);
+    if (problem !== undefined) throw new Error(`LocalVault: refusing a finding outcome: ${problem}`);
+    const bytes = encode(r);
+    const hash = sha256(bytes);
+    if (!(await createExclusive(join(this.#store, FINDING_OUTCOMES_DIR, 'by-finding', `${findingKeyOf(r.finding)}.json`), bytes))) return null;
+    await createExclusive(join(this.#store, FINDING_OUTCOMES_DIR, `${hash}.json`), bytes);
+    return hash;
+  }
+
+  async readFindingOutcomes(): Promise<readonly FindingOutcomeEntry[]> {
+    const dir = join(this.#store, FINDING_OUTCOMES_DIR, 'by-finding');
+    let names: string[];
+    try {
+      names = await readdir(dir);
+    } catch (error) {
+      if (isAbsent(error)) return [];
+      throw error;
+    }
+    const out: FindingOutcomeEntry[] = [];
+    for (const name of names) {
+      const key = CONTENT_NAME.exec(name)?.[1];
+      if (key === undefined) continue;
+      const bytes = await readFile(join(dir, name));
+      const record = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+      // A file that is not an outcome, or is filed under another finding, is a fault, never one to skip (I5).
+      const problem = findingOutcomeProblem(record);
+      if (problem !== undefined) throw new Error(`LocalVault: ${join(dir, name)} is not a finding outcome: ${problem}`);
+      if (findingKeyOf((record as FindingOutcomeRecord).finding) !== key) throw new Error(`LocalVault: ${join(dir, name)} is filed under another finding`);
+      out.push({ record: record as FindingOutcomeRecord, sha256: sha256(bytes) });
+    }
+    return out.sort((a, b) => a.record.at.localeCompare(b.record.at) || a.sha256.localeCompare(b.sha256));
+  }
+
   /** Under `runs/<id>/observations/<sha256>.json`, or `observations/<sha256>.json` beside the runs (D-R8a-03). */
   async recordObservation(r: ObservationRecord): Promise<string> {
     const problem = observationProblem(r);
@@ -1347,7 +1506,7 @@ export class LocalVault implements Vault {
         : null,
     };
   }
-  async #objects(runId: RunId, kind: 'decision' | 'usage' | 'integration'): Promise<readonly VaultRef[]> {
+  async #objects(runId: RunId, kind: 'decision' | 'usage' | 'integration' | 'review-findings'): Promise<readonly VaultRef[]> {
     const dir = join(runDir(this.#store, runId), 'objects', kind);
     let names: string[];
     try {

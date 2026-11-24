@@ -876,7 +876,7 @@ export const CRITIC_FINDING_SENDS_BACK: LocalAssertion = runtime({
     'any finding from an independent critic sends the draft back with the findings in the next attempt\'s variable suffix, and a result the runtime cannot read counts as one; the drafter is never asked to settle it in its stable prefix or role',
   run: async () => {
     await withLine('r19-finding-', async (rig) => {
-      const r = await drafting(rig, { critic: (_, attempt) => (attempt === 1 ? JSON.stringify({ findings: ['statement 2 cannot be tested'] }) : attempt === 2 ? 'Looks fine to me!' : CLEAN) });
+      const r = await drafting(rig, { critic: (_, attempt) => (attempt === 1 ? JSON.stringify({ findings: [{ path: `.drafts/${rig.runId}/spec.md`, note: 'statement 2 cannot be tested' }] }) : attempt === 2 ? 'Looks fine to me!' : CLEAN) });
       awaiting(await admitAndDrive(r), 'spec:1', 'a drafted spec after two critiques');
       const attempts = (await rig.state()).drafts.spec?.attempts ?? [];
       if (attempts.length !== 3 || attempts[0]?.sentBack?.by !== 'critic' || attempts[1]?.sentBack?.by !== 'critic') {
@@ -892,7 +892,7 @@ export const CRITIC_FINDING_SENDS_BACK: LocalAssertion = runtime({
       if (retry.stablePrefix.includes('statement 2 cannot be tested') || retry.role.instructions.includes('statement 2 cannot be tested')) throw new Error('R19: a finding reached the stable prefix or the role');
       // Attempt 3 is told attempt 2's result could not be read, in its suffix alone.
       const third = r.drivers.specDrafter.requests[2];
-      const unreadableFinding = unreadable.findings[0] ?? '';
+      const unreadableFinding = unreadable.findings[0] === undefined ? '' : (await api()).criticNote(unreadable.findings[0]);
       if (!third?.variableSuffix.includes(unreadableFinding)) throw new Error(`R19: the third attempt was not told the second critic's result was unreadable: ${JSON.stringify(third?.variableSuffix)}`);
       if (third.stablePrefix.includes(unreadableFinding) || third.role.instructions.includes(unreadableFinding)) throw new Error('R19: the unreadable result reached the stable prefix or the role');
       for (const tree of r.drivers.specDrafter.workspaces.slice(1)) {
@@ -971,7 +971,7 @@ export const LAST_ATTEMPT_GOES_TO_A_PERSON: LocalAssertion = runtime({
   run: async () => {
     await withLine('r19-park-', async (rig) => {
       const { rejectDraft, resumeRun } = await api();
-      const r = await drafting(rig, { critic: () => JSON.stringify({ findings: ['still untestable'] }) });
+      const r = await drafting(rig, { critic: () => JSON.stringify({ findings: [{ path: `.drafts/${rig.runId}/spec.md`, note: 'still untestable' }] }) });
       awaiting(await admitAndDrive(r), 'spec:1', 'a third drafted spec with findings');
       const state = await rig.state();
       const attempt = lastAttempt(state, 'spec');
@@ -1106,7 +1106,7 @@ export async function draftingDecision(cause: 'approval-rejected' | 'draft-sent-
   await withLine(`p14-${cause}-`, async (rig) => {
     const { rejectDraft } = await api();
     const seats: Seats = cause === 'draft-sent-back'
-      ? { critic: (_, attempt) => (attempt === 1 ? JSON.stringify({ findings: ['one'] }) : CLEAN) }
+      ? { critic: (_, attempt) => (attempt === 1 ? JSON.stringify({ findings: [{ path: `.drafts/${rig.runId}/spec.md`, note: 'one' }] }) : CLEAN) }
       : cause === 'draft-invalid'
         ? { spec: (_, id) => helloSpec(id, { [`.drafts/${id}/spec.md`]: '' }) }
         : {};

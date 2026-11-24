@@ -34,7 +34,7 @@ function bundle(): EvidenceBundle {
     unstarted: [],
     claim: { narrative: 'stub', filesChanged: [] },
     claimEvidenceDiff: [],
-  tamper: { assertionsWeakened: [], skipMarkersAdded: [], testsDeleted: [], snapshotsRegenerated: [], coverageDelta: null, protectedPathsTouched: [], suppressionMarkersAdded: [] },
+  tamper: { assertionsWeakened: [], skipMarkersAdded: [], testsDeleted: [], snapshotsRegenerated: [], coverageDelta: null, changedLines: null, protectedPathsTouched: [], suppressionMarkersAdded: [] },
   notCarried: [],
   install: null,
     collectedBy: 'runtime',

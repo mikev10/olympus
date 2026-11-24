@@ -659,11 +659,23 @@ export interface DraftRecord {
 }
 
 /**
+ * One thing a critic found, as the runtime read it (R28). `located` names one
+ * of the draft's files and carries the critic's note, which is what its
+ * drafter is sent (D-A-DS-07). `refused` is never measured as a finding:
+ * `unlocated` named no file of the draft, `unreadable` stands for a result the
+ * runtime could not read (I5), and `recorded-before` is a finding stored
+ * before R28, which cited nothing.
+ */
+export type CriticFinding =
+  | { readonly kind: 'located'; readonly path: string; readonly note: string }
+  | { readonly kind: 'refused'; readonly cause: 'unlocated' | 'unreadable' | 'recorded-before' };
+
+/**
  * A critic's result for one draft (R19). `findings` is the list the critic
  * returned, with no severity; a result the runtime could not read is one
- * finding, and `readable` says so (I5). `binding` is false unless the critic
- * is of another family than the drafter: such findings are recorded and
- * shown, and send nothing back (D-A-DS-06).
+ * refused finding, and `readable` says so (I5). `binding` is false unless the
+ * critic is of another family than the drafter: such findings are recorded
+ * and shown, and send nothing back (D-A-DS-06).
  */
 export interface CriticRecord {
   readonly runId: RunId;
@@ -675,7 +687,7 @@ export interface CriticRecord {
   readonly grade: IndependenceGrade;
   readonly binding: boolean;
   readonly readable: boolean;
-  readonly findings: readonly string[];
+  readonly findings: readonly CriticFinding[];
   /** The hash of the rubric the critic was given. */
   readonly rubric: string;
   readonly role: RoleVersion;
@@ -1276,6 +1288,100 @@ export type ReviewFinding =
   | { readonly kind: 'refused'; readonly cause: 'unlocated' | 'unknown-record' | 'unrecordable'; readonly defects: readonly FieldDefect[] };
 
 /**
+ * One thing a review seat found in the tree it reviewed, as the runtime read
+ * it (R28). `located` names a file that tree holds and a line that file has;
+ * the category is the reviewer's, from the closed set. `refused` is never
+ * measured: `unlocated` named no such file or line, `unrecordable` broke its
+ * schema, and only the field and the rule are kept, never the values (I7).
+ */
+export type SeatFinding =
+  | { readonly kind: 'located'; readonly category: TreeCategory; readonly path: string; readonly line: number }
+  | { readonly kind: 'refused'; readonly cause: 'unlocated' | 'unrecordable'; readonly defects: readonly FieldDefect[] };
+
+/**
+ * What a review seat found, beside its result (R28). The task's status is
+ * the runtime's and never reads this (I2, D-P4-07). `tree` is the digest of
+ * the accepted diff the seat reviewed, or null where it reviewed the base;
+ * the lines are that tree's, which is the tree `integrate` pushes.
+ * `readable` false is a result the runtime could not read as a list of
+ * findings, recorded as such and never as none found (I5).
+ */
+export interface ReviewFindingsRecord {
+  readonly runId: RunId;
+  readonly taskId: TaskId;
+  readonly seat: 'review' | 'security';
+  /** The task result the findings were read from. */
+  readonly result: VaultRef;
+  /** The model the seat was recorded under (I6): the runtime's, never the result's say-so. */
+  readonly reviewer: ModelIdentity;
+  readonly tree: string | null;
+  readonly readable: boolean;
+  readonly findings: readonly SeatFinding[];
+  readonly collectedBy: 'runtime';
+}
+
+/**
+ * Where a finding was raised, by the record that holds it (R28): a review
+ * seat's findings record, a critic record, or a nightly record by its hash.
+ */
+export type FindingSource =
+  | { readonly kind: 'review'; readonly record: VaultRef }
+  | { readonly kind: 'critic'; readonly record: VaultRef }
+  | { readonly kind: 'nightly'; readonly record: string };
+
+/** One finding, by its source record and its index in that record's findings (R28). */
+export interface FindingRef {
+  readonly source: FindingSource;
+  readonly index: number;
+}
+
+/**
+ * Why a finding is resolved, from the runtime's own records only (R28, I2).
+ * `covered-change`: a later run's merged change altered a hunk holding the
+ * cited line, mapped to that run's base, and its pinned coverage check passed
+ * with a changed line of the hunk executed. `draft-changed`: the cited file's
+ * hash differs between the draft the critic read and the locked draft.
+ */
+export type FindingResolution =
+  | {
+      readonly kind: 'covered-change';
+      readonly runId: RunId;
+      readonly mergeCommit: string;
+      /** The cited line as it stands at the resolving run's base. */
+      readonly path: string;
+      readonly line: number;
+      /** The hunk of the resolving change that holds it: its base-side start and count, and its head-side start and count. */
+      readonly hunk: { readonly oldStart: number; readonly oldLines: number; readonly newStart: number; readonly newLines: number };
+      /** The hunk's head-side lines the coverage report saw run; never empty. */
+      readonly executed: readonly number[];
+      readonly evidence: VaultRef;
+    }
+  | { readonly kind: 'draft-changed'; readonly lock: VaultRef; readonly raised: string; readonly locked: string };
+
+/**
+ * What became of a finding (R28). `open` is never recorded: a finding with no
+ * outcome record is open, so an unknown outcome never reads as resolved. A
+ * dismissal is a person's, with a cause and no text (A-R16-05).
+ */
+export type FindingOutcome =
+  | { readonly kind: 'resolved'; readonly resolution: FindingResolution }
+  | { readonly kind: 'dismissed'; readonly cause: DismissalCause };
+
+/** A finding's one outcome, write-once and content-addressed (R28). `at` is the runtime's clock. */
+export interface FindingOutcomeRecord {
+  readonly finding: FindingRef;
+  readonly outcome: FindingOutcome;
+  readonly at: string;
+  readonly collectedBy: 'runtime';
+}
+
+/** An outcome as stored, beside the SHA-256 of its bytes, which is its name. */
+export interface FindingOutcomeEntry {
+  readonly record: FindingOutcomeRecord;
+  readonly sha256: string;
+}
+
+/**
  * A nightly reviewer's seat and what came of it (R13b). `claim` is the
  * reviewer's final message, kept as its claim: no record reads it as a
  * finding, and no prompt is ever given it (I2, I7). `usage` and `egress` are
@@ -1359,6 +1465,13 @@ export interface Vault {
   recordDraft(r: DraftRecord): Promise<VaultRef>;
   /** A critic's result for a draft, as the runtime read it (R19). */
   recordCriticResult(r: CriticRecord): Promise<VaultRef>;
+  /**
+   * A review seat's findings, beside its result (R28). Refused unless
+   * `collectedBy` is `'runtime'` and every finding is of its shape.
+   */
+  recordReviewFindings(r: ReviewFindingsRecord): Promise<VaultRef>;
+  /** Every review findings record of a run, in no promised order; empty for a run with none. */
+  readReviewFindings(runId: RunId): Promise<readonly VaultRef[]>;
   /** An approved draft as it was written into the artifact root and locked; once per run and station (R19). */
   recordDraftLock(r: DraftLockRecord): Promise<VaultRef>;
   /** The run's lock manifest as it stands, or null when nothing is locked: read, never written, here (R19). */
@@ -1409,6 +1522,16 @@ export interface Vault {
   recordNightly(r: NightlyRecord): Promise<string>;
   /** Every nightly record, sorted by date, then schedule, then hash. */
   readNightly(): Promise<readonly NightlyEntry[]>;
+  /**
+   * A finding's outcome, write-once: content-addressed beside the runs, and
+   * named once more by its finding, so a finding has one outcome at most
+   * (R28). Its SHA-256 is returned, or null where the finding already had an
+   * outcome, and nothing is written. Refused unless `collectedBy` is
+   * `'runtime'`.
+   */
+  recordFindingOutcome(r: FindingOutcomeRecord): Promise<string | null>;
+  /** Every finding outcome, sorted by `at`, then hash. */
+  readFindingOutcomes(): Promise<readonly FindingOutcomeEntry[]>;
   /**
    * One observation, write-once and content-addressed: under its run, or
    * beside the runs where `runId` is null (R8a, D-R8a-03). Its SHA-256 is

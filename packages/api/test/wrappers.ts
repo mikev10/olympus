@@ -23,7 +23,7 @@ import type {
 import type { IntegrityViolation } from '@olympus-ai/integrity';
 import type { ExecOptions, ExecResult, SandboxCapabilities, SandboxHandle, SandboxProvider, SandboxSpec, Teardown } from '@olympus-ai/sandbox';
 import type {
-  AdmissionRecord, BaseRunRecord, CandidateRecord, CountedRefusalCause, CriticRecord, DismissalCause, DraftLockRecord, DraftRecord, EnforcementDecision, EvidenceBundle, IntakeEntry, IntegrationRecord, IntentRecord, LockManifest, LockVerdict, NightlyEntry, NightlyRecord, ObservationEntry, ObservationRecord, RefusedDeliveryCount, StoredObject, RubricRecord, TriggerDecision, UsageRecord, Vault,
+  AdmissionRecord, BaseRunRecord, CandidateRecord, CountedRefusalCause, CriticRecord, DismissalCause, DraftLockRecord, DraftRecord, EnforcementDecision, EvidenceBundle, IntakeEntry, IntegrationRecord, IntentRecord, LockManifest, LockVerdict, NightlyEntry, NightlyRecord, ObservationEntry, ObservationRecord, RefusedDeliveryCount, StoredObject, RubricRecord, TriggerDecision, UsageRecord, Vault, FindingOutcomeEntry, FindingOutcomeRecord, ReviewFindingsRecord,
 } from '@olympus-ai/vault';
 
 export class DelegatingVault implements Vault {
@@ -156,6 +156,22 @@ export class DelegatingVault implements Vault {
 
   readNightly(): Promise<readonly NightlyEntry[]> {
     return this.inner.readNightly();
+  }
+
+  recordReviewFindings(r: ReviewFindingsRecord): Promise<VaultRef> {
+    return this.inner.recordReviewFindings(r);
+  }
+
+  readReviewFindings(runId: RunId): Promise<readonly VaultRef[]> {
+    return this.inner.readReviewFindings(runId);
+  }
+
+  recordFindingOutcome(r: FindingOutcomeRecord): Promise<string | null> {
+    return this.inner.recordFindingOutcome(r);
+  }
+
+  readFindingOutcomes(): Promise<readonly FindingOutcomeEntry[]> {
+    return this.inner.readFindingOutcomes();
   }
 
   recordObservation(r: ObservationRecord): Promise<string> {

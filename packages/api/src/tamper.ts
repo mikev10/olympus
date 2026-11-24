@@ -15,7 +15,7 @@
 import { lstat, readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import picomatch from 'picomatch';
-import { buildAdapterSet, diffTrees, isDependencyTree, markersIn, VCS_DIRECTORIES, type Assertion, type TestFrameworkAdapter } from '@olympus-ai/adapters';
+import { buildAdapterSet, coverageFraction, diffTrees, isDependencyTree, markersIn, VCS_DIRECTORIES, type Assertion, type TestFrameworkAdapter } from '@olympus-ai/adapters';
 import type { RunState, TaskId, VaultRef } from '@olympus-ai/core';
 import type { SecurityCheckKind, TamperReport } from '@olympus-ai/integrity';
 import type { EvidenceBundle } from '@olympus-ai/vault';
@@ -179,10 +179,13 @@ export async function analyzeTamper(base: string, head: string, options: TamperO
   const tests = set.test === null
     ? { assertionsWeakened: [], skipMarkersAdded: [], testsDeleted: [] }
     : await testFindings(set.test, base, head, changed);
+  // One read of the report gives both: the lines a finding's resolution reads, and the fraction counted from them (R28).
+  const changedLines = set.coverage === null ? null : await set.coverage.changedLineReport(base, head);
   return {
     ...tests,
     snapshotsRegenerated: changes.map((c) => c.path).filter((p) => SNAPSHOT.test(p)),
-    coverageDelta: set.coverage === null ? null : await set.coverage.changedLineCoverage(base, head),
+    coverageDelta: changedLines === null ? null : coverageFraction(changedLines),
+    changedLines,
     protectedPathsTouched: [...touched].sort(),
     suppressionMarkersAdded: await markersAdded(base, head, changes, options.markers),
   };

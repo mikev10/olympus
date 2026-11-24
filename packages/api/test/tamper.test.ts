@@ -26,7 +26,7 @@ async function tree(files: Readonly<Record<string, string>>): Promise<string> {
   return root;
 }
 
-const EMPTY: TamperReport = { assertionsWeakened: [], skipMarkersAdded: [], testsDeleted: [], snapshotsRegenerated: [], coverageDelta: null, protectedPathsTouched: [], suppressionMarkersAdded: [] };
+const EMPTY: TamperReport = { assertionsWeakened: [], skipMarkersAdded: [], testsDeleted: [], snapshotsRegenerated: [], coverageDelta: null, changedLines: null, protectedPathsTouched: [], suppressionMarkersAdded: [] };
 
 const frameworks = [
   ['vitest', JSON.stringify({ name: 'f', version: '0.0.0', devDependencies: { vitest: '4.1.11' } })],

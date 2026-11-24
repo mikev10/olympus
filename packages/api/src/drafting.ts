@@ -55,8 +55,8 @@ import type {
   VaultRef,
 } from '@olympus-ai/core';
 import type { CheckSpec } from '@olympus-ai/integrity';
-import { draftDigest } from '@olympus-ai/vault';
-import type { BaseRunRecord, CriticRecord, DecisionCause, DraftFile, DraftLockRecord, DraftRecord, Vault } from '@olympus-ai/vault';
+import { criticFindingsOf, draftDigest } from '@olympus-ai/vault';
+import type { BaseRunRecord, CriticFinding, CriticRecord, DecisionCause, DraftFile, DraftLockRecord, DraftRecord, Vault } from '@olympus-ai/vault';
 import { baseMismatches, baseRefusal } from './base.js';
 import { recordDecision } from './decisions.js';
 import {
@@ -378,7 +378,7 @@ async function retryParts(ctx: LineContext, station: DraftStation, previous: Dra
     case 'critic': {
       if (previous.critic === null || previous.critic === 'not-seated') return [];
       const critic = await readRecord<CriticRecord>(ctx, previous.critic);
-      return [{ kind: 'critic-findings', findings: critic.findings }];
+      return [{ kind: 'critic-findings', findings: criticFindingsOf(critic.findings).map(criticNote) }];
     }
     case 'base-run':
       return [{ kind: 'base-refusal' }];
@@ -713,13 +713,31 @@ function renderDraft(record: DraftRecord): string {
   return record.files.map((f) => `--- ${f.path}\n${new TextDecoder().decode(bytesOf(f))}`).join('\n');
 }
 
+/** What the runtime says in place of a finding it could not read, as the drafter is told it (D-A-DS-07). */
+const UNREADABLE_CRITIC = 'the critic returned no result the runtime could read as a list of findings';
+const UNLOCATED_CRITIC = 'the critic named a file the draft does not hold, so its finding could not be located';
+const RECORDED_BEFORE_CRITIC = 'the critic raised a finding that named no file of the draft';
+
 /**
- * A critic's result is its final message, `{"findings": [string, …]}`, with no
- * severity. Anything else is one finding: a result the runtime cannot read
- * is never a clean one (I5, D-A-DS-07). A single fenced block is unwrapped.
+ * A critic finding as its drafter is sent it: a located one is its file and
+ * the critic's note, which D-A-DS-07 lets through; a refused one is the
+ * runtime's own text, never the critic's (R28).
  */
-export function readCriticResult(narrative: string): { readable: boolean; findings: string[] } {
-  const unreadable = { readable: false, findings: ['the critic returned no result the runtime could read as a list of findings'] };
+export function criticNote(f: CriticFinding): string {
+  if (f.kind === 'located') return `${f.path}: ${f.note}`;
+  return f.cause === 'unreadable' ? UNREADABLE_CRITIC : f.cause === 'unlocated' ? UNLOCATED_CRITIC : RECORDED_BEFORE_CRITIC;
+}
+
+/**
+ * A critic's result is its final message, `{"findings": [{"path", "note"}, …]}`,
+ * with no severity, each `path` one of the draft's files (R28). Anything else
+ * is one refused finding: a result the runtime cannot read is never a clean
+ * one (I5, D-A-DS-07). A finding naming another path is refused `unlocated`,
+ * kept, never measured, and still not clean. A single fenced block is
+ * unwrapped.
+ */
+export function readCriticResult(narrative: string, paths: ReadonlySet<string>): { readable: boolean; findings: CriticFinding[] } {
+  const unreadable = { readable: false, findings: [{ kind: 'refused', cause: 'unreadable' } as const] };
   const text = narrative.trim().replace(/^```(?:json)?\s*\n([\s\S]*)\n```$/, '$1').trim();
   let parsed: unknown;
   try {
@@ -730,8 +748,15 @@ export function readCriticResult(narrative: string): { readable: boolean; findin
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return unreadable;
   const keys = Object.keys(parsed);
   const { findings } = parsed as { findings?: unknown };
-  if (keys.length !== 1 || !Array.isArray(findings) || !findings.every((f) => typeof f === 'string' && f.trim() !== '')) return unreadable;
-  return { readable: true, findings: findings as string[] };
+  if (keys.length !== 1 || !Array.isArray(findings)) return unreadable;
+  const out: CriticFinding[] = [];
+  for (const element of findings as unknown[]) {
+    if (typeof element !== 'object' || element === null || Array.isArray(element)) return unreadable;
+    const { path, note, ...rest } = element as Record<string, unknown>;
+    if (Object.keys(rest).length > 0 || typeof path !== 'string' || typeof note !== 'string' || note.trim() === '') return unreadable;
+    out.push(paths.has(path) ? { kind: 'located', path, note } : { kind: 'refused', cause: 'unlocated' });
+  }
+  return { readable: true, findings: out };
 }
 
 /**
@@ -787,7 +812,7 @@ async function critique(ctx: LineContext, station: DraftStation, current: DraftA
   }
   const result = await ctx.components.vault.recordTaskResult(ctx.run.id, ran.result);
   await commit(ctx, { tasks: { [seat.id]: 'passed' }, results: { [seat.id]: result } });
-  const read = readCriticResult(ran.result.claim.narrative);
+  const read = readCriticResult(ran.result.claim.narrative, new Set(record.files.map((f) => f.path)));
   // The weaker of the planned seat and the one the result names: what the critic reports never widens it (I2, I6).
   const grade = weakerGrade(gradeOf(record.model, planned), gradeOf(record.model, ran.result.model));
   const critic: CriticRecord = {

@@ -11,6 +11,7 @@ import {
   isDraftableDirectory,
   parseQuestions,
   parseRunRequirements,
+  criticNote,
   readCriticResult,
   requestProblems,
   worstCaseCost,
@@ -18,14 +19,29 @@ import {
 } from '../src/index.js';
 
 describe('a critic\'s result (D-A-DS-07)', () => {
-  it('is a list of findings with no severity, and anything else is one finding', () => {
-    expect(readCriticResult('{"findings": []}')).toEqual({ readable: true, findings: [] });
-    expect(readCriticResult('```json\n{"findings": ["statement 2 is not testable"]}\n```')).toEqual({ readable: true, findings: ['statement 2 is not testable'] });
-    for (const narrative of ['Looks good!', '{"findings": [], "severity": "low"}', '{"findings": [""]}', '{"findings": "none"}', '[]', '']) {
-      const read = readCriticResult(narrative);
+  const paths = new Set(['spec.md']);
+  it('is a list of located findings with no severity, and anything else is one refused finding', () => {
+    expect(readCriticResult('{"findings": []}', paths)).toEqual({ readable: true, findings: [] });
+    expect(readCriticResult('```json\n{"findings": [{"path": "spec.md", "note": "statement 2 is not testable"}]}\n```', paths))
+      .toEqual({ readable: true, findings: [{ kind: 'located', path: 'spec.md', note: 'statement 2 is not testable' }] });
+    for (const narrative of [
+      'Looks good!', '{"findings": [], "severity": "low"}', '{"findings": ["statement 2 is not testable"]}', '{"findings": [{"path": "spec.md", "note": ""}]}',
+      '{"findings": [{"path": "spec.md", "note": "x", "severity": "low"}]}', '{"findings": [{"note": "x"}]}', '{"findings": "none"}', '[]', '',
+    ]) {
+      const read = readCriticResult(narrative, paths);
       expect(read.readable).toBe(false);
-      expect(read.findings).toHaveLength(1);
+      expect(read.findings).toEqual([{ kind: 'refused', cause: 'unreadable' }]);
     }
+  });
+
+  it('refuses a finding naming a file the draft does not hold as unlocated, and keeps it (R28)', () => {
+    expect(readCriticResult('{"findings": [{"path": "other.md", "note": "x"}, {"path": "spec.md", "note": "y"}]}', paths))
+      .toEqual({ readable: true, findings: [{ kind: 'refused', cause: 'unlocated' }, { kind: 'located', path: 'spec.md', note: 'y' }] });
+  });
+
+  it('sends a drafter the located note with its file, and the runtime\'s own text for a refused finding (R28)', () => {
+    expect(criticNote({ kind: 'located', path: 'spec.md', note: 'y' })).toBe('spec.md: y');
+    expect(criticNote({ kind: 'refused', cause: 'unlocated' })).not.toContain('other.md');
   });
 });
 
