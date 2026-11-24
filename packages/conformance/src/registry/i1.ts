@@ -22,6 +22,7 @@ const NAMED_OPERATIONS: readonly string[] = [
   'dismissCandidate',
   // R13a: the nightly record, written once and read; and the store's own listing of what it holds (A-R13a-02, A-R13a-05).
   'recordNightly', 'readNightly', 'listObjects',
+  'recordReviewFindings', 'readReviewFindings', 'recordFindingOutcome', 'readFindingOutcomes',
   // R8a: an observation, written once under its run or beside the runs, and read (D-R8a-03).
   'recordObservation', 'readObservations',
 ];
@@ -50,7 +51,7 @@ export const I1: InvariantEntry = {
     runtime({
       id: 'I1.vault-implementation-exposes-only-named-operations',
       title:
-        'the filesystem Vault carries exactly the thirty-five named operations at run time: no generic write, no delete, and no helper left reachable on a constructed instance or anywhere on its prototype chain for a caller to mutate the store past them',
+        'the filesystem Vault carries exactly the thirty-nine named operations at run time: no generic write, no delete, and no helper left reachable on a constructed instance or anywhere on its prototype chain for a caller to mutate the store past them',
       run: async () => {
         const { LocalVault } = await import('@olympus-ai/vault');
         // A constructed instance, not the class prototype: an instance field, a symbol key, an inherited helper, or an

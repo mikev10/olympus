@@ -337,8 +337,13 @@ export async function walkHistory(vault: Vault, target: ObserveTarget | null, po
         // The code findings this run's merged change resolved, if its evidence shows it covered them (R28). One
         // whose history cannot be read stays open, and the walk names it (I5).
         if (run.runId !== null) {
-          const { unreadable } = await resolveCodeFindings(vault, checkout, run.runId, stamp);
-          if (unreadable.length > 0) refusals.push({ part: 'history', cause: 'history-unreadable', detail: `the history of findings ${unreadable.join(', ')} could not be read against run ${run.runId}, so each stays open` });
+          try {
+            const { unreadable } = await resolveCodeFindings(vault, checkout, run.runId, stamp);
+            if (unreadable.length > 0) refusals.push({ part: 'history', cause: 'history-unreadable', detail: `the history of findings ${unreadable.join(', ')} could not be read against run ${run.runId}, so each stays open` });
+          } catch (error) {
+            // The store, not the history: the walk goes on, and every finding stays open until a walk can read it.
+            refusals.push({ part: 'store', cause: 'store-unreadable', detail: `the findings run ${run.runId} could resolve could not be read, so each stays open: ${describe(error)}` });
+          }
         }
       }
       else if (!merged.has(commit.commit) && !closedRuns.has(commit.commit) && !closedBaseline.has(commit.commit)) {

@@ -330,7 +330,16 @@ export interface CodeResolutions {
 export async function resolveCodeFindings(vault: Vault, checkout: string, runId: RunId, at: () => string): Promise<CodeResolutions> {
   const merged = (await readIntegration(vault, runId)).find((r): r is IntegrationMerged => r.kind === 'merged');
   if (merged === undefined) return { resolved: 0, unreadable: [] };
-  const accepted = await latestAccepted(vault, await vault.readRunState(runId));
+  let state: RunState;
+  try {
+    state = await vault.readRunState(runId);
+  } catch (error) {
+    // A merged run whose state the store does not hold has no evidence to resolve anything by; the plan's
+    // reader refuses it at close (D-A-OB-14). Anything else is a fault, never nothing resolved (I5).
+    if (isNoRunState(error)) return { resolved: 0, unreadable: [] };
+    throw error;
+  }
+  const accepted = await latestAccepted(vault, state);
   // A bundle stored before R28 names no lines: read as none.
   const lines = accepted?.bundle.tamper.changedLines ?? null;
   if (accepted === null || lines === null) return { resolved: 0, unreadable: [] };

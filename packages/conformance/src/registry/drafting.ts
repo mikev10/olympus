@@ -910,13 +910,13 @@ export const CRITIC_OF_DRAFTER_FAMILY_IS_ADVISORY: LocalAssertion = runtime({
   run: async () => {
     for (const criticReports of [undefined, 'critic-family']) await withLine('r19-advisory-', async (rig) => {
       const { runStanding } = await api();
-      const r = await drafting(rig, { criticFamily: 'drafter-family', criticModel: 'another-model', ...(criticReports === undefined ? {} : { criticReports }), critic: () => JSON.stringify({ findings: ['the spec says nothing about permissions'] }) });
+      const r = await drafting(rig, { criticFamily: 'drafter-family', criticModel: 'another-model', ...(criticReports === undefined ? {} : { criticReports }), critic: () => JSON.stringify({ findings: [{ path: `.drafts/${rig.runId}/spec.md`, note: 'the spec says nothing about permissions' }] }) });
       awaiting(await admitAndDrive(r), 'spec:1', 'a drafted spec with an advisory finding');
       const attempts = (await rig.state()).drafts.spec?.attempts ?? [];
       if (attempts.length !== 1 || attempts[0]?.sentBack !== null) throw new Error('R19: an advisory finding sent the draft back');
       const vault = (await r.components()).vault;
       const { standing } = await runStanding(vault, rig.runId);
-      if (standing.standing !== 'awaiting-approval' || standing.draft?.critic?.grade !== 'different-model' || standing.draft.critic.binding || !standing.draft.critic.findings.includes('the spec says nothing about permissions')) {
+      if (standing.standing !== 'awaiting-approval' || standing.draft?.critic?.grade !== 'different-model' || standing.draft.critic.binding || !standing.draft.critic.findings.includes(`.drafts/${rig.runId}/spec.md: the spec says nothing about permissions`)) {
         throw new Error(`R19: the person deciding the draft was shown ${JSON.stringify(standing)}`);
       }
     });

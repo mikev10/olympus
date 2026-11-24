@@ -115,7 +115,7 @@ export const FINDING_DISMISSAL_IS_A_PERSONS: LocalAssertion = runtime({
 export const FINDING_DISMISSAL_THROUGH_THE_CLI: LocalAssertion = runtime({
   id: 'I2.finding-dismissal-through-the-cli',
   title:
-    'olympus-ai dismiss-finding <id> --cause <cause> sends POST findings/<id>/dismiss with the body {"cause":...} and nothing else; without --cause it is a usage error that sends nothing',
+    'the CLI\'s dismiss-finding <id> --cause <cause> sends POST findings/<id>/dismiss with the body {"cause":...} and nothing else; without --cause it is a usage error that sends nothing',
   run: async () => {
     const { runCli } = await import('olympus-ai');
     const sent: Array<{ url: string; method: string; body: string | null }> = [];
