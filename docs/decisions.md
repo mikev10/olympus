@@ -12629,3 +12629,41 @@ Started on `v2` at 03518f9. Issue #171.
 - **C5, the price's date.** `PRICES_AS_OF` stays 2026-09-27. Only the new
   line was read on 2026-11-23, and it says so. Moving the constant would
   claim every price was re-read.
+
+### D-R54-05: the paid runs happen in CI, by a label (corrects C4 and the gate paths)
+
+- **Corrected:** D-R54-04's C4 chose a local run and rejected CI, and
+  D-R54-01 said no gate path was touched. Both are replaced here.
+- **Found:** the only model credential is the one CI holds. The maintainer
+  revoked the local key on 2026-09-29 after it leaked spend, and this
+  session's shell has none. A local run means making a local key again.
+- **Chosen, by the maintainer on 2026-11-23:** a workflow of its own,
+  `.github/workflows/benchmark-model.yml`. It runs the model tier at `deep`
+  on corpus v2, three repetitions, once per model, when the `run-benchmark`
+  label is added to a pull request and at no other time. The caps are in the
+  file: $20 for `claude-opus-5-5`, $40 for `claude-fable-5-2`. Adding the
+  label is the authorization, and only the maintainer adds it. Each run keeps
+  its result as an artifact. The session downloads both, runs the comparison,
+  and commits the three files.
+- **Rejected:** a job started by hand (`workflow_dispatch`). GitHub starts
+  one only from a workflow already on the default branch, so this unit's own
+  pull request could not use it.
+- **Rejected:** a job inside `ci.yml`. That workflow cancels a run in
+  progress whenever its pull request changes, so a push or another label
+  would stop a paid run after it had spent and before it wrote a result.
+- **Why both models are named:** the baseline is passed as `BENCHMARK_MODEL`
+  too. A result's file then names the model that ran whatever the tier map
+  holds on the day, and a rerun after a map change is still the same two
+  models.
+- **The test's time limit** is raised to five hours on the command line. The
+  config's two hours were set for the `fast` model. A run the clock stops
+  has spent its money and written nothing. The config is not edited.
+- **Known limits:** adding the label again spends again, up to $60. A run
+  that fails partway leaves no result: the tier reports a whole corpus or
+  nothing, which is R7's rule.
+- **Gate paths touched:** `.github/workflows/benchmark-model.yml`, new. The
+  pull request takes `gate-change`, and the squash body carries
+  `Gate-Change: acknowledged`. It weakens no check: it adds a paid job and
+  changes no existing one.
+- **Reverse:** delete the workflow file; the tier still runs locally with a
+  key.
