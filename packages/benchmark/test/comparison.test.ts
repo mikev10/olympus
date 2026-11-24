@@ -6,9 +6,11 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
-import { compareRuns, comparisonName, modelRunPlan, serializeComparison, type Comparison } from '../src/comparison.js';
+import { ClaudeCodeDriver } from '@olympus-ai/driver-claude-code';
+import type { SandboxProvider } from '@olympus-ai/sandbox';
+import { compareRuns, comparisonName, coverage, modelRunPlan, REQUIRED_COMPARISONS, serializeComparison, type Comparison } from '../src/comparison.js';
 import { benchmarkResult, type BenchmarkResult, type ItemOutcome, type Verdict } from '../src/result.js';
-import type { Corpus } from '../src/corpus.js';
+import { loadCorpus, type Corpus } from '../src/corpus.js';
 
 const DOCS = join(import.meta.dirname, '..', '..', '..', 'docs', 'benchmark');
 const CORPUS = { version: 'v9', digest: 'd'.repeat(64) } as Corpus;
@@ -108,10 +110,8 @@ describe('compareRuns', () => {
 
   test.each<[string, Shape, Shape, string]>([
     ['another corpus', { model: 'old', spentUsd: 1 }, { model: 'new', spentUsd: 1, corpus: { version: 'v9', digest: 'e'.repeat(64) } as Corpus }, 'not the same tasks'],
-    ['other repetitions', { model: 'old', spentUsd: 1 }, { model: 'new', spentUsd: 1, repetitions: 2 }, 'not the same repetitions'],
+    ['other repetitions', { model: 'old', spentUsd: 1 }, { model: 'new', spentUsd: 1, repetitions: 2, seeded: ['caught', 'passed'], control: ['passed', 'caught'] }, 'not the same repetitions'],
     ['the same model', { model: 'old', spentUsd: 1 }, { model: 'old', spentUsd: 1 }, 'nothing to compare'],
-    ['fewer trials', { model: 'old', spentUsd: 1 }, { model: 'new', spentUsd: 1, seeded: ['caught', 'caught'] }, 'different numbers of trials'],
-    ['no seeded sample', { model: 'old', spentUsd: 1, seeded: [] }, { model: 'new', spentUsd: 1, seeded: [] }, 'no sample'],
   ])('refuses %s', (_, baseline, candidate, message) => {
     expect(() => compare(baseline, candidate)).toThrow(message);
   });
@@ -134,6 +134,84 @@ describe('the committed comparisons', () => {
       const fresh = compareRuns({ file: named.baseline.result, result: await read(named.baseline.result) }, { file: named.candidate.result, result: await read(named.candidate.result) });
       expect(comparisonName(fresh), file).toBe(file);
       expect(serializeComparison(fresh), file).toBe(committed);
+    }
+  });
+});
+
+describe('compareRuns reads the trials, not the summary a file carries (review: codex-2, codex-3, gemini-4)', () => {
+  const edited = (result: BenchmarkResult, edit: (r: { arms: Record<string, { overall: { everyTrial: { detection: { count: number; rate: number }; falseRefusal: { rate: number } } }; items: Array<{ id: string }> }>; run: { spentUsd: unknown } }) => void): BenchmarkResult => {
+    const copy = JSON.parse(JSON.stringify(result)) as BenchmarkResult;
+    edit(copy as never);
+    return copy;
+  };
+  const baseline = { file: 'baseline.json', result: run({ model: 'old', spentUsd: 10 }) };
+
+  test('a summary that claims more than its own trials show is refused', () => {
+    const worse = run({ model: 'new', spentUsd: 1, seeded: ['passed', 'passed', 'passed'] });
+    const dressed = edited(worse, (r) => {
+      for (const arm of Object.values(r.arms)) Object.assign(arm.overall.everyTrial.detection, { count: 3, rate: 1 });
+    });
+    expect(() => compareRuns(baseline, { file: 'candidate.json', result: dressed })).toThrow('does not match its own trials');
+  });
+
+  test('a stored false-refusal rate that disagrees with its count is refused', () => {
+    const refusing = run({ model: 'new', spentUsd: 1, control: ['caught', 'caught', 'caught'] });
+    const dressed = edited(refusing, (r) => {
+      for (const arm of Object.values(r.arms)) arm.overall.everyTrial.falseRefusal.rate = 0;
+    });
+    expect(() => compareRuns(baseline, { file: 'candidate.json', result: dressed })).toThrow('does not match its own trials');
+  });
+
+  test('a cost that is not a number is refused, never compared as text', () => {
+    const texted = edited(run({ model: 'new', spentUsd: 100 }), (r) => {
+      r.run.spentUsd = '100';
+    });
+    expect(() => compareRuns({ file: 'baseline.json', result: run({ model: 'old', spentUsd: 20 }) }, { file: 'candidate.json', result: texted })).toThrow('spentUsd');
+  });
+
+  test('the same totals over other items are not the same tasks', () => {
+    const renamed = edited(run({ model: 'new', spentUsd: 1 }), (r) => {
+      for (const arm of Object.values(r.arms)) for (const item of arm.items) if (item.id === 'seeded') item.id = 'an-easier-item';
+    });
+    expect(() => compareRuns(baseline, { file: 'candidate.json', result: renamed })).toThrow('not the same tasks');
+  });
+
+  test('an item that did not run once per repetition is refused', () => {
+    expect(() => compare({ model: 'old', spentUsd: 1 }, { model: 'new', spentUsd: 1, seeded: ['caught', 'caught'] })).toThrow('repetition');
+  });
+});
+
+describe('coverage: a result holds every item of its corpus in both arms (review: codex-3)', () => {
+  test('the committed results cover corpus v2, and one with an arm or an item removed does not', async () => {
+    const corpus = await loadCorpus('v2');
+    const file = 'v2-model-deep-claude-opus-5-5.json';
+    const result = JSON.parse(await readFile(join(DOCS, file), 'utf8')) as BenchmarkResult;
+    expect(() => { coverage(corpus, { file, result }); }).not.toThrow();
+    const { critic: _critic, ...alone } = result.arms;
+    expect(() => { coverage(corpus, { file, result: { ...result, arms: alone } }); }).toThrow('arms');
+    const first = result.arms.alone;
+    if (first === undefined) throw new Error('no alone arm');
+    expect(() => { coverage(corpus, { file, result: { ...result, arms: { ...result.arms, alone: { ...first, items: first.items.slice(1) } } } }); }).toThrow('alone');
+    expect(() => { coverage(corpus, { file, result: { ...result, corpus: { ...result.corpus, digest: '0'.repeat(64) } } }); }).toThrow('digest');
+  });
+});
+
+describe('the tier map and its evidence (review: codex-5, gemini-3)', () => {
+  test('the comparison this unit decided on is committed, and covers its corpus', async () => {
+    const names = (await readdir(DOCS)).filter((f) => f.includes('-comparison-'));
+    for (const required of REQUIRED_COMPARISONS) expect(names, required).toContain(required);
+    for (const name of names) {
+      const named = JSON.parse(await readFile(join(DOCS, name), 'utf8')) as Comparison;
+      const corpus = await loadCorpus(named.corpus.version);
+      for (const file of [named.baseline.result, named.candidate.result]) coverage(corpus, { file, result: JSON.parse(await readFile(join(DOCS, file), 'utf8')) as BenchmarkResult });
+    }
+  });
+
+  test('the deep tier holds a compared candidate only where its comparison says change', async () => {
+    const deep = new ClaudeCodeDriver({ provider: {} as SandboxProvider }).resolveModel('deep').model;
+    for (const name of (await readdir(DOCS)).filter((f) => f.includes('-comparison-'))) {
+      const named = JSON.parse(await readFile(join(DOCS, name), 'utf8')) as Comparison;
+      if (named.candidate.model === deep) expect(named.change, `${name} seats ${deep} at deep`).toBe(true);
     }
   });
 });

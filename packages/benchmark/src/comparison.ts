@@ -13,7 +13,8 @@
  */
 import type { ModelTier } from '@olympus-ai/core';
 import type { Proportion } from '@olympus-ai/api';
-import type { BenchmarkResult } from './result.js';
+import type { Corpus, Item } from './corpus.js';
+import { armResult, type ArmResult, type BenchmarkResult, type ItemOutcome, type ModelRun, type Verdict } from './result.js';
 
 const TIERS: readonly ModelTier[] = ['fast', 'standard', 'deep'];
 /** A model id, as it appears in a file name: nothing that could leave the results directory. */
@@ -107,61 +108,119 @@ export interface Comparison {
 
 const DECIMALS = 6;
 
-function side(result: BenchmarkResult, arm: string, file: string): ArmSide {
-  const rates = result.arms[arm]?.overall;
-  if (rates === undefined) throw new Error(`benchmark: ${file} has no '${arm}' arm to compare`);
-  const { detection, falseRefusal } = rates.everyTrial;
-  if (detection.kind !== 'rate' || falseRefusal.kind !== 'rate') throw new Error(`benchmark: ${file}'s '${arm}' arm has no sample, so there is nothing to compare`);
+const VERDICTS: readonly string[] = ['caught', 'passed', 'unreadable'];
+const KINDS: readonly string[] = ['seeded', 'control'];
+
+interface Named {
+  readonly file: string;
+  readonly result: BenchmarkResult;
+}
+
+/**
+ * A result file as it was read from disk: nothing in it is what its type
+ * says until it is checked here. Every arm's rates are counted again from
+ * its own trials, and a file whose stored summary differs from that count is
+ * refused, so a comparison is always over verdicts and never over a summary
+ * somebody wrote (review: codex-2).
+ */
+function checked(named: Named): { readonly run: ModelRun; readonly arms: Readonly<Record<string, ArmResult>> } {
+  const { file } = named;
+  const refuse = (what: string): never => {
+    throw new Error(`benchmark: ${file} ${what}`);
+  };
+  // Read as unknown: the type is a claim the file makes about itself.
+  const result = named.result as unknown as {
+    tier?: unknown;
+    run?: { spentUsd?: unknown; repetitions?: unknown; capUsd?: unknown; model?: { provider?: unknown; family?: unknown; model?: unknown } | null } | null;
+    arms?: Record<string, { overall?: unknown; groups?: unknown; items?: unknown } | undefined> | null;
+  } | null;
+  if (typeof result !== 'object' || result === null) return refuse('is not a result');
+  const run = result.run;
+  if (result.tier !== 'model' || typeof run !== 'object' || run === null) return refuse('is not a model-tier result, so it says nothing about a model');
+  const { spentUsd, repetitions, capUsd, model } = run;
+  if (typeof spentUsd !== 'number' || !Number.isFinite(spentUsd) || spentUsd < 0) return refuse('records a spentUsd that is not a non-negative number');
+  if (typeof capUsd !== 'number' || !Number.isFinite(capUsd)) return refuse('records a capUsd that is not a number');
+  if (typeof repetitions !== 'number' || !Number.isSafeInteger(repetitions) || repetitions < 1) return refuse('records repetitions that are not a positive integer');
+  if (typeof model !== 'object' || model === null || typeof model.model !== 'string' || model.model === '' || typeof model.provider !== 'string' || typeof model.family !== 'string') return refuse('names no model');
+  if (typeof result.arms !== 'object' || result.arms === null) return refuse('holds no arms');
+  const arms: Record<string, ArmResult> = {};
+  for (const name of Object.keys(result.arms).sort()) {
+    const stored = result.arms[name];
+    if (stored === undefined || !Array.isArray(stored.items)) return refuse(`has no trials in its '${name}' arm`);
+    const seen = new Set<string>();
+    const items = (stored.items as unknown[]).map((entry): ItemOutcome => {
+      const item = entry as Partial<Record<keyof ItemOutcome, unknown>> | null;
+      if (typeof item !== 'object' || item === null || typeof item.id !== 'string' || typeof item.group !== 'string' || typeof item.kind !== 'string' || !KINDS.includes(item.kind)) return refuse(`holds a malformed item in its '${name}' arm`);
+      if (seen.has(item.id)) return refuse(`holds item '${item.id}' twice in its '${name}' arm`);
+      seen.add(item.id);
+      const verdicts = item.verdicts;
+      if (!Array.isArray(verdicts) || !verdicts.every((v) => typeof v === 'string' && VERDICTS.includes(v))) return refuse(`holds a verdict nobody defined for item '${item.id}' in its '${name}' arm`);
+      if (verdicts.length !== repetitions) return refuse(`ran item '${item.id}' ${String(verdicts.length)} time(s) in its '${name}' arm, not once per repetition (${String(repetitions)})`);
+      return { id: item.id, kind: item.kind as ItemOutcome['kind'], group: item.group, verdicts: verdicts as Verdict[], detectorFired: [], causes: [] };
+    });
+    const fresh = armResult(items);
+    if (JSON.stringify(fresh.overall) !== JSON.stringify(stored.overall) || JSON.stringify(fresh.groups) !== JSON.stringify(stored.groups)) {
+      return refuse(`carries a summary for its '${name}' arm that does not match its own trials`);
+    }
+    arms[name] = fresh;
+  }
+  return { run: { model: { provider: model.provider, family: model.family, model: model.model }, repetitions, capUsd, spentUsd }, arms };
+}
+
+function side(arm: ArmResult, name: string, file: string): ArmSide {
+  const { detection, falseRefusal } = arm.overall.everyTrial;
+  if (detection.kind !== 'rate' || falseRefusal.kind !== 'rate') throw new Error(`benchmark: ${file}'s '${name}' arm has no sample, so there is nothing to compare`);
   const missed = detection.sample - detection.count;
   return {
     falseDone: { count: missed, sample: detection.sample, rate: Number((missed / detection.sample).toFixed(DECIMALS)) },
     detection,
     falseRefusal,
-    unreadable: rates.unreadable,
+    unreadable: arm.overall.unreadable,
   };
 }
 
-/** The sample behind a proportion `side` has already refused to read without one. */
-function sample(p: Proportion): number {
-  return p.kind === 'rate' ? p.sample : 0;
+/** How many clean trials a side refused; `side` has already refused a side with no sample. */
+function refused(s: ArmSide): number {
+  return s.falseRefusal.kind === 'rate' ? s.falseRefusal.count : Number.NaN;
 }
 
-function rate(p: Proportion): number {
-  return p.kind === 'rate' ? p.rate : Number.NaN;
+/** An arm's items as what they are, without what was said of them: the tasks. */
+function tasks(arm: ArmResult): string {
+  return JSON.stringify(arm.items.map((i) => [i.id, i.kind, i.group]));
 }
 
 /**
  * `candidate` against `baseline`, each a committed model-tier result named
  * by its file. Refused unless both ran the same corpus, by digest, the same
- * number of times, over the same arms and the same number of trials, with
- * different models: anything else is not the same tasks.
+ * number of times, over the same arms and the same items, with different
+ * models: anything else is not the same tasks.
  */
-export function compareRuns(baseline: { readonly file: string; readonly result: BenchmarkResult }, candidate: { readonly file: string; readonly result: BenchmarkResult }): Comparison {
-  const b = baseline.result;
-  const c = candidate.result;
-  for (const [file, r] of [[baseline.file, b], [candidate.file, c]] as const) {
-    if (r.tier !== 'model' || r.run === undefined) throw new Error(`benchmark: ${file} is not a model-tier result, so it says nothing about a model`);
-  }
-  // Both checked just above; the narrowing does not survive the loop.
-  if (b.run === undefined || c.run === undefined) throw new Error('benchmark: a model-tier result without its run');
-  if (b.corpus.version !== c.corpus.version || b.corpus.digest !== c.corpus.digest) throw new Error(`benchmark: ${baseline.file} ran corpus ${b.corpus.version} (${b.corpus.digest}) and ${candidate.file} ran ${c.corpus.version} (${c.corpus.digest}); they are not the same tasks`);
+export function compareRuns(baseline: Named, candidate: Named): Comparison {
+  const b = checked(baseline);
+  const c = checked(candidate);
+  const bc = baseline.result.corpus;
+  const cc = candidate.result.corpus;
+  if (bc.version !== cc.version || bc.digest !== cc.digest) throw new Error(`benchmark: ${baseline.file} ran corpus ${bc.version} (${bc.digest}) and ${candidate.file} ran ${cc.version} (${cc.digest}); they are not the same tasks`);
   if (b.run.repetitions !== c.run.repetitions) throw new Error(`benchmark: ${baseline.file} ran each item ${String(b.run.repetitions)} time(s) and ${candidate.file} ${String(c.run.repetitions)}; they are not the same repetitions`);
   if (b.run.model.model === c.run.model.model) throw new Error(`benchmark: both results are ${b.run.model.model}'s; there is nothing to compare`);
-  const names = Object.keys(b.arms).sort();
-  if (names.length === 0 || names.join() !== Object.keys(c.arms).sort().join()) throw new Error(`benchmark: ${baseline.file} and ${candidate.file} do not hold the same arms`);
+  const names = Object.keys(b.arms);
+  if (names.length === 0 || names.join() !== Object.keys(c.arms).join()) throw new Error(`benchmark: ${baseline.file} and ${candidate.file} do not hold the same arms`);
   const arms: Record<string, ArmComparison> = {};
   for (const name of names) {
-    const left = side(b, name, baseline.file);
-    const right = side(c, name, candidate.file);
-    if (left.falseDone.sample !== right.falseDone.sample || sample(left.falseRefusal) !== sample(right.falseRefusal)) {
-      throw new Error(`benchmark: the '${name}' arms of ${baseline.file} and ${candidate.file} ran different numbers of trials; they are not the same tasks`);
-    }
-    arms[name] = { baseline: left, candidate: right, noWorse: right.falseDone.count <= left.falseDone.count && rate(right.falseRefusal) <= rate(left.falseRefusal) };
+    const left = b.arms[name];
+    const right = c.arms[name];
+    // Both are keys of maps whose key lists were just held equal.
+    if (left === undefined || right === undefined) throw new Error(`benchmark: the '${name}' arm is missing`);
+    if (tasks(left) !== tasks(right)) throw new Error(`benchmark: the '${name}' arms of ${baseline.file} and ${candidate.file} hold different items; they are not the same tasks`);
+    const l = side(left, name, baseline.file);
+    const r = side(right, name, candidate.file);
+    // The same items the same number of times, so the samples are equal and counts compare as rates do.
+    arms[name] = { baseline: l, candidate: r, noWorse: r.falseDone.count <= l.falseDone.count && refused(r) <= refused(l) };
   }
-  const noWorse = Object.values(arms).every((a) => a.noWorse);
+  const noWorse = Object.values(arms).every((arm) => arm.noWorse);
   const costsLess = c.run.spentUsd < b.run.spentUsd;
   return {
-    corpus: b.corpus,
+    corpus: { version: bc.version, digest: bc.digest },
     repetitions: b.run.repetitions,
     baseline: { result: baseline.file, model: b.run.model.model, spentUsd: b.run.spentUsd },
     candidate: { result: candidate.file, model: c.run.model.model, spentUsd: c.run.spentUsd },
@@ -172,6 +231,34 @@ export function compareRuns(baseline: { readonly file: string; readonly result: 
     notMeasured: ['iterations', 'parks'],
   };
 }
+
+/**
+ * Whether a result holds its whole corpus: the corpus by digest, the two arms
+ * of the model tier and no others, every item of the corpus in the
+ * driver-alone arm, and every model-tier item in the critic arm, each as the
+ * corpus names it. Two results that left the same arm or the same hard items
+ * out would otherwise compare as equals (review: codex-3).
+ */
+export function coverage(corpus: Corpus, named: Named): void {
+  const { file, result } = named;
+  if (result.corpus.version !== corpus.version || result.corpus.digest !== corpus.digest) throw new Error(`benchmark: ${file} names corpus ${result.corpus.version} with digest ${result.corpus.digest}, and the committed corpus ${corpus.version} has ${corpus.digest}`);
+  const arms = Object.keys(result.arms).sort();
+  if (arms.join() !== 'alone,critic') throw new Error(`benchmark: ${file} holds the arms ${arms.join(', ') || 'none'}, and a model-tier result holds alone and critic`);
+  const expected: Record<string, readonly Item[]> = { alone: corpus.items, critic: corpus.items.filter((i) => i.tier === 'model') };
+  for (const name of arms) {
+    const want = JSON.stringify((expected[name] ?? []).map((i) => [i.id, i.kind, i.group]).sort());
+    const have = JSON.stringify((result.arms[name]?.items ?? []).map((i) => [i.id, i.kind, i.group]).sort());
+    if (want !== have) throw new Error(`benchmark: ${file}'s '${name}' arm does not hold the items corpus ${corpus.version} gives that arm`);
+  }
+}
+
+/**
+ * The comparisons a decision about the tier map rests on. Each must be
+ * committed: with none named, deleting a comparison would leave nothing to
+ * hold, and the suite would pass over an empty directory (review: codex-5,
+ * gemini-3).
+ */
+export const REQUIRED_COMPARISONS: readonly string[] = ['v2-comparison-claude-opus-5-5-claude-fable-5-2.json'];
 
 /** The file under `docs/benchmark/` a comparison is committed as. */
 export function comparisonName(comparison: Comparison): string {
