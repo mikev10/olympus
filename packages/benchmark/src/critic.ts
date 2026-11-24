@@ -26,7 +26,7 @@ import {
 import { BASE_IMAGE } from '@olympus-ai/driver-claude-code';
 import { LocalVault, type CriticRecord, type DraftRecord } from '@olympus-ai/vault';
 import type { Corpus, Item } from './corpus.js';
-import { benchPolicyDocument, boundGraph, installed, type Bench } from './line.js';
+import { BENCH_READINESS, benchPolicyDocument, boundGraph, installed, type Bench } from './line.js';
 import { BenchStub, ScriptedSeat } from './seats.js';
 
 export interface CriticOutcome {
@@ -147,6 +147,7 @@ export async function throughTheCritic(bench: Bench, corpus: Corpus, item: Item,
     policy,
     roles: DEFAULT_ROLES_DIRECTORY,
     components,
+    readiness: BENCH_READINESS,
     intent: station === 'spec' ? { text: item.asked, from: 'principal' } : null,
     rubrics: DEFAULT_RUBRICS_DIRECTORY,
     approvedCostUsd: worstCaseCost(graph, policy, [station]).usd,

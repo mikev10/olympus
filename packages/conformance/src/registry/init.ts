@@ -16,6 +16,7 @@ import type { LocalAssertion } from '../kit/types.js';
 import { workspaceRoot } from '../kit/workspace.js';
 import { exampleGraph } from './first-run.js';
 import { withVaultDirs } from './local-vault.js';
+import { RIG_READINESS } from './line.js';
 
 const api = async () => import('@olympus-ai/api');
 
@@ -81,7 +82,7 @@ export const INIT_SETUP_ADMITTED: LocalAssertion = runtime({
         runId: 'r36b-init' as RunRequest['runId'],
         baseCommit, requestedLevel: 1, workspace: dirs.artifacts, policy: loaded.policy,
         roles: startup.settings.rolesDirectory, rubrics: startup.settings.rubricsDirectory,
-        components: await exampleGraph(dirs, base), approvedCostUsd: null,
+        components: await exampleGraph(dirs, base), approvedCostUsd: null, readiness: RIG_READINESS,
         intent: { text: 'Add a multiply(a, b) function to src/math.ts that returns the product.', from: 'principal' },
         artifacts: { spec: 'draft', acceptanceTests: 'draft', verificationManifest: '.factory/verify.json', taskGraph: '.factory/graph.json' },
       };

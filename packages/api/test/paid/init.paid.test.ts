@@ -25,6 +25,7 @@ import type { RunId } from '@olympus-ai/core';
 import type { UsageRecord } from '@olympus-ai/vault';
 import { afterAll, beforeAll, expect } from 'vitest';
 import { approveStation, composeHost, initSetup, loadPolicyFile, parseGraph, readUsage, resumeRun, runStanding, startRun, worstCaseCost, type BuiltGraph, type RunOutcome, type RunRequest } from '../../src/index.js';
+import { RIG_READINESS } from '../harness.js';
 
 const CALC = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', 'corpus', 'v1', 'repos', 'calc');
 const runId = 'paid-init' as RunId;
@@ -78,6 +79,8 @@ beforeAll(async () => {
     policy: loaded.policy,
     roles: join(config, 'roles'),
     rubrics: join(config, 'rubrics'),
+    // The fixture has no branch protection to probe; init's run is under test here, not readiness (A-R40-02).
+    readiness: RIG_READINESS,
     components,
     approvedCostUsd: null,
   };

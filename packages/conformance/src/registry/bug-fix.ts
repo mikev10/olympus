@@ -22,7 +22,7 @@ import type { LocalAssertion } from '../kit/types.js';
 import {
   HELLO_CHECK, admitAndDrive, approveAndResume, artifactsFor, awaiting, drafting, draftingPolicy, draftingScopes, helloSpec, lastAttempt, type DraftingRig,
 } from './drafting.js';
-import { lineScope, linePolicy, readRecord, stubDriver, withLine, type LineRig } from './line.js';
+import { lineScope, linePolicy, readRecord, RIG_SCANNER, stubDriver, withLine, type LineRig } from './line.js';
 
 const api = async () => import('@olympus-ai/api');
 const core = async () => import('@olympus-ai/core');
@@ -293,7 +293,7 @@ const RUN_TEMPLATE_IS_GRANTED: LocalAssertion = runtime({
       const policyFile = join(rig.dirs.artifacts, '..', 'policy.yaml');
       await writeFile(policyFile, JSON.stringify(policy));
       const r = await drafting(rig);
-      const server = createApiServer({ components: await r.components(), token: TOKEN, principal: 'conformance', policyFile, rolesDirectory: rig.roles, rubricsDirectory: join(rig.roles, '..', 'rubrics'), secrets: SECRETS });
+      const server = createApiServer({ readiness: RIG_SCANNER, components: await r.components(), token: TOKEN, principal: 'conformance', policyFile, rolesDirectory: rig.roles, rubricsDirectory: join(rig.roles, '..', 'rubrics'), secrets: SECRETS });
       const address = await server.listen(0, '127.0.0.1');
       try {
         const { from: _from, template: _template, ...parts } = BUG_INTENT;
@@ -444,7 +444,7 @@ const DISMISSED_CANDIDATE_ADMITS_NO_RUN: LocalAssertion = runtime({
       const policyFile = join(rig.dirs.artifacts, '..', 'policy.yaml');
       await writeFile(policyFile, JSON.stringify(policy));
       const r = await drafting(rig);
-      const server = createApiServer({ components: await r.components(), token: TOKEN, principal: 'conformance', policyFile, rolesDirectory: rig.roles, secrets: SECRETS });
+      const server = createApiServer({ readiness: RIG_SCANNER, components: await r.components(), token: TOKEN, principal: 'conformance', policyFile, rolesDirectory: rig.roles, secrets: SECRETS });
       const address = await server.listen(0, '127.0.0.1');
       const dismiss = async (id: string, body: unknown): Promise<{ status: number; json: unknown }> => {
         const res = await fetch(`${address}/intake/${id}/dismiss`, { method: 'POST', body: JSON.stringify(body), headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' } });

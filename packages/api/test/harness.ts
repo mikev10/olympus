@@ -32,9 +32,24 @@ import { STAND_IN_SECRET_SCAN_IMAGE, STAND_IN_SECRET_SCANNER, STAND_IN_STATIC_AN
 import type { OtherCheckSpec } from '@olympus-ai/integrity';
 import { StubSandboxProvider, type SandboxProvider } from '@olympus-ai/sandbox';
 import { StubVault } from '@olympus-ai/vault';
-import { buildGraph, isBuilt, localWorkspaceStore, parseGraph, worstCaseCost, type BuiltGraph, type GraphParts, type RunRequest, type WorkspaceStore } from '../src/index.js';
+import { buildGraph, isBuilt, localWorkspaceStore, parseGraph, worstCaseCost, type AdmissionReadiness, type BuiltGraph, type ReadinessScanner, type GraphParts, type RunRequest, type WorkspaceStore } from '../src/index.js';
 import { commitFixture } from '@olympus-ai/conformance/git';
 import { DelegatingDriver } from './wrappers.js';
+
+/**
+ * The rig's readiness scan (A-R40-02): L2 for whatever commit it is asked about, held by the scan limit. A
+ * trusted component of the rig, as its drivers and Vault are; an assertion about readiness passes its own.
+ */
+export const RIG_READINESS: AdmissionReadiness = {
+  ceilingAt: (_checkout, commit) => Promise.resolve({ kind: 'scanned', level: 2, heldBy: { kind: 'scan-limit' }, commit }),
+};
+
+/** The same scan as a server's scanner: admission asks it for a ceiling, and the readiness route is not under test. */
+export const RIG_SCANNER: ReadinessScanner = {
+  resolve: () => Promise.reject(new Error('the readiness route is not under test')),
+  scan: () => Promise.reject(new Error('the readiness route is not under test')),
+  ceilingAt: (checkout, commit) => RIG_READINESS.ceilingAt(checkout, commit),
+};
 
 export const HELLO = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'hello');
 /**
@@ -294,6 +309,7 @@ export function runRequest(runId: RunId, workspace: string, parts: GraphParts, o
     roles: ROLES,
     components: working(built(parts)),
     approvedCostUsd: null,
+    readiness: RIG_READINESS,
     ...overrides,
   };
   return Object.hasOwn(overrides, 'approvedCostUsd') ? req : { ...req, approvedCostUsd: approvedFigure(req) };
