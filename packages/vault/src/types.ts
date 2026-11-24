@@ -9,7 +9,7 @@
  */
 import type {
   AgentClaim, ApprovalKey, AutonomyLevel, BaseRefusalPart, CompiledRole, DraftCondition, DraftRef, DraftStation, IndependenceGrade, ModelIdentity, ModelTier, Policy, PolicyRefusal,
-  RecordCategory, RejectionReason, RoleId, Run, RunId, RunState, SeatIdentity, StationId, StationRefusal, TaskId, TaskResult, TreeCategory, VaultRef,
+  RecordCategory, RejectionReason, ReviewCategory, RoleId, Run, RunId, RunState, SeatIdentity, StationId, StationRefusal, TaskId, TaskResult, TreeCategory, VaultRef,
   AuthorTrust, CandidateId, CandidateSchema, FieldDefect, JobTemplateId, RunTemplateId, SchemaKind, TemplateId, TriggerAdmissionCause, TriggerLineage,
   NarrowedScope, NarrowingCause,
 } from '@olympus-ai/core';
@@ -1290,12 +1290,12 @@ export type ReviewFinding =
 /**
  * One thing a review seat found in the tree it reviewed, as the runtime read
  * it (R28). `located` names a file that tree holds and a line that file has;
- * the category is the reviewer's, from the closed set. `refused` is never
+ * the category is the reviewer's, from its seat's closed set (`REVIEW_CATEGORIES`, or `TREE_CATEGORIES` for the security seat). `refused` is never
  * measured: `unlocated` named no such file or line, `unrecordable` broke its
  * schema, and only the field and the rule are kept, never the values (I7).
  */
 export type SeatFinding =
-  | { readonly kind: 'located'; readonly category: TreeCategory; readonly path: string; readonly line: number }
+  | { readonly kind: 'located'; readonly category: TreeCategory | ReviewCategory; readonly path: string; readonly line: number }
   | { readonly kind: 'refused'; readonly cause: 'unlocated' | 'unrecordable'; readonly defects: readonly FieldDefect[] };
 
 /**
