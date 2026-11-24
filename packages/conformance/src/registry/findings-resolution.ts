@@ -101,7 +101,7 @@ async function build(rig: Rig, s: Scenario): Promise<Built> {
   const bundle: EvidenceBundle = {
     runId: RUN_R, taskId: TASK_R, baseCommit: rBase, baseTreeSha256: ZERO, baseRun: { runId: RUN_R, kind: 'base-run', hash: ZERO },
     diff: [{ path: PATH, change: 'modified', sha256: ZERO }], diffSha256: ZERO, checks: [check(s.coverageExit)], unstarted: [],
-    claim: { narrative: 'fixed', filesChanged: [PATH] }, claimEvidenceDiff: [],
+    claim: { narrative: 'fixed', filesChanged: [PATH] }, claimEvidenceDiff: [], harnessImage: 'no-sandbox',
     tamper: {
       assertionsWeakened: [], skipMarkersAdded: [], suppressionMarkersAdded: [], testsDeleted: [], snapshotsRegenerated: [], protectedPathsTouched: [],
       coverageDelta: s.lines === 'none' ? null : 1,
