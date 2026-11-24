@@ -1,3 +1,19 @@
+# External review of R28, gemini, 2026-11-23
+
+The Gemini family's review of R28, finding outcomes derived by the runtime. Its findings are weighed in `2026-11-23-R28-finding-outcomes-triage.md`.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini. A direct `generateContent` API call to `gemini-3.1-pro-preview`, offering no tools; `cleanRoom` is `null` because an API call loads no local configuration. Outcome `counted`: 136,607 input tokens against a floor of 93,565; all four markers echoed.
+- **Cross-family agreement:** gemini-1 with codex-2 (denominator); gemini-2 with codex-1 (resolution by a broad hunk). gemini-3 was raised by Gemini alone.
+- **Date:** 2026-11-23
+- **Bundle:** `2026-11-23-R28-finding-outcomes-review-bundle.txt`, SHA-256 `96afaf3a54b2f967c46e9fcc5fdb156eed7434b20831e7d6db2fddc278790c75` (the manifest's `bundleSha256`), base `a320a01` (the tip of `v2` R28 was rebased onto; the A-R40-02 amendment and a tooling commit merged since `reviewed/R53` were split into their own review for size), head `7b2758f` (the unit's tip when shipped). Every new file in full and every modified file as a function-context diff; `docs/decisions.md`, `docs/reviews/`, `docs/plan/`, and `pnpm-lock.yaml` excluded. Prompt: `2026-11-23-R28-finding-outcomes-review-prompt.txt`.
+- **Prior context and lookups:** it disclosed none and no external lookups. A self-report, not independently verifiable.
+- **Coverage, and any gap:** items 1 and 3 answered; items 2, 4, 5, 6 (which mechanisms are sound), and 7 (whether the framing is right) came back empty.
+- **Citations:** line numbers refer to the bundle's new side, not the repository; each was re-located in the code.
+
+---
+
 BASE: a320a01
 HEAD: 7b2758f
 packages/vault/test/stub.test.ts

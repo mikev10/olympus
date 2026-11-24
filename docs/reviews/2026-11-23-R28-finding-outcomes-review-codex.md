@@ -1,3 +1,19 @@
+# External review of R28, codex, 2026-11-23
+
+The Codex family's review of R28, finding outcomes derived by the runtime. Its findings are weighed in `2026-11-23-R28-finding-outcomes-triage.md`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex. A headless `codex exec` run under a read-only sandbox, with recorded approval policy `never`, in an empty scratch working directory and a scratch config home holding only `auth.json`, with an environment of `CODEX_HOME` alone. The pre-run listing of both is the manifest's `cleanRoom`. Outcome `counted`: 135,129 input tokens against a floor of 93,565; all four markers echoed.
+- **Cross-family agreement:** codex-1 with gemini-2 (resolution needs only a covered edit in the hunk); codex-2 with gemini-1 (refused and unreadable findings leave the denominator). codex-3, codex-4, codex-5, and codex-6 were raised by Codex alone.
+- **Date:** 2026-11-23
+- **Bundle:** `2026-11-23-R28-finding-outcomes-review-bundle.txt`, SHA-256 `96afaf3a54b2f967c46e9fcc5fdb156eed7434b20831e7d6db2fddc278790c75` (the manifest's `bundleSha256`), base `a320a01` (the tip of `v2` R28 was rebased onto; the A-R40-02 amendment and a tooling commit merged since `reviewed/R53` were split into their own review for size), head `7b2758f` (the unit's tip when shipped). Every new file in full and every modified file as a function-context diff; `docs/decisions.md`, `docs/reviews/`, `docs/plan/`, and `pnpm-lock.yaml` excluded. Prompt: `2026-11-23-R28-finding-outcomes-review-prompt.txt`.
+- **Prior context and lookups:** it disclosed none and no external lookups, and that a local file-listing command was blocked. A self-report, not independently verifiable.
+- **Coverage, and any gap:** items 1, 2, 3, 5, 6, and 7 answered; item 4 (language escape hatches) answered only as "none found" within the sound-mechanisms list.
+- **Citations:** line numbers refer to the bundle's new side, not the repository; each was re-located in the code.
+
+---
+
 BASE: a320a01  
 HEAD: 7b2758f  
 packages/vault/test/stub.test.ts  

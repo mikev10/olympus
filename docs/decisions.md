@@ -12739,3 +12739,23 @@ Every dependency (P14, R2, R9, R13b, R19, R29) is merged and tagged
   back (D-P4-07) and `integrate` pushes the accepted diff, so the two are the
   same tree; the findings record names the diff digest it was read against
   (`tree`), and a later unit that lets review send work back must join on it.
+
+### D-R28-08: external review, what was fixed and what is owned elsewhere
+
+Triage: `docs/reviews/2026-11-23-R28-finding-outcomes-triage.md`. Both families counted on the first run.
+
+- **Fixed (codex-2, gemini-1), d9c5a8c:** each rate group carries `refused` and `unreadable` counts beside `raised`, from the same records; a malformed critic element is refused alone as `unrecordable` (a new `CriticFinding` cause), keeping the located findings beside it. Rejected: counting refused findings as raised and open, which puts what nothing can resolve into a resolved rate. Reverse: drop the two counts and return unreadable from inside `readCriticResult`'s loop.
+- **Fixed (codex-5), d9c5a8c:** a resolved rate is measured where a resolution is on record, or where any run in the store recorded line coverage in a passed task's last bundle; not only runs in the window, and never a failed attempt's. Reverse: read `runs.some(r => r.lineCoverage)` over the window again.
+- **Fixed (codex-6), 2327ec4:** the stack assertion checks each fixture's own lines. Reverse: compare the fraction with the report again.
+- **Recorded, the maintainer's to decide (codex-1, gemini-2):** "resolved" proves a covered edit of the hunk that held the cited line, or a changed draft file, not that the cited problem was fixed. That is A-R28-01's rule as chosen. Recommendation: before R11 reads these rates to seat reviewers, rename the two resolution kinds for what they prove, or add a remediation outcome that an independently checked regression assertion establishes. Either is an amendment.
+- **Known limit, owner R11 (codex-3):** repeated or near-repeated findings in one result count as independent findings, inflating a rate and its sample. No local rule separates one problem cited twice from two problems on one line. R11, which reads the rates to choose seats, owns making the count resistant to it.
+- **Known limit, owner M3 (codex-4):** a workload-written coverage report can claim hits that never ran; pending as `I3.coverage-report-is-not-writable-by-the-suite`.
+- **Not holding (gemini-3):** line 0 is out of the `decimal` class and is refused `unrecordable`; it never reaches the Vault.
+
+### D-R28-09: the A-R40-02 amendment's external review, folded into R28's
+
+The R28 bundle from `reviewed/R53` exceeded the runner's 599,000-byte ceiling, because the A-R40-02 amendment and a tooling commit had merged to `v2` after that tag. The maintainer chose two reviews: R28 from `a320a01`, and `reviewed/R53..a320a01` on its own as `A-R40-02`. Both counted. Triage: `docs/reviews/2026-11-23-A-R40-02-readiness-scan-admission-triage.md`.
+
+- **Fixed (codex-1), 9549f48:** `I5.resume-holds-the-recorded-readiness-ceiling` drives `resumeRun` over a `not-scanned` record and a pre-R40 record above L0, not only the helper. Reverse: drop the loop.
+- **Not holding (gemini-1):** the at-ceiling checks use `port(1)` with an L1 request; they pin the boundary.
+- **Reverse the split:** review both ranges together, which needs a payload ceiling above 600 KB.

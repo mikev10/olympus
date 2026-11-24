@@ -1,3 +1,19 @@
+# External review of A-R40-02, gemini, 2026-11-23
+
+The Gemini family's review of the A-R40-02 amendment and the tooling commit beside it. Its findings are weighed in `2026-11-23-A-R40-02-readiness-scan-admission-triage.md`.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini. A direct `generateContent` API call to `gemini-3.1-pro-preview`, offering no tools; `cleanRoom` is `null` because an API call loads no local configuration. Outcome `counted`: 43,967 input tokens against a floor of 31,007; all four markers echoed.
+- **Cross-family agreement:** none; gemini-1 was raised by Gemini alone.
+- **Date:** 2026-11-23
+- **Bundle:** `2026-11-23-A-R40-02-readiness-scan-admission-review-bundle.txt`, SHA-256 `984dd867eadd930237fc519155e289fa913b4313f8627ad1fb5525c07cf0e0e9` (the manifest's `bundleSha256`), base `03518f9` (`reviewed/R53`), head `a320a01` (the tip of `v2` after the A-R40-02 amendment and the R57 intermittent-list tooling commit). Split from R28's review because the two together exceeded the runner's payload ceiling; the maintainer chose two reviews. Every new file in full and every modified file as a function-context diff; `docs/decisions.md`, `docs/reviews/`, `docs/plan/`, and `pnpm-lock.yaml` excluded. Prompt: `2026-11-23-A-R40-02-readiness-scan-admission-review-prompt.txt`.
+- **Prior context and lookups:** it disclosed none and no lookups. A self-report, not independently verifiable.
+- **Coverage, and any gap:** items 2, 6, and 7 answered; items 1, 3, 4, and 5 came back empty.
+- **Citations:** line numbers refer to the bundle's new side, not the repository; each was re-located in the code.
+
+---
+
 BASE: 03518f9
 HEAD: a320a01
 packages/vault/src/types.ts

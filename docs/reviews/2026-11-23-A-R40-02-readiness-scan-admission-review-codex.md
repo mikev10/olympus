@@ -1,3 +1,19 @@
+# External review of A-R40-02, codex, 2026-11-23
+
+The Codex family's review of the A-R40-02 amendment (admission above L0 refuses when no readiness scan ran) and the tooling commit beside it. Its findings are weighed in `2026-11-23-A-R40-02-readiness-scan-admission-triage.md`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex. A headless `codex exec` run under a read-only sandbox, with recorded approval policy `never`, in an empty scratch working directory and a scratch config home holding only `auth.json`, with an environment of `CODEX_HOME` alone. The pre-run listing of both is the manifest's `cleanRoom`. Outcome `counted`: 53,932 input tokens against a floor of 31,007; all four markers echoed.
+- **Cross-family agreement:** none; codex-1 was raised by Codex alone, and Gemini's one finding is about another assertion.
+- **Date:** 2026-11-23
+- **Bundle:** `2026-11-23-A-R40-02-readiness-scan-admission-review-bundle.txt`, SHA-256 `984dd867eadd930237fc519155e289fa913b4313f8627ad1fb5525c07cf0e0e9` (the manifest's `bundleSha256`), base `03518f9` (`reviewed/R53`), head `a320a01` (the tip of `v2` after the A-R40-02 amendment and the R57 intermittent-list tooling commit). Split from R28's review because the two together exceeded the runner's payload ceiling; the maintainer chose two reviews. Every new file in full and every modified file as a function-context diff; `docs/decisions.md`, `docs/reviews/`, `docs/plan/`, and `pnpm-lock.yaml` excluded. Prompt: `2026-11-23-A-R40-02-readiness-scan-admission-review-prompt.txt`.
+- **Prior context and lookups:** it disclosed none and no lookups. A self-report, not independently verifiable.
+- **Coverage, and any gap:** items 1, 2, 3, 4, 6, and 7 answered, several as "none found"; item 5 answered in passing (the fixed-ceiling ports).
+- **Citations:** line numbers refer to the bundle's new side, not the repository; each was re-located in the code.
+
+---
+
 BASE: 03518f9  
 HEAD: a320a01  
 packages/vault/src/types.ts  
