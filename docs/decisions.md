@@ -12656,3 +12656,86 @@ Every dependency (P14, R2, R9, R13b, R19, R29) is merged and tagged
    as refused `recorded-before`, never measured. Reverse: refuse to read it.
 9. *Role text.* Each seat's role states the JSON result shape and that a
    note is read by a person, never the runtime, as R13b's tree prompt does.
+
+### D-R28-02: the reviewer's categories are its role's questions
+
+- **Ambiguous:** A-R28-01 gives the review seats `{ category, path, line }`
+  and names no categories for the run's reviewer. `TREE_CATEGORIES` are the
+  security reviewer's questions (`packages/core/src/trigger/schemas.ts:96-100`).
+- **Chosen:** `REVIEW_CATEGORIES`, one per question `reviewer.md` asks:
+  `spec-mismatch`, `beyond-spec`, `untested-behavior`, `check-bypassed`,
+  `uncovered-breakage`. The security seat keeps `TREE_CATEGORIES`. Each seat
+  is held to its own set; another seat's category is `unrecordable`. Fields
+  are checked as `checkFields` checks a schema (caps, `tree-path`,
+  `decimal`), in `packages/api/src/findings.ts`, without a new
+  `CandidateSchema`, since a seat's finding is never an intake candidate.
+- **Rejected:** one shared set (the security seat's questions do not fit a
+  reviewer's, and a rate per category would mix them); free categories (an
+  unbounded value in a record, I7).
+- **Reverse:** drop `REVIEW_CATEGORIES` and read `TREE_CATEGORIES` for both.
+
+### D-R28-03: the line report names its coverage check
+
+- **Chosen:** `TamperReport.changedLines` is `{ check, files } | null`: the
+  pinned coverage check's id beside the lines, so a resolution judges that
+  check's own result in the same bundle (passed as the gate judges one). The
+  bundle does not record which check is the coverage check otherwise, and
+  reading the manifest artifact later is reading a file outside the Vault.
+  `TamperOptions.coverage` gains `check`.
+- **Rejected:** "any required check passed" (the rejection in D-A-FO-01);
+  reading the verification manifest at walk time (not a Vault record).
+- **Reverse:** drop `check`, and resolve from the gate's pass of the task.
+
+### D-R28-04: finding rates stay out of the nightly drift snapshot
+
+- **Found:** the nightly integrity job flattens R2's figures over settled
+  runs and reports any change as `rate-drift`
+  (`packages/api/src/nightly.ts:302-310`). An outcome is written after its
+  run settles, by a person or a later merge, so a findings rate moves with no
+  run changing; and a snapshot taken before R28 holds no findings key, so
+  even an empty one would read as drift once.
+- **Chosen:** the snapshot is taken from `deriveOutcomes` without
+  `findings`. The rates are R2's to report (`GET /outcomes`), never the
+  snapshot's to compare.
+- **Reverse:** flatten `findings` again, and accept one drift per upgrade.
+
+### D-R28-05: a refused critic finding goes back in the runtime's words
+
+- **Chosen:** the drafter is sent `<path>: <note>` for a located finding
+  (D-A-DS-07's exception, unchanged in substance), and the runtime's own
+  sentence for an unlocated, unreadable, or pre-R28 one. The critic's text of
+  an unlocated finding never reaches a prompt, since it cited nothing the
+  runtime could check. `core`'s `critic-findings` part stays a list of
+  strings, so no contract in `core/src/station/types.ts` changes.
+- **Reverse:** send the critic's note for an unlocated finding too.
+
+### D-R28-06: where the dismissal lives
+
+- **Chosen:** `GET /findings` lists every located finding with its outcome
+  (`open` where none), and `POST /findings/:id/dismiss` takes `{cause}` alone,
+  validated by the same `dismissBody` as a candidate's (400 on any other key);
+  404 for an id naming no located finding, 409 for one already decided. The
+  CLI has `findings` and `dismiss-finding <id> --cause`. A finding's id is
+  `review:<run>:<hash>:<index>`, `critic:<run>:<hash>:<index>`, or
+  `nightly:<hash>:<index>`. A refused finding cannot be dismissed: it was
+  never measured.
+- **Reverse:** remove the two routes and commands.
+
+### D-R28-07: known limits
+
+- **No code finding resolves today (M3).** A pinned coverage check is refused
+  at `verify` (D-P7-05), so no bundle carries line coverage, and R2 reports a
+  code seat's resolved rate as `unmeasured` (D-R28-01, option A). The rule is
+  proven by `I2.code-finding-resolved-by-covered-change` over a store whose
+  evidence carries an injected report. M3 owns the channel.
+- **A finding fixed outside Olympus, or on a line rewritten in between,
+  stays open** until a person dismisses it (the entry's out-of-scope list).
+- **A review finding of a run that never merged stays open:** the code it
+  cites never landed, so no history holds it.
+- **Only the resolving run's last accepted bundle's lines are read** (choice
+  4): a line covered only by an earlier task of that run, in another tree's
+  numbering, resolves nothing.
+- **The reviewed tree is taken to be the pushed tree.** `review` sends nothing
+  back (D-P4-07) and `integrate` pushes the accepted diff, so the two are the
+  same tree; the findings record names the diff digest it was read against
+  (`tree`), and a later unit that lets review send work back must join on it.
