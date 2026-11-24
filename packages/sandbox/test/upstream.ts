@@ -98,7 +98,7 @@ export async function makeCertificate(): Promise<Certificate> {
  * reads (P13). What it answers is steered by `relay_test` in the request body,
  * which the relay forwards unchanged like the rest: `usage` (the four counts),
  * `omit` (`'final'` drops the output count, `'all'` every count), `status`,
- * `searches` (the web searches `server_tool_use` reports), `encoding` (`'gzip'`), `hold` (milliseconds before answering), and `hangup`
+ * `searches` (the web searches `server_tool_use` reports), `startSearches` (a count on a stream's `message_start`), `encoding` (`'gzip'`), `hold` (milliseconds before answering), and `hangup`
  * (`true` reads the whole request and closes without answering). `stream:
  * true` answers in server-sent events. It logs
  * the SHA-256 of every body it received and sent, so a suite can prove both
@@ -221,6 +221,8 @@ function answer(s, request, t, body, echo) {
     const start = { id: 'msg_test', type: 'message', role: 'assistant', model: request.model, content: [] };
     if (usage !== undefined) start.usage = { input_tokens: usage.input_tokens, cache_read_input_tokens: usage.cache_read_input_tokens,
       cache_creation_input_tokens: usage.cache_creation_input_tokens, cache_creation: usage.cache_creation, output_tokens: 1 };
+    // A running count of server-tool uses on message_start, before any search has run (codex-1).
+    if (start.usage !== undefined && t.startSearches !== undefined) start.usage.server_tool_use = { web_search_requests: t.startSearches };
     const events = [
       ['message_start', { type: 'message_start', message: start }],
       ['content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }],

@@ -337,7 +337,8 @@ function usageReader() {
     }
     const output = count(usage.output_tokens);
     if (output !== null) { u.output = output; if (final) u.final = true; }
-    const s = usage.server_tool_use;
+    // Uses are read from the final usage alone: a running count on message_start is not the call's (codex-1).
+    const s = final ? usage.server_tool_use : null;
     if (s !== null && typeof s === 'object') Object.keys(s).forEach(function (k) { if (count(s[k]) !== null) u.uses[k] = s[k]; });
   };
   // openai-chat: an answer served at a tier other than the default is not at the table's rate.

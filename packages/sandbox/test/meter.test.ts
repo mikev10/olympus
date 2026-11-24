@@ -286,6 +286,15 @@ describe('the relay forwards only the server tools its grant names, and charges 
     expect(reading.costUsd).toBeCloseTo(3 * priced(usage) + (3 + 2 + 8) * 0.01, 12);
   });
 
+  test("a count read before the final usage is not the call's count: a stream cut after message_start reported zero is charged max_uses (codex-1)", async () => {
+    const { handle } = await metered(TEST_BUDGET, {}, { serverTools: GRANT });
+    const answers = await send(handle, [message(usage, { tools: [SEARCH], stream: true }, { startSearches: 0, omit: 'final' })].map((body) => ({ body })));
+    expect(answers.map((a) => a.status)).toStrictEqual([200]);
+    const reading = meteredReading(await destroyed(handle));
+    // Input read, output charged its 64-token ceiling, and the eight searches the request allowed.
+    expect(reading.costUsd).toBeCloseTo((usage.input * 1 + 64 * 10) / 1e6 + 8 * 0.01, 12);
+  });
+
   test('the fees count toward maxCostUsd', async () => {
     const { handle } = await metered({ maxTokens: 1_000_000_000, maxCostUsd: 0.05 }, {}, { serverTools: GRANT });
     const answers = await send(handle, [message(usage, { tools: [SEARCH] }, { searches: 5 }), message(usage)].map((body) => ({ body })));
