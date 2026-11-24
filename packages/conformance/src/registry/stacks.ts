@@ -48,6 +48,12 @@ interface Stack {
   readonly configFile: string;
   /** A coverage report on the head, as the stack's coverage check writes it, under `/workspace`, covering one of two new lines. */
   readonly report: { readonly file: string; readonly text: string };
+  /**
+   * The changed executable lines the report covers and does not, read off the
+   * fixture by hand, never from an adapter: the base-to-head change adds two
+   * statements, and the report saw one run (R28 triage, codex-6).
+   */
+  readonly changedLines: ReadonlyArray<{ readonly path: string; readonly executed: readonly number[]; readonly unexecuted: readonly number[] }>;
 }
 
 const VITEST_TEST = [
@@ -108,6 +114,8 @@ const STACKS: readonly Stack[] = [
         },
       }),
     },
+    // Lines 2 and 3 of src/sum.ts are new; statement 1 (line 2) ran and statement 2 (line 3) did not.
+    changedLines: [{ path: 'src/sum.ts', executed: [2], unexecuted: [3] }],
   },
   {
     name: 'pytest',
@@ -136,6 +144,8 @@ const STACKS: readonly Stack[] = [
       file: 'coverage.json',
       text: JSON.stringify({ meta: { format: 3 }, files: { 'hello/__init__.py': { executed_lines: [1, 2, 5], missing_lines: [6], excluded_lines: [] } } }),
     },
+    // Lines 3 to 6 of hello/__init__.py are new; of them only `def one():` (5) and `return 1` (6) are statements, and 5 ran.
+    changedLines: [{ path: 'hello/__init__.py', executed: [5], unexecuted: [6] }],
   },
 ];
 
@@ -241,14 +251,12 @@ export const EVERY_STACK_REPORTS_CHANGED_LINES: LocalAssertion = runtime({
       const set = await buildAdapterSet(base, { provider: null, coverage: { report, sourceRoot: '/workspace' } });
       if (set.coverage === null) throw new Error(`I8: the ${stack.name} set has no coverage adapter`);
       const files = await set.coverage.changedLineReport(base, head);
-      const executed = files.flatMap((f) => f.executed);
-      const unexecuted = files.flatMap((f) => f.unexecuted);
-      if (executed.length === 0 || unexecuted.length === 0) throw new Error(`I8: the ${stack.name} report named ${JSON.stringify(files)} over a change with one covered and one uncovered line`);
-      for (const f of files) {
-        const sorted = (xs: readonly number[]): boolean => xs.every((x, i) => i === 0 || (xs[i - 1] ?? x) < x);
-        if (!sorted(f.executed) || !sorted(f.unexecuted) || f.executed.some((x) => f.unexecuted.includes(x))) throw new Error(`I8: the ${stack.name} report's lines for ${f.path} are not sorted and disjoint`);
+      // The fixture's own lines, read off it by hand: an adapter naming any other lines, however tidy, fails here.
+      if (JSON.stringify(files) !== JSON.stringify(stack.changedLines)) {
+        throw new Error(`I8: the ${stack.name} report named ${JSON.stringify(files)}, not the fixture's ${JSON.stringify(stack.changedLines)}`);
       }
-      if (coverageFraction(files) !== (await set.coverage.changedLineCoverage(base, head))) throw new Error(`I8: the ${stack.name} lines disagree with its fraction`);
+      // One of the two changed statements ran: a half, worked out from the fixture, not from the report.
+      if ((await set.coverage.changedLineCoverage(base, head)) !== 0.5) throw new Error(`I8: the ${stack.name} fraction is not the half its lines give`);
       const tamper = await analyzeTamper(base, head, { protectedPaths: [], coverage: { check: 'pinned-coverage', report, sourceRoot: '/workspace' }, commands: [], markers: [] });
       if (tamper.changedLines?.check !== 'pinned-coverage' || JSON.stringify(tamper.changedLines.files) !== JSON.stringify(files) || tamper.coverageDelta !== coverageFraction(files)) {
         throw new Error(`I8: the ${stack.name} evidence recorded ${JSON.stringify(tamper.changedLines)} beside ${String(tamper.coverageDelta)}`);
