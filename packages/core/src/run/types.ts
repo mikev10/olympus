@@ -30,7 +30,7 @@ export type VaultRefKind =
   | 'policy' | 'verification-manifest' | 'evidence' | 'violation'
   | 'run-state' | 'rubric' | 'learning'
   | 'admission' | 'task-result' | 'usage' | 'decision' | 'integration' | 'base-run'
-  | 'intent' | 'draft' | 'critic-result' | 'draft-lock';
+  | 'intent' | 'draft' | 'critic-result' | 'draft-lock' | 'review-findings';
 
 export interface VaultRef { runId: RunId; kind: VaultRefKind; hash: string; }
 

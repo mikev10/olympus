@@ -48,6 +48,7 @@ function run(id: string, over: Partial<RunRecords>): RunRecords {
     approvalsSpent: 0,
     reviewGrade: 'different-family',
     critiques: [],
+    lineCoverage: false,
     observations: [],
     mergeCommit: null,
     tasks: [],

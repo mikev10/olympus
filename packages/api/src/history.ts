@@ -121,6 +121,52 @@ async function patch(checkout: string, a: string | null, b: string, context: 'de
   );
 }
 
+/** One hunk's ranges at zero context, as `@@ -a,b +c,d @@` gives them; a count left out is one (R28). */
+export interface HunkRange {
+  readonly oldStart: number;
+  readonly oldLines: number;
+  readonly newStart: number;
+  readonly newLines: number;
+}
+
+const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/u;
+
+/** Every hunk header's ranges in a patch, in order. */
+export function parseHunkRanges(text: string): HunkRange[] {
+  const out: HunkRange[] = [];
+  for (const line of text.split('\n')) {
+    const m = HUNK_HEADER.exec(line);
+    if (m === null) continue;
+    out.push({ oldStart: Number(m[1]), oldLines: m[2] === undefined ? 1 : Number(m[2]), newStart: Number(m[3]), newLines: m[4] === undefined ? 1 : Number(m[4]) });
+  }
+  return out;
+}
+
+/** Whether `commit` holds a file at `path`. Only a missing path is no; a read that failed is never an answer (I5). */
+async function holdsPath(checkout: string, commit: string, path: string): Promise<boolean> {
+  try {
+    await run('git', gitArgs(checkout, 'cat-file', '-e', `${requireOid(commit, 'commit')}:${path}`));
+    return true;
+  } catch (error) {
+    if (typeof error === 'object' && error !== null && 'code' in error && error.code === 128) return false;
+    throw error;
+  }
+}
+
+/**
+ * One path's hunks from `from` to `to`, at zero context with renames off
+ * (R28): a renamed file is a file gone and another added. Null where either
+ * commit holds no file at `path`, which nothing maps a line through.
+ */
+export async function pathHunks(checkout: string, from: string, to: string, path: string): Promise<HunkRange[] | null> {
+  if (!(await holdsPath(checkout, from, path)) || !(await holdsPath(checkout, to, path))) return null;
+  const text = await git(
+    checkout, 'diff', '--text', '--no-ext-diff', '--no-textconv', '--no-color', '--no-renames', '-U0',
+    requireOid(from, 'commit'), requireOid(to, 'commit'), '--', `:(literal)${path}`,
+  );
+  return parseHunkRanges(text);
+}
+
 /** The `patch-id --stable` of a patch, or null for an empty one. */
 async function patchId(checkout: string, text: string): Promise<string | null> {
   if (text.trim() === '') return null;

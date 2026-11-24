@@ -205,7 +205,7 @@ export function push(after: string, pushedAt: number): unknown {
 export async function mergedRun(vault: Vault, runId: RunId, mergedAt: string, mergeCommit: string | null = null): Promise<RunRecords> {
   return {
     runId, mergeCommit, ending: 'merged', requestedLevel: 2, stack: 'vitest@4', startedAt: mergedAt, mergedAt, approvalsSpent: 1,
-    tasks: [], decisions: [], usage: [], cost: null, reviewGrade: 'different-family', critiques: [],
+    tasks: [], decisions: [], usage: [], cost: null, reviewGrade: 'different-family', critiques: [], lineCoverage: false,
     observations: (await vault.readObservations(runId)).map((e) => e.record),
   };
 }

@@ -100,6 +100,15 @@ export const TREE_CATEGORIES = Object.freeze([
 ] as const);
 export type TreeCategory = (typeof TREE_CATEGORIES)[number];
 
+/**
+ * A run's reviewer's finding category: one per question its role asks (R28).
+ * The security seat's are `TREE_CATEGORIES`.
+ */
+export const REVIEW_CATEGORIES = Object.freeze([
+  'spec-mismatch', 'beyond-spec', 'untested-behavior', 'check-bypassed', 'uncovered-breakage',
+] as const);
+export type ReviewCategory = (typeof REVIEW_CATEGORIES)[number];
+
 /** A findings-review finding's category: what the day's records show. */
 export const RECORD_CATEGORIES = Object.freeze([
   'repeated-refusal', 'repeated-park', 'violation', 'failed-check', 'record-drift', 'refused-deliveries', 'security-finding', 'control-gap',

@@ -6,7 +6,7 @@
  * says so. The store is a Map that dies with the process. P1 replaces this
  * file.
  */
-import { harnessImageProblem, repoInstructionsProblem, seatBeforeR9 } from '../local/vault.js';
+import { findingKeyOf, findingOutcomeProblem, harnessImageProblem, repoInstructionsProblem, reviewFindingsProblem, seatBeforeR9 } from '../local/vault.js';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -15,7 +15,7 @@ import { intakeId, intakeProblem } from '../intake.js';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
 import type {
   AdmissionRecord, BaseRunRecord, CandidateRecord, CountedRefusalCause, CriticRecord, DraftLockRecord, DraftRecord, EnforcementDecision, EvidenceBundle, IntakeEntry, IntegrationRecord, IntentRecord, NightlyEntry, NightlyRecord, RefusedDeliveryCount, StoredObject, TriggerDecision,
-  LockEntry, LockManifest, LockVerdict, NoRunState, ObservationEntry, ObservationRecord, RubricRecord, UsageRecord, Vault, DismissalCause,
+  LockEntry, LockManifest, LockVerdict, NoRunState, ObservationEntry, ObservationRecord, RubricRecord, UsageRecord, Vault, DismissalCause, FindingOutcomeEntry, FindingOutcomeRecord, ReviewFindingsRecord,
 } from '../types.js';
 import { DISMISSAL_CAUSES } from '../types.js';
 
@@ -65,6 +65,8 @@ export class StubVault implements Vault {
   private readonly refusedCounts = new Map<string, Partial<Record<CountedRefusalCause, number>>>();
   private readonly nightly = new Map<string, Uint8Array>();
   private readonly observations = new Map<string, Uint8Array>();
+  private readonly reviewFindings = new Map<RunId, VaultRef[]>();
+  private readonly findingOutcomes = new Map<string, Uint8Array>();
 
   /** `root` is what locked paths resolve against (S1 finding 4d; P1 decides where the base belongs). */
   constructor(root: string) {
@@ -233,6 +235,20 @@ export class StubVault implements Vault {
     return Promise.resolve(this.store(r.runId, 'critic-result', r));
   }
 
+  recordReviewFindings(r: ReviewFindingsRecord): Promise<VaultRef> {
+    const problem = reviewFindingsProblem(r);
+    if (problem !== undefined) return Promise.reject(new Error(`StubVault: refusing a review findings record: ${problem}`));
+    const ref = this.store(r.runId, 'review-findings', r);
+    const refs = this.reviewFindings.get(r.runId) ?? [];
+    if (!refs.some((x) => x.hash === ref.hash)) refs.push(ref);
+    this.reviewFindings.set(r.runId, refs);
+    return Promise.resolve(ref);
+  }
+
+  readReviewFindings(runId: RunId): Promise<readonly VaultRef[]> {
+    return Promise.resolve([...(this.reviewFindings.get(runId) ?? [])]);
+  }
+
   recordDraftLock(r: DraftLockRecord): Promise<VaultRef> {
     if ((r.collectedBy as string) !== 'runtime') return Promise.reject(new Error('StubVault: a draft lock is collected by the runtime, or it is not recorded'));
     const key = `${r.runId}\0${r.station}`;
@@ -324,6 +340,21 @@ export class StubVault implements Vault {
     return Promise.resolve(hash);
   }
 
+  recordFindingOutcome(r: FindingOutcomeRecord): Promise<string | null> {
+    const problem = findingOutcomeProblem(r);
+    if (problem !== undefined) return Promise.reject(new Error(`StubVault: refusing a finding outcome: ${problem}`));
+    const key = findingKeyOf(r.finding);
+    if (this.findingOutcomes.has(key)) return Promise.resolve(null);
+    const bytes = new TextEncoder().encode(JSON.stringify(r));
+    this.findingOutcomes.set(key, bytes);
+    return Promise.resolve(sha256(bytes));
+  }
+
+  readFindingOutcomes(): Promise<readonly FindingOutcomeEntry[]> {
+    const out = [...this.findingOutcomes.values()].map((bytes) => ({ record: JSON.parse(new TextDecoder().decode(bytes)) as FindingOutcomeRecord, sha256: sha256(bytes) }));
+    return Promise.resolve(out.sort((a, b) => a.record.at.localeCompare(b.record.at) || a.sha256.localeCompare(b.sha256)));
+  }
+
   readObservations(runId: RunId | null): Promise<readonly ObservationEntry[]> {
     const out = [...this.observations.entries()]
       .map(([hash, bytes]) => ({ record: JSON.parse(new TextDecoder().decode(bytes)) as ObservationRecord, sha256: hash }))
@@ -394,9 +425,9 @@ export class StubVault implements Vault {
 
   private store(
     runId: RunId,
-    kind: 'evidence' | 'violation' | 'admission' | 'task-result' | 'usage' | 'decision' | 'integration' | 'base-run' | 'intent' | 'rubric' | 'draft' | 'critic-result' | 'draft-lock',
+    kind: 'evidence' | 'violation' | 'admission' | 'task-result' | 'usage' | 'decision' | 'integration' | 'base-run' | 'intent' | 'rubric' | 'draft' | 'critic-result' | 'draft-lock' | 'review-findings',
     record: EvidenceBundle | IntegrityViolation | AdmissionRecord | TaskResult | UsageRecord | EnforcementDecision | IntegrationRecord | BaseRunRecord
-      | IntentRecord | RubricRecord | DraftRecord | CriticRecord | DraftLockRecord,
+      | IntentRecord | RubricRecord | DraftRecord | CriticRecord | DraftLockRecord | ReviewFindingsRecord,
   ): VaultRef {
     const bytes = new TextEncoder().encode(JSON.stringify(record));
     const ref: VaultRef = { runId, kind, hash: sha256(bytes) };

@@ -289,7 +289,22 @@ export interface TamperReport {
    * is never a zero and never a `null` (A-P7-02).
    */
   coverageDelta: number | null;
+  /**
+   * Each changed file's changed executable lines, executed and not, read from
+   * the same report as `coverageDelta` and null exactly when it is (R28),
+   * naming the pinned coverage check whose report it is, so a reader judges
+   * that check's result beside it. The line numbers are the head tree's. A
+   * finding's resolution reads these, never the fraction.
+   */
+  changedLines: { check: string; files: ChangedLineCoverage[] } | null;
   protectedPathsTouched: string[];
+}
+
+/** One changed file's changed executable lines, by whether the report saw them run (R28). Each list sorted, the two disjoint. */
+export interface ChangedLineCoverage {
+  path: string;
+  executed: number[];
+  unexecuted: number[];
 }
 
 export interface IntegrityViolation {

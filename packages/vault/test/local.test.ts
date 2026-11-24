@@ -18,7 +18,7 @@ import { join } from 'node:path';
 import { DEFAULT_POLICY_DOCUMENT, StrictPolicyEngine, StubDriver, type ModelFamily, type RoleId, type RunId, type RunState, type TaskId } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
-import { draftDigest, isNoRunState, LocalVault, StubVault, type AdmissionRecord, type CallTiming, type CriticRecord, type HarnessImage, type DraftRecord, type EvidenceBundle } from '../src/index.js';
+import { draftDigest, isNoRunState, LocalVault, StubVault, type AdmissionRecord, type CallTiming, type CriticRecord, type HarnessImage, type DraftRecord, type EvidenceBundle, type FindingOutcomeRecord, type FindingRef, type ReviewFindingsRecord } from '../src/index.js';
 
 const runId = 'run-1' as RunId;
 const taskId = 'task-1' as TaskId;
@@ -59,7 +59,7 @@ function bundle(): EvidenceBundle {
     unstarted: [],
     claim: { narrative: 'the task, as the model tells it', filesChanged: [] },
     claimEvidenceDiff: [],
-  tamper: { assertionsWeakened: [], skipMarkersAdded: [], testsDeleted: [], snapshotsRegenerated: [], coverageDelta: null, protectedPathsTouched: [], suppressionMarkersAdded: [] },
+  tamper: { assertionsWeakened: [], skipMarkersAdded: [], testsDeleted: [], snapshotsRegenerated: [], coverageDelta: null, changedLines: null, protectedPathsTouched: [], suppressionMarkersAdded: [] },
   notCarried: [],
   install: null,
     collectedBy: 'runtime',
@@ -499,7 +499,11 @@ describe('drafting records (R19)', () => {
     };
     await vault.recordCriticResult(critic);
     await expect(vault.recordCriticResult({ ...critic, grade: 'different-model', binding: true })).rejects.toThrow(/only a critic of another family/);
-    await expect(vault.recordCriticResult({ ...critic, readable: false, findings: [] })).rejects.toThrow(/counts as a finding/);
+    await expect(vault.recordCriticResult({ ...critic, readable: false, findings: [] })).rejects.toThrow(/one refused finding/);
+    // R28: a located finding names a file and carries a note; a bare string is not a finding a new record holds.
+    await vault.recordCriticResult({ ...critic, findings: [{ kind: 'located', path: 'spec.md', note: 'statement 2 cannot be tested' }] });
+    await expect(vault.recordCriticResult({ ...critic, findings: ['statement 2 cannot be tested'] as never })).rejects.toThrow(/located or refused/);
+    await expect(vault.recordCriticResult({ ...critic, findings: [{ kind: 'refused', cause: 'recorded-before' }] })).rejects.toThrow(/located or refused/);
   });
 
   test('an intent comes from the principal\'s channel alone', async () => {
@@ -526,6 +530,68 @@ describe('drafting records (R19)', () => {
     const read = await vault.readRunState(runId);
     expect(read.drafts).toEqual({});
     expect(read.approvals[0]?.draft).toBeNull();
+  });
+});
+
+describe('findings and their outcomes (R28)', () => {
+  const model = { provider: 'p', family: 'claude' as ModelFamily, model: 'm', version: '1' };
+  const findingsRecord = (over: Partial<ReviewFindingsRecord> = {}): ReviewFindingsRecord => ({
+    runId, taskId: 'review' as TaskId, seat: 'review', result: { runId, kind: 'task-result', hash: 'a'.repeat(64) }, reviewer: model, tree: 'b'.repeat(64),
+    readable: true, findings: [{ kind: 'located', category: 'spec-mismatch', path: 'src/a.ts', line: 3 }, { kind: 'refused', cause: 'unlocated', defects: [] }], collectedBy: 'runtime', ...over,
+  });
+
+  test('a review seat\'s findings are recorded beside its result, and an unreadable result holds none', async () => {
+    const ref = await vault.recordReviewFindings(findingsRecord());
+    expect(await vault.readReviewFindings(runId)).toEqual([ref]);
+    expect(JSON.parse(new TextDecoder().decode(await vault.read(ref)))).toEqual(findingsRecord());
+    await expect(vault.recordReviewFindings(findingsRecord({ readable: false }))).rejects.toThrow(/unreadable result holds no finding/);
+    await expect(vault.recordReviewFindings(findingsRecord({ findings: [{ kind: 'located', category: 'spec-mismatch', path: '', line: 3 }] }))).rejects.toThrow(/located finding/);
+    await expect(vault.recordReviewFindings({ ...findingsRecord(), collectedBy: 'driver' } as never)).rejects.toThrow(/collectedBy/);
+  });
+
+  const finding: FindingRef = { source: { kind: 'review', record: { runId, kind: 'review-findings', hash: 'c'.repeat(64) } }, index: 0 };
+  const dismissal: FindingOutcomeRecord = { finding, outcome: { kind: 'dismissed', cause: 'not-a-defect' }, at: '2026-11-23T00:00:00.000Z', collectedBy: 'runtime' };
+
+  test('an outcome is written once per finding; a second is refused and nothing is written', async () => {
+    const hash = await vault.recordFindingOutcome(dismissal);
+    expect(hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(await vault.recordFindingOutcome({ ...dismissal, outcome: { kind: 'dismissed', cause: 'duplicate' }, at: '2026-11-24T00:00:00.000Z' })).toBeNull();
+    expect(await vault.readFindingOutcomes()).toEqual([{ record: dismissal, sha256: hash }]);
+    // Another index of the same record is another finding.
+    expect(await vault.recordFindingOutcome({ ...dismissal, finding: { ...finding, index: 1 } })).not.toBeNull();
+  });
+
+  test('a dismissal carries a cause and no text; open is never written; collectedBy is the runtime', async () => {
+    await expect(vault.recordFindingOutcome({ ...dismissal, outcome: { kind: 'dismissed', cause: 'not-a-defect', note: 'fixed by hand' } } as never)).rejects.toThrow(/cause and nothing else/);
+    await expect(vault.recordFindingOutcome({ ...dismissal, outcome: { kind: 'dismissed', cause: 'fixed' } } as never)).rejects.toThrow(/not a dismissal cause/);
+    await expect(vault.recordFindingOutcome({ ...dismissal, outcome: { kind: 'open' } } as never)).rejects.toThrow(/open is never written/);
+    await expect(vault.recordFindingOutcome({ ...dismissal, collectedBy: 'driver' } as never)).rejects.toThrow(/collectedBy/);
+    expect(await vault.readFindingOutcomes()).toEqual([]);
+  });
+
+  test('a resolution is held to its source: a change resolves no critic finding, a draft no code finding, and the hunk holds the line', async () => {
+    const covered = {
+      kind: 'covered-change' as const, runId: 'run-2' as RunId, mergeCommit: 'd'.repeat(40), path: 'src/a.ts', line: 3,
+      hunk: { oldStart: 2, oldLines: 2, newStart: 2, newLines: 3 }, executed: [3], evidence: { runId: 'run-2' as RunId, kind: 'evidence' as const, hash: 'e'.repeat(64) },
+    };
+    const resolved = (resolution: unknown, f: FindingRef = finding): FindingOutcomeRecord => ({ ...dismissal, finding: f, outcome: { kind: 'resolved', resolution } } as FindingOutcomeRecord);
+    expect(await vault.recordFindingOutcome(resolved(covered))).not.toBeNull();
+    await expect(vault.recordFindingOutcome(resolved({ ...covered, line: 9 }, { ...finding, index: 2 }))).rejects.toThrow(/does not hold the cited line/);
+    await expect(vault.recordFindingOutcome(resolved({ ...covered, executed: [] }, { ...finding, index: 2 }))).rejects.toThrow(/executed line/);
+    await expect(vault.recordFindingOutcome(resolved({ ...covered, executed: [9] }, { ...finding, index: 2 }))).rejects.toThrow(/executed line/);
+    const critic: FindingRef = { source: { kind: 'critic', record: { runId, kind: 'critic-result', hash: 'f'.repeat(64) } }, index: 0 };
+    await expect(vault.recordFindingOutcome(resolved(covered, critic))).rejects.toThrow(/by its draft/);
+    const changed = { kind: 'draft-changed', lock: { runId, kind: 'draft-lock', hash: '1'.repeat(64) }, raised: '2'.repeat(64), locked: '3'.repeat(64) };
+    await expect(vault.recordFindingOutcome(resolved(changed, { ...finding, index: 3 }))).rejects.toThrow(/only a critic finding/);
+    await expect(vault.recordFindingOutcome(resolved({ ...changed, locked: '2'.repeat(64) }, critic))).rejects.toThrow(/did not change/);
+    expect(await vault.recordFindingOutcome(resolved(changed, critic))).not.toBeNull();
+  });
+
+  test('the stub keeps one outcome per finding too', async () => {
+    const stub = new StubVault(artifacts);
+    expect(await stub.recordFindingOutcome(dismissal)).not.toBeNull();
+    expect(await stub.recordFindingOutcome(dismissal)).toBeNull();
+    await expect(stub.recordFindingOutcome({ ...dismissal, outcome: { kind: 'open' } } as never)).rejects.toThrow(/open is never written/);
   });
 });
 

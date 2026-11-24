@@ -3,7 +3,7 @@
  * uses to enumerate suites, parse assertions, and measure coverage. I5: a
  * stack with no adapter loses controls loudly and can never run at L3.
  */
-import type { CheckResult, PropertyRun } from '@olympus-ai/integrity';
+import type { ChangedLineCoverage, CheckResult, PropertyRun } from '@olympus-ai/integrity';
 import type { SandboxHandle } from '@olympus-ai/sandbox';
 import type { SecurityScanner } from './security.js';
 
@@ -62,7 +62,15 @@ export interface TestFrameworkAdapter {
 export interface Assertion { file: string; line: number; operator: string; args: string[]; tolerance?: number; }
 export interface AssertionDelta { weakened: Assertion[]; removed: Assertion[]; toleranceWidened: Assertion[]; }
 
-export interface CoverageAdapter { changedLineCoverage(base: string, head: string): Promise<number>; }
+export interface CoverageAdapter {
+  changedLineCoverage(base: string, head: string): Promise<number>;
+  /**
+   * The changed executable lines of each changed file, executed and not, in
+   * the head tree's numbering (R28). The same lines the fraction counts, so
+   * the two never disagree; a file with no changed executable line is absent.
+   */
+  changedLineReport(base: string, head: string): Promise<ChangedLineCoverage[]>;
+}
 
 export interface MutationAdapter {
   run(files: string[], budgetMs: number): Promise<{ score: number; survived: string[]; equivalent: string[]; timedOut: string[] }>;

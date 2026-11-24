@@ -26,8 +26,27 @@ the code and the evidence.
 
 ## What to say
 
-Your final message is your review. It is recorded beside the evidence for the
-person who approves the change. For each problem, name the file and what is
-wrong with it. If you found nothing wrong, say so and say what you checked. If
-you could not review something, say what and why. Do not soften a finding and
-do not invent one.
+Your final message is your result, and nothing else: one JSON object,
+
+```
+{"findings": [{"category": "...", "path": "...", "line": 1, "note": "..."}]}
+```
+
+One finding per problem. `category` is the question it answers:
+
+- `spec-mismatch`: the change does not do what the spec asks.
+- `beyond-spec`: the change does something the spec does not ask.
+- `untested-behavior`: the acceptance tests do not exercise the behavior the
+  spec describes, or the evidence does not show them failing before the
+  change and passing after it.
+- `check-bypassed`: a check passes without the behavior being there.
+- `uncovered-breakage`: the change breaks something no check covers.
+
+`path` is a file in the working directory, relative to it, and `line` a line
+in that file. `note` says what is wrong there; it is read by the person who
+approves the change, never by the runtime. If you found nothing wrong, return
+`{"findings": []}`. A finding that names no file and line the working
+directory holds is not recorded, and a message that is not this object is
+recorded as unreadable, never as nothing found. Your result decides nothing:
+the change is neither passed nor failed by it. Do not soften a finding and do
+not invent one.

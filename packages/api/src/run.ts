@@ -78,13 +78,13 @@ import { compileRoles, readRepoInstructions, type RepoInstructionRefusal, type R
 import type { CheckSpec } from '@olympus-ai/integrity';
 import type { SandboxProvider } from '@olympus-ai/sandbox';
 import type { AdmissionRecord, AdmissionRefusal, AdmittedArtifact, RecordedHeldBy, RecordedReadiness, RecordedScanLevel, AdmittedManifest, AdmittedPlan, AdmittedSet, AttemptFailure, CriticRecord, EnforcementDecision, DraftLockRecord, DraftRecord, EvidenceBundle, IntakeEntry, IntentRecord, ResumeRefusal, RubricRecord, RubricVersion, Vault } from '@olympus-ai/vault';
-import { repoInstructionsProblem } from '@olympus-ai/vault';
+import { criticFindingsOf, repoInstructionsProblem } from '@olympus-ai/vault';
 import { resolveCommit, type ReadinessCeiling } from '@olympus-ai/readiness';
 import { readUsage, unsettledCalls, worstCaseCost, type WorstCaseCost } from './cost.js';
 import { estimateCost, type CostEstimate, type EstimateCell } from './outcomes.js';
 import { problemCodes, recordDecision } from './decisions.js';
 import { gateFailure, integrateEscalations, readIntegration, runLine, type GateFailure, type LineArtifacts, type LineContext } from './line.js';
-import { draftFloorOf, lockedArtifacts, NOT_DRAFTING, seatDriver, settleArtifactRoot, settleBase, type DraftingContext, type DraftingDrivers } from './drafting.js';
+import { criticNote, draftFloorOf, lockedArtifacts, NOT_DRAFTING, seatDriver, settleArtifactRoot, settleBase, type DraftingContext, type DraftingDrivers } from './drafting.js';
 import { readRubrics, rubricsProblems, type ReadRubric } from './rubrics.js';
 import { parsePlan } from './observation-plan.js';
 import { DRAFT_DIR, defectIntentText, parseQuestions, parseRunRequirements, type DefectPart, type RunRequirements } from './spec-parts.js';
@@ -2000,7 +2000,7 @@ async function draftStanding(vault: Vault, state: RunState, station: DraftStatio
     draft: floor.draft,
     failed: floor.failed,
     problems: record?.problems ?? [],
-    critic: critic === null ? null : { grade: critic.grade, binding: critic.binding, findings: critic.findings },
+    critic: critic === null ? null : { grade: critic.grade, binding: critic.binding, findings: criticFindingsOf(critic.findings).map(criticNote) },
     attemptsLeft: STATION_CONTRACTS[station].maxIterations - floor.draft.attempt,
   };
 }

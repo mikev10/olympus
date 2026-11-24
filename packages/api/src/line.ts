@@ -135,6 +135,7 @@ import { installInto } from './install.js';
 import type { RunOutcome } from './run.js';
 import { acceptedEscalations, analyzeTamper, notCarriedFindings, tamperFindings } from './tamper.js';
 import { prepareProperty, propertyResult, type PreparedProperty } from './property.js';
+import { readSeatFindings } from './findings.js';
 import { checkImageOf, claimEvidenceDiff, commandOf, runnerMissing, suiteRunner, suitesRun, taskResultProblems, writesOutsideGrant } from './verification.js';
 import {
   attemptPaths,
@@ -1978,6 +1979,21 @@ async function review(ctx: LineContext, task: Task): Promise<StationRefusal | un
   // grade and never widen it, and never becomes the recorded identity, which stays the runtime's (I2, I6; P6 codex-1, gemini-1; R9 codex-1).
   const seat = { ...planned.seat, independence: weakerGrade(planned.seat.independence, seated.seat.independence) };
   const ref = await vault.recordTaskResult(ctx.run.id, ran.result);
+  // The findings, located in the tree the seat reviewed, beside the result and before the commit, so a stop
+  // between the two reruns the seat and the record a reader joins is the committed result's (R28). Nothing here
+  // reads them: the task passes exactly as before, whatever was found (I2, D-P4-07).
+  const read = await readSeatFindings(kind, ran.result.claim.narrative, current.tree);
+  await vault.recordReviewFindings({
+    runId: ctx.run.id,
+    taskId: task.id,
+    seat: kind,
+    result: ref,
+    reviewer: seat.reviewer.model,
+    tree: current.diff.length === 0 ? null : diffDigest(current.diff),
+    readable: read.readable,
+    findings: read.findings,
+    collectedBy: 'runtime',
+  });
   await commit(ctx, {
     tasks: { [task.id]: 'passed' },
     results: { [task.id]: ref },

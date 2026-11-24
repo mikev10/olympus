@@ -15,7 +15,7 @@
 import { lstat, readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import picomatch from 'picomatch';
-import { buildAdapterSet, diffTrees, isDependencyTree, markersIn, VCS_DIRECTORIES, type Assertion, type TestFrameworkAdapter } from '@olympus-ai/adapters';
+import { buildAdapterSet, coverageFraction, diffTrees, isDependencyTree, markersIn, VCS_DIRECTORIES, type Assertion, type TestFrameworkAdapter } from '@olympus-ai/adapters';
 import type { RunState, TaskId, VaultRef } from '@olympus-ai/core';
 import type { SecurityCheckKind, TamperReport } from '@olympus-ai/integrity';
 import type { EvidenceBundle } from '@olympus-ai/vault';
@@ -23,8 +23,8 @@ import type { EvidenceBundle } from '@olympus-ai/vault';
 export interface TamperOptions {
   /** The policy's protected paths: in-repo files whose change escalates rather than fails. */
   readonly protectedPaths: readonly string[];
-  /** Where a pinned coverage check's report is, or null when the manifest pins none (A-P7-02). */
-  readonly coverage: { readonly report: string; readonly sourceRoot: string } | null;
+  /** Where a pinned coverage check's report is, and the check's id, or null when the manifest pins none (A-P7-02, R28). */
+  readonly coverage: { readonly check: string; readonly report: string; readonly sourceRoot: string } | null;
   /** The pinned checks' argument vectors: a file one names is what that check runs, and a change to it a touch. */
   readonly commands: ReadonlyArray<readonly string[]>;
   /** The suppression markers of each scanner the manifest pins a check of, by kind (R17). */
@@ -160,7 +160,7 @@ async function testFindings(test: TestFrameworkAdapter, base: string, head: stri
  * it is never an empty finding (I5).
  */
 export async function analyzeTamper(base: string, head: string, options: TamperOptions): Promise<TamperReport> {
-  const set = await buildAdapterSet(base, { provider: null, coverage: options.coverage });
+  const set = await buildAdapterSet(base, { provider: null, coverage: options.coverage === null ? null : { report: options.coverage.report, sourceRoot: options.coverage.sourceRoot } });
   if (options.coverage !== null && set.coverage === null) {
     throw new Error(`tamper: a coverage check is pinned, and the stack ${set.stack} has no coverage adapter to read its report`);
   }
@@ -179,10 +179,13 @@ export async function analyzeTamper(base: string, head: string, options: TamperO
   const tests = set.test === null
     ? { assertionsWeakened: [], skipMarkersAdded: [], testsDeleted: [] }
     : await testFindings(set.test, base, head, changed);
+  // One read of the report gives both: the lines a finding's resolution reads, and the fraction counted from them (R28).
+  const changedLines = set.coverage === null || options.coverage === null ? null : { check: options.coverage.check, files: await set.coverage.changedLineReport(base, head) };
   return {
     ...tests,
     snapshotsRegenerated: changes.map((c) => c.path).filter((p) => SNAPSHOT.test(p)),
-    coverageDelta: set.coverage === null ? null : await set.coverage.changedLineCoverage(base, head),
+    coverageDelta: changedLines === null ? null : coverageFraction(changedLines.files),
+    changedLines,
     protectedPathsTouched: [...touched].sort(),
     suppressionMarkersAdded: await markersAdded(base, head, changes, options.markers),
   };
