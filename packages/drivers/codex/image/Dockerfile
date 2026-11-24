@@ -1,19 +1,33 @@
-# The image a task runs in: Node, the Codex CLI at one version, and the model
+# The image a task runs in: Node, the Codex CLI by content, and the model
 # catalogs the driver hands it.
 #
 # Built by this package rather than pulled, because no published image carries
-# the CLI. Both inputs are pinned, the base by digest and the CLI by exact
-# version, so the image a reviewer builds is the image CI built. The build runs
+# the CLI. Every input is pinned: the base by digest, and the CLI and each of
+# its platform packages by sha512 in cli-lock.json (R53). The build runs
 # on the host, where the network is the developer's own; the container this
 # produces reaches only what the sandbox's egress allowlist and relay grant it.
 #
-# Nothing from the project is copied in. The workspace arrives at run time as
-# the sandbox's one writable mount.
+# Nothing from the project is copied in but this directory's manifest,
+# lockfile, install check, and catalog generator. The workspace arrives at run
+# time as the sandbox's one writable mount.
 ARG BASE
 FROM ${BASE}
 
-ARG CLI_VERSION
-RUN npm install --global --no-fund --no-audit "@openai/codex@${CLI_VERSION}" && npm cache clean --force
+# From the lockfile and never by name: `npm ci` installs exactly what it pins
+# and checks each tarball against its sha512. It skips an optional platform
+# package whose tarball fails that check, so check-install.js then fails the
+# build unless every package pinned for this platform is installed as locked.
+# Root owns all of it, so a task's user cannot rewrite the CLI or the check.
+# The lockfile is committed as cli-lock.json because a packed package never
+# carries a file named package-lock.json, and a driver installed from the
+# registry would then have none to build from. npm reads it under its own name.
+COPY package.json check-install.js /opt/cli/
+COPY cli-lock.json /opt/cli/package-lock.json
+RUN cd /opt/cli \
+    && npm ci --no-fund --no-audit \
+    && node check-install.js /opt/cli \
+    && npm cache clean --force \
+    && ln -s /opt/cli/node_modules/.bin/codex /usr/local/bin/codex
 
 # The catalogs (D-R26-04), written from the catalog the pinned CLI ships and
 # owned by root: a task's commands run as another user and cannot rewrite what

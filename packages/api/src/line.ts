@@ -127,7 +127,7 @@ import { recordDecision, recordEgress, stationDecider } from './decisions.js';
 import { requiredShortfall } from './gate.js';
 import type { EgressPolicy, ExecResult, RelayMeter, SandboxHandle, SandboxSpec, Teardown } from '@olympus-ai/sandbox';
 import { splitFrontMatter } from '@olympus-ai/compiler';
-import type { AdmissionRecord, AdmittedArtifact, AttemptFailure, BaseRunRecord, RepoInstructionFile, CallTiming, DiffEntry, EnforcementDecision, EvidenceBundle, IntegrationOpened, IntegrationRecord, UnstartedCheck, UsageReading, UsageRecord, Vault } from '@olympus-ai/vault';
+import type { AdmissionRecord, AdmittedArtifact, AttemptFailure, BaseRunRecord, RepoInstructionFile, CallTiming, DiffEntry, EnforcementDecision, EvidenceBundle, HarnessImage, IntegrationOpened, IntegrationRecord, UnstartedCheck, UsageReading, UsageRecord, Vault } from '@olympus-ai/vault';
 import { draftFloorOf, draftStation, isDrafted, lockApproved, testDraftOf, type DraftingContext } from './drafting.js';
 import type { RunRequirements } from './spec-parts.js';
 import { imageFor, type BuiltGraph } from './graph.js';
@@ -1115,10 +1115,14 @@ export async function runTask(
   const tier = tierFor(scope, task.station, attemptsOf(ctx.state, task));
   let handle: SandboxHandle;
   let model: ModelIdentity;
+  let image: HarnessImage;
   try {
     // The runtime's resolution of that tier, taken before the call: the record's model is never the driver's account (I2, A-I1a-01).
     model = driver.resolveModel(tier);
     const spec = workspaceOnly(ctx, workspace, mode, egressFor(scope.network), driver, scope.budget.maxWallClockMs);
+    // The image the sandbox is started from, by the content ID the host read from the engine and the graph checked,
+    // never anything the driver says: the engine runs exactly the image an ID names (I2, A-R53-01, D-R53-03).
+    image = ctx.components.profile === null ? 'no-sandbox' : { id: spec.image };
     // The relay the driver asks for, bounded by the budget policy grants the role, never the driver's (I4, A-I1a-02),
     // and priced for the resolved model alone, so a request naming any other is refused before it is sent (D-R14-01).
     const relay = driver.relayRequest();
@@ -1133,7 +1137,7 @@ export async function runTask(
   // Its start is the runtime's clock, never the driver's account of how long it took (I2, A-R12-01).
   const startedAt = new Date().toISOString();
   try {
-    await recordPending(ctx, task, model, role, driver.provenanceId(), startedAt);
+    await recordPending(ctx, task, model, role, driver.provenanceId(), image, startedAt);
   } catch (error) {
     await sandbox.destroy(handle).catch(() => undefined);
     throw error;
@@ -1169,7 +1173,7 @@ export async function runTask(
     teardown = await sandbox.destroy(handle);
   } catch (error) {
     // The call was made and what it cost is unknown: recorded as lost before the run stops, so a resume finds it and refuses (D-P13-20).
-    await recordUsage(ctx, task, { kind: 'lost', detail: `the sandbox could not be destroyed and read: ${describe(error)}` }, model, role, driver.provenanceId(), ended(startedAt));
+    await recordUsage(ctx, task, { kind: 'lost', detail: `the sandbox could not be destroyed and read: ${describe(error)}` }, model, role, driver.provenanceId(), image, ended(startedAt));
     throw new Error(
       `line: the sandbox task ${task.id} ran in could not be destroyed and its cost read, so the call is unaccounted and the run stops: ${describe(error)}`,
       { cause: error },
@@ -1178,7 +1182,7 @@ export async function runTask(
   const site = { vault: ctx.components.vault, runId: ctx.run.id, taskId: task.id, station: ctx.state.station };
   await recordEgress(site, teardown.egress);
   const { meter } = teardown;
-  const usage = await recordUsage(ctx, task, meter, model, role, driver.provenanceId(), ended(startedAt));
+  const usage = await recordUsage(ctx, task, meter, model, role, driver.provenanceId(), image, ended(startedAt));
   // A call whose relay refused anything is a decision the relay made, recorded as a count against its usage record (D-P14-05).
   if (meter.kind === 'metered' && meter.refused > 0) {
     await recordDecision(site, { cause: 'relay-refused', decidedBy: 'model-relay', usage, refused: meter.refused, exhausted: meter.exhausted });
@@ -1202,8 +1206,8 @@ export function boundTo(meter: RelayMeter, model: string): RelayMeter {
 }
 
 /** One driver call's cost, as the relay counted it, written through the Vault's named operation and referenced from run state. */
-async function recordUsage(ctx: LineContext, task: Task, reading: UsageReading, model: ModelIdentity, role: CompiledRole, driver: string, timing: CallTiming): Promise<VaultRef> {
-  const ref = await ctx.components.vault.recordUsage(usageRecord(ctx, task, reading, model, role, driver, timing));
+async function recordUsage(ctx: LineContext, task: Task, reading: UsageReading, model: ModelIdentity, role: CompiledRole, driver: string, image: HarnessImage, timing: CallTiming): Promise<VaultRef> {
+  const ref = await ctx.components.vault.recordUsage(usageRecord(ctx, task, reading, model, role, driver, image, timing));
   await commit(ctx, { usage: ref });
   return ref;
 }
@@ -1213,8 +1217,8 @@ async function recordUsage(ctx: LineContext, task: Task, reading: UsageReading, 
  * Vault lists it by run (A-I1a-05), and a state a resume can start from never
  * holds a call that has not begun (D-I1a-12).
  */
-async function recordPending(ctx: LineContext, task: Task, model: ModelIdentity, role: CompiledRole, driver: string, startedAt: string): Promise<void> {
-  await ctx.components.vault.recordUsage(usageRecord(ctx, task, { kind: 'pending' }, model, role, driver, { startedAt, endedAt: null }));
+async function recordPending(ctx: LineContext, task: Task, model: ModelIdentity, role: CompiledRole, driver: string, image: HarnessImage, startedAt: string): Promise<void> {
+  await ctx.components.vault.recordUsage(usageRecord(ctx, task, { kind: 'pending' }, model, role, driver, image, { startedAt, endedAt: null }));
 }
 
 /** A call that started at `startedAt` and has ended now: its sandbox was torn down, or could not be (A-R12-01). */
@@ -1222,7 +1226,7 @@ function ended(startedAt: string): CallTiming {
   return { startedAt, endedAt: new Date().toISOString() };
 }
 
-function usageRecord(ctx: LineContext, task: Task, reading: UsageReading, model: ModelIdentity, role: CompiledRole, driver: string, timing: CallTiming): UsageRecord {
+function usageRecord(ctx: LineContext, task: Task, reading: UsageReading, model: ModelIdentity, role: CompiledRole, driver: string, image: HarnessImage, timing: CallTiming): UsageRecord {
   return {
     runId: ctx.run.id,
     taskId: task.id,
@@ -1235,8 +1239,30 @@ function usageRecord(ctx: LineContext, task: Task, reading: UsageReading, model:
     driver,
     reading,
     timing,
+    // The image the call's sandbox was started from, as the runtime chose and read it (A-R53-01).
+    harnessImage: image,
     collectedBy: 'runtime',
   };
+}
+
+/**
+ * The image the build call behind `task`'s current result ran in, from that
+ * call's own usage record: the task, the attempt run state is on, and a
+ * reading that is not pending. Taken from the record rather than the profile,
+ * which a resume onto a rebuilt image would have changed (D-R53-03, C5). A
+ * call with no record, or one whose record names no image, is not one a
+ * bundle can be tied to, so the run stops (I5).
+ */
+async function buildCallImage(ctx: LineContext, task: Task): Promise<HarnessImage> {
+  const attempt = attemptsOf(ctx.state, task).starts;
+  for (const ref of [...ctx.state.usage].reverse()) {
+    const record = JSON.parse(decode(await ctx.components.vault.read(ref))) as Partial<UsageRecord>;
+    if (record.taskId !== task.id || record.attempt !== attempt || record.reading?.kind === 'pending') continue;
+    const image = record.harnessImage;
+    if (image === 'no-sandbox' || (typeof image === 'object' && typeof image.id === 'string')) return image;
+    break;
+  }
+  throw new Error(`line: the build call behind task ${task.id}'s result has no usage record naming the image it ran in, so no bundle is written and the run stops (A-R53-01)`);
 }
 
 /**
@@ -1800,6 +1826,8 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
     install: installed.ok ? installed.install : null,
     collectedBy: 'runtime',
     driverProvenanceId: driver.provenanceId(),
+    // Beside the provenance, which names a version, the bytes the build ran in (A-R53-01).
+    harnessImage: await buildCallImage(ctx, task),
     contractVersion: driver.contractVersion,
   };
   const ref = await vault.writeEvidence(evidence);

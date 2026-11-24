@@ -11865,6 +11865,325 @@ Both families counted on the first run. Full record:
   just as R17's denial checks are satisfied by naming the rule. Whether a
   check is adequate is the critic's to judge.
 
+## R53: Harness integrity: the agent CLI by content, the image in evidence
+
+Started on `v2` at b79c699. Issue #169. Builds A-R53-01 (D-A-HI-01).
+
+### D-R53-01: boundary, verified
+
+- **Deliverables:**
+  - Each driver's image directory (`packages/drivers/claude-code/image/`,
+    `packages/drivers/codex/image/`) holds a `package.json` and a
+    `package-lock.json` that pin the CLI and every platform package by
+    version, registry URL, and `sha512` integrity. The Dockerfile installs
+    from that lockfile with `npm ci` and never by package name.
+  - A check that runs in the image build, after the install: every package the
+    lockfile names for the image's platform is installed, at its locked
+    version, with its locked integrity. Anything missing or different fails the
+    build and names the package (D-R53-02 explains why `npm ci` alone does not
+    do this).
+  - Before building, `ensureImage` refuses a lockfile with an entry that has
+    no `sha512` integrity, resolves outside `https://registry.npmjs.org/`, or
+    locks a CLI version other than `CLI_VERSION`. Both lockfile files are part
+    of what `imageTag()` hashes.
+  - `ensureImage` reads the content ID of the image under the tag, and
+    refuses it unless this host recorded building that ID under that tag. It
+    never rebuilds over a mismatch. It returns the content ID, not the tag,
+    and every sandbox it serves is provisioned from that ID.
+  - `buildGraph` refuses a profile whose `buildImage` or any `driverImages`
+    value is not a content ID (`sha256:` and 64 hex digits).
+  - A-R53-01 in `packages/vault/src/types.ts`: `HarnessImage`, and
+    `harnessImage` on `UsageRecord` and `EvidenceBundle`. The line fills both
+    from the image it provisioned, or `no-sandbox` with no profile. Both
+    Vaults refuse `not-recorded` and a malformed ID. Reading a record written
+    before R53 yields `not-recorded`.
+  - `imageId(ref)` in `@olympus-ai/sandbox` reads a reference's content ID
+    from the engine. The drivers' `ensureImage`, the benchmark, and the
+    conformance rigs that run a real engine resolve their profiles with it.
+  - Conformance entries, and changesets for every package changed.
+- **Out of scope (verbatim from #169, "Not in this unit"):**
+  - bumping either CLI's version
+  - the CLI's own settings, such as `permissions.blockWritesOutsideWorkingDirectories`
+    and `CLAUDE_CODE_SUBAGENT_EFFORT`. A setting in the agent's own
+    configuration is not a trust boundary, and the mount already confines writes.
+  - signing or attesting the image
+  - R6's endpoint driver, which runs no third-party harness
+  - an image registry
+
+  The R53 entry in `DECOMPOSITION.md` named none of these. They are added
+  there in this unit's first commit, from #169, which the entry says it
+  carries over.
+- **Acceptance:**
+  - `pnpm -r typecheck`, `pnpm -r lint`, `pnpm -r test`, and `pnpm conformance`
+    pass.
+  - `pnpm --filter @olympus-ai/driver-claude-code exec vitest run test/image.test.ts`
+    and the same for `@olympus-ai/driver-codex` pass locally against Docker.
+    They call no model. Each assertion is shown failing with the control it
+    guards removed.
+  - The paid driver suites run in CI under `run-driver` at merge, as for
+    every unit. Their reports reconcile the new external entries.
+- **Invariants:**
+  - The runtime derives every status, and the model never reports one (I2).
+    The image ID is read from the container engine by the host, never taken
+    from a driver.
+  - Fail closed (I5). A hash mismatch, a missing integrity, an unrecorded
+    or replaced image, a profile image that is not a content ID, and a
+    `not-recorded` write are each refused, never warned about.
+  - Every capability claim has an assertion that fails when the capability
+    is deleted (I8).
+  - No Greek names in code (I10). The new manifests are named
+    `factory-claude-code-image` and `factory-codex-image`.
+- **Pending registry entries owed:** none name R53. New entries are added
+  with their assertions, and the baseline changes only where the kit
+  requires it (recorded at the commit).
+- **Gate paths touched:** `packages/vault/src/types.ts` (A-R53-01), and
+  `packages/conformance/`. Both are declared by #169. The pull request takes
+  `gate-change`, and the squash body carries `Gate-Change: acknowledged`.
+  `.github/workflows/ci.yml` is not changed (D-R53-03, C6).
+
+### D-R53-02: assumptions, each verified
+
+- The dependencies have shipped. `reviewed/P5`, `reviewed/R26`, `reviewed/R9`,
+  and `reviewed/R52` exist (`git tag -l`), and A-R53-01 is on `v2` (b79c699).
+- `vault/src/types.ts` does not yet have `harnessImage` (`grep`). A-R53-01
+  left the type for this unit to build (D-A-HI-01).
+- Both images install by name: `npm install --global "<cli>@${CLI_VERSION}"`
+  (`claude-code/image/Dockerfile`, `codex/image/Dockerfile`). `imageTag()`
+  hashes the base, the version, the Dockerfile, and, for Codex,
+  `catalog.js` (`claude-code/src/image.ts:41`, `codex/src/image.ts`).
+  `ensureImage` returns the tag as soon as `docker image inspect <tag>`
+  succeeds (`claude-code/src/image.ts:104`).
+- **`npm ci` alone does not make an altered hash fail the build. Verified,
+  and it changes the design.** In a probe build, a lockfile with the
+  `@anthropic-ai/claude-code-linux-x64` integrity altered printed "seems to be
+  corrupted. Trying again" twice and then succeeded with exit 0. npm treats a
+  platform package as an optional dependency, so a failed one is skipped. The
+  image then held only `claude-code-linux-x64-musl`, and `claude --version`
+  answered `2.1.330`. The same lockfile unaltered installed
+  `claude-code-linux-x64` and `-musl` both. This is why the build gets its own
+  check after the install.
+- The CLI packages are what #169 says they are. `@anthropic-ai/claude-code@2.1.330`
+  has eight platform packages as `optionalDependencies` and a `postinstall`
+  of `node install.cjs`. Nothing in that script reaches the network: it
+  requires `child_process`, `fs`, `os`, and `path`, and reads its own
+  `package.json` (from the packed tarball). `@openai/codex@0.166.0` has six,
+  aliased `npm:@openai/codex@0.166.0-<platform>`, and no install script.
+  `npm install --package-lock-only` writes lockfile v3 with 9 and 7 entries.
+  Every entry resolves under `https://registry.npmjs.org/` with a `sha512-`
+  integrity.
+- Docker runs an image by its content ID and nothing else. `docker run
+  sha256:cecc…651f` started the local `factory-claude-code:2.1.330-…` image.
+  The container's `{{.Image}}` was the same ID. `docker run sha256:000…0`
+  answered "No such image" and pulled nothing (Docker 29.8.0, local).
+- The line provisions every driver call from `imageFor(profile, driver)`, or
+  `'none'` with no profile (`api/src/line.ts:897`). Every driver call goes
+  through `runTask` (`line.ts:1074`). That is the one writer of
+  `UsageRecord` (`line.ts:1184-1218`), used by build, review, and drafting
+  (`drafting.ts:445`, `:778`, `line.ts:1913`). The nightly seat calls the
+  driver directly and writes no `UsageRecord` (`nightly-review.ts:367`).
+- `EvidenceBundle` is written in `verify`, which reads the build's result
+  from the Vault (`line.ts:1610`, `:1760`). The build call may have run in an
+  earlier process (a resume). So the image comes from the build call's own
+  usage record, not from the profile at verify.
+- `SandboxProvider` (`sandbox/src/types.ts`, F2 §7) reports no image ID, and
+  A-R53-01 does not amend it.
+- Only top-level packages are workspace packages (`pnpm-workspace.yaml`:
+  `packages/*`, `packages/drivers/*`), so `image/package.json` is not one.
+  It matches no protected-path pattern. Both driver packages already publish
+  `image/` (`"files"`).
+- The driver suites run serially (`fileParallelism: false`,
+  `claude-code/vitest.config.ts`). On a pull request without `run-driver`,
+  CI runs only `test/driver.test.ts` (and Codex's `claims.test.ts`)
+  (`ci.yml:168`, `:252`).
+
+### D-R53-03: choices
+
+- **C1. Where the image ID is read.** D-A-HI-01 left two options open: in
+  `ensureImage`, against the recorded build, or again at provision. It
+  recommended both.
+  - *Chosen:* `ensureImage` reads the tag's content ID and checks it against
+    the record. The line then provisions from the ID itself. Docker resolves
+    an ID to exactly that image or refuses (D-R53-02). A tag moved after
+    `ensureImage` cannot change what runs, so the gap between the two reads
+    is closed by design and does not need a second read. The recorded
+    `harnessImage` is the ID the container was started from.
+  - *Rejected:* reading the container's `{{.Image}}` at provision. The
+    provider would have to return it, which changes `SandboxProvider`, a
+    contract A-R53-01 does not amend. That would be a stop. It would also add
+    nothing once the provision names the ID.
+  - *Reverse:* return the tag from `ensureImage` and drop the content-ID
+    check in `buildGraph`. A provision-time read then needs its own amendment
+    to `SandboxProvider`.
+- **C2. The record of what this host built.** Kept outside the image and
+  outside the daemon. It is a directory per tag holding one file per content
+  ID that `ensureImage` built under the tag. The default is `~/.factory/images/`,
+  and `EnsureImageOptions.records` overrides it. A tag whose ID is not in
+  its directory is refused, and so is a tag with no directory. The refusal
+  says to remove the image (`docker image rm <tag>`) so that the next start
+  rebuilds and records it. The ID comes from `docker build --iidfile`, so the
+  record names what this build produced, even if another build moved the tag
+  before it was read.
+  - *Rejected:* one ID per tag. Two builders racing (two hosts on one daemon,
+    or a test beside a host) could each record their own ID and leave the
+    tag pointing at the other's. The next start would then refuse a
+    legitimate image. A set is no weaker: every ID in it is one this host
+    built from the same hashed inputs, because the tag hashes them.
+  - *Rejected:* a label on the image. A replaced image carries whatever
+    labels its author chose.
+  - *Rejected:* the Vault. The image is built before any run exists, and a
+    new Vault operation would be a contract change.
+  - *Known limit:* the record and the daemon belong to the same host user.
+    Anyone who can write both can forge both. Signing and attestation are out
+    of scope (#169).
+  - *Reverse:* delete the records check from `ensureImage`. The tag is then
+    trusted as before.
+- **C3. How a hash mismatch fails the build.** `npm ci` from the lockfile,
+  followed by `check-install.js`. That script is copied into the image and
+  owned by root. It reads the lockfile and npm's record of the install
+  (`node_modules/.package-lock.json`). Every lockfile entry that is not
+  optional, or is optional and matches the image's `os` and `cpu`, must be
+  installed at its locked version with its locked integrity. Otherwise the
+  build fails, naming the package.
+  - *Rejected:* `npm ci` alone. Verified to accept an altered hash on a
+    platform package (D-R53-02).
+  - *Rejected:* `--omit=optional` with the platform package as a direct
+    dependency. The CLI's own `install.cjs` resolves its platform binary from
+    `optionalDependencies`, and changing that is a change to the vendor's
+    install that this unit should not own.
+  - *Reverse:* remove the script's `RUN` line and the script.
+- **C4. Profiles name content IDs.** `buildGraph` refuses a `buildImage` or
+  `driverImages` value that is not `sha256:` and 64 hex digits, so the host
+  fails at composition and not on the first call. `checkImage` and stack
+  images are exempt, because no driver call runs in them and
+  `harnessImage` is a driver call's field. The benchmark and the conformance
+  rigs that run a real engine resolve their references with `imageId()`.
+  - *Rejected:* checking only when a record is written. A bad profile would
+    then refuse as an attempt failure, spend a retry, and repeat.
+  - *Reverse:* drop the check in `buildGraph`. The Vault still refuses a
+    malformed ID at write.
+- **C5. The bundle's image.** `harnessImage` on `EvidenceBundle` is copied
+  from the terminal usage record of the build call that produced the result
+  under verification: the same task, the attempt run state is on, station
+  `build`, and not `pending`. If none is found, the bundle is refused and the
+  run stops (I5), instead of naming an image the build may not have run in.
+  - *Rejected:* `imageFor(profile, driver)` at verify. After a resume onto a
+    rebuilt image, it names an image the build did not run in.
+  - *Reverse:* take it from the profile at verify.
+- **C6. Where the image assertions run.** In each driver's `test/image.test.ts`,
+  registered as external entries. They need Docker and npm and call no model.
+  CI runs them in the driver job under `run-driver`, which every merge runs.
+  The lockfile checks that need neither (the integrity shape, the version
+  match, and no install by name in the Dockerfile) are in `test/driver.test.ts`,
+  which CI runs on every pull request.
+  - *Rejected:* adding `image.test.ts` to the step that calls no model on a
+    pull request. `.github/workflows/ci.yml` is a gate path #169 does not
+    declare, so the change is left for a follow-up and named in the PR body.
+  - *Reverse:* move the files between the two tests.
+- **C7. The nightly seat.** It is provisioned from the host's build image,
+  which is now a content ID, so it runs by ID too. Its record is a nightly
+  part, not a `UsageRecord`, and A-R53-01 gives it no field. That is recorded
+  as a known limit, with an issue filed at ship time.
+
+### D-R53-04: judgment calls made during the work
+
+- **The build logic is shared, and the install check is copied.**
+  `recordedImage()` and `harnessLockProblems()` live in `@olympus-ai/sandbox`,
+  which both drivers already depend on (`package.json`). Before R53, each
+  driver kept its own copy of `ensureImage`. One implementation removes the
+  risk that the two copies drift apart. `check-install.js` has to be inside
+  each build context, because a Docker build cannot copy from outside its
+  context, so each image directory holds a copy. Each copy is proven by its
+  own driver's `I5.<driver>-image-installs-the-cli-by-content`.
+  *Reverse:* move the functions back into each driver's `image.ts`.
+- **`check-install.js`, not `.cjs`.** The lint's project service allows a
+  default project for `*.js`, `*.mjs`, and `*.ts` only (`eslint.config.js`).
+  That file is a gate path #169 does not declare. The script follows
+  `codex/image/catalog.js`: CommonJS with `require`, the same two header
+  comments, and run by plain `node` in a directory whose `package.json` sets no
+  `type`. *Reverse:* rename it and add `*.cjs` to `allowDefaultProject`, in a
+  gate change of its own.
+- **`imageId(ref, { pull: true })`.** The Python rig in `stacks.ts` ran
+  `PYTHON_IMAGE` as its build image, and it worked only because `docker run`
+  pulls a missing image. CI pre-pulls the node base and alpine (`ci.yml:78-82`)
+  but not that image. Reading the ID without pulling would refuse on a cold
+  runner. The pull is allowed only for a reference pinned by digest, so it
+  cannot fetch whatever a tag names that day. A pull by tag is refused before
+  the engine is asked. *Reverse:* drop the option and pre-pull in CI, which
+  is a gate change.
+- **`ensureImage` returns an ID where it returned a tag.** Its four callers
+  (`api/src/host/compose.ts:231`, `claude-code/test/harness.ts:379`,
+  `codex/test/harness.ts:135`, and `benchmark/test/tiers/model.tier.ts:55`)
+  each pass the value to a sandbox as its image, and Docker runs an ID as it
+  ran the tag (D-R53-02). None of them reads it as a name.
+- **The real tag in the external test.** `I5.<driver>-image-replaced-is-refused`
+  builds or accepts the real tag through `ensureImage()` with the default
+  records, as the host would. A record in a temporary directory would leave
+  the daemon holding a tag that the next `ensureImage()` refuses, in the CI
+  job that runs the paid suites afterwards and on a maintainer's machine. The
+  refusals are shown against empty and foreign record directories for that
+  tag. The true retag is shown on a tag of the test's own, which is removed
+  afterwards.
+- **The assertion's reviewer has a provenance of its own.** The rig's two
+  stubs share `provenanceId()`, so a `driverImages` entry keyed by it would
+  have caught the builder too. `I2.harness-image-recorded-by-the-runtime`
+  gives the reviewer its own ID, so the profile provisions each seat from a
+  different image, and a line that recorded the build image for both is
+  caught.
+- **Each control, deleted, fails its assertion.** Run locally:
+  - Without `node check-install.js` in the Dockerfile, the altered platform
+    hash built (`expected null to be an instance of Error`).
+  - With `npm install --global` by name in place of the lockfile, the image
+    has no `/opt/cli/node_modules/.package-lock.json`.
+  - Without the records check in `recordedImage`, the refusal resolved.
+  - Without `buildGraph`'s check, a tag profile was not refused.
+  - With the line recording `no-sandbox` always, the build call names no
+    image.
+  - With the bundle taking the profile's image, a bundle was written for a
+    build call whose record named none.
+  - Without the Vault's checks, three Vault tests fail.
+- **The lockfile is committed as `image/cli-lock.json`.** Found by
+  `I9.packaged-host-runs`: a packed package never carries a file named
+  `package-lock.json` (`pnpm pack` shipped `image/Dockerfile`,
+  `check-install.js`, and `package.json` only). An installed host then
+  refused to start because it had no lockfile to check. The Dockerfile copies
+  the file in as `/opt/cli/package-lock.json`, where `npm ci` reads it.
+  *Rejected:* `npm-shrinkwrap.json`. Whether a packer ships one below the
+  package root is a rule this unit cannot pin. *Reverse:* rename it back and
+  add it to the package's `files`, if a packer is found that ships it.
+
+### D-R53-05: review fixes, and one known limit
+
+From the triage (`docs/reviews/2026-11-22-R53-harness-integrity-triage.md`).
+
+- **codex-2, fixed (ddcca04).** `I2.harness-image-recorded-by-the-runtime`
+  compared records with the profile's constants. It now wraps the rig's
+  sandbox, requires each image to be named by as many call records as
+  sandboxes were provisioned from it, and runs a line whose build record names
+  an image the profile does not, so a bundle that took the profile's image
+  fails. *Reverse:* drop the provision capture and the third line.
+- **codex-3, fixed (8f959bc).** Claude Code's lockfile also requires
+  `-linux-x64-musl`, an optional entry that names no `libc`, so npm installs it
+  and `check-install.js` requires it. The image test checked only the CLI and
+  the plain platform package. Both drivers' tests now derive the required set
+  from the lockfile by npm's rule, check each one, and alter each required
+  optional entry's hash. Codex's lockfile has no such entry, and its test is
+  changed only so that both drivers stay alike.
+- **codex-1, known limit, with a test (8f959bc).** `check-install.js` compares
+  npm's recorded integrity and the installed `package.json` versions. It
+  hashes no installed file. The bytes come from tarballs that `npm ci` verified
+  against the lockfile's sha512. The one lifecycle script either lockfile
+  declares is Claude Code's `install.cjs`. It was read in the built image: it
+  uses no network, and it links the platform package's binary over the
+  placeholder. Claude Code's image test now requires the executable on PATH to
+  be byte-identical to that binary. `--ignore-scripts` was rejected, because
+  it would leave the placeholder as the CLI. Hashing every installed file
+  against the lockfile was rejected too: the lockfile pins tarballs, not
+  files, so the expected hashes would have to be committed separately, and
+  that is a lockfile format this unit does not define. *Owner:* a later CLI
+  bump that adds a lifecycle script, or changes this one, re-reads it. A
+  version bump is a reviewed lockfile diff, and `hasInstallScript` shows in
+  that diff.
+
 ### D-A-FO-01: every finding R28 measures names what it cites, and outcomes are runtime records (A-R28-01)
 
 R28 (#109) asks for an outcome on every finding the line raises, derived by

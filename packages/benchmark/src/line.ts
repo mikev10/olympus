@@ -30,7 +30,7 @@ import {
 } from '@olympus-ai/core';
 import { BASE_IMAGE } from '@olympus-ai/driver-claude-code';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
-import { LocalDockerProvider, type SandboxHandle, type SandboxProvider, type SandboxSpec } from '@olympus-ai/sandbox';
+import { imageId, LocalDockerProvider, type SandboxHandle, type SandboxProvider, type SandboxSpec } from '@olympus-ai/sandbox';
 import { LocalVault, type EnforcementDecision, type Vault } from '@olympus-ai/vault';
 import { DEFAULT_ARMS, repoDir, type Arm, type Corpus, type Item, type RepoPolicy } from './corpus.js';
 import { BENCH_TOOLS, BenchStub, ScriptedSeat } from './seats.js';
@@ -236,7 +236,8 @@ export async function throughTheLine(bench: Bench, corpus: Corpus, item: Item, a
     reviewer: new BenchStub(),
     workspaces: localWorkspaceStore({ root: join(root, 'trees'), user: bench.user }),
     integrator: null,
-    profile: { buildImage: BASE_IMAGE, checkImage: BASE_IMAGE, limits: DEFAULT_LIMITS },
+    // The scripted seat runs in the base, named by its content ID as every driver call's image is (A-R53-01).
+    profile: { buildImage: await imageId(BASE_IMAGE, { pull: true }), checkImage: BASE_IMAGE, limits: DEFAULT_LIMITS },
   });
   const policy = benchPolicy(policyOf);
   const runId = name as RunId;

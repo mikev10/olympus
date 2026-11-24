@@ -8,7 +8,10 @@
  * a stream that is recorded rather than produced. The recorded lines are real
  * output from the pinned CLI version, trimmed.
  */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
+import { imageContext, lockProblems } from '../src/image.js';
 import type { SandboxHandle, SandboxProvider, SandboxSpec, Teardown } from '@olympus-ai/sandbox';
 import type { Budget, CompiledRole, RoleId, TaskId, TaskRequest } from '@olympus-ai/core';
 import {
@@ -802,5 +805,21 @@ describe('small parts', () => {
     expect([...DECLARED_TOOLS].sort((a, b) => a.localeCompare(b))).toEqual([...DECLARED_TOOLS]);
     expect(new Set(DECLARED_TOOLS).size).toBe(DECLARED_TOOLS.length);
     expect(DECLARED_TOOLS.some((t) => t.startsWith('mcp__'))).toBe(false);
+  });
+});
+
+
+describe('the image pins the CLI by content (R53)', () => {
+  test('the lockfile pins the CLI at CLI_VERSION and every package by sha512 from the registry, and the Dockerfile installs from it and never by name', () => {
+    expect(lockProblems()).toEqual([]);
+    const instructions = readFileSync(join(imageContext(), 'Dockerfile'), 'utf8')
+      .split('\n')
+      .filter((line) => !line.trimStart().startsWith('#'))
+      .join('\n');
+    expect(instructions).toMatch(/COPY package\.json check-install\.js \/opt\/cli\//);
+    expect(instructions).toMatch(/COPY cli-lock\.json \/opt\/cli\/package-lock\.json/);
+    expect(instructions).toMatch(/npm ci --no-fund --no-audit/);
+    expect(instructions).toMatch(/node check-install\.js \/opt\/cli/);
+    expect(instructions).not.toMatch(/npm (?:install|i|add|update)\b|\bnpx\b|\byarn\b|\bpnpm\b/);
   });
 });

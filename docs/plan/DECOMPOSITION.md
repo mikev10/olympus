@@ -3346,6 +3346,14 @@ not have to parse an image ID out of it. Confirmed as the field on
 paid driver jobs rerun because the images change, so the pull request takes
 `gate-change`.
 
+**Out of scope** (from #169, which this entry carries over): bumping
+either CLI's version; the CLI's own settings, such as
+`permissions.blockWritesOutsideWorkingDirectories` and
+`CLAUDE_CODE_SUBAGENT_EFFORT`, since a setting in the agent's own
+configuration is not a trust boundary and the mount already confines
+writes; signing or attesting the image; R6's endpoint driver, which runs
+no third-party harness; and an image registry.
+
 **Why after R52:** the lockfile pins the version R52 moves to, so the bump
 is not done twice.
 

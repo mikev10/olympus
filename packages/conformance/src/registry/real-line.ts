@@ -18,7 +18,7 @@ import { lineScope, linePolicy, type LineRig } from './line.js';
 
 /** Real components over the rig's store. Needs a Docker daemon, as the sandbox assertions do. */
 export async function realComponents(rig: LineRig): Promise<BuiltGraph> {
-  const [{ buildGraph, GitHubIntegrator }, { LocalDockerProvider }, { LocalVault }, driverPackage] = await Promise.all([
+  const [{ buildGraph, GitHubIntegrator }, { imageId, LocalDockerProvider }, { LocalVault }, driverPackage] = await Promise.all([
     import('@olympus-ai/api'),
     import('@olympus-ai/sandbox'),
     import('@olympus-ai/vault'),
@@ -37,7 +37,8 @@ export async function realComponents(rig: LineRig): Promise<BuiltGraph> {
     workspaces: rig.workspaces,
     // Attested like the host's, and never called: no assertion over this graph drives a run to integrate.
     integrator: new GitHubIntegrator({ repository: 'conformance/never-reached', baseBranch: 'main', token: 'placeholder-never-sent', apiBase: 'http://127.0.0.1:9' }),
-    profile: { buildImage: driverPackage.BASE_IMAGE, checkImage: driverPackage.BASE_IMAGE, limits: { cpus: 1, memoryMb: 512, pids: 128 } },
+    // A driver call's image is named by its content ID (A-R53-01); no call is made over this graph, so the base serves.
+    profile: { buildImage: await imageId(driverPackage.BASE_IMAGE, { pull: true }), checkImage: driverPackage.BASE_IMAGE, limits: { cpus: 1, memoryMb: 512, pids: 128 } },
   });
 }
 

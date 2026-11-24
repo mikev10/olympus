@@ -304,7 +304,7 @@ export const PYTHON_RUN_REACHES_INTEGRATE: LocalAssertion = runtime({
     "a run on a Python repository reaches integrate on the Docker provider: the runtime installs its uv.lock from PyPI in the Python image, the locked pytest acceptance test fails over the base and passes over the builder's change in that image with no egress, and the admission records the stack as pytest@8 (R29, needs Docker and the network)",
   timeoutMs: 1_200_000,
   run: async () => {
-    const [{ startRun, readRunRecords }, { INSTALLERS, PYPI_REGISTRIES, PYTHON_IMAGE, STATIC_ANALYSIS_IMAGE }, { LocalDockerProvider }, { BASE_IMAGE }] = await Promise.all([
+    const [{ startRun, readRunRecords }, { INSTALLERS, PYPI_REGISTRIES, PYTHON_IMAGE, STATIC_ANALYSIS_IMAGE }, { imageId, LocalDockerProvider }, { BASE_IMAGE }] = await Promise.all([
       api(), adapters(), import('@olympus-ai/sandbox'), import('@olympus-ai/driver-claude-code'),
     ]);
     await withLine('r29-line-', async (rig) => {
@@ -325,7 +325,8 @@ export const PYTHON_RUN_REACHES_INTEGRATE: LocalAssertion = runtime({
       const components = await rig.components({
         sandbox, driver, reviewer: driver, installers: INSTALLERS,
         // The profile's check image is Node's, with no Python in it: a check that ran there, not in the Python set's own image, could not pass.
-        profile: { buildImage: PYTHON_IMAGE, checkImage: BASE_IMAGE, limits: { cpus: 2, memoryMb: 2048, pids: 512 } },
+        // The build image by its content ID, as every driver call's is (A-R53-01).
+        profile: { buildImage: await imageId(PYTHON_IMAGE, { pull: true }), checkImage: BASE_IMAGE, limits: { cpus: 2, memoryMb: 2048, pids: 512 } },
       }, { work: false });
       const policy = await linePolicy({}, { installRegistries: [...PYPI_REGISTRIES] });
       const request = await rig.request(components, { policy, artifacts: { ...ARTIFACTS, acceptanceTests: [...ARTIFACTS.acceptanceTests, test] } });

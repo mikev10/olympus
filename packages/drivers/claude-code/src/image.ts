@@ -2,49 +2,67 @@
  * The image a task runs in.
  *
  * No published image carries the Claude Code CLI, so this package builds one
- * rather than pulling one. Both inputs are pinned — the base by digest, the
- * CLI by exact version — so the image is a function of two constants in this
- * file and `image/Dockerfile`, and a reviewer who builds it gets what CI
- * built. The tag carries the CLI version, so bumping the version builds a
- * different image instead of quietly replacing one under the same name.
+ * rather than pulling one. Every input is pinned: the base by digest, and the
+ * CLI and each of its platform packages by `sha512` in `image/cli-lock.json`,
+ * which the image installs from and never by name (R53). A version number
+ * names a release, not its contents; the lockfile names the contents, so a
+ * version bump is a reviewed lockfile diff and cannot happen through the
+ * registry alone.
+ *
+ * The image is checked by content too. `ensureImage` returns the content ID
+ * of an image this host recorded building, and refuses any other the daemon
+ * holds under the tag; the line provisions from that ID and records it in
+ * the evidence as `harnessImage` (A-R53-01).
  *
  * This is beside the image `packages/sandbox` pins for its own suite, not
  * downstream of it: that one is an alpine that has to run `sh`, this one has
  * to run a model runner, and neither should move because the other did.
  */
-import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { harnessLockProblems, recordedImage, SandboxRefusal } from '@olympus-ai/sandbox';
 import { refuse } from './refusal.js';
 
 /** The base, by digest. `node:22-bookworm-slim` at the time it was pinned. */
 export const BASE_IMAGE = 'node@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5';
 
-/** The CLI, by exact version. Never a range: a range makes the image a function of the day it was built. */
+/** The CLI's package. */
+export const CLI_PACKAGE = '@anthropic-ai/claude-code';
+
+/**
+ * The CLI, by exact version: the version the lockfile pins, which
+ * `ensureImage` refuses to build if the two differ. The provenance ID and the
+ * model identity report it.
+ */
 export const CLI_VERSION = '2.1.330';
+
+/** Every file of the build context, each hashed into the tag. */
+const CONTEXT_FILES = ['Dockerfile', 'package.json', 'cli-lock.json', 'check-install.js'] as const;
+
+/**
+ * Where this host records the content ID of every image it built. A tag the
+ * daemon holds with an ID not recorded here is refused. Removing a record
+ * makes the next start refuse its image until the image is removed and
+ * rebuilt; it never makes an image trusted.
+ */
+export const IMAGE_RECORDS = join(homedir(), '.factory', 'images');
 
 /**
  * The tag the built image carries, derived from everything that decides what is
- * in it: the Dockerfile's bytes, the base digest, and the CLI version.
+ * in it: every file of the build context and the base digest.
  *
- * A tag naming the CLI version alone does not identify the image. `ensureImage`
- * returns as soon as the daemon holds the tag, so changing the Dockerfile or
- * the base while leaving the CLI version alone left every machine that had
- * built the old one running it -- old runtime bytes under a report that hashes
- * the new source and blesses the result as current. Deriving the tag from the
- * inputs makes that impossible: different inputs are a different tag, and a
- * different tag is a build.
+ * A tag naming the CLI version alone does not identify the image. Deriving the
+ * tag from the inputs means different inputs are a different tag, and a
+ * different tag is a build: a changed lockfile builds a new image rather than
+ * leaving an old one running under a report that hashes the new source.
  */
 export function imageTag(): string {
-  const dockerfile = readFileSync(join(imageContext(), 'Dockerfile'));
-  const digest = createHash('sha256')
-    .update(`${BASE_IMAGE}\n${CLI_VERSION}\n`)
-    .update(dockerfile)
-    .digest('hex')
-    .slice(0, 16);
-  return `factory-claude-code:${CLI_VERSION}-${digest}`;
+  const hash = createHash('sha256').update(`${BASE_IMAGE}\n${CLI_VERSION}\n`);
+  for (const file of CONTEXT_FILES) hash.update(`${file}\n`).update(readFileSync(join(imageContext(), file)));
+  return `factory-claude-code:${CLI_VERSION}-${hash.digest('hex').slice(0, 16)}`;
 }
 
 /** The directory holding the Dockerfile, resolved from this module rather than from the caller's cwd. */
@@ -52,31 +70,10 @@ export function imageContext(): string {
   return join(dirname(fileURLToPath(import.meta.url)), '..', 'image');
 }
 
-interface Ran {
-  readonly exitCode: number;
-  readonly stderr: string;
-}
-
-function docker(executable: string, args: string[], timeoutMs: number): Promise<Ran> {
-  return new Promise((resolvePromise, rejectPromise) => {
-    const child = spawn(executable, args, { shell: false, stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
-    const stderr: Buffer[] = [];
-    const timer = setTimeout(() => {
-      child.kill('SIGKILL');
-      rejectPromise(new Error(`docker ${args[0] ?? ''} did not finish within ${String(timeoutMs)}ms`));
-    }, timeoutMs);
-    child.stderr.on('data', (chunk: Buffer) => {
-      stderr.push(chunk);
-    });
-    child.on('error', (error: Error) => {
-      clearTimeout(timer);
-      rejectPromise(error);
-    });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      resolvePromise({ exitCode: code ?? 1, stderr: Buffer.concat(stderr).toString('utf8') });
-    });
-  });
+/** Why the image's manifest and lockfile do not pin `CLI_VERSION` by content, or none. */
+export function lockProblems(): string[] {
+  const read = (file: string): unknown => JSON.parse(readFileSync(join(imageContext(), file), 'utf8'));
+  return harnessLockProblems(read('package.json'), read('cli-lock.json'), { name: CLI_PACKAGE, version: CLI_VERSION });
 }
 
 export interface EnsureImageOptions {
@@ -84,11 +81,15 @@ export interface EnsureImageOptions {
   readonly executable?: string;
   /** How long a build may take. Installing the CLI pulls from npm. */
   readonly timeoutMs?: number;
+  /** Where built images are recorded. Defaults to `IMAGE_RECORDS`. */
+  readonly records?: string;
 }
 
 /**
- * Builds the image if the daemon does not already hold the tag, and returns
- * the tag.
+ * The content ID of the image a task runs in: built if the daemon does not
+ * hold the tag, accepted if it holds the tag as an image this host recorded
+ * building, and refused otherwise. A lockfile that does not pin the CLI by
+ * content is refused before anything is built (I5).
  *
  * Building on the host is deliberate: the host's network is the developer's
  * own, and the container this produces reaches only what the sandbox's egress
@@ -97,30 +98,19 @@ export interface EnsureImageOptions {
  * at run time as the sandbox's one writable mount.
  */
 export async function ensureImage(options: EnsureImageOptions = {}): Promise<string> {
-  const executable = options.executable ?? 'docker';
-  const timeoutMs = options.timeoutMs ?? 600_000;
-  const tag = imageTag();
-
-  const present = await docker(executable, ['image', 'inspect', tag], 60_000).catch((error: unknown) => {
-    refuse('image', `the Docker daemon could not be reached to look for ${tag}: ${String(error)}`);
-  });
-  if (present.exitCode === 0) return tag;
-
-  const built = await docker(
-    executable,
-    [
-      'build',
-      '--build-arg', `BASE=${BASE_IMAGE}`,
-      '--build-arg', `CLI_VERSION=${CLI_VERSION}`,
-      '--tag', tag,
-      imageContext(),
-    ],
-    timeoutMs,
-  ).catch((error: unknown) => {
-    refuse('image', `building ${tag} did not finish: ${String(error)}`);
-  });
-  if (built.exitCode !== 0) {
-    refuse('image', `building ${tag} failed with exit code ${String(built.exitCode)}: ${built.stderr.trim()}`);
+  const problems = lockProblems();
+  if (problems.length > 0) refuse('image', `the image's lockfile does not pin the CLI by content, so nothing was built: ${problems.join('; ')}`);
+  try {
+    return await recordedImage({
+      tag: imageTag(),
+      context: imageContext(),
+      buildArgs: { BASE: BASE_IMAGE },
+      records: options.records ?? IMAGE_RECORDS,
+      ...(options.executable === undefined ? {} : { executable: options.executable }),
+      ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+    });
+  } catch (error) {
+    if (error instanceof SandboxRefusal) refuse('image', error.message);
+    throw error;
   }
-  return tag;
 }

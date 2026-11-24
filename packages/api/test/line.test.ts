@@ -907,7 +907,7 @@ describe('cost is what the relay counted, recorded per driver call (I2)', () => 
   });
 
   test('a call whose usage the relay could not read makes its total a lower bound, counted apart from exact calls (D-P13-19)', () => {
-    const base = { runId, taskId: hello, station: 'build' as const, attempt: 1, model: new ChosenDriver().resolveModel('standard'), role: { id: 'builder' as RoleId, sha256: '0'.repeat(64) }, driver: 'stub@1', timing: 'not-recorded' as const, collectedBy: 'runtime' as const };
+    const base = { runId, taskId: hello, station: 'build' as const, attempt: 1, model: new ChosenDriver().resolveModel('standard'), role: { id: 'builder' as RoleId, sha256: '0'.repeat(64) }, driver: 'stub@1', timing: 'not-recorded' as const, harnessImage: 'no-sandbox' as const, collectedBy: 'runtime' as const };
     const exact = { kind: 'metered' as const, calls: 1, inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0.01, exhausted: 'none' as const, refused: 0 };
     expect(costTotals([{ ...base, reading: exact }]).run).toMatchObject({ bound: 'exact', metered: { unreadable: 0 } });
     const totals = costTotals([{ ...base, reading: exact }, { ...base, attempt: 2, reading: { ...exact, exhausted: 'unreadable' } }]);
@@ -916,7 +916,8 @@ describe('cost is what the relay counted, recorded per driver call (I2)', () => 
 });
 
 describe('the line provisions what the graph and the policy name (D-I1a-01, A-I1a-02)', () => {
-  const PROFILE = { buildImage: 'build-image', checkImage: 'check-image', limits: { cpus: 1, memoryMb: 512, pids: 64 } };
+  const BUILD_IMAGE = `sha256:${'b'.repeat(64)}`;
+  const PROFILE = { buildImage: BUILD_IMAGE, checkImage: 'check-image', limits: { cpus: 1, memoryMb: 512, pids: 64 } };
   const PRICE = { inputPerMTok: 1, outputPerMTok: 5, cacheReadPerMTok: 0.1, cacheWritePerMTok: 1.25, cacheWrite1hPerMTok: 2 };
   const RELAY: Omit<RelaySpec, 'budget'> = { upstream: 'https://models.example', paths: ['/v1/messages'], header: 'x-api-key', scheme: 'raw', credential: 'model', urlVariable: 'MODEL_URL', meter: { dialect: 'anthropic-messages', prices: { stub: PRICE, 'another-model': PRICE } } };
 
@@ -932,7 +933,7 @@ describe('the line provisions what the graph and the policy name (D-I1a-01, A-I1
     await startRun(runRequest(runId, workspace, { ...components, sandbox, driver, reviewer: new ChosenDriver({ family: 'other' }), profile: PROFILE }));
     const build = sandbox.specs.find((s) => s.relay !== undefined);
     expect(build).toMatchObject({
-      image: 'build-image',
+      image: BUILD_IMAGE,
       limits: { cpus: 1, memoryMb: 512, pids: 64, wallClockMs: 60_000 },
       relay: { ...RELAY, meter: { ...RELAY.meter, prices: { stub: PRICE } }, budget: { maxTokens: 1000, maxCostUsd: 1 } },
       mounts: { others: [] },
