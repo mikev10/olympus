@@ -12503,3 +12503,156 @@ missing check.
   not readiness, and its port says so where it is built. L3 is now
   unreachable through admission everywhere, as it already was through the
   factory host, until a unit gives a scan a way to grant it.
+
+## R28: Finding outcomes, derived by the runtime
+
+Started on `v2` at 2767a57, after A-R28-01 (D-A-FO-01) merged as #219.
+Every dependency (P14, R2, R9, R13b, R19, R29) is merged and tagged
+`reviewed/*` (`git tag -l 'reviewed/*'`).
+
+### D-R28-01: boundary, verified
+
+- **Deliverables:**
+  - Located review findings: the reviewer and the security seat end with
+    `{"findings": [{ "category", "path", "line" }, …]}`, read strictly; an
+    unlocated finding is refused with its cause, an unreadable result is
+    recorded as unreadable, and the findings record sits beside the result.
+    The task's status is unchanged.
+  - Located critic findings: `{"findings": [{ "path", "note" }, …]}`, `path`
+    one of the draft's files.
+  - Line coverage in the evidence: both coverage adapters report each changed
+    file's executed and unexecuted changed lines; `TamperReport` records them
+    beside `coverageDelta`.
+  - Derived outcomes: `resolved` (code and critic rules), `dismissed` (a
+    person's, API and CLI, cause and no text), `open` (no record).
+  - Write-once outcome records, content-addressed, `collectedBy: 'runtime'`.
+  - R2 rates per reviewer family and per seat kind, each with sample and bound.
+  - The contract amendments the entry lists, the role texts, the assertions,
+    and changesets.
+- **Out of scope, verbatim:** "changing which reviewers are seated based on
+  the rate (R11's); turning a review finding into a status or a send-back
+  (M3's rubric and panel); resolving a finding fixed outside Olympus, which
+  stays open until a person dismisses it."
+- **Acceptance, as commands:** `pnpm typecheck`, `pnpm lint`, `pnpm test`,
+  `pnpm conformance`, with an assertion per deliverable sentence, each failing
+  when its behaviour is deleted (I8), the six the entry names among them.
+- **Invariants touched:**
+  - I2: no model reports an outcome or a status; a review finding never
+    moves its task's status; outcomes come from diffs, evidence, draft
+    records, or a person.
+  - I5: unlocated, unreadable, unmappable, or uncovered leaves a finding open.
+  - I7: a review finding's note stays in the claim and enters no prompt; a
+    critic's note goes to its drafter as today (D-A-DS-07's exception).
+  - I1: outcomes are written by the runtime through named Vault operations.
+  - I6: rates are keyed by the seat's recorded family, never an inferred one.
+  - I8, I10.
+- **Pending registry entries owed:** none. `grep -rn R28
+  packages/conformance/src packages/conformance/pending-baseline.json` finds
+  nothing.
+- **Gate paths:** `packages/{vault,integrity,adapters}/src/types.ts` and
+  `packages/conformance/` are protected (`.github/protected-paths.txt`), so
+  the pull request carries `gate-change`, as the entry declares.
+
+**Assumptions, each verified:**
+
+- A review seat's task passes whatever its claim says, recorded through
+  `recordTaskResult` and `commit(... 'passed')`
+  (`packages/api/src/line.ts:1952-1957`). The security seat is the same path
+  (`line.ts:1899`).
+- The tree a seat reviews is the latest accepted tree, `accepted(ctx).tree`,
+  copied to the seat's view filtered by its grants (`line.ts:1833-1845`,
+  `1383-1397`); its line numbers are that tree's.
+- That tree is the tree `integrate` pushes: `IntegrationOpened.commit` is
+  "`baseCommit`'s tree with the accepted diff applied", its only parent
+  `baseCommit` (`packages/vault/src/types.ts:459-463`).
+- The nightly tree reviewer's strict read, `readReviewResult` and
+  `elementFields`, with `held.has(path)` and `lineCount`, already locates a
+  file and line and refuses `unlocated` / `unrecordable`
+  (`packages/api/src/nightly-review.ts:231-262`, `539-563`); the
+  `nightly-tree-finding` schema checks category, path, and line
+  (`packages/core/src/trigger/schemas.ts:196-200`).
+- A critic's result is `string[]`, read by `readCriticResult`
+  (`packages/api/src/drafting.ts:721-734`), counted for send-back
+  (`drafting.ts:251`), and sent to the drafter as `critic-findings`
+  (`drafting.ts:381`).
+- A draft records each file's path and hash (`DraftRecord.files`,
+  `types.ts:598-613`); the locked draft's files are in `DraftLockRecord`
+  (`types.ts:646-654`); `readBaseRun(runId, draft)` names a draft's base
+  record or null (Vault interface).
+- Every pinned coverage check is refused at `verify`, so `coverageDelta` is
+  null in every real run (`line.ts:1576-1589`, D-P7-05). M3 owns the channel.
+- `analyzeTamper(base, head)` takes `base` as the prior accepted tree and
+  `head` as the task's tree (`line.ts:1676`,
+  `packages/api/src/tamper.ts:161-187`). Both adapters build per-file
+  executed sets before counting (`packages/adapters/src/coverage.ts:147-176`,
+  `packages/adapters/src/python/coverage.ts:87-136`).
+- `integrate` has no local checkout: `GitHubIntegrator` works over the API
+  (`packages/api/src/integrate.ts:136-252`). The history walk has one, the
+  merged runs with their merge commits, and `firstParents`, `commitOf`,
+  `commitDiff` (`packages/api/src/observe.ts:237-330`,
+  `packages/api/src/history.ts`).
+- Candidate dismissal takes `{cause}` only, from `DISMISSAL_CAUSES`
+  (`packages/api/src/http/server.ts:240-248`, `599-611`). The CLI has no
+  dismiss command (`grep -n dismiss packages/cli/src` is empty).
+- R2's rates are `Proportion`s with a one-sided Clopper–Pearson bound
+  (`packages/api/src/bounds.ts:15-50`), derived purely by `deriveOutcomes`
+  (`packages/api/src/outcomes.ts:572`); `Outcomes` lives in `outcomes.ts`,
+  not a gate path.
+- A write-once record per key is `createExclusive` on a name beside a
+  content-addressed object (`recordBaseRun`,
+  `packages/vault/src/local/vault.ts:998-1012`).
+
+**Where the code differs from the entry:**
+
+- The pinned coverage check the code-finding rule reads cannot occur in a
+  real run (above). Raised as a stop; the maintainer chose option A on
+  2026-11-23: build the rule as amended, reachable only when M3's channel
+  lands; prove it with an injected report; record the limit as M3's; and R2
+  reports a code-finding resolved rate as `unmeasured`, with its cause, never
+  as 0 of n, when no run in the window recorded line coverage. Rejected: R28
+  builds the channel (M3's, and a suite-written hit count would decide an
+  outcome, I3); move the rule to M3 (a deliverable leaves the unit).
+- D-A-FO-01 recommended deriving resolutions when `integrate` merges.
+  `integrate` has no checkout to map lines through; the history walk does.
+
+**Choice points:**
+
+1. *The commit a review seat's finding is read against.* Chosen: the
+   finding's run's `IntegrationOpened.commit`, whose tree is the reviewed
+   tree. Line numbers are fixed at review time; the commit is joined when
+   the run merges. A run that never merged cited code that never landed: its
+   findings stay open. A nightly tree finding's commit is its subject's
+   `commit`. Rejected: the run's `baseCommit` (the cited line is in the
+   changed tree, not the base). Reverse: name `baseCommit` and map through
+   the run's own diff.
+2. *When resolutions are derived.* Chosen: in the history walk, for each
+   merged run it walks, over the code findings open at that point.
+   Rejected: at `integrate` (no checkout). Reverse: give `integrate` a
+   checkout and call the same derivation there.
+3. *Mapping a line through history.* Chosen: a zero-context diff from the
+   finding's commit to the resolving run's `baseCommit`. A hunk whose old
+   side holds the line means it was rewritten in between: unmappable, open.
+   Otherwise the line shifts by the hunks wholly before it. A cited file
+   absent at either end is unmappable. Reverse: walk commit by commit.
+4. *Whose coverage counts for the resolving run.* Chosen: the latest
+   accepted bundle's, whose head tree is the integrated tree, so its line
+   numbers are the resolving diff's new side; its coverage check must be
+   recorded and passed. An earlier task's report is in another tree's
+   numbering and is not read. A hunk with no new-side line (a pure deletion)
+   has nothing to execute and resolves nothing. Reverse: map each bundle's
+   lines forward.
+5. *How findings are named.* Chosen: by source and index, the source a
+   review findings record, a critic record, or a nightly record, each by its
+   hash. Nightly findings join directly, not through candidates, since a
+   finding can have no candidate. Reverse: key nightly findings by candidate.
+6. *Where a review seat's findings live.* Chosen: a content-addressed
+   `review-findings` record under the run, listed like decisions, so
+   `RunState` does not change. Reverse: add a ref to `RunState`.
+7. *A critic finding naming another path.* Chosen: kept in the record as
+   refused `unlocated`, never measured; it still sends the draft back with
+   the runtime's own text, as an unreadable result does today, since it is
+   not a clean result (I5). Reverse: drop refused findings from send-back.
+8. *A critic record stored before R28* holds strings. Chosen: each is read
+   as refused `recorded-before`, never measured. Reverse: refuse to read it.
+9. *Role text.* Each seat's role states the JSON result shape and that a
+   note is read by a person, never the runtime, as R13b's tree prompt does.
