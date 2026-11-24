@@ -335,6 +335,13 @@ export type RunOutcome =
    * (R40): refused, never downgraded, naming the probe or the scan limit
    * that holds the ceiling.
    */
+  /** A run above L0 with no readiness scan (A-R40-02): refused, never admitted on the policy terms alone. */
+  | {
+      readonly ok: false;
+      readonly reason: 'readiness-unscanned';
+      readonly requestedLevel: AutonomyLevel;
+      readonly detail: string;
+    }
   | {
       readonly ok: false;
       readonly reason: 'readiness-refused';
@@ -712,19 +719,31 @@ async function templateOf(req: RunRequest, policy: Policy): Promise<{ ok: true; 
  * a resume holds the run to what admission found rather than to what its
  * caller says now (D-P8-03).
  */
-export function admissionRefusal(record: AdmissionRecord): Extract<RunOutcome, { reason: 'controls-unavailable' | 'readiness-refused' }> | undefined {
+export function admissionRefusal(record: AdmissionRecord): Extract<RunOutcome, { reason: 'controls-unavailable' | 'readiness-unscanned' | 'readiness-refused' }> | undefined {
   const level = record.run.requestedLevel;
-  // A record written before R40 has no term, and is read as not scanned: the policy terms bind alone.
+  // Controls first: no scan grants L3, so the readiness check refuses every L3 run, and run first it would hide
+  // the control an L3 run lacks (A-R40-02).
+  if (level === 3 && record.unavailableControls.length > 0) {
+    return { ok: false, reason: 'controls-unavailable', requestedLevel: level, unavailable: [...record.unavailableControls] };
+  }
+  if (level === 0) return undefined;
+  // Above L0 a scan is required (A-R40-02): a record with no term (written before R40) or one R40 wrote with no
+  // scanner is refused, on admission and on resume alike.
   const readiness = record.readiness;
-  if (readiness?.kind === 'scanned' && level > readiness.level) {
+  if (readiness?.kind !== 'scanned') {
+    return {
+      ok: false, reason: 'readiness-unscanned', requestedLevel: level,
+      detail: `L${String(level)} requested with no readiness scan of the base commit. A run above L0 needs one; refused, not admitted on the policy terms alone.`,
+    };
+  }
+  if (level > readiness.level) {
     const held = readiness.heldBy.kind === 'probe' ? `held by probe ${readiness.heldBy.probe}` : 'no scan grants L3';
     return {
       ok: false, reason: 'readiness-refused', requestedLevel: level, ceiling: readiness.level, heldBy: readiness.heldBy, commit: readiness.commit,
       detail: `L${String(level)} requested exceeds the readiness ceiling L${String(readiness.level)} of commit ${readiness.commit} (${held}). Refused, not downgraded.`,
     };
   }
-  if (level < 3 || record.unavailableControls.length === 0) return undefined;
-  return { ok: false, reason: 'controls-unavailable', requestedLevel: level, unavailable: [...record.unavailableControls] };
+  return undefined;
 }
 
 /**
@@ -1038,9 +1057,10 @@ async function hasState(vault: Vault, runId: RunId): Promise<boolean> {
  */
 async function readinessAt(req: RunRequest): Promise<RecordedReadiness> {
   const port = req.readiness ?? null;
-  if (port === null) return { kind: 'not-scanned', because: 'no-scanner' };
   // ScanLevel stops at L2, so no ceiling is below L0 and an L0 run spends no scan.
   if (req.requestedLevel === 0) return { kind: 'not-scanned', because: 'level-zero' };
+  // Recorded, then refused by admissionRefusal (A-R40-02).
+  if (port === null) return { kind: 'not-scanned', because: 'no-scanner' };
   const commit = await resolveCommit(req.workspace, req.baseCommit);
   const ceiling = await port.ceilingAt(req.workspace, commit);
   if (ceiling.commit !== commit) {
@@ -1085,6 +1105,8 @@ function admissionRefusalOf(outcome: Exclude<AdmissionOutcome, { ok: true }>): A
       return { reason: 'cost-unapproved', requestedLevel: outcome.requestedLevel, worstCaseUsd: outcome.worstCase.usd, approvedCostUsd: outcome.approvedCostUsd };
     case 'controls-unavailable':
       return { reason: 'controls-unavailable', requestedLevel: outcome.requestedLevel, unavailable: outcome.unavailable };
+    case 'readiness-unscanned':
+      return { reason: 'readiness-unscanned', requestedLevel: outcome.requestedLevel };
     case 'readiness-refused':
       return { reason: 'readiness-refused', requestedLevel: outcome.requestedLevel, ceiling: outcome.ceiling, heldBy: outcome.heldBy, commit: outcome.commit };
     case 'policy-refused':

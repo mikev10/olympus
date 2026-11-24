@@ -14,7 +14,7 @@ import { checkOutWithCrlf, commitFixture, committedFiles } from '../kit/git.js';
 import type { LocalAssertion } from '../kit/types.js';
 import { workspaceRoot } from '../kit/workspace.js';
 import { approveAndResume, toApproval, withIntegration } from './integration.js';
-import { refusalOf, stubDriver, withLine } from './line.js';
+import { refusalOf, RIG_READINESS, stubDriver, withLine } from './line.js';
 import { withVaultDirs } from './local-vault.js';
 import { drafting } from './drafting.js';
 
@@ -72,7 +72,7 @@ async function exampleCreate(policyFile: string, drafted: boolean, body: (outcom
       runId: `r36a-example-${drafted ? 'drafted' : 'supplied'}` as RunRequest['runId'],
       baseCommit, requestedLevel: 1, workspace: dirs.artifacts, policy: loaded.policy,
       roles: join(examples(), 'roles'), rubrics: join(examples(), 'rubrics'),
-      components: await exampleGraph(dirs, base), approvedCostUsd: null,
+      components: await exampleGraph(dirs, base), approvedCostUsd: null, readiness: RIG_READINESS,
       ...(drafted
         ? { intent: { text: 'Add hello.txt at the repository root, containing exactly the line hello.', from: 'principal' }, artifacts: { spec: 'draft', acceptanceTests: ['acceptance.md'], verificationManifest: 'verify.json', taskGraph: 'graph.json' } }
         : { artifacts: { spec: ['spec.md'], acceptanceTests: ['acceptance.md'], verificationManifest: 'verify.json', taskGraph: 'graph.json', specParts: { security: 'security.json' } } }),

@@ -1,8 +1,9 @@
 /**
  * R40: admission enforces the readiness ceiling. A run asked above the
  * ceiling its base commit's scan derives is refused, naming what holds it;
- * the ceiling only ever adds a refusal (I4); and a run with no scan records
- * that none ran, rather than reading as cleared (F1).
+ * the ceiling only ever adds a refusal (I4); a run above L0 with no scan is
+ * refused, never read as cleared (A-R40-02); and an L0 run records that none
+ * ran.
  */
 import type { RunRequest } from '@olympus-ai/api';
 import type { RunId } from '@olympus-ai/core';
@@ -71,20 +72,30 @@ export const ADMISSION_REFUSES_ABOVE_THE_READINESS_CEILING: LocalAssertion = run
   },
 });
 
+export const ADMISSION_REFUSES_WITH_NO_SCAN: LocalAssertion = runtime({
+  id: 'I5.admission-refuses-with-no-readiness-scan',
+  title:
+    'a run above L0 whose request carries no readiness scan is refused at admission as readiness-unscanned, naming the level, and leaves no run state, rather than admitted on the policy terms alone',
+  run: async () => {
+    // L1 only: the rig's stub components are refused above L1 for another reason before readiness is read.
+    for (const level of [1] as const) {
+      await withLine(`r40-none-${String(level)}-`, async (rig) => {
+        const { admitRun } = await api();
+        const outcome = await admitRun(await rig.request(await rig.components(), { requestedLevel: level, readiness: null }));
+        if (outcome.ok || outcome.reason !== 'readiness-unscanned' || outcome.requestedLevel !== level) {
+          throw new Error(`I5: an L${String(level)} run with no scan port was ${outcome.ok ? 'admitted' : outcome.reason}`);
+        }
+        if (await recorded(rig)) throw new Error('I5: a run refused for want of a scan left run state behind');
+      });
+    }
+  },
+});
+
 export const READINESS_ABSENCE_IS_RECORDED: LocalAssertion = runtime({
   id: 'I4.readiness-absence-is-recorded',
   title:
-    'a run admitted with no readiness scan records that none ran and why, an L0 run spends no scan, and neither is refused for it: the policy terms bind alone',
+    'an L0 run, the one run admitted with no readiness scan, spends no scan, records that none ran and why, and is not refused for it',
   run: async () => {
-    await withLine('r40-none-', async (rig) => {
-      const { admitRun } = await api();
-      const outcome = await admitRun(await rig.request(await rig.components(), { requestedLevel: 1 }));
-      if (!outcome.ok) throw new Error(`I4: a run with no scan port was refused (${outcome.reason})`);
-      const record = await admissionRecord(rig);
-      if (record.readiness?.kind !== 'not-scanned' || record.readiness.because !== 'no-scanner') {
-        throw new Error(`I4: a run with no scan recorded ${JSON.stringify(record.readiness)}`);
-      }
-    });
     await withLine('r40-zero-', async (rig) => {
       const { admitRun } = await api();
       const asked: string[] = [];
@@ -137,7 +148,7 @@ export const READINESS_ANSWER_FOR_ANOTHER_COMMIT_REFUSES: LocalAssertion = runti
 export const RESUME_HOLDS_THE_RECORDED_CEILING: LocalAssertion = runtime({
   id: 'I5.resume-holds-the-recorded-readiness-ceiling',
   title:
-    'the admission refusal a resume repeats reads the readiness ceiling from the admission record: a record above its scanned ceiling is refused naming it, one at it, one not scanned, and one written before R40 are not; and resumeRun over a record above its ceiling is refused before the line runs',
+    'the admission refusal a resume repeats reads the readiness ceiling from the admission record: a record above its scanned ceiling is refused naming it, one above L0 not scanned or written before R40 is refused as unscanned, one at its ceiling is not; and resumeRun over a record above its ceiling is refused before the line runs',
   run: async () => {
     await withLine('r40-resume-', async (rig) => {
       const { admitRun, admissionRefusal } = await api();
@@ -151,12 +162,13 @@ export const RESUME_HOLDS_THE_RECORDED_CEILING: LocalAssertion = runtime({
       };
       const below = admissionRefusal(at({ ...record.readiness, level: 0 }));
       if (below?.reason !== 'readiness-refused' || below.ceiling !== 0) throw new Error(`I5: a record above its ceiling was not refused (${JSON.stringify(below)})`);
+      if (admissionRefusal(at(record.readiness)) !== undefined) throw new Error('I5: a record at its ceiling was refused');
       for (const [name, readiness] of [
-        ['at its ceiling', record.readiness],
         ['not scanned', { kind: 'not-scanned', because: 'no-scanner' }],
         ['written before R40', undefined],
       ] as const) {
-        if (admissionRefusal(at(readiness)) !== undefined) throw new Error(`I5: a record ${name} was refused`);
+        const refused = admissionRefusal(at(readiness));
+        if (refused?.reason !== 'readiness-unscanned') throw new Error(`I5: a record ${name} above L0 was ${refused === undefined ? 'admitted' : refused.reason}`);
       }
       // The resume itself, not only the helper it calls (codex-4): a run whose record holds a ceiling below its
       // level is refused by resumeRun before the line runs, and its state is left as it stood.
@@ -180,4 +192,4 @@ export const RESUME_HOLDS_THE_RECORDED_CEILING: LocalAssertion = runtime({
 });
 
 export const R40_I4: readonly LocalAssertion[] = [READINESS_ABSENCE_IS_RECORDED, READINESS_CEILING_NEVER_GRANTS];
-export const R40_I5: readonly LocalAssertion[] = [ADMISSION_REFUSES_ABOVE_THE_READINESS_CEILING, READINESS_ANSWER_FOR_ANOTHER_COMMIT_REFUSES, RESUME_HOLDS_THE_RECORDED_CEILING];
+export const R40_I5: readonly LocalAssertion[] = [ADMISSION_REFUSES_ABOVE_THE_READINESS_CEILING, ADMISSION_REFUSES_WITH_NO_SCAN, READINESS_ANSWER_FOR_ANOTHER_COMMIT_REFUSES, RESUME_HOLDS_THE_RECORDED_CEILING];

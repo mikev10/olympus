@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { STATION_CONTRACTS, StubDriver, type PolicyDocument, type RunState, type TaskRequest, type TaskResult } from '@olympus-ai/core';
 import { StubSandboxProvider, type SandboxHandle, type SandboxSpec } from '@olympus-ai/sandbox';
 import { createApiServer, egressFor, UNANALYSED_TESTS, worstCaseCost, type ApiServer, type BuiltGraph, type ComponentGraph, type CreatedRun, type RunView } from '../src/index.js';
-import { ARTIFACTS, makeWorkspace, policy, policyDocument, removeWorkspace, ROLES, roleScope, stubComponents, writeChecks, BUILDER, REVIEWER } from './harness.js';
+import { ARTIFACTS, makeWorkspace, policy, policyDocument, removeWorkspace, RIG_SCANNER, ROLES, roleScope, stubComponents, writeChecks, BUILDER, REVIEWER } from './harness.js';
 import { commitFixture } from '@olympus-ai/conformance/git';
 import { DelegatingDriver, DelegatingSandbox } from './wrappers.js';
 
@@ -30,7 +30,7 @@ async function writePolicy(doc: PolicyDocument = policyDocument()): Promise<stri
 
 async function serve(overrides: Partial<ComponentGraph> = {}, doc?: PolicyDocument): Promise<void> {
   components = stubComponents(workspace, overrides);
-  server = createApiServer({ components, token: TOKEN, principal: PRINCIPAL, policyFile: await writePolicy(doc), rolesDirectory: ROLES });
+  server = createApiServer({ components, token: TOKEN, principal: PRINCIPAL, policyFile: await writePolicy(doc), rolesDirectory: ROLES, readiness: RIG_SCANNER });
   url = await server.listen(0, '127.0.0.1');
 }
 

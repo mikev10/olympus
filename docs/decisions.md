@@ -12468,6 +12468,42 @@ the only `not-scanned` admission, and every in-process caller (the
 conformance rigs, the API tests) given a scan port. **Alternative:** keep
 F1 as it is and record the library path as unenforced by design.
 
+### A-R40-02: admission above L0 refuses when no scan ran (D-R40-09)
+
+Confirmed by the maintainer on 2026-11-22, taking D-R40-09's recommendation.
+F1's readiness paragraph said absence of the term "leaves the other three
+unchanged"; it now says a run above L0 with no scan is refused, and that
+`level-zero` is the only absence admission records. Fail-closed reads a
+missing check as a refusal, and a caller that omits the scan port is a
+missing check.
+
+- **Contract.** `AdmissionRefusal` gains `readiness-unscanned`, carrying the
+  requested level, beside `readiness-refused`. `RecordedReadiness` keeps its
+  `no-scanner` arm so a record R40 wrote before this amendment still reads.
+- **Where it binds.** In `admissionRefusal`, read from the record, so
+  admission and resume refuse alike: a record above L0 whose term is
+  `not-scanned` or absent (a record from before R40) is refused on resume
+  too. Rejected: refusing in `readinessAt` before any record exists, which
+  would leave resume admitting an unscanned record. Rejected: letting an
+  earlier record resume under the rule it was admitted by, which is the
+  silent degradation fail-closed forbids. The cost is that a run above L0
+  stopped before this amendment cannot resume; it can be started again.
+  Reverse by returning `undefined` for an unscanned record above L0.
+- **Order.** The controls check now runs before the readiness check in
+  `admissionRefusal`. No scan grants L3, so with a scan required every L3
+  run is refused by readiness; put first, readiness would hide every
+  `controls-unavailable` refusal and make that check unreachable. Run first,
+  an L3 run with a missing control still names the control, and one with
+  every control names readiness.
+- **Callers.** The conformance rigs, the API tests, the benchmark, and the
+  paid line tests run at L1 and above without the host, so each is given a
+  scan port that answers L2, held by the scan limit, for the commit it is
+  asked about. It is a trusted component of each rig, as the fake drivers
+  and Vaults beside it are. The benchmark measures false-done detection,
+  not readiness, and its port says so where it is built. L3 is now
+  unreachable through admission everywhere, as it already was through the
+  factory host, until a unit gives a scan a way to grant it.
+
 ## R54: The `deep` tier's model, chosen by the benchmark
 
 Started on `v2` at 03518f9. Issue #171.

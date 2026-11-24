@@ -371,7 +371,7 @@ export const CHECK_COMMAND_HAS_A_GRAMMAR: LocalAssertion = runtime({
 export const ADAPTER_REFUSAL_ENFORCED_AT_ADMISSION: LocalAssertion = runtime({
   id: 'I5.adapter-refusal-enforced-at-admission',
   title:
-    "admission records the adapter set's unavailable controls in the admission record, mutation and HTTP and browser behavioral among them; the admission refusal reads them from that record and refuses L3 naming each one, refuses nothing at L0-L2, and refuses nothing at L3 when the record names none",
+    "admission records the adapter set's unavailable controls in the admission record, mutation and HTTP and browser behavioral among them; the admission refusal reads them from that record and refuses L3 naming each one, refuses nothing at L0-L2, and refuses L3 for readiness rather than controls when the record names none",
   run: async () => {
     await withLine('p6-i5-admission-', async (rig) => {
       const { startRun, admissionRefusal } = await api();
@@ -390,7 +390,9 @@ export const ADAPTER_REFUSAL_ENFORCED_AT_ADMISSION: LocalAssertion = runtime({
       for (const level of [0, 1, 2] as const) {
         if (admissionRefusal(at(level, record.unavailableControls)) !== undefined) throw new Error(`I5: the admission refusal refused L${String(level)}`);
       }
-      if (admissionRefusal(at(3, [])) !== undefined) throw new Error('I5 control: L3 was refused with every control available');
+      // With every control available an L3 run is refused for readiness, since no scan grants L3 (A-R40-02), never for controls.
+      const all = admissionRefusal(at(3, []));
+      if (all?.reason !== 'readiness-refused') throw new Error(`I5 control: L3 with every control available was ${all === undefined ? 'admitted' : all.reason}`);
     });
   },
 });

@@ -20,7 +20,7 @@ import type { CapabilityScope, ModelTier, RunId, RunState } from '@olympus-ai/co
 import type { UsageRecord } from '@olympus-ai/vault';
 import { afterAll, beforeAll, expect } from 'vitest';
 import { composeHost, readUsage, runStanding, startRun, UNANALYSED_TESTS, type BuiltGraph, type RunOutcome } from '../../src/index.js';
-import { ARTIFACTS, BUILDER, HELLO, policy, REVIEWER } from '../harness.js';
+import { ARTIFACTS, BUILDER, HELLO, policy, REVIEWER, RIG_READINESS } from '../harness.js';
 
 /** hello with a task that needs one file written, so a real run reaches the integrate approval with a change to merge: an empty change halts at integrate's work (D-I1b-04). */
 const HELLO_CHANGE = join(HELLO, '..', 'hello-change');
@@ -90,6 +90,8 @@ beforeAll(async () => {
     }),
     roles: DEFAULT_ROLES_DIRECTORY,
     components,
+    // The fixture has no branch protection to probe; the line is under test here, not readiness (A-R40-02).
+    readiness: RIG_READINESS,
     approvedCostUsd: null,
   };
   const { parseGraph, worstCaseCost } = await import('../../src/index.js');

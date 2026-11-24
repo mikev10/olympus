@@ -271,6 +271,8 @@ export type AdmissionRefusal =
    * (A-R40-01): the level asked for, the ceiling, what holds it, and the
    * commit scanned. Subtractive only: no other refusal reads it.
    */
+  /** A run above L0 with no readiness scan, refused rather than admitted on the policy terms alone (A-R40-02). */
+  | { readonly reason: 'readiness-unscanned'; readonly requestedLevel: AutonomyLevel }
   | { readonly reason: 'readiness-refused'; readonly requestedLevel: AutonomyLevel; readonly ceiling: RecordedScanLevel; readonly heldBy: RecordedHeldBy; readonly commit: string };
 
 /** The levels a readiness scan can derive: L3 is the M3 canary's, and no scan grants it (R1). */
@@ -288,7 +290,10 @@ export type RecordedHeldBy = { readonly kind: 'probe'; readonly probe: string } 
  */
 export type RecordedReadiness =
   | { readonly kind: 'scanned'; readonly level: RecordedScanLevel; readonly heldBy: RecordedHeldBy; readonly commit: string }
-  /** `no-scanner`: the request carried no scan port. `level-zero`: an L0 run, which no ceiling is below. */
+  /**
+   * `level-zero`: an L0 run, which no ceiling is below. `no-scanner`: the request carried no scan port, which
+   * only a record written before A-R40-02 holds; admission and resume refuse such a record above L0.
+   */
   | { readonly kind: 'not-scanned'; readonly because: 'no-scanner' | 'level-zero' };
 
 /**
