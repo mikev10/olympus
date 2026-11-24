@@ -1232,3 +1232,103 @@ export async function sensitiveDraftGoesBack(): Promise<void> {
     if ((await (await r.components()).vault.readLocks(rig.runId)) !== null) throw new Error('R10: a draft writing a sensitive path locked something');
   });
 }
+
+/**
+ * R28: a critic's finding names one of the draft's files. One naming another
+ * path is refused `unlocated`, kept, never measured, and still not a clean
+ * result: the draft goes back with the runtime's own words, never the
+ * critic's (D-R28-01, choice 7).
+ */
+export const CRITIC_FINDING_NAMES_A_DRAFT_FILE: LocalAssertion = runtime({
+  id: 'I5.critic-finding-names-a-draft-file',
+  title:
+    "a critic finding naming a file the draft does not hold is refused unlocated in the critic record, is never listed as a finding, and sends the draft back with the runtime's own text and never the critic's note; a located finding is sent back as its file and note (R28)",
+  run: async () => {
+    await withLine('r28-critic-unlocated-', async (rig) => {
+      const NOTE = 'CRITIC-NOTE-SENTINEL';
+      const r = await drafting(rig, {
+        critic: (station, attempt) => (station !== 'spec' ? CLEAN : attempt === 1
+          ? JSON.stringify({ findings: [{ path: 'elsewhere.md', note: NOTE }] })
+          : attempt === 2 ? JSON.stringify({ findings: [{ path: `.drafts/${rig.runId}/spec.md`, note: 'LOCATED-NOTE' }] }) : CLEAN),
+      });
+      awaiting(await admitAndDrive(r), 'spec:1', 'a drafted spec after two critiques');
+      const attempts = (await rig.state()).drafts.spec?.attempts ?? [];
+      const first = attempts[0]?.critic;
+      if (attempts.length !== 3 || attempts[0]?.sentBack?.by !== 'critic' || attempts[1]?.sentBack?.by !== 'critic' || first == null || first === 'not-seated') {
+        throw new Error(`R28: an unlocated critic finding did not send the draft back: ${JSON.stringify(attempts)}`);
+      }
+      const vault = (await r.components()).vault;
+      const critic = await readRecord<CriticRecord>(vault, first);
+      if (!critic.readable || JSON.stringify(critic.findings) !== JSON.stringify([{ kind: 'refused', cause: 'unlocated' }])) {
+        throw new Error(`R28: a critic finding naming another path was recorded as ${JSON.stringify(critic.findings)}`);
+      }
+      const [, second, third] = r.drivers.specDrafter.requests;
+      const told = second?.variableSuffix ?? '';
+      if (told.includes(NOTE) || !told.includes('could not be located')) throw new Error(`R28: the drafter was told ${JSON.stringify(told)} of an unlocated finding`);
+      if (!(third?.variableSuffix ?? '').includes(`.drafts/${rig.runId}/spec.md: LOCATED-NOTE`)) throw new Error('R28: a located finding did not reach the drafter as its file and note');
+      const { listFindings } = await api();
+      const listed = await listFindings(vault);
+      if (listed.some((f) => f.id.startsWith(`critic:${rig.runId}:${first.hash}:`))) throw new Error(`R28: a refused critic finding is listed as a finding: ${JSON.stringify(listed)}`);
+      if (listed.filter((f) => f.seat === 'critic').length !== 1) throw new Error(`R28 control: the located critic finding is not listed once: ${JSON.stringify(listed)}`);
+    });
+  },
+});
+
+/**
+ * R28: a critic finding is resolved when the file it cites changed between
+ * the draft it was raised against and the locked draft, and at test-design
+ * that locked draft has a base record. No check covers a spec file, so a spec
+ * finding never is; and a file that did not change resolves nothing.
+ */
+export const CRITIC_FINDING_RESOLVED_BY_THE_LOCK: LocalAssertion = runtime({
+  id: 'I2.critic-finding-resolved-by-its-locked-draft',
+  title:
+    'when a test draft is locked, a critic finding on a file whose hash differs between the draft the critic read and the locked draft, which has a base record, is resolved draft-changed, once; a finding on a file that did not change stays open; a spec critic finding is never resolved, though its file changed (R28)',
+  run: async () => {
+    await withLine('r28-critic-resolved-', async (rig) => {
+      const spec = `.drafts/${rig.runId}/spec.md`;
+      const manifest = `.drafts/${rig.runId}/acceptance.json`;
+      const check = 'checks/hello.check.cjs';
+      const r = await drafting(rig, {
+        spec: (attempt, id) => helloSpec(id, attempt === 1 ? { [spec]: '# Hello\n\nA first draft, sent back.\n' } : {}),
+        tests: (attempt, id) => helloTests(id, attempt === 1 ? `${HELLO_CHECK}// the first draft\n` : HELLO_CHECK),
+        critic: (station, attempt) => attempt !== 1 ? CLEAN : station === 'spec'
+          ? JSON.stringify({ findings: [{ path: spec, note: 'statement 2 cannot be tested' }] })
+          : JSON.stringify({ findings: [{ path: check, note: 'the check reads a comment' }, { path: manifest, note: 'the manifest is fine, but say so' }] }),
+      });
+      awaiting(await admitAndDrive(r, { artifacts: artifactsFor(true, true) }), 'spec:1', 'a drafted spec');
+      const drafted = lastAttempt(await rig.state(), 'spec');
+      awaiting(await approveAndResume(rig, r, 'spec:1', drafted.sha256 ?? ''), 'test-design:1', 'drafted tests');
+      const tests = lastAttempt(await rig.state(), 'test-design');
+      awaiting(await approveAndResume(rig, r, 'test-design:1', tests.sha256 ?? ''), 'integrate:1', 'the run after its drafted tests were approved');
+
+      const state = await rig.state();
+      const vault = (await r.components()).vault;
+      const testCritic = state.drafts['test-design']?.attempts[0]?.critic;
+      const specCritic = state.drafts.spec?.attempts[0]?.critic;
+      const lock = state.drafts['test-design']?.locked;
+      if (testCritic == null || testCritic === 'not-seated' || specCritic == null || specCritic === 'not-seated' || lock == null) {
+        throw new Error(`R28 control: the run did not record both first critiques and a test lock: ${JSON.stringify(state.drafts)}`);
+      }
+      if ((await vault.readBaseRun(rig.runId, tests.sha256 ?? '')) === null) throw new Error('R28 control: the locked test draft has no base record');
+      const outcomes = (await vault.readFindingOutcomes()).map((e) => e.record);
+      const ofCheck = outcomes.filter((o) => o.finding.source.kind === 'critic' && o.finding.source.record.hash === testCritic.hash && o.finding.index === 0);
+      const resolution = ofCheck[0]?.outcome;
+      if (ofCheck.length !== 1 || resolution?.kind !== 'resolved' || resolution.resolution.kind !== 'draft-changed' || resolution.resolution.lock.hash !== lock.hash
+        || resolution.resolution.raised === resolution.resolution.locked) {
+        throw new Error(`R28: the test critic's finding on a changed file was not resolved by the lock: ${JSON.stringify(outcomes)}`);
+      }
+      if (outcomes.some((o) => o.finding.source.kind === 'critic' && o.finding.source.record.hash === testCritic.hash && o.finding.index === 1)) {
+        throw new Error('R28: a critic finding on a file that did not change was resolved');
+      }
+      if (outcomes.some((o) => o.finding.source.kind === 'critic' && o.finding.source.record.hash === specCritic.hash)) {
+        throw new Error('R28: a spec critic finding was resolved; no check covers a spec file');
+      }
+      const { listFindings } = await api();
+      const open = (await listFindings(vault)).filter((f) => f.seat === 'critic' && f.outcome.kind === 'open');
+      if (open.length !== 2) throw new Error(`R28: the open critic findings are ${JSON.stringify(open)}, not the spec finding and the unchanged manifest's`);
+    });
+  },
+});
+
+export const R28_DRAFTING = { I2: [CRITIC_FINDING_RESOLVED_BY_THE_LOCK], I5: [CRITIC_FINDING_NAMES_A_DRAFT_FILE] } as const;

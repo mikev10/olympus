@@ -743,7 +743,7 @@ export function findingOutcomeProblem(r: unknown): string | undefined {
   if (!isRecord(outcome)) return 'it carries no outcome';
   if (outcome.kind === 'dismissed') {
     if (Object.keys(outcome).some((k) => k !== 'kind' && k !== 'cause')) return 'a dismissal carries a cause and nothing else';
-    return typeof outcome.cause === 'string' && LOCAL_DISMISSAL_CAUSES.has(outcome.cause as DismissalCause) ? undefined : 'its cause is not a dismissal cause';
+    return typeof outcome.cause === 'string' && LOCAL_DISMISSAL_CAUSES.has(outcome.cause) ? undefined : 'its cause is not a dismissal cause';
   }
   if (outcome.kind === 'resolved') return resolutionProblem(outcome.resolution, (r.finding as { source: unknown }).source);
   return 'an outcome is resolved or dismissed; open is never written';

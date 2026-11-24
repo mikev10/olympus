@@ -222,6 +222,43 @@ export const EVERY_STACK_MEASURES_CHANGED_LINES: LocalAssertion = runtime({
   },
 });
 
+/**
+ * R28: each stack's coverage adapter names the changed lines it counts, run
+ * and not, and the evidence records them beside the fraction, from the same
+ * report, under the pinned coverage check's id. A finding's resolution reads
+ * these lines; the fraction alone could not say which line ran.
+ */
+export const EVERY_STACK_REPORTS_CHANGED_LINES: LocalAssertion = runtime({
+  id: 'I8.every-supported-stack-reports-changed-lines',
+  title:
+    "over a vitest repository and a pytest repository alike, the coverage adapter names each changed file's changed executable lines, executed and not, disjoint and sorted, agreeing with the changed-line fraction; and the tamper report records them beside coverageDelta under the pinned coverage check's id (R28)",
+  run: async () => {
+    const { buildAdapterSet, coverageFraction } = await adapters();
+    const { analyzeTamper } = await api();
+    await eachStack(async (stack, base, head) => {
+      const report = join(head, stack.report.file);
+      await writeFile(report, stack.report.text);
+      const set = await buildAdapterSet(base, { provider: null, coverage: { report, sourceRoot: '/workspace' } });
+      if (set.coverage === null) throw new Error(`I8: the ${stack.name} set has no coverage adapter`);
+      const files = await set.coverage.changedLineReport(base, head);
+      const executed = files.flatMap((f) => f.executed);
+      const unexecuted = files.flatMap((f) => f.unexecuted);
+      if (executed.length === 0 || unexecuted.length === 0) throw new Error(`I8: the ${stack.name} report named ${JSON.stringify(files)} over a change with one covered and one uncovered line`);
+      for (const f of files) {
+        const sorted = (xs: readonly number[]): boolean => xs.every((x, i) => i === 0 || (xs[i - 1] ?? x) < x);
+        if (!sorted(f.executed) || !sorted(f.unexecuted) || f.executed.some((x) => f.unexecuted.includes(x))) throw new Error(`I8: the ${stack.name} report's lines for ${f.path} are not sorted and disjoint`);
+      }
+      if (coverageFraction(files) !== (await set.coverage.changedLineCoverage(base, head))) throw new Error(`I8: the ${stack.name} lines disagree with its fraction`);
+      const tamper = await analyzeTamper(base, head, { protectedPaths: [], coverage: { check: 'pinned-coverage', report, sourceRoot: '/workspace' }, commands: [], markers: [] });
+      if (tamper.changedLines?.check !== 'pinned-coverage' || JSON.stringify(tamper.changedLines.files) !== JSON.stringify(files) || tamper.coverageDelta !== coverageFraction(files)) {
+        throw new Error(`I8: the ${stack.name} evidence recorded ${JSON.stringify(tamper.changedLines)} beside ${String(tamper.coverageDelta)}`);
+      }
+      const none = await analyzeTamper(base, head, { protectedPaths: [], coverage: null, commands: [], markers: [] });
+      if (none.changedLines !== null || none.coverageDelta !== null) throw new Error(`I8: with no coverage check pinned, the ${stack.name} evidence recorded lines or a fraction`);
+    });
+  },
+});
+
 export const DEPENDENCY_TREES_ARE_NOT_CARRIED: LocalAssertion = runtime({
   id: 'I3.no-stack-dependency-tree-is-carried',
   title:
