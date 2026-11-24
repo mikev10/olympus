@@ -652,7 +652,7 @@ order between them is settled before any of them is picked up.
 | R54 | The `deep` tier's model, chosen by the benchmark ([#171](https://github.com/mikev10/olympus/issues/171)) | M2 | R7, R14, P13, R52 | — |
 | R55 | An operator can read a draft, and the host refuses a rejected key ([#175](https://github.com/mikev10/olympus/issues/175), [#176](https://github.com/mikev10/olympus/issues/176)) | M2 | R19, R36b | — |
 | R56 | The relay forwards only the tools a task was granted ([#189](https://github.com/mikev10/olympus/issues/189)) (opens with a contract amendment) | M2 | P12, P13, R26 | — |
-| R57 | A build runs the locked acceptance tests in its own sandbox before it claims done ([#220](https://github.com/mikev10/olympus/issues/220)) | M2 | R37, R36b | — |
+| R57 | A build runs the locked acceptance tests in its own sandbox before it claims done ([#220](https://github.com/mikev10/olympus/issues/220)) | M2 | R37, R36b, R56 | — |
 
 ### R1 — Readiness
 
@@ -3293,7 +3293,8 @@ change `packages/drivers/claude-code`. After R36b merges: the #174
 amendment, then R53, R54, R55, then R40 onward as the R38 to R51 amendment
 orders them. R56 was added after R52's review and comes after R55. It opens
 with a contract amendment to the relay grant, so it does not run beside
-another unit changing `packages/sandbox`.
+another unit changing `packages/sandbox`. R57 waits for R56, because it
+grants init's builder `Bash`.
 
 ### R52 — The driver's CLI is current, and Code Mode is off
 
@@ -3420,6 +3421,35 @@ a task may use is a change to that type. It is confirmed before the build.
 **Why M2:** default deny at the one boundary a granted command tool can reach
 on its own, and the relay controls P12 and P13 built are the place that
 enforces it.
+
+### R57 — A build runs the locked acceptance tests in its own sandbox
+
+Issue [#220](https://github.com/mikev10/olympus/issues/220). A retried build
+is told only each failed check's id and cause (D-R37-03), and the builder
+never runs the tests, so a drafted case its first change misses (`-0` against
+`toBe(0)`) parks the task after three identical attempts. The builder runs
+the locked acceptance tests in its own sandbox before it finishes. Their
+output is the result of its own tool call, never runtime text placed in a
+prompt, so payloads stay data. The spec is written when the unit starts. Checked
+against the code on 2026-11-23:
+
+- init's builder holds `Read` and `Write` and no egress
+  (`packages/api/setup/policy.yaml`), so it cannot run anything. Running the
+  tests needs `Bash`.
+- the build tree gets no dependency install: the runtime installs only over
+  the base at `test-design` and over the verified tree (`installInto`,
+  `packages/api/src/line.ts`). With no egress, the builder cannot fetch the
+  runner either, so the unit places the runtime's install in the build tree.
+- the driver, install, and check images share one `node` digest, so an
+  install made for the checks runs in the builder's container.
+- what a task writes in a dependency tree is not carried and is recorded as a
+  finding (D-R15-05). Vitest's default cache under `node_modules/.vite` would
+  raise one on every build, which the unit has to settle.
+
+**Why after R56:** a task granted `Bash` can send the relay its own request,
+and for the Anthropic dialect the relay forwards the body unchanged, so that
+request can name a server-side tool nothing granted. No init seat holds `Bash`
+today. Granting it before R56 would open that path on every init install.
 
 ## Working Rules
 
