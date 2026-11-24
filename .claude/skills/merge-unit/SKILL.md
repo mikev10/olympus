@@ -103,6 +103,7 @@ owns its fix; the entry leaves when that unit merges.
 | Assertion | Issue | Owner |
 |---|---|---|
 | `driver.subagents` (`@olympus-ai/driver-claude-code`) | #165 | R38 |
+| `I5.init-setup-merges-on-the-real-driver` (`@olympus-ai/api`) | #220 | R57 |
 
 When every newest check is green, remove the label
 (`gh pr edit <n> --remove-label run-driver`), so a later push to the branch
