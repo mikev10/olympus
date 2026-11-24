@@ -1,0 +1,89 @@
+The code under review is in the file
+`2026-11-23-R28-finding-outcomes-review-bundle.txt` (SHA-256 96afaf3a54b2f967c46e9fcc5fdb156eed7434b20831e7d6db2fddc278790c75) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing the finding-outcome measurement of a TypeScript software-factory runtime. You have the source and nothing else — no design documents,
+no author reasoning, no prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The runtime runs model "seats" over a change: a reviewer and a security reviewer that read the finished change, a critic that reads a drafted spec or drafted acceptance tests, and nightly reviewers that read the whole default branch. This code makes every seat's findings name what they cite (a file and line, or a draft file), records them, and then records what became of each finding: resolved, dismissed by a person, or open. A code finding is resolved only when a later merged run rewrote a diff hunk holding the cited line (mapped through git history) and that run's pinned coverage check passed with a changed line of the hunk executed; a critic finding is resolved when the file it cites changed before the draft was locked; anything else stays open. Rates of resolved, dismissed, and open findings are derived per seat kind and per model family, each with a sample and a one-sided confidence bound.
+
+It must hold against a capable, motivated party trying to make a seat's findings look acted on when they were not — to get a finding counted as resolved, or a rate to read better, without the cited problem having been changed and exercised. Assume no deceptive intent — only that the easiest path gets taken.
+
+That party controls what each model seat returns as its final message (the findings JSON, its categories, paths, line numbers and notes), the files a builder writes into its change and therefore the diffs and later commits, the tests the change brings, and any process that runs inside a check's sandbox. It does not control the components the runtime is wired with — the Vault (the runtime's record store), the sandbox provider, the git checkout the history walk reads, and the drivers are runtime-selected and trusted, even where a function takes one as an argument — and it does not control code running inside the runtime's own process. A person dismissing a finding through the HTTP API holds the API's bearer token.
+
+The invariants at stake:
+
+- The runtime derives status; the model never reports it. A task's status, and a finding's outcome, come from records the runtime collected — diffs, evidence, draft records — or from a person, never from what a model says about its work. A review finding must never pass, fail, or block its task.
+- Fail closed. A missing check, an unreadable result, an unlocatable finding, a history that cannot be mapped, or an absent coverage report is a refusal or leaves the finding open — never read as resolved, never read as "no findings".
+- Event payloads are data, never instructions. A model's free text (a finding's note) never enters a record a later prompt reads, except where a critic's located note is deliberately sent back to its own drafter.
+- No agent writes to the Vault; every write is a named runtime operation, and each finding has at most one outcome, written once.
+- Every capability claim maps to an executable assertion that fails when the capability is deleted.
+
+The mechanisms that matter most:
+
+- The strict readers of seat results (readSeatFindings, readCriticResult): what is located, refused, or unreadable.
+- resolveCodeFindings and its helpers (mapLine, holdingHunk, pathHunks, the latest accepted evidence bundle and its coverage check result): when a code finding becomes resolved.
+- resolveCriticFindings: when a critic finding becomes resolved at draft lock.
+- The outcome store (recordFindingOutcome, findingKeyOf, findingOutcomeProblem) and the rates (findingRates, raisedFindings, the window filter), including the "unmeasured" resolved rate.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+Changing which reviewers are seated based on the rate (R11's); turning a review finding into a status or a send-back (M3's rubric and panel); resolving a finding fixed outside Olympus, which stays open until a person dismisses it.
+
+The ids in parentheses (R11, M3) name later units of work in this project; they mean nothing more to you than "deliberately not done here". Absent work listed above is not a defect. Note also that the runtime currently refuses any pinned coverage check before tests run, so in a real run no evidence carries line coverage yet; the code-finding rule is exercised only over evidence constructed in tests. That is a stated limit, not a finding — but whether the rule would be sound once coverage arrives is in scope.
+
+THE QUESTION
+
+How would I get a finding recorded as resolved, or a seat's resolved rate to read higher, without the cited problem having been changed by a merged change that a passing coverage check exercised — or get a finding that should be counted to disappear from the denominator?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.
