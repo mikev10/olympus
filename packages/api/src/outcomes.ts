@@ -12,12 +12,13 @@
 import { approvalKey, gatedIterations, levelOf } from '@olympus-ai/core';
 import type { AutonomyLevel, ModelIdentity, RunId, RunState, StationId, TaskId, TaskStatus } from '@olympus-ai/core';
 import {
-  isNoRunState, type AdmissionRecord, type CriticRecord, type EnforcementDecision, type EvidenceBundle, type IntegrationRecord, type ObservationRecord,
+  findingKeyOf, isNoRunState, type AdmissionRecord, type CriticRecord, type EnforcementDecision, type EvidenceBundle, type IntegrationRecord, type ObservationRecord,
   type UsageRecord, type Vault,
 } from '@olympus-ai/vault';
 import { distribution, failureRate, successRate, type Distribution, type Proportion } from './bounds.js';
 import { costTotals, readUsage, type UsageTotal } from './cost.js';
 import { readIntegration } from './line.js';
+import { outcomesByFinding, raisedFindings } from './findings.js';
 
 /**
  * How a run ended, read from its records alone. `passed` crossed its last exit
@@ -80,6 +81,36 @@ export interface RunRecords {
   readonly critiques: ReadonlyArray<{ readonly grade: string; readonly found: boolean }>;
   /** Every observation stored under the run (R8a); empty for a run never merged or never observed. */
   readonly observations: readonly ObservationRecord[];
+  /**
+   * Whether any evidence bundle of the run records changed-line coverage, the
+   * one input a code finding is resolved by (R28). False for every run until
+   * M3 gives a coverage check's report a channel (D-P7-05).
+   */
+  readonly lineCoverage: boolean;
+}
+
+/** One located finding as R2 counts it (R28): its seat, its family, and what became of it. */
+export interface FindingInput {
+  /** `review`, `security`, `critic`, or `nightly:<job>`. */
+  readonly seat: string;
+  readonly family: string;
+  /** Whether only a covered change could resolve it, which needs line coverage in the evidence. */
+  readonly code: boolean;
+  readonly outcome: 'open' | 'resolved' | 'dismissed';
+}
+
+/**
+ * What became of the findings one seat kind or one family raised (R28), over
+ * findings raised, each with its sample and bound. `resolved` is `unmeasured`
+ * where the group holds a finding only a covered change could resolve and no
+ * run in the window recorded line coverage: a rate of nothing resolved there
+ * would be a measurement no input could have made (D-R28-01).
+ */
+export interface FindingRates {
+  readonly raised: number;
+  readonly resolved: Proportion | { readonly kind: 'unmeasured'; readonly cause: 'no-line-coverage' };
+  readonly dismissed: Proportion;
+  readonly open: Proportion;
 }
 
 /** A window over admission time, inclusive at `from` and exclusive at `to`. */
@@ -150,6 +181,8 @@ export interface Outcomes {
     /** The baseline's lead time from first commit to merge, committer-claimed; a change with one parent is counted as not measurable. */
     readonly baselineLeadTime: { readonly committerClaimed: Distribution; readonly notMeasurable: number };
   };
+  /** Findings raised and what became of them, per seat kind and per reviewer family (R28). */
+  readonly findings: { readonly bySeat: Keyed<FindingRates>; readonly byFamily: Keyed<FindingRates> };
   /** What every bound here assumes, said with the figures (D-A-OB-08). */
   readonly boundAssumption: string;
   /** What is not measured, said once so a reader never takes an absence for a zero. */
@@ -277,6 +310,7 @@ export async function readRunRecords(vault: Vault, runId: RunId): Promise<RunRec
       startedAt: refusal?.decidedAt ?? null,
       mergedAt: null,
       mergeCommit: null,
+      lineCoverage: false,
       approvalsSpent: 0,
       tasks: [],
       decisions,
@@ -349,6 +383,8 @@ export async function readRunRecords(vault: Vault, runId: RunId): Promise<RunRec
     reviewGrade: reviewGradeOf(state),
     critiques: await critiquesOf(vault, state),
     observations: (await vault.readObservations(runId)).map((e) => e.record),
+    // A bundle stored before R28 names no lines.
+    lineCoverage: bundles.some((b) => (b.tamper.changedLines ?? null) !== null),
   };
 }
 
@@ -411,7 +447,34 @@ export async function outcomes(vault: Vault, window: OutcomeWindow = {}): Promis
     if (inWindow(run.startedAt, window)) runs.push(run);
   }
   const beside = (await vault.readObservations(null)).map((e) => e.record);
-  return deriveOutcomes(runs, window, { observations: beside.filter((o) => inWindow(openedAt(o), window) || o.signal.kind !== 'window-closed') });
+  // A run's findings are in the window when its run is; a nightly one when the day it covers is (R28).
+  const inRuns = new Set(runs.map((r) => r.runId));
+  const decided = await outcomesByFinding(vault);
+  const findings = (await raisedFindings(vault))
+    .filter((f) => (f.runId !== null ? inRuns.has(f.runId) : f.date !== null && inWindow(`${f.date}T00:00:00.000Z`, window)))
+    .map((f): FindingInput => ({ seat: f.seat, family: f.family, code: f.cites.kind === 'code', outcome: decided.get(findingKeyOf(f.ref))?.outcome.kind ?? 'open' }));
+  return deriveOutcomes(runs, window, { observations: beside.filter((o) => inWindow(openedAt(o), window) || o.signal.kind !== 'window-closed') }, findings);
+}
+
+/**
+ * The rates of one group of findings (R28). Resolved is a success, bounded
+ * below; dismissed and open are failures to act, bounded above.
+ */
+function findingRates(items: readonly FindingInput[], lineCoverage: boolean): FindingRates {
+  const n = items.length;
+  const count = (o: FindingInput['outcome']): number => items.filter((f) => f.outcome === o).length;
+  return {
+    raised: n,
+    resolved: !lineCoverage && items.some((f) => f.code) ? { kind: 'unmeasured', cause: 'no-line-coverage' } : successRate(count('resolved'), n),
+    dismissed: failureRate(count('dismissed'), n),
+    open: failureRate(count('open'), n),
+  };
+}
+
+function groupRates(items: readonly FindingInput[], key: (f: FindingInput) => string, lineCoverage: boolean): Keyed<FindingRates> {
+  const groups = new Map<string, FindingInput[]>();
+  for (const f of items) groups.set(key(f), [...(groups.get(key(f)) ?? []), f]);
+  return Object.fromEntries([...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, findingRates(v, lineCoverage)]));
 }
 
 /** When a closed change's window opened, from its `window-closed` record; null for any other record. */
@@ -569,7 +632,7 @@ function observedFigures(runs: readonly RunRecords[], baseline: BaselineRecords 
  * function of its records. `baseline` is the observations beside the runs;
  * null where they were not read, so every baseline figure is `no-sample`.
  */
-export function deriveOutcomes(runs: readonly RunRecords[], window: OutcomeWindow = {}, baseline: BaselineRecords | null = null): Outcomes {
+export function deriveOutcomes(runs: readonly RunRecords[], window: OutcomeWindow = {}, baseline: BaselineRecords | null = null, findings: readonly FindingInput[] = []): Outcomes {
   const population: Record<RunEnding, number> = { refused: 0, merged: 0, passed: 0, cancelled: 0, halted: 0, parked: 0, unfinished: 0 };
   for (const run of runs) population[run.ending] += 1;
 
@@ -713,6 +776,10 @@ export function deriveOutcomes(runs: readonly RunRecords[], window: OutcomeWindo
       timeToRestore: observed.timeToRestore,
       baselineLeadTime: observed.leadTime,
     },
+    findings: (() => {
+      const lineCoverage = runs.some((r) => r.lineCoverage);
+      return { bySeat: groupRates(findings, (f) => f.seat, lineCoverage), byFamily: groupRates(findings, (f) => f.family, lineCoverage) };
+    })(),
     boundAssumption: BOUND_ASSUMPTION,
     notMeasured: NOT_MEASURED,
   };

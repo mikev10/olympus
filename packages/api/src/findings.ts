@@ -167,8 +167,8 @@ export interface RaisedFinding {
   readonly cites: Citation;
 }
 
-function decodeJson<T>(bytes: Uint8Array): T {
-  return JSON.parse(new TextDecoder().decode(bytes)) as T;
+function decodeJson(bytes: Uint8Array): unknown {
+  return JSON.parse(new TextDecoder().decode(bytes));
 }
 
 /**
@@ -189,7 +189,7 @@ export async function raisedFindings(vault: Vault): Promise<RaisedFinding[]> {
     }
     const merged = (await readIntegration(vault, runId)).find((r) => r.kind === 'merged');
     for (const ref of await vault.readReviewFindings(runId)) {
-      const record = decodeJson<ReviewFindingsRecord>(await vault.read(ref));
+      const record = decodeJson(await vault.read(ref)) as ReviewFindingsRecord;
       if (!Object.hasOwn(state.results, record.taskId) || state.results[record.taskId]?.hash !== record.result.hash) continue;
       record.findings.forEach((f, index) => {
         if (f.kind !== 'located') return;
@@ -201,7 +201,7 @@ export async function raisedFindings(vault: Vault): Promise<RaisedFinding[]> {
       for (const attempt of drafts.attempts) {
         if (attempt.critic === null || attempt.critic === 'not-seated') continue;
         const ref = attempt.critic;
-        const critic = decodeJson<CriticRecord>(await vault.read(ref));
+        const critic = decodeJson(await vault.read(ref)) as CriticRecord;
         criticFindingsOf(critic.findings).forEach((f, index) => {
           if (f.kind !== 'located') return;
           const finding: FindingRef = { source: { kind: 'critic', record: ref }, index };
@@ -212,7 +212,7 @@ export async function raisedFindings(vault: Vault): Promise<RaisedFinding[]> {
   }
   for (const entry of await vault.readNightly()) {
     const { review } = entry.record;
-    if (review === null || review.seat === null) continue;
+    if (review?.seat == null) continue;
     const family = review.seat.reviewer.model.family;
     const commit = review.subject?.kind === 'tree' ? review.subject.commit : null;
     review.findings.forEach((f, index) => {
@@ -245,8 +245,8 @@ export async function resolveCriticFindings(vault: Vault, state: RunState, stati
   let resolved = 0;
   for (const attempt of state.drafts[station]?.attempts ?? []) {
     if (attempt.critic === null || attempt.critic === 'not-seated' || attempt.draft === null) continue;
-    const critic = decodeJson<CriticRecord>(await vault.read(attempt.critic));
-    const draft = decodeJson<DraftRecord>(await vault.read(attempt.draft));
+    const critic = decodeJson(await vault.read(attempt.critic)) as CriticRecord;
+    const draft = decodeJson(await vault.read(attempt.draft)) as DraftRecord;
     const raisedAt = new Map(draft.files.map((f) => [f.path, f.sha256]));
     const findings = criticFindingsOf(critic.findings);
     for (const [index, f] of findings.entries()) {
@@ -295,7 +295,7 @@ export function holdingHunk(hunks: readonly HunkRange[], line: number): HunkRang
 async function latestAccepted(vault: Vault, state: RunState): Promise<{ bundle: EvidenceBundle; ref: VaultRef } | null> {
   const last = new Map<TaskId, { bundle: EvidenceBundle; ref: VaultRef; at: number }>();
   for (const [at, ref] of state.evidenceRefs.entries()) {
-    const bundle = decodeJson<EvidenceBundle>(await vault.read(ref));
+    const bundle = decodeJson(await vault.read(ref)) as EvidenceBundle;
     last.set(bundle.taskId, { bundle, ref, at });
   }
   let latest: { bundle: EvidenceBundle; ref: VaultRef; at: number } | null = null;
