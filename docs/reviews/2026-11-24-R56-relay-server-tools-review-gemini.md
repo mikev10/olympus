@@ -1,3 +1,19 @@
+# External review of R56, gemini, 2026-11-24
+
+The Gemini family's review of R56 (the relay forwards only the server tools a task was granted), given the prompt and bundle below and nothing else. Triage: `2026-11-24-R56-relay-server-tools-triage.md`.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini. A direct `generateContent` API call to `gemini-3.1-pro-preview`, offering no tools. `cleanRoom` is `null` because an API call loads no local configuration.
+- **Cross-family agreement:** Gemini raised no findings. Codex raised one (codex-1) in a mechanism Gemini assessed as sound, `charge` and the usage reader. Gemini's account of that reader ("overwriting the `u.uses` object, which perfectly aligns with Anthropic's reporting of total counts in later chunks") describes the path codex-1 found defective.
+- **Date:** 2026-11-24
+- **Bundle:** `2026-11-24-R56-relay-server-tools-review-bundle.txt`, SHA-256 `5c338a9ee173eafe7a39e0f1cbd0b9e9dacef6c9aca66f1a9746248f858929f6` (the manifest's `bundleSha256`), base `03518f9` (`reviewed/R53`), head `fb1206b` (R56's tip before review: the A-R56-01 record and the relay grant). Every new file in full and every modified file as a function-context diff, 50 sections. `docs/decisions.md`, `docs/reviews/`, `docs/plan/`, and `pnpm-lock.yaml` were excluded. The range also held two post-R53 commits from other work (A-R40-02 and a tooling note). Prompt: `2026-11-24-R56-relay-server-tools-review-prompt.txt`.
+- **Citations:** line numbers refer to positions in the bundle, not the repository. They are hints, and each was resolved to the construct it names before verification.
+- **Prior context and lookups:** the reviewer stated none of either. This is a self-report and is not independently verifiable.
+- **Coverage, and any gap:** items 1 to 5 were answered together as "none found", with three sentences of reasoning. Items 6 and 7 were answered: four mechanisms assessed sound, and the framing judged correct. No item was left empty, but items 2 to 5 got no per-item treatment.
+
+---
+
 BASE: 03518f9
 HEAD: fb1206b
 packages/vault/src/types.ts

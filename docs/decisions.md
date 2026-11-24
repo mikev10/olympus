@@ -12671,3 +12671,16 @@ second consumer to land ahead of.
   `unreadable` does.
 - **The DECOMPOSITION entry had no out-of-scope line.** It gains the one
   D-R56-01 states, derived from #189's scope note and R57's entry.
+
+### D-R56-05: review fixes
+
+Both families' reviews counted on their first runs. Codex raised one finding;
+Gemini raised none. The triage is
+`docs/reviews/2026-11-24-R56-relay-server-tools-triage.md`.
+
+- **codex-1, fixed (2849b55).** A `server_tool_use` count on a stream's
+  `message_start` was kept as the call's count. A stream cut before
+  `message_delta` was then charged that early count instead of `max_uses`.
+  The relay now reads a count from final usage alone: the JSON body, or
+  `message_delta`. Shown failing on the old code first. Reverse by taking the
+  count on every usage event in `u.take`.

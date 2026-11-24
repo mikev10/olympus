@@ -1,3 +1,19 @@
+# External review of R56, codex, 2026-11-24
+
+The Codex family's review of R56 (the relay forwards only the server tools a task was granted), given the prompt and bundle below and nothing else. Triage: `2026-11-24-R56-relay-server-tools-triage.md`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex. A headless `codex exec` run under a read-only sandbox, with recorded approval policy `never`, in an empty scratch working directory and a scratch config home holding only `auth.json`, with an environment of `CODEX_HOME` alone. The pre-run listing of both is the manifest's `cleanRoom`.
+- **Cross-family agreement:** codex-1 was raised by Codex alone; Gemini raised no findings and assessed the same mechanism (`charge` and the usage reader) as sound.
+- **Date:** 2026-11-24
+- **Bundle:** `2026-11-24-R56-relay-server-tools-review-bundle.txt`, SHA-256 `5c338a9ee173eafe7a39e0f1cbd0b9e9dacef6c9aca66f1a9746248f858929f6` (the manifest's `bundleSha256`), base `03518f9` (`reviewed/R53`), head `fb1206b` (R56's tip before review: the A-R56-01 record and the relay grant). Every new file in full and every modified file as a function-context diff, 50 sections. `docs/decisions.md`, `docs/reviews/`, `docs/plan/`, and `pnpm-lock.yaml` were excluded. The range also held two post-R53 commits from other work (A-R40-02 and a tooling note). Prompt: `2026-11-24-R56-relay-server-tools-review-prompt.txt`.
+- **Citations:** line numbers refer to positions in the bundle, not the repository. They are hints, and each was resolved to the construct it names before verification.
+- **Prior context and lookups:** the reviewer stated no prior context and no external lookups, and that local execution was blocked. This is a self-report and is not independently verifiable.
+- **Coverage, and any gap:** one finding under item 1. Items 2 and 3 were answered in prose: no tautological assertion and no exception-to-pass path found. Item 4 was answered in passing (casts in the sandbox cannot reach the trusted runtime). Item 5 was not addressed separately. Item 6 named four sound mechanisms. Item 7 judged the framing appropriate and named the open question it left.
+
+---
+
 Prior context: none. External lookups: none. I reviewed the prompt’s bundle; local execution was blocked, so I ran no tests and did not verify the SHA-256.
 
 BASE: 03518f9  
