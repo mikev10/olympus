@@ -12712,3 +12712,45 @@ instruction. Corpus v2, `deep`, three repetitions. Both runs finished.
   (D-R54-03).
 - **Verified by this run:** the pinned CLI (2.1.330) accepts
   `claude-fable-5-2`, which D-R54-02 left open.
+
+### D-R54-07: review fixes, known limits, and one correction
+
+The external reviews (codex, gemini; both counted on the first run) and their
+triage are in `docs/reviews/2026-11-23-R54-deep-tier-benchmark-*`.
+
+- **Fixed (codex-2, codex-3, gemini-4), b446cf1:** `compareRuns` reads a
+  result file as unknown data, counts every arm's rates again from its
+  verdicts, and refuses a file whose stored summary differs. It refuses a
+  cost that is not a number and two runs whose arms hold different items.
+  `coverage` holds a result to the committed corpus it names: both arms, every
+  item. *Rejected:* recounting and ignoring the stored summary. A file whose
+  summary disagrees with its trials is wrong somewhere, and refusing it is the
+  fail-closed reading. *Reverse:* revert the commit; the committed comparison
+  is unchanged either way.
+- **Fixed (codex-5, gemini-3), b446cf1:** `REQUIRED_COMPARISONS` names the
+  comparison this unit decided on, and the suite fails without it. The `deep`
+  tier may hold a model a committed comparison names as its candidate only
+  where that comparison says `change`. *Rejected:* asserting at least one
+  comparison exists, which a file of any name satisfies.
+- **Fixed (codex-6), ea3edb1:** the comparison tier no longer restates the
+  rule. It holds both results to their corpus before comparing.
+- **Known limit, #228 (codex-1, gemini-1):** nothing ties a committed result
+  to the run that wrote it. The recount means a forgery has to rewrite trial
+  records and not just a summary, and the maintainer reading the pull request
+  is the defence. An attestation or an artifact check is CI work on a gate
+  path.
+- **Known limit, #228 (codex-4, gemini-2), and a correction to D-R54-05:**
+  D-R54-05 said the caps are in the workflow file. They are, and what enforces
+  them is the benchmark's own code, which the workflow checks out from the
+  pull request. A pull request from a branch of this repository that changed
+  that code could spend past them. Fork pull requests are excluded, and a run
+  starts only when someone who can label adds the label. The paid driver steps
+  in `ci.yml` run the same way. The bound that does not depend on the code
+  under test is the provider key's own spend limit.
+- **Known limit, #228 (codex-3):** a result does not record the tier or the
+  per-call limit it ran with. They are not added by hand to the two committed
+  results, because that would be writing evidence no run produced.
+- **Rejected (gemini-5):** the test rigs' readiness scan always answers level
+  2. That is A-R40-02's design, merged by its own pull request and not this
+  unit's work: a rig's scan is a stand-in, and what the rigs prove is that
+  admission enforces the term.

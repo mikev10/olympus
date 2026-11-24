@@ -1,3 +1,47 @@
+# External review of R54, codex, 2026-11-23
+
+The review of R54: the benchmark's model tier run per model, the rule that
+compares two runs, the paid workflow, and the committed results. The bundle
+also carried the admission change A-R40-02, merged since the last reviewed
+tag. Everything below the rule under this header is the reviewer's reply,
+unedited. The triage is `2026-11-23-R54-deep-tier-benchmark-triage.md`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex.
+  A headless `codex exec` run under a read-only sandbox, with recorded
+  approval policy `never`, in an empty scratch working directory and a scratch
+  config home holding only `auth.json`, with an environment of `CODEX_HOME`
+  alone. The pre-run listing of both is the manifest's `cleanRoom`.
+- **Cross-family agreement:** gemini raised four of these six too. codex-1 is
+  gemini-1 (results not tied to a run). codex-4 is gemini-2 (the pull
+  request's code runs with the key). codex-5 is gemini-3 (no comparison, no
+  assertion). codex-2 and codex-3 overlap gemini-4 (summaries trusted, items
+  not compared). codex-6 was raised by codex alone.
+- **Date:** 2026-11-23
+- **Bundle:** `2026-11-23-R54-deep-tier-benchmark-review-bundle.txt`, SHA-256
+  `221f7416648bf8050a04dbf8628a0675ffb3c9e9ff87f390559c5ca6cfe89896`, base
+  `03518f9` (`reviewed/R53`), head `4a3b15d` (the results and their
+  comparison committed, before any review fix). It held every new file in
+  full and every modified file as a function-context diff, 34 sections.
+  Excluded: `docs/decisions.md`, `docs/reviews/`, `docs/plan/`,
+  `pnpm-lock.yaml`. Prompt: `2026-11-23-R54-deep-tier-benchmark-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer said it had no prior project
+  context and performed no external lookups, and that a local file-listing
+  attempt was blocked. This is a self-report and cannot be verified
+  independently.
+- **Coverage, and any gap:** items 1, 2, 3 and 5 are answered by the six
+  findings. Item 4 (language escape hatches) is answered in the closing
+  paragraphs: the unchecked JSON assertion, and no declaration-merging or
+  augmentation bypass found. Item 6 (sound mechanisms) names three. Item 7
+  (the framing) is answered: the framing fits, with the limit that the runs
+  measure judging, not authoring. The reviewer said it could not assess the
+  spend reservation, because `modelTier` and the relay were not in the bundle.
+- **Citations:** line numbers refer to positions in the bundle, not the
+  repository. Each finding was located by the construct it describes.
+
+---
+
 BASE: reviewed/R53  
 HEAD: 4a3b15d  
 packages/vault/src/types.ts  

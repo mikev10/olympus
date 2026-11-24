@@ -1,3 +1,45 @@
+# External review of R54, gemini, 2026-11-23
+
+The review of R54: the benchmark's model tier run per model, the rule that
+compares two runs, the paid workflow, and the committed results. The bundle
+also carried the admission change A-R40-02, merged since the last reviewed
+tag. Everything below the rule under this header is the reviewer's reply,
+unedited. The triage is `2026-11-23-R54-deep-tier-benchmark-triage.md`.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini.
+  A direct `generateContent` API call to `gemini-3.1-pro-preview`, offering no
+  tools. `cleanRoom` is `null` because an API call loads no local
+  configuration.
+- **Cross-family agreement:** codex raised four of these five too. gemini-1
+  is codex-1 (results not tied to a run). gemini-2 is codex-4 (the pull
+  request's code runs with the key); its claim about the merge-unit skill was
+  raised by gemini alone. gemini-3 is codex-5 (no comparison, no assertion).
+  gemini-4 overlaps codex-2 and codex-3 (summaries trusted, items not
+  compared). gemini-5 (the test rigs' readiness scan) was raised by gemini
+  alone; codex looked at the same code and reported no bypass.
+- **Date:** 2026-11-23
+- **Bundle:** `2026-11-23-R54-deep-tier-benchmark-review-bundle.txt`, SHA-256
+  `221f7416648bf8050a04dbf8628a0675ffb3c9e9ff87f390559c5ca6cfe89896`, base
+  `03518f9` (`reviewed/R53`), head `4a3b15d` (the results and their
+  comparison committed, before any review fix). It held every new file in
+  full and every modified file as a function-context diff, 34 sections.
+  Excluded: `docs/decisions.md`, `docs/reviews/`, `docs/plan/`,
+  `pnpm-lock.yaml`. Prompt: `2026-11-23-R54-deep-tier-benchmark-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer said it had no prior context
+  and performed no lookups. This is a self-report and cannot be verified
+  independently.
+- **Coverage, and any gap:** the reply numbers seven entries. Entries 1 to 5
+  are findings, covering prompt items 1, 2, 3 and 5. Entry 6 answers item 6
+  (sound mechanisms). Entry 7 answers item 7 (the framing): it fits, and the
+  reviewer would have CI generate the comparison. Item 4 (language escape
+  hatches) came back empty, which is recorded and is not read as clearance.
+- **Citations:** line numbers refer to positions in the bundle, not the
+  repository. Each finding was located by the construct it describes.
+
+---
+
 BASE: reviewed/R53
 HEAD: 4a3b15d
 packages/vault/src/types.ts
