@@ -12,7 +12,7 @@ import { join, relative, sep } from 'node:path';
 import { CHAR_CLASSES, REVIEW_CATEGORIES, TREE_CATEGORIES, type DraftStation, type FieldDefect, type ReviewCategory, type ReviewSeatKind, type RunId, type RunState, type TaskId, type TreeCategory, type VaultRef } from '@olympus-ai/core';
 import type { CheckResult } from '@olympus-ai/integrity';
 import { criticFindingsOf, findingKeyOf, isNoRunState } from '@olympus-ai/vault';
-import type { CriticRecord, DraftLockRecord, DraftRecord, EvidenceBundle, FindingOutcomeRecord, FindingRef, IntegrationMerged, ReviewFindingsRecord, SeatFinding, Vault } from '@olympus-ai/vault';
+import type { CriticRecord, DismissalCause, DraftLockRecord, DraftRecord, EvidenceBundle, FindingOutcome, FindingOutcomeRecord, FindingRef, IntegrationMerged, ReviewFindingsRecord, SeatFinding, Vault } from '@olympus-ai/vault';
 import { isAncestor, pathHunks, type HunkRange } from './history.js';
 import { readIntegration } from './line.js';
 import { readReviewResult } from './nightly-review.js';
@@ -367,4 +367,44 @@ export async function resolveCodeFindings(vault: Vault, checkout: string, runId:
     }
   }
   return { resolved, unreadable };
+}
+
+/** A raised finding with what became of it, as the API and the CLI show it (R28). `open` is the absence of an outcome. */
+export interface FindingSummary {
+  readonly id: string;
+  readonly seat: string;
+  readonly family: string;
+  readonly runId: RunId | null;
+  readonly date: string | null;
+  readonly cites: Citation;
+  readonly outcome: { readonly kind: 'open' } | FindingOutcome;
+}
+
+/** Every located finding and its outcome, open where it has none, sorted by id. */
+export async function listFindings(vault: Vault): Promise<FindingSummary[]> {
+  const outcomes = await outcomesByFinding(vault);
+  return (await raisedFindings(vault))
+    .map((f): FindingSummary => ({ id: f.id, seat: f.seat, family: f.family, runId: f.runId, date: f.date, cites: f.cites, outcome: outcomes.get(findingKeyOf(f.ref))?.outcome ?? { kind: 'open' } }))
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
+/**
+ * A person's dismissal of a finding, with a cause and no text (A-R16-05,
+ * D-A-FO-01). Only a located finding can be dismissed: a refused one was
+ * never measured. A finding that already has an outcome keeps it.
+ */
+export async function dismissFinding(
+  vault: Vault, id: string, cause: DismissalCause, at: string,
+): Promise<{ readonly kind: 'dismissed'; readonly finding: FindingSummary } | { readonly kind: 'unknown' } | { readonly kind: 'decided'; readonly outcome: FindingOutcome }> {
+  const ref = parseFindingId(id);
+  if (ref === null) return { kind: 'unknown' };
+  const finding = (await raisedFindings(vault)).find((f) => f.id === id);
+  if (finding === undefined) return { kind: 'unknown' };
+  const written = await vault.recordFindingOutcome({ finding: finding.ref, outcome: { kind: 'dismissed', cause }, at, collectedBy: 'runtime' });
+  if (written === null) {
+    const outcome = (await outcomesByFinding(vault)).get(findingKeyOf(finding.ref))?.outcome;
+    if (outcome === undefined) throw new Error(`findings: ${id} was refused a second outcome, and none is stored`);
+    return { kind: 'decided', outcome };
+  }
+  return { kind: 'dismissed', finding: { id, seat: finding.seat, family: finding.family, runId: finding.runId, date: finding.date, cites: finding.cites, outcome: { kind: 'dismissed', cause } } };
 }
