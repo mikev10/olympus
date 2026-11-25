@@ -13463,7 +13463,7 @@ none rejected; the triage is `docs/reviews/2026-11-24-R55-draft-read-key-check-t
 
 ## R57: A build runs the locked acceptance tests in its own sandbox
 
-Started on `v2` at ef868ca. Issue #220.
+Started on `v2` at ef868ca. Issue #220. Rebased onto c53f09a (R55, merged during the unit) before review; the only conflict was both units appending here.
 
 ### D-R57-01: boundary, verified
 
@@ -13628,3 +13628,11 @@ Started on `v2` at ef868ca. Issue #220.
   declares, so the example runs are admitted as before. The fixture's own
   grant, `TEST_TOOLS`, is unchanged. `line.test.ts` moved its sample
   escalating write off `.vite`, as `base-run.ts` did.
+- **One more existing entry followed the examples.**
+  `I4.tool-grant-undeclared-by-the-seat-driver-refused` lowers the builder's
+  `Read` to `read` by replacing the first `tools: [Read, Write]` in the
+  example policy. With the builder's grant now `[Read, Write, Bash]`, the
+  first match became the reviewer's, and the refusal named the wrong seat. It
+  now replaces `tools: [Read, Write, Bash]`, the builder's grant (`first-run.ts`).
+  The property is unchanged: an undeclared grant is refused at admission,
+  naming the builder, before the estimate.
