@@ -14,6 +14,7 @@ import { readFile } from 'node:fs/promises';
 import { parseEnv } from 'node:util';
 import { MIN_TOKEN_LENGTH } from '../http/server.js';
 import { containerUser, parseCodexSeats, parseEndpointFile, type HostCodex, type HostEndpoint } from './compose.js';
+import { probeModelKey, type KeyProbe } from './key-probe.js';
 import { probeSymlinks, type MakeLink } from './symlinks.js';
 import type { ContainerUser } from '../workspace.js';
 
@@ -80,12 +81,13 @@ export interface HostSettings {
 }
 
 /**
- * A refusal still carries the two inputs whose own checks can run without the
- * rest, so start-up reports their problems in the same list (review: codex-5).
+ * A refusal still carries the three inputs whose own checks can run without
+ * the rest, so start-up reports their problems in the same list (review:
+ * codex-5, R55).
  */
 export type HostConfigResult =
   | { readonly ok: true; readonly settings: HostSettings }
-  | { readonly ok: false; readonly problems: readonly string[]; readonly trees: string; readonly endpoint: HostSettings['endpoint'] };
+  | { readonly ok: false; readonly problems: readonly string[]; readonly trees: string; readonly endpoint: HostSettings['endpoint']; readonly modelKey: string };
 
 function declared(name: string): HostVariable | undefined {
   return HOST_VARIABLES.find((v) => (v.prefix === true ? name.startsWith(v.name) && name.length > v.name.length : v.name === name));
@@ -159,7 +161,7 @@ export function readHostConfig(env: Readonly<Record<string, string | undefined>>
   const rubricsDirectory = optional('FACTORY_RUBRICS_DIR');
   const checksToken = optional('FACTORY_CHECKS_TOKEN');
 
-  if (problems.length > 0) return { ok: false, problems, trees, endpoint: endpointFile === '' ? null : { file: endpointFile, key: endpointKey } };
+  if (problems.length > 0) return { ok: false, problems, trees, modelKey, endpoint: endpointFile === '' ? null : { file: endpointFile, key: endpointKey } };
   return {
     ok: true,
     settings: {
@@ -201,11 +203,17 @@ export type StartupResult =
 
 /**
  * Every check start-up makes before it composes, all of them, into one list:
- * the environment, the endpoint file named, and whether the trees directory
- * can hold a symbolic link. A check whose input is unset is skipped, since the
- * missing variable is already listed (I5, review: codex-5).
+ * the environment, the endpoint file named, whether the trees directory can
+ * hold a symbolic link, and whether the provider accepts the model key (R55,
+ * #176). A check whose input is unset is skipped, since the missing variable
+ * is already listed (I5, review: codex-5).
+ *
+ * `probeKey` defaults to the real request, so a caller that names none gets
+ * the check; only a test passes another.
  */
-export async function checkStartup(env: Readonly<Record<string, string | undefined>>, makeLink?: MakeLink, facts: HostFacts = hostFacts()): Promise<StartupResult> {
+export async function checkStartup(
+  env: Readonly<Record<string, string | undefined>>, makeLink?: MakeLink, facts: HostFacts = hostFacts(), probeKey: KeyProbe = probeModelKey,
+): Promise<StartupResult> {
   const read = readHostConfig(env, facts);
   const problems = read.ok ? [] : [...read.problems];
   const source = read.ok ? read.settings.endpoint : read.endpoint;
@@ -221,6 +229,11 @@ export async function checkStartup(env: Readonly<Record<string, string | undefin
   if (trees !== '') {
     const links = await probeSymlinks(trees, makeLink);
     if (links !== null) problems.push(links);
+  }
+  const modelKey = read.ok ? read.settings.modelKey : read.modelKey;
+  if (modelKey !== '') {
+    const rejected = await probeKey(modelKey);
+    if (rejected !== null) problems.push(rejected);
   }
   if (!read.ok || problems.length > 0) return { ok: false, problems };
   return { ok: true, settings: read.settings, endpoint };

@@ -334,8 +334,10 @@ factory-host --env-file $HOME\.factory\host.env
 
 `factory-host --env-file` reads the file through the same table as its
 environment: a name the host does not read is refused, and so is one set in
-both with different values. Once it listens it prints one line, and stays in
-the foreground until Ctrl+C:
+both with different values. Before it listens it asks the model provider
+whether it accepts `ANTHROPIC_API_KEY`, with one request that spends nothing,
+and does not start on a key the provider rejects or one it could not check.
+Once it listens it prints one line, and stays in the foreground until Ctrl+C:
 
 ```
 factory-host: listening on http://127.0.0.1:7300, admitting runs from /path/to/repo; stop with Ctrl+C
@@ -362,9 +364,12 @@ figure by running the same command again with `--approve-cost <usd>`.
 
 Then follow it with `olympus-ai status <run id>` or `events <run id>`. When
 `status` shows the run awaiting approval, pass the gate with
-`olympus-ai approve <run id> <station>:1`; at `spec` and `test-design`, which
-were drafted, add `--draft <hash>` with the draft's hash as `status` names it,
-having read the draft first. `olympus-ai report <run id>` prints what it cost
+`olympus-ai approve <run id> <station>:1`. At `spec` and `test-design`, which
+were drafted, read the draft first: `olympus-ai draft <run id> spec` (or
+`test-design`) prints its files, its open questions and assumptions, its
+hash, and the `approve` command for it, which adds `--draft <hash>`. To send
+it back instead, `olympus-ai reject` takes the same hash.
+`olympus-ai report <run id>` prints what it cost
 and what was decided. Every command prints its flags with
 `olympus-ai <command> --help`.
 

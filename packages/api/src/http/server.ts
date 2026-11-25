@@ -14,13 +14,14 @@
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { isAbsolute } from 'node:path';
-import { isApprovalKey, isRunTemplate, type CandidateId, type RunCancellation, type RunId, type RunState, type TaskId } from '@olympus-ai/core';
+import { DRAFT_STATIONS, isApprovalKey, isRunTemplate, type CandidateId, type DraftStation, type RunCancellation, type RunId, type RunState, type TaskId } from '@olympus-ai/core';
 import { MAX_DELIVERY_BYTES } from '@olympus-ai/triggers';
 import { DISMISSAL_CAUSES, UNSUBSCRIBED_BUCKET, isNoRunState, type AttemptFailure, type CandidateRecord, type DismissalCause, type IntakeEntry } from '@olympus-ai/vault';
 import { Intake, type DeliveryOutcome, type SecretSource } from '../intake.js';
 import { startSchedules, type Scheduler } from '../schedule.js';
 import { NightlyJobs, type NightlyTarget } from '../nightly.js';
 
+import { awaitingKey, readDraft } from '../draft-view.js';
 import { loadPolicyFile } from '../policy-file.js';
 import type { ReadinessScanner } from '../readiness-scan.js';
 import { admitRun, approveStation, cancelRun, rejectDraft, resumeRun, runStanding, type DriveHooks, type RunOutcome } from '../run.js';
@@ -29,7 +30,7 @@ import { runReport, type RunReport } from '../report.js';
 import { outcomes, type OutcomeWindow } from '../outcomes.js';
 import { dismissFinding, listFindings } from '../findings.js';
 import { telemetryOf, type TelemetryExport } from '../telemetry.js';
-import type { ApproveBody, BugFixIntentBody, CandidateSummary, CandidateView, CreateRunBody, DismissBody, CreatedRun, DeliveryAnswer, DriveEnd, ErrorBody, ErrorCode, RejectBody, RunEvent, RunView } from './wire.js';
+import type { ApproveBody, BugFixIntentBody, CandidateSummary, CandidateView, CreateRunBody, DismissBody, CreatedRun, DeliveryAnswer, DraftView, DriveEnd, ErrorBody, ErrorCode, RejectBody, RunEvent, RunView } from './wire.js';
 
 export interface ApiServerOptions {
   readonly components: BuiltGraph;
@@ -461,6 +462,22 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
     return { runId, state: read.state, standing: read.standing, driving, lastOutcome };
   };
 
+  /**
+   * The station's latest recorded draft, for a person to read before deciding
+   * it (R55, #175). One read of the run gives both the draft and whether it is
+   * the one waiting, so the two cannot describe different moments. Bytes that
+   * no longer hash to the recorded hash are refused, never shown (I5).
+   */
+  const draft = async (runId: RunId, station: string | null): Promise<DraftView> => {
+    const named = DRAFT_STATIONS.find((s) => s === station);
+    if (named === undefined) throw new HttpError(400, 'bad-request', `station is one of ${DRAFT_STATIONS.join(', ')}: the stations a run can draft at`);
+    const drafting: DraftStation = named;
+    const now = await view(runId);
+    const read = await readDraft(components.vault, now.state, drafting);
+    if (!read.ok) throw new HttpError(read.reason === 'no-draft' ? 404 : 500, read.reason === 'no-draft' ? 'not-found' : 'internal', read.message);
+    return { runId, station: drafting, draft: read.draft, awaiting: awaitingKey(now.standing, drafting, read.draft), files: read.files, questions: read.questions };
+  };
+
   const create = async (body: CreateRunBody): Promise<CreatedRun> => {
     const policy = await loadPolicyFile(options.policyFile);
     if (!policy.ok) throw new HttpError(422, 'refused', `the server's policy file is refused: ${policy.message}`, policy);
@@ -705,6 +722,11 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
     if (action === undefined) {
       if (method !== 'GET') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
       send(res, 200, await view(runId));
+      return;
+    }
+    if (action === 'draft') {
+      if (method !== 'GET') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
+      send(res, 200, await draft(runId, url.searchParams.get('station')));
       return;
     }
     if (action === 'report') {

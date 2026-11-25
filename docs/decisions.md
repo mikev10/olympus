@@ -13226,3 +13226,32 @@ Started on `v2` at 746aca2. Both dependencies are merged and tagged:
   cannot list models, and whether such a key answers 401 there cannot be run
   from here; an endpoint file declares one path, the one that spends. Both
   are filed as an issue with the pull request rather than guessed at.
+
+### D-R55-05: what proves it, each shown failing, and the order it was built in
+
+- **`I5.host-refuses-a-rejected-key`** (`packages/conformance/src/registry/startup-key.ts`).
+  With the line that lists the probe's answer removed from `checkStartup`, it
+  failed with "the host would start although the provider answered 401".
+- **`I9.draft-is-read-through-the-api`** (`registry/draft-read.ts`). With the
+  per-file byte hash check removed from `readDraft`, it failed with "a draft
+  whose bytes were changed was not refused". Without the route the CLI gets a
+  404 and the first step fails.
+- **`I9.packaged-host-runs`** now starts the installed host with the provider
+  stand-in answering 401 and requires the refusal, then 200 and requires it
+  to listen. It passed on Windows through the installed `.cmd` shims.
+- **Unit tests:** `packages/api/test/draft-view.test.ts`,
+  `packages/cli/test/draft.test.ts` (what a hostile file may print), and the
+  two start-up callers in `host-config.test.ts`, which pass a stand-in.
+- **Not run here:** `packages/api/test/paid/key-probe.paid.test.ts`, the real
+  key against the real provider (C8). It runs in CI's paid step.
+- **Order, stated as it happened:** the product code was written before the
+  two assertions, not after, against working rule 3. Each assertion was then
+  shown failing by deleting the behaviour it covers, as above.
+- **Local results on 2026-11-24:** `pnpm typecheck` and `pnpm lint` clean.
+  Every package's tests pass except the conformance registry's 46 entries
+  marked `external`, which read driver reports only CI produces, and the two
+  registry-completeness entries that count them (decisions, line 2015). No
+  entry this unit adds or changes is among them.
+- **Found on the way:** the first full run failed on the Greek-name scan, for
+  a test string holding the CLI's name inside a longer string. Fixed in the
+  test. The run it cost is why the four process changes on #197 were filed.
