@@ -12760,6 +12760,47 @@ The R28 bundle from `reviewed/R53` exceeded the runner's 599,000-byte ceiling, b
 - **Not holding (gemini-1):** the at-ceiling checks use `port(1)` with an L1 request; they pin the boundary.
 - **Reverse the split:** review both ranges together, which needs a payload ceiling above 600 KB.
 
+## A-R53-02: one build of a tag at a time (#231)
+
+Confirmed by the maintainer on 2026-11-24, taking #231's first option. Found
+merging R54: a rerun of the paid job failed with `No such image` for an ID
+`recordedImage` had just returned.
+
+- **What is built.** `recordedImage` holds a lock per tag, a directory beside
+  the tag's records, around the whole of inspect, build, and record. A second
+  caller waits, then finds the tag present and recorded and returns the same
+  ID. No contract, type, or gate path changes.
+- **Verified.**
+  - Two `docker build --tag` of one tag at once give two content IDs, the tag
+    ends on one, and `docker image inspect` of the other fails (run by hand
+    on Docker 29.8.0 with the containerd image store, the store the CI runner
+    has; the runner's log shows the same on 29.4.2).
+  - `init.paid.test.ts` and `line.paid.test.ts` each reach `ensureImage`
+    through `composeHost` in `beforeAll` (`packages/api/src/host/compose.ts`),
+    in separate workers, against the one records directory under the home
+    directory.
+  - Nothing in `recordedImage` serialises inspect and build (read).
+  - The tag exists before its record is written, so an unlocked reader in
+    that window reads a tag with no record and refuses it as replaced. The
+    lock therefore covers the reader's path too, not only the build.
+  - `packages/sandbox/src/local/image.ts` matches no pattern in
+    `.github/protected-paths.txt`.
+- **A lock left behind is refused, never taken over.** The holder writes its
+  host name and process ID inside the lock. A waiter that reads a holder on
+  this host whose process is gone refuses at once and names the directory to
+  remove; one that waits past the build's time limit refuses the same way.
+  Rejected: removing a stale lock and carrying on. Two waiters that both
+  judge it stale can each remove it, the second removing the first's fresh
+  lock, which is the race again. A refusal costs the operator one `rm` after
+  a build was killed; a wrong takeover costs a run that fails on a missing
+  image. Reverse by deleting `withTagLock` and its call.
+- **Rejected: build the image once in the paid suite's global setup.** It
+  fixes CI and leaves two hosts started together racing.
+- **Rejected: a CI step that builds before the line step.** CI only, and a
+  gate-path change for a defect that is in the product.
+- **Not changed.** Whether an image this host built and recorded should be
+  rebuilt when its tag is gone but its ID is still held: unchanged, a build.
+
 ### A-R56-01: the relay grant names the server tools a task may use, each with its price (D-A-ST-01)
 
 Confirmed by the maintainer in two steps. On 2026-11-24, before R56 started,
