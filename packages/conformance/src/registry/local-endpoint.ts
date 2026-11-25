@@ -38,6 +38,7 @@ function localRelay(port: number): RelaySpec {
     urlVariable: 'MODEL_BASE_URL',
     budget: { maxTokens: 1_000_000, maxCostUsd: 1 },
     meter: METER,
+    serverTools: [],
   };
 }
 
@@ -333,6 +334,7 @@ export const MODEL_RELAY_REFUSES_AN_UNDECLARED_LOCAL_ENDPOINT = runtime({
       RELAY_PORT: String(await freePort()),
       RELAY_BUDGET: JSON.stringify({ maxTokens: 1000, maxCostUsd: 1 }),
       RELAY_METER: JSON.stringify(METER),
+      RELAY_TOOLS: '[]',
     };
     const started = await relayStart(RELAY_SOURCE, env);
     if (!started.output.includes('listening')) {

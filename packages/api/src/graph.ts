@@ -116,7 +116,8 @@ function attest(slot: Slot, component: object): UnsafeDeclaration | undefined {
 
 /** A driver whose calls go through no relay is unmetered, so it carries no run above L1 (A-I1a-02). */
 function relayless(slot: 'driver' | 'reviewer', driver: ComponentGraph['driver']): UnsafeDeclaration | undefined {
-  if (driver.relayRequest() !== null) return undefined;
+  // Whether a relay exists does not depend on the grant, so none is given (A-R56-01).
+  if (driver.relayRequest([]) !== null) return undefined;
   return {
     component: `${slot} ${driver.id}`,
     cannotEnforce: [`the ${slot} names no model relay, so what its calls cost is unmetered and no budget bounds them (A-I1a-02)`],

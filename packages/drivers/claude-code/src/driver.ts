@@ -37,7 +37,7 @@ import type {
   Usage,
 } from '@olympus-ai/core';
 import { DRIVER_CONTRACT_VERSION } from '@olympus-ai/core';
-import type { ModelPrice, RelayMeter, RelaySpec, SandboxHandle, SandboxProvider } from '@olympus-ai/sandbox';
+import type { ModelPrice, RelayMeter, RelaySpec, SandboxHandle, SandboxProvider, ServerToolGrant } from '@olympus-ai/sandbox';
 import { CLI_VERSION } from './image.js';
 import { refuse } from './refusal.js';
 import { parseStream, type ParsedStream, type SessionInit } from './stream.js';
@@ -126,6 +126,20 @@ export const MODEL_RELAY: Readonly<Omit<RelaySpec, 'budget'>> = Object.freeze({
   credential: MODEL_CREDENTIAL,
   urlVariable: 'ANTHROPIC_BASE_URL',
   meter: MODEL_METER,
+  serverTools: [],
+});
+
+/**
+ * The server tools a grant brings with it (A-R56-01): the exact `type` the
+ * pinned CLI sends when the tool runs, and what one use costs. `WebSearch` runs
+ * as a request of its own offering `web_search_20250305` with `max_uses: 8`,
+ * observed against CLI 2.1.330 with a capturing upstream (D-R56-02); a CLI
+ * bump that changes the type is refused by the relay until this map changes.
+ * Searches are $10 per 1,000. No other tool the driver declares runs at the API:
+ * `WebFetch` fetches on the client, through the sandbox's egress.
+ */
+export const SERVER_TOOLS: Readonly<Record<string, ServerToolGrant>> = Object.freeze({
+  WebSearch: Object.freeze({ type: 'web_search_20250305', perUseUsd: 0.01 }),
 });
 
 /**
@@ -406,9 +420,13 @@ export class ClaudeCodeDriver implements Driver {
     return DECLARED_TOOLS;
   }
 
-  /** The relay every sandbox this driver runs in is provisioned with (A-I1a-02). */
-  relayRequest(): Omit<RelaySpec, 'budget'> {
-    return { ...MODEL_RELAY, paths: [...MODEL_RELAY.paths] };
+  /**
+   * The relay every sandbox this driver runs in is provisioned with (A-I1a-02),
+   * forwarding the server tools `tools` grants and no other (I4, A-R56-01).
+   */
+  relayRequest(tools: readonly string[]): Omit<RelaySpec, 'budget'> {
+    const serverTools = Object.entries(SERVER_TOOLS).filter(([tool]) => tools.includes(tool)).map(([, grant]) => ({ ...grant }));
+    return { ...MODEL_RELAY, paths: [...MODEL_RELAY.paths], serverTools };
   }
 
   /**

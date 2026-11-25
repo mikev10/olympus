@@ -1,0 +1,136 @@
+The code under review is in the file
+`2026-11-24-R56-relay-server-tools-review-bundle.txt` (SHA-256 5c338a9ee173eafe7a39e0f1cbd0b9e9dacef6c9aca66f1a9746248f858929f6) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing the model relay's tool grant of a TypeScript project: the
+control that decides which tools the model provider's API may run on a task's
+behalf. You have the source and nothing else — no design documents, no author
+reasoning, no prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+A coding agent runs inside a Docker sandbox. Its only route to the model
+provider is a relay: a separate container that holds the API credential, which
+the sandbox never sees, forwards granted paths to one upstream, and meters every
+call against a budget. The provider's Messages API can run some tools itself,
+web search among them, outside the sandbox and billed per use outside token
+usage. This change adds a grant of such "server tools" to the relay's
+specification (`RelaySpec.serverTools`, each entry an exact tool `type` and a
+per-use price). The driver derives the grant from the task's granted tools
+(`Driver.relayRequest(tools)`). The relay refuses any request offering a typed
+tool the grant does not name, or naming `mcp_servers` or a `container`, and
+charges each granted use against the budget. The relay's source runs as a
+single `node --eval` argument, and the shipped copy is the source with
+whole-line comments and indentation stripped.
+
+The relay must hold against a capable, motivated party trying to obtain a
+capability that was not granted: to make the provider's API run a tool the
+task's grant does not include, or to spend through the relay more than its
+budget counts. Assume no deceptive intent — only that the easiest path gets
+taken.
+
+That party controls everything sent to the relay from inside the sandbox: a
+task granted a command tool can send the relay any HTTP request it likes, with
+any method, path, headers, and body, by `curl`, by `node`, or by a second agent
+CLI started in the container. It also controls the provider's responses only
+insofar as its request shapes them. It does not control the components the
+runtime is wired with — the relay's specification, the sandbox provider, the
+drivers, and the policy that names a task's tools are runtime-selected and
+trusted, even where a function takes one as an argument — and it does not
+control code running inside the runtime's own process or inside the relay's
+container.
+
+The invariants at stake:
+
+- Default deny. A capability not granted in policy is unavailable. Adding one is
+  an explicit, versioned edit; nothing derived may grant one.
+- Fail closed. A missing check, a missing capability, or a value that cannot be
+  read is a refusal, never a silent degrade or a warning that lets work
+  continue. Spend the meter cannot count is refused rather than forwarded.
+- Every capability claim maps to an executable assertion that fails when the
+  capability is deleted.
+
+The mechanisms that matter most:
+
+- `anthropicTools` and its use in `metered()` in
+  `packages/sandbox/src/local/relay.ts`: what a request may offer, and what is
+  refused before it is sent.
+- The relay's start checks on `RELAY_TOOLS` and `checkServerTools` /
+  `checkRelay`: which grants are accepted at all.
+- `charge` and the usage reader's `server_tool_use` handling: how granted uses
+  are counted and what an answer with no readable count is charged.
+- `ClaudeCodeDriver.relayRequest` and `SERVER_TOOLS` in
+  `packages/drivers/claude-code/src/driver.ts`, and the callers that pass a
+  call's tools (`packages/api/src/line.ts`, `nightly-review.ts`,
+  `packages/benchmark/src/alone.ts`), together with `RELAY_SOURCE`'s comment
+  stripping.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+"This is relay work, beside P12 and P13's relay controls. It is not R52's: R52
+changes only the driver's CLI pin and its Code Mode switch." Also out: granting
+any agent seat a command tool (R57), metering any server tool other than web
+search, and the CLI's version pin and Code Mode switch (R52).
+
+The identifiers in that list (P12, P13, R52, R57) name other units of work in
+this project; they mean nothing more than "a different change owns this".
+Absent work listed here is not a defect. The bundle's commit range also
+includes two earlier commits from other changes (an admission rule for
+readiness scans, and a test-tooling note); they are in range because they
+landed after the last review, and they are fair to review, but they are not
+this change's mechanism.
+
+THE QUESTION
+
+From inside the sandbox, how would I get the provider's API to run a tool the
+task was not granted, or to spend more than the relay's budget counts?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.

@@ -13059,6 +13059,187 @@ triage are in `docs/reviews/2026-11-23-R54-deep-tier-benchmark-*`.
   unit's work: a rig's scan is a stand-in, and what the rigs prove is that
   admission enforces the term.
 
+### A-R56-01: the relay grant names the server tools a task may use, each with its price (D-A-ST-01)
+
+Confirmed by the maintainer in two steps. On 2026-11-24, before R56 started,
+the direction: the relay's grant gains the server-side tools a task may use,
+so the relay can refuse an Anthropic-dialect request naming an ungranted one
+(#189). On the same day, in R56's session, the three parts that go past that
+shape, each taking the recommended answer:
+
+- **Contract.** `RelaySpec` (`packages/sandbox/src/types.ts`) gains a
+  required `serverTools: readonly ServerToolGrant[]`. Each entry is
+  `{ type, perUseUsd }`: the exact `type` a request's tool names, such as
+  `web_search_20250305`, and what one use costs. An empty list grants none.
+- **The fee is metered.** A web search is billed per use ($10 per 1,000),
+  outside the token usage the meter reads. P13 refuses spend the meter cannot
+  count (D-P13-12), so a granted server tool is charged, not merely let
+  through. The relay reads the uses from `usage.server_tool_use`, and a
+  request offering one must name a positive integer `max_uses`, the ceiling
+  charged when the count cannot be read. The relay knows how to count one
+  type, `web_search_20250305`. A grant naming any other is refused when the
+  sandbox is provisioned, and the relay will not start with one.
+- **The driver derives it.** Only a driver knows that a grant of its
+  `WebSearch` means the API's `web_search_20250305`. `Driver.relayRequest()`
+  becomes `relayRequest(tools: readonly string[])`
+  (`packages/core/src/driver/contract.ts`). It is given the task's granted
+  tools and returns the relay with `serverTools` derived from them. Rejected:
+  a separate driver method merged by the line, because two calls can drift
+  apart. Also rejected: an empty list from every driver, which leaves a policy
+  able to grant `WebSearch` with nothing working.
+- **Request-level server features.** A non-null `mcp_servers` or `container`
+  is refused under the Anthropic dialect, whatever the grant. Each reaches
+  something that runs at the API, and no grant names either. In `tools`, an
+  entry with no `type` or `type: "custom"` is a tool the client runs and is
+  forwarded. Any other `type` passes only if the grant names it. An
+  Anthropic-defined client tool (`bash_*`, `text_editor_*`) is refused like a
+  server tool: default deny, and the pinned CLI sends none (D-R56-02).
+- **Other dialects.** `openai-chat` and `openai-responses` already refuse
+  every hosted tool (D-P13-12). A relay of either dialect whose grant names a
+  server tool is refused at provisioning rather than started with a grant it
+  would ignore.
+
+Gate paths: `packages/sandbox/src/types.ts`,
+`packages/core/src/driver/contract.ts`, `packages/conformance/`. R56 builds
+it. Reverse by removing `serverTools` and the parameter, which restores
+forwarding every tool unchecked, the gap #189 names.
+
+## R56: The relay forwards only the tools a task was granted
+
+Started on `v2` at f413f12. Issue #189. Builds A-R56-01 (D-A-ST-01). The
+amendment record is this unit's first commit rather than a pull request of its
+own, because the maintainer confirmed it before the unit began and it has no
+second consumer to land ahead of.
+
+### D-R56-01: boundary, verified
+
+- **Deliverables:**
+  - A-R56-01 in `packages/sandbox/src/types.ts` (`ServerToolGrant`,
+    `RelaySpec.serverTools`) and `packages/core/src/driver/contract.ts`
+    (`relayRequest(tools)`).
+  - `checkRelay` refuses a malformed grant, an unknown type, a price that is
+    not a non-negative finite number, and any server tool under an OpenAI
+    dialect. The plan and `AppliedRelay` carry the grant.
+  - The relay, under `anthropic-messages`: refuses unsent a request whose
+    `tools` name a typed tool the grant omits, one offering a granted tool
+    with no positive integer `max_uses`, or one carrying `mcp_servers` or
+    `container`. It charges each use reported in `usage.server_tool_use`, or
+    `max_uses` times the price when a successful answer reports none.
+  - The Claude Code driver maps `WebSearch` to
+    `{ type: 'web_search_20250305', perUseUsd: 0.01 }`, and nothing else to a
+    server tool. Codex and openai-compatible return an empty grant. The line,
+    the nightly review, and the benchmark pass each call's granted tools.
+  - A conformance entry: from inside a real sandbox, a request naming an
+    ungranted server tool is refused and never reaches the upstream, and a
+    granted one passes and is charged its uses.
+  - Changesets for every package changed.
+- **Out of scope** (verbatim from #189, "Scope note"): "This is relay work,
+  beside P12 and P13's relay controls. It is not R52's: R52 changes only the
+  driver's CLI pin and its Code Mode switch." Also out: granting any init
+  seat `Bash` (R57), and metering any server tool other than web search.
+- **Acceptance:**
+  - `pnpm -r typecheck`, `pnpm -r lint`, `pnpm -r test`, and
+    `pnpm conformance` pass. The relay tests and the conformance entry run
+    against Docker and call no model.
+  - The new entry is shown failing with the check it guards removed.
+  - The paid driver suites run under `run-driver` at merge, as for every unit.
+- **Invariants:** default deny (I4): a server tool the grant does not name
+  is refused. Fail closed (I5): an unknown type, a missing `max_uses`, and an
+  unreadable use count are refused or charged their ceiling, never let
+  through. Every capability claim has an assertion that fails when the
+  capability is deleted (I8). No Greek names in code (I10).
+- **Pending registry entries owed:** none name R56.
+
+### D-R56-02: assumptions, each verified
+
+- The dependencies have shipped. `reviewed/P12`, `reviewed/P13`, and
+  `reviewed/R26` exist (`git tag -l`).
+- Under `anthropic-messages` the relay reads only `model` and `max_tokens`,
+  and `unmeterable` is `null` for that dialect
+  (`packages/sandbox/src/local/relay.ts`, `metered()`). Only the OpenAI paths
+  check tools (`responsesUnmeterable`, `chatUnmeterable`).
+- `RelaySpec` carries paths and no tools (`packages/sandbox/src/types.ts:52`).
+- **What the pinned CLI (2.1.330) sends.** Verified by running it locally
+  against a capturing upstream that answers like the Messages API. No model
+  was called. With `--tools WebSearch,WebFetch,Bash,Read,Write,Edit,ToolSearch,Task`,
+  the main request's tools have no `type`. `WebSearch` and `WebFetch` are
+  deferred behind `ToolSearch`. When the model calls `WebSearch`, the CLI
+  sends a second request with
+  `tools: [{"type":"web_search_20250305","name":"web_search","max_uses":8}]`
+  and `tool_choice: {"type":"auto"}`. `WebFetch` fetches on the client and
+  then sends a request with no tools. No request carries `mcp_servers` or
+  `container`.
+- The API reports uses as `usage.server_tool_use.web_search_requests`, at $10
+  per 1,000. A failed search is not billed, and `max_uses` is optional, with a
+  minimum of 1 (platform.claude.com web-search-tool and Messages API
+  reference, read through Context7 on 2026-11-24).
+- No policy in the repository grants `WebSearch` (`rg WebSearch` finds only
+  `packages/drivers/claude-code/src/tools.ts`). No run today sends a server
+  tool, so refusing ungranted ones changes no shipped behaviour.
+- `RELAY_SOURCE` is 30,246 characters, against Windows' 32,767 limit for
+  the whole command line, environment arguments included. The new checks are
+  written compactly, and the duplicated OpenAI tool loop is shared to make
+  room (D-R56-03).
+- `relayRequest()` has three callers: `packages/api/src/line.ts`,
+  `packages/api/src/nightly-review.ts`, and `packages/benchmark/src/alone.ts`.
+
+### D-R56-03: choices
+
+- **Exact type, not a family prefix.** `web_search_20250305` is granted, not
+  `web_search_*`. A later version can change behaviour and billing: the API's
+  web search accepts `allowed_callers` naming code execution, and a CLI bump
+  that moves to a newer version is a reviewed change to the driver's map, not
+  something a prefix lets through. Reverse by matching a prefix in the
+  relay's tool check.
+- **The count is read like the tokens.** From the body, or from the
+  `message_start` and `message_delta` events. A successful answer to a
+  request offering a granted tool, with no readable count, is charged the
+  summed `max_uses` at the price. It does not stop the relay, as a ceiling
+  charge for output tokens does not. Reverse in `charge`.
+- **`MeterReading` is unchanged.** The fee is in `costUsd`. The meter's log
+  line names the uses, so the relay's own record keeps them. A separate
+  reading field would be a contract change nothing reads.
+- **The price is the driver's,** beside its model prices (`MODEL_METER`), at
+  $0.01 a use from the published rate.
+
+### D-R56-04: judgment calls made during the work
+
+- **The relay's shipped source is stripped.** With the new checks,
+  `RELAY_SOURCE` grew to 33,042 characters, past the 32,767 Windows allows
+  for the whole command line. `RELAY_SOURCE_TEXT` keeps the readable source,
+  and `RELAY_SOURCE`, what runs, drops whole-line comments and indentation
+  (25,745 characters). This is safe because no line of the source is a string
+  continued from the one before, and the source holds no template literal.
+  The relay tests start the stripped copy. Rejected: passing the source in the
+  relay container's environment, which changes how the relay is started
+  (D-P12) for a size problem the stripping solves. Reverse by exporting the
+  text unchanged once the source shrinks.
+- **The OpenAI dialects share one hosted-tool loop** (`hosted`), the same
+  check that was written out twice, to make room. Behaviour is unchanged, and
+  the existing tests for both dialects pass.
+- **Refusal reasons.** An ungranted tool, `mcp_servers`, or `container` is
+  logged as `ungranted`. A granted tool with no `max_uses` is logged as
+  `unreadable-request`, beside a missing `max_tokens`. Both count in
+  `refused`, which the line records as a `relay-refused` decision (D-P14-05).
+- **An unreported count is a `ceiling` charge,** the label a missing final
+  output count already uses. It never exhausts the budget the way
+  `unreadable` does.
+- **The DECOMPOSITION entry had no out-of-scope line.** It gains the one
+  D-R56-01 states, derived from #189's scope note and R57's entry.
+
+### D-R56-05: review fixes
+
+Both families' reviews counted on their first runs. Codex raised one finding;
+Gemini raised none. The triage is
+`docs/reviews/2026-11-24-R56-relay-server-tools-triage.md`.
+
+- **codex-1, fixed (2849b55).** A `server_tool_use` count on a stream's
+  `message_start` was kept as the call's count. A stream cut before
+  `message_delta` was then charged that early count instead of `max_uses`.
+  The relay now reads a count from final usage alone: the JSON body, or
+  `message_delta`. Shown failing on the old code first. Reverse by taking the
+  count on every usage event in `u.take`.
+
 ## R55: An operator can read a draft, and the host refuses a rejected key
 
 Started on `v2` at 746aca2. Both dependencies are merged and tagged:

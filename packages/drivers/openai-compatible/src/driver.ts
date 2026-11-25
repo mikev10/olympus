@@ -217,7 +217,7 @@ export class OpenAICompatibleDriver implements Driver {
   }
 
   /** The relay every sandbox this driver runs in is provisioned with: the endpoint's origin, its one path, and the `openai-chat` meter (A-R6-01). */
-  relayRequest(): Omit<RelaySpec, 'budget'> {
+  relayRequest(_tools: readonly string[]): Omit<RelaySpec, 'budget'> {
     return {
       upstream: this.#config.upstream,
       paths: [this.#config.path],
@@ -227,6 +227,8 @@ export class OpenAICompatibleDriver implements Driver {
       credential: this.#config.scheme === 'none' ? null : this.#credential,
       urlVariable: RELAY_URL_VARIABLE,
       meter: { dialect: 'openai-chat', prices: { ...this.#config.prices } },
+      // A-R56-01: none. The chat dialect refuses every hosted tool (D-P13-12), and no declared tool is one.
+      serverTools: [],
     };
   }
 

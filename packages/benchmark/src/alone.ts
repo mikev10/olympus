@@ -69,7 +69,7 @@ export interface AloneOutcome {
 
 /** One driver-alone call. A call the relay did not meter is refused, never counted as free (I5). */
 export async function aloneCall(call: AloneCall): Promise<AloneOutcome> {
-  const relay = call.driver.relayRequest();
+  const relay = call.driver.relayRequest(call.tools);
   if (relay === null) throw new Error('benchmark: the driver-alone arm needs a metered driver; this one has no relay, so its cost could not be counted against the cap');
   const model = call.driver.resolveModel(call.tier);
   const spec: SandboxSpec = {

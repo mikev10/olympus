@@ -255,8 +255,8 @@ export class DelegatingDriver implements Driver {
     return this.inner.resolveModel(tier);
   }
 
-  relayRequest(): ReturnType<Driver['relayRequest']> {
-    return this.inner.relayRequest();
+  relayRequest(tools: readonly string[]): ReturnType<Driver['relayRequest']> {
+    return this.inner.relayRequest(tools);
   }
 
   runTask(req: TaskRequest): Promise<TaskResult> {

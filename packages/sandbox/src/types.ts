@@ -85,6 +85,22 @@ export interface RelaySpec {
   budget: RelayBudget;
   /** How the relay reads what a call used and prices it. A dialect the implementation does not know is refused (D-P13-06). */
   meter: RelayMeter;
+  /**
+   * The tools the API runs itself that a request through this relay may offer
+   * (A-R56-01), derived by the driver from the task's grant. Empty grants none.
+   * Under `'anthropic-messages'` a request whose `tools` name any typed tool
+   * not listed here, or that carries `mcp_servers` or `container`, is refused
+   * unsent; each use of a listed tool is charged its price. Implementations
+   * MUST refuse a type they cannot count, and any entry under another dialect,
+   * whose hosted tools are refused outright (D-P13-12).
+   */
+  serverTools: readonly ServerToolGrant[];
+}
+
+/** One server tool a relay forwards, by the exact `type` a request names (`'web_search_20250305'`), and what one use costs in US dollars, a non-negative finite number. */
+export interface ServerToolGrant {
+  type: string;
+  perUseUsd: number;
 }
 
 /** How a relay writes its credential into the header its grant names. `'none'` writes nothing, and only with no credential (A-R21-02). */

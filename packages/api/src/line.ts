@@ -1126,7 +1126,7 @@ export async function runTask(
     image = ctx.components.profile === null ? 'no-sandbox' : { id: spec.image };
     // The relay the driver asks for, bounded by the budget policy grants the role, never the driver's (I4, A-I1a-02),
     // and priced for the resolved model alone, so a request naming any other is refused before it is sent (D-R14-01).
-    const relay = driver.relayRequest();
+    const relay = driver.relayRequest(scope.tools);
     handle = await sandbox.provision(relay === null ? spec : {
       ...spec,
       relay: { ...relay, meter: boundTo(relay.meter, model.model), budget: { maxTokens: scope.budget.maxTokens, maxCostUsd: scope.budget.maxCostUsd } },
