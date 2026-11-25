@@ -1,0 +1,164 @@
+{
+  "corpus": {
+    "version": "v2",
+    "digest": "d145e2f1c36891361f2c9fd7757447cf1e5a5f3ac3c0fe237dc2bd11a7041064"
+  },
+  "repetitions": 3,
+  "baseline": {
+    "result": "v2-model-deep-claude-opus-5-5.json",
+    "model": "claude-opus-5-5",
+    "spentUsd": 5.097492
+  },
+  "candidate": {
+    "result": "v2-model-deep-claude-fable-5-2.json",
+    "model": "claude-fable-5-2",
+    "spentUsd": 11.234404
+  },
+  "arms": {
+    "alone": {
+      "baseline": {
+        "falseDone": {
+          "count": 15,
+          "sample": 36,
+          "rate": 0.416667
+        },
+        "detection": {
+          "kind": "rate",
+          "count": 21,
+          "sample": 36,
+          "rate": 0.583333,
+          "bound": {
+            "side": "lower",
+            "confidence": 0.95,
+            "value": 0.433086
+          }
+        },
+        "falseRefusal": {
+          "kind": "rate",
+          "count": 19,
+          "sample": 24,
+          "rate": 0.791667,
+          "bound": {
+            "side": "upper",
+            "confidence": 0.95,
+            "value": 0.914115
+          }
+        },
+        "unreadable": {
+          "seeded": 15,
+          "control": 13
+        }
+      },
+      "candidate": {
+        "falseDone": {
+          "count": 2,
+          "sample": 36,
+          "rate": 0.055556
+        },
+        "detection": {
+          "kind": "rate",
+          "count": 34,
+          "sample": 36,
+          "rate": 0.944444,
+          "bound": {
+            "side": "lower",
+            "confidence": 0.95,
+            "value": 0.835265
+          }
+        },
+        "falseRefusal": {
+          "kind": "rate",
+          "count": 10,
+          "sample": 24,
+          "rate": 0.416667,
+          "bound": {
+            "side": "upper",
+            "confidence": 0.95,
+            "value": 0.603215
+          }
+        },
+        "unreadable": {
+          "seeded": 0,
+          "control": 0
+        }
+      },
+      "noWorse": true
+    },
+    "critic": {
+      "baseline": {
+        "falseDone": {
+          "count": 0,
+          "sample": 9,
+          "rate": 0
+        },
+        "detection": {
+          "kind": "rate",
+          "count": 9,
+          "sample": 9,
+          "rate": 1,
+          "bound": {
+            "side": "lower",
+            "confidence": 0.95,
+            "value": 0.716871
+          }
+        },
+        "falseRefusal": {
+          "kind": "rate",
+          "count": 6,
+          "sample": 6,
+          "rate": 1,
+          "bound": {
+            "side": "upper",
+            "confidence": 0.95,
+            "value": 1
+          }
+        },
+        "unreadable": {
+          "seeded": 0,
+          "control": 0
+        }
+      },
+      "candidate": {
+        "falseDone": {
+          "count": 0,
+          "sample": 9,
+          "rate": 0
+        },
+        "detection": {
+          "kind": "rate",
+          "count": 9,
+          "sample": 9,
+          "rate": 1,
+          "bound": {
+            "side": "lower",
+            "confidence": 0.95,
+            "value": 0.716871
+          }
+        },
+        "falseRefusal": {
+          "kind": "rate",
+          "count": 6,
+          "sample": 6,
+          "rate": 1,
+          "bound": {
+            "side": "upper",
+            "confidence": 0.95,
+            "value": 1
+          }
+        },
+        "unreadable": {
+          "seeded": 0,
+          "control": 0
+        }
+      },
+      "noWorse": true
+    }
+  },
+  "noWorse": true,
+  "costsLess": false,
+  "change": false,
+  "notMeasured": [
+    "iterations",
+    "parks"
+  ]
+}

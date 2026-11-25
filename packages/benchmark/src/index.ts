@@ -14,3 +14,4 @@ export * from './result.js';
 export * from './seats.js';
 export * from './model.js';
 export * from './critic.js';
+export * from './comparison.js';
