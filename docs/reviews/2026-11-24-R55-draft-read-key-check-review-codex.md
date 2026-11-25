@@ -1,3 +1,44 @@
+# External review of R55, codex, 2026-11-24
+
+The unit's draft-reading route and CLI command, and the start-up check of the
+model key, reviewed from the bundle alone. What was done with each finding is
+in `2026-11-24-R55-draft-read-key-check-triage.md`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex.
+  A headless `codex exec` run under a read-only sandbox, with recorded
+  approval policy `never`, in an empty scratch working directory and a scratch
+  config home holding only `auth.json`, with an environment of `CODEX_HOME`
+  alone. The pre-run listing of both is the manifest's `cleanRoom`.
+- **Cross-family agreement:** the incomplete `isDraftView` check was raised by
+  both families (here in the closing notes, by gemini as its second finding).
+  codex-1 (bytes that are not UTF-8 withheld), codex-2 (an escape and its own
+  text print alike; byte-order mark, line endings, final newline), and the
+  note that no assertion covers the probe's time limit were raised by this
+  family alone. Gemini called the not-UTF-8 fallback sound, which is the
+  opposite reading of codex-1.
+- **Date:** 2026-11-24
+- **Bundle:** `2026-11-24-R55-draft-read-key-check-review-bundle.txt`, SHA-256
+  `49335b0f6ccfb07e80cfcc4705e03468ab06c93ee0ab82e9b4a3daa8db4aeb2b`, base
+  `ef868ca` (`reviewed/R56`), head `29ea48a` (the unit branch after `v2` was
+  merged into it). Every new file in full and every modified file as a
+  function-context diff; `docs/decisions.md`, `docs/plan/`, `docs/reviews/`,
+  and the lockfile excluded. Prompt:
+  `2026-11-24-R55-draft-read-key-check-review-prompt.txt`.
+- **Prior context and lookups:** it stated it had no prior project context and
+  performed no external lookups, and that it ran no tests. A self-report, not
+  independently verifiable.
+- **Coverage, and any gap:** items 1 and 3 (two numbered findings), 4 (the
+  `as DraftRecord` cast and the type predicate), 5 (the injected probe and the
+  preload, judged test seams), 6 (four mechanisms assessed sound), and 7 (the
+  framing, with a refinement) were answered. Item 2, tautological checks, was
+  answered only for the start-up tests; nothing was said of the draft tests.
+- **Citations:** line numbers are positions in the bundle, treated as hints.
+  Each finding was located by the function it describes.
+
+---
+
 BASE: reviewed/R56  
 HEAD: 29ea48a  
 packages/conformance/src/registry/startup-key.ts  

@@ -1,3 +1,41 @@
+# External review of R55, gemini, 2026-11-24
+
+The unit's draft-reading route and CLI command, and the start-up check of the
+model key, reviewed from the bundle alone. What was done with each finding is
+in `2026-11-24-R55-draft-read-key-check-triage.md`.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini.
+  A direct `generateContent` API call to `gemini-3.1-pro-preview`, offering no
+  tools. `cleanRoom` is `null` because an API call loads no local
+  configuration.
+- **Cross-family agreement:** gemini-2 (the incomplete `isDraftView` check)
+  was raised by codex too, in its closing notes. gemini-1 (U+2028, U+2029,
+  U+061C not escaped) and gemini-3 (a `null` record throws in `readDraft`)
+  were raised by this family alone. Its "sound mechanisms" list calls the
+  not-UTF-8 fallback sound; codex-1 found the same code a defect, and
+  verification agreed with codex.
+- **Date:** 2026-11-24
+- **Bundle:** `2026-11-24-R55-draft-read-key-check-review-bundle.txt`, SHA-256
+  `49335b0f6ccfb07e80cfcc4705e03468ab06c93ee0ab82e9b4a3daa8db4aeb2b`, base
+  `ef868ca` (`reviewed/R56`), head `29ea48a` (the unit branch after `v2` was
+  merged into it). Every new file in full and every modified file as a
+  function-context diff; `docs/decisions.md`, `docs/plan/`, `docs/reviews/`,
+  and the lockfile excluded. Prompt:
+  `2026-11-24-R55-draft-read-key-check-review-prompt.txt`.
+- **Prior context and lookups:** it stated it had no prior context and
+  performed no external lookups. A self-report, not independently verifiable.
+- **Coverage, and any gap:** items 1 (gemini-1), 3 (gemini-3), 4 (gemini-2),
+  6 (three mechanisms assessed sound), and 7 (the framing, judged right) were
+  answered. Items 2, tautological checks, and 5, configuration satisfied
+  without doing what it appears to, came back empty. The findings are not
+  numbered in the reply; the triage numbers them in the order given.
+- **Citations:** line numbers are positions in the bundle, treated as hints.
+  Each finding was located by the function it describes.
+
+---
+
 I had no prior context about this project, and I performed no external lookups.
 
 BASE: reviewed/R56

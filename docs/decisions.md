@@ -13436,3 +13436,27 @@ Started on `v2` at 746aca2. Both dependencies are merged and tagged:
 - **Found on the way:** the first full run failed on the Greek-name scan, for
   a test string holding the CLI's name inside a longer string. Fixed in the
   test. The run it cost is why the four process changes on #197 were filed.
+
+### D-R55-06: external review, what was fixed and what stays a limit
+
+Both families counted on the first run. Seven findings and notes, all holding,
+none rejected; the triage is `docs/reviews/2026-11-24-R55-draft-read-key-check-triage.md`.
+
+- **C4 is corrected.** It said control characters and direction overrides were
+  escaped and each file line sat behind a margin, and that this made what a
+  person reads what the hash covers. It did not: a file that was not UTF-8 was
+  withheld behind a notice, an escape and its own literal text printed alike,
+  and a byte-order mark, a carriage return, and a missing final newline were
+  invisible (codex-1, codex-2). Now a file's printed form stands for one
+  sequence of bytes. *Rejected:* refusing a draft that holds a file that is
+  not UTF-8, which leaves a person unable to read what they must decide.
+  *Reverse:* none wanted.
+- **The list of dangerous characters is a Unicode category, not a list**
+  (gemini-1): controls, format characters, separators, private-use, and
+  unassigned. *Reverse:* restore the ranges.
+- **The probe's time limit is a parameter and is asserted** (codex).
+- **Known limit, no owner needed:** the start-up check shows the provider
+  accepted the key when the host started. A key revoked later fails each
+  attempt until the run parks, as before R55.
+- **Order, stated as it happened:** the first review fix was committed before
+  lint ran on it, and a second commit (62bbbce) made it lint-clean.
