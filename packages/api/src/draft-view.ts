@@ -79,14 +79,19 @@ export async function readDraft(vault: Vault, state: RunState, station: DraftSta
   } catch (error) {
     return mismatch(`its record could not be read (${error instanceof Error ? error.message : String(error)})`);
   }
-  // Read as unknown: the record is the store's, and its type is a claim about it until checked.
+  // Read as unknown: the record is the store's, and its type is a claim about it until checked (review: gemini-3).
+  const shape: unknown = record;
+  if (typeof shape !== 'object' || shape === null || Array.isArray(shape)) return mismatch('its record is not a draft record');
   const stored: unknown = record.files;
-  if (!Array.isArray(stored) || record.runId !== runId || record.station !== station || record.attempt !== attempt.attempt) {
+  const isFile = (f: unknown): boolean => typeof f === 'object' && f !== null
+    && typeof (f as Partial<DraftFile>).path === 'string' && typeof (f as Partial<DraftFile>).sha256 === 'string' && typeof (f as Partial<DraftFile>).base64 === 'string';
+  if (!Array.isArray(stored) || !stored.every(isFile)) return mismatch('its record does not hold a list of files');
+  if (record.runId !== runId || record.station !== station || record.attempt !== attempt.attempt) {
     return mismatch('its record is not the record of this run, station, and attempt');
   }
   if (record.sha256 !== attempt.sha256 || draftDigest(record.files) !== attempt.sha256) return mismatch('its files do not hash to the hash run state holds');
   for (const file of record.files) {
-    if (typeof file.base64 !== 'string' || sha256(Buffer.from(file.base64, 'base64')) !== file.sha256) return mismatch(`the bytes of ${JSON.stringify(file.path)} do not hash to its recorded hash`);
+    if (sha256(Buffer.from(file.base64, 'base64')) !== file.sha256) return mismatch(`the bytes of ${JSON.stringify(file.path)} do not hash to its recorded hash`);
   }
   const files = record.files.map(({ path, sha256: hash, base64 }) => ({ path, sha256: hash, base64 }));
   return { ok: true, draft: { sha256: attempt.sha256, attempt: attempt.attempt }, files, questions: questionsOf(runId, station, files) };

@@ -69,6 +69,13 @@ describe('readDraft', () => {
       record({ station: 'test-design' }),
       record({ runId: 'another-run' as RunId }),
       { ...record(), files: 'none' },
+      // A record that is not a record, or a file that is not a file, is a mismatch too, never a throw (review: gemini-3).
+      null,
+      'text',
+      [],
+      { ...record(), files: [null] },
+      { ...record(), files: [{ path: 1, sha256: 'x', base64: 'eA==' }] },
+      { ...record(), files: [{ path: 'p', sha256: 'x' }] },
     ];
     for (const stored of cases) {
       const read = await readDraft(vault(stored), state([attempt()]), 'spec');
