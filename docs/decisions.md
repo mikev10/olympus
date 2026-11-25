@@ -13460,3 +13460,122 @@ none rejected; the triage is `docs/reviews/2026-11-24-R55-draft-read-key-check-t
   attempt until the run parks, as before R55.
 - **Order, stated as it happened:** the first review fix was committed before
   lint ran on it, and a second commit (62bbbce) made it lint-clean.
+
+## R57: A build runs the locked acceptance tests in its own sandbox
+
+Started on `v2` at ef868ca. Issue #220.
+
+### D-R57-01: boundary, verified
+
+- **Deliverables:**
+  - `build` installs the dependencies into the tree it hands the builder:
+    the runtime's install of the build tree's lockfile (`installInto`, R34),
+    placed in the start copy before it is copied to the builder's working copy.
+    This applies only where the stack's checks run in the profile's image.
+  - A write under Vite's default cache directory, `node_modules/.vite`, is
+    not recorded as a dependency-tree write. Every other write in a dependency
+    tree still is (D-R15-05). Neither kind is carried.
+  - init's builder is granted `Bash`, and no other init seat is. Its role tells
+    it to run the acceptance tests before it finishes.
+  - Conformance entries, each shown failing with the thing it guards
+    removed. Changesets for every package changed.
+- **Out of scope:** a builder install for a stack whose checks run in an image
+  of their own (Python: the copied interpreter reads that image's standard
+  library, and the builder's container is the driver's). This becomes an
+  issue. Also out: changing what a retry is told (D-R37-03); the drafter's
+  instructions and the fixture's intent (#220, question 2); egress, `Edit`, or
+  any other tool for any seat; a field on `TestFrameworkAdapter` or
+  `DependencyInstaller`, which would be a contract change; taking the paid
+  init assertion off the intermittent list, which is a tooling PR made after a
+  paid run passes.
+- **Acceptance:** `pnpm -r typecheck`, `pnpm -r lint`, `pnpm -r test`, and
+  `pnpm conformance` pass. Each new entry is shown failing with its guard
+  removed. The paid suites run under `run-driver` at merge, including
+  `I5.init-setup-merges-on-the-real-driver`.
+- **Invariants:**
+  - The builder may not be judged by an artifact it can write (I3). The
+    install in its tree is a copy. `verify` still removes every dependency tree
+    and reinstalls, so nothing the builder ran or wrote there decides a check.
+  - Payloads are data (I7). Test output reaches the model only as the result
+    of its own tool call. The runtime places no output in a prompt.
+  - Default deny (I4). `Bash` is granted to one seat, and that seat has no
+    egress.
+  - Fail closed (I5). An install refused at `build` leaves the tree with no
+    dependency tree, as at `verify`, where the same refusal leaves every check
+    unstarted.
+  - No Greek names in code (I10).
+- **Pending registry entries owed:** none name R57
+  (`packages/conformance/pending-baseline.json`).
+
+### D-R57-02: assumptions, each verified
+
+- **The dependencies have shipped.** `reviewed/R37`, `reviewed/R36b`, and
+  `reviewed/R56` are ancestors of `origin/v2` (`git merge-base --is-ancestor`).
+- **init's builder holds `[Read, Write]` with `egress: none`, and no init
+  seat holds `Bash`** (`packages/api/setup/policy.yaml`).
+- **The build tree gets no install.** `build()` materializes the start copy,
+  omits withheld paths, and copies it to the working copy. It never calls
+  `installInto` (`packages/api/src/line.ts`, `build`). Only `runOnBase` and
+  `verify` call it.
+- **One node digest.** The install image (`DEPENDENCY_AUDIT_IMAGE`,
+  `packages/adapters/src/audit.ts:16`), the Claude Code driver's base
+  (`BASE_IMAGE`, `packages/drivers/claude-code/src/image.ts:30`), and the
+  default check image (`config.checkImage ?? BASE_IMAGE`,
+  `packages/api/src/host/compose.ts:245`) are all
+  `node@sha256:83f487e0…`. A host that configures another `checkImage` can
+  give the builder a different `node` from the checks. That is acceptable,
+  because the builder's run is a tool it uses, not evidence.
+- **Python's checks run in an image of their own** (`checkImageOf`,
+  `packages/api/src/verification.ts:91`, A-R29-01). An install made for them
+  does not run in the driver's container, hence the out-of-scope line.
+- **A dependency-tree write is recorded, then escalated** (`notCarried` in
+  `verify`, `notCarriedFindings`). Vite's default `cacheDir` is
+  `path.join(pkgDir, 'node_modules/.vite')`, and no environment variable
+  overrides it (`vite@8.2.2`, `dist`). Vitest keeps its results there:
+  `node_modules/.vite/vitest/<hash>/results.json` exists in this repository
+  after a run. A builder that runs vitest would therefore raise the finding on
+  every build.
+- **`TestFrameworkAdapter` and `DependencyInstaller` are in
+  `packages/adapters/src/types.ts`,** which matches the gate path
+  `^packages/([^/]+/)?[^/]+/src/.*types\.ts$`
+  (`.github/protected-paths.txt`). Declaring the cache on either one is an
+  amendment.
+- **`copyTree` copies links verbatim** (`packages/api/src/workspace.ts:412`).
+  npm's `.bin` links survive the copy to the working copy.
+- **`Bash` is in the driver's inventory** (`DECLARED_TOOLS`,
+  `packages/drivers/claude-code/src/tools.ts`). Since R56, the relay refuses
+  an ungranted server tool in a request the task sends itself, which is the
+  path DECOMPOSITION gives for waiting on R56.
+
+### D-R57-03: choices
+
+- **The install goes into the start copy, not only into the working copy.**
+  The task's own diff is start against work. With the install in both, a
+  package the builder edits, adds, or removes still appears in that diff, so
+  D-R15-05 still records it. Rejected: installing into the working copy alone,
+  which puts the whole install in the diff as the task's writes. Also
+  rejected: mounting the install read-only beside the tree, because the
+  sandbox refuses a nested mount (D-R34-03) and a sibling mount is a sandbox
+  change. Reverse by removing the `installInto` call in `build`.
+- **The install comes before `omitWithheld`,** so a withheld path is left out
+  of the install's files too, and the model never sees one.
+- **An install refused or failed at `build` does not stop the build.** The
+  tree keeps no dependency tree, and `verify` judges the same refusal and
+  leaves every check unstarted. A sandbox that cannot be provisioned spends a
+  retry, as at `verify`. Rejected: parking at `build`, which needs a new park
+  cause (a contract change) for an outcome `verify` already reaches. Reverse
+  in `build`.
+- **The cache exemption is a constant in `packages/adapters/src/trees.ts`,
+  matched exactly,** not a field on an adapter. The entry the exemption keys
+  on is `node_modules/.vite`, at any depth below the tree's root, in exact
+  case. A case variant, or a `.vite` under a package's own `node_modules`, is
+  recorded as before. The exemption is safe because the safety comes from the
+  reinstall: `verify` replaces every dependency tree before any check, so
+  nothing in the cache reaches a check. Rejected: a field on
+  `TestFrameworkAdapter`, which is an amendment and so waits for the
+  maintainer (filed as the reversal path). Also rejected: telling the builder
+  to run `--no-cache`, which a role cannot enforce, and exempting every dot
+  directory, which would hide writes in `node_modules/.pnpm`, where pnpm keeps
+  the real package code. Reverse by emptying the constant.
+- **Only the builder gets `Bash`.** The drafters, critics, and reviewer run no
+  tests. Reverse in `packages/api/setup/policy.yaml`.
