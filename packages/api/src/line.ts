@@ -1537,7 +1537,7 @@ async function build(ctx: LineContext, task: Task): Promise<StationRefusal | und
   await materialize(workspaces, ctx.run.id, start, base.diff, () => base.tree);
   // R57: the builder can run the locked tests, so its tree holds the runtime's install of its lockfile.
   const prepared = await installForBuild(ctx, task, start);
-  if (prepared !== undefined) return prepared;
+  if (!prepared.ok) return prepared.outcome;
   // What the role is not given is left out of both copies, so the model never has it and its diff never shows it (D-A-TR-04).
   await omitWithheld(ctx, task.role, start);
   await copyTree(start, work);
@@ -1576,16 +1576,21 @@ async function build(ctx: LineContext, task: Task): Promise<StationRefusal | und
  * its own install before any check (I3). Made only where the stack's checks
  * run in the profile's image, the one the driver's is built on; an install for
  * an image of its own would not run in the builder's container (D-R57-01).
- * An install refused or failed here leaves no dependency tree, and `verify`
- * judges the same refusal (D-R57-03); a sandbox that cannot be provisioned
- * spends a retry, as at `verify`.
+ * Its inputs are ones the run already installed, at the base run or an
+ * accepted `verify`, so it is that install, reused. Where it fails anyway, the
+ * attempt is spent and the builder is not asked (R57 review, codex-2,
+ * gemini-1).
  */
-async function installForBuild(ctx: LineContext, task: Task, start: string): Promise<StationRefusal | undefined> {
+async function installForBuild(
+  ctx: LineContext, task: Task, start: string,
+): Promise<{ readonly ok: true } | { readonly ok: false; readonly outcome: StationRefusal | undefined }> {
   const base = basePath(ctx.components.workspaces, ctx.run.id);
-  if ((await checkImageOf(base)) !== null) return undefined;
+  if ((await checkImageOf(base)) !== null) return { ok: true };
   const installed = await installInto(ctx, start, base, task.id, ctx.state.station);
-  if (!installed.ok && installed.at === 'provision') return spendRetry(ctx, task, installed.reason);
-  return undefined;
+  if (installed.ok) return { ok: true };
+  // Any failure spends the attempt, and the builder is not asked to build over a tree missing its install (I5).
+  // `spendRetry`'s undefined is a retry still to come, which ends this attempt as surely as a park does.
+  return { ok: false, outcome: await spendRetry(ctx, task, installed.reason) };
 }
 
 /** Locked artifacts whose content in `tree` is not what was admitted. */
