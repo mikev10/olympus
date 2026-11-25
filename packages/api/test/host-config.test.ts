@@ -10,6 +10,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
 import { checkStartup, HOST_VARIABLES, listenProblem, mergeEnvFile, readHostConfig, refusalText, type HostFacts } from '../src/host/config.js';
+import { probeModelKey } from '../src/host/key-probe.js';
 import { probeSymlinks } from '../src/host/symlinks.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -171,6 +172,18 @@ describe('every start-up problem in one list (review: codex-5)', () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('the key check gives up (review: codex)', () => {
+  test('a provider that never answers is a key that could not be checked, within the time allowed', async () => {
+    const never = ((_input: unknown, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => { reject(init.signal?.reason as Error); });
+    })) as typeof fetch;
+    const started = Date.now();
+    const line = await probeModelKey('k', never, 50);
+    expect(line).toMatch(/^ANTHROPIC_API_KEY could not be checked: .* could not be reached \(TimeoutError\)/u);
+    expect(Date.now() - started).toBeLessThan(5_000);
   });
 });
 

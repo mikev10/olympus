@@ -58,6 +58,16 @@ export const HOST_REFUSES_A_REJECTED_KEY: LocalAssertion = runtime({
       if (headers.get(MODEL_RELAY.header) !== KEY) throw new Error(`I5: the key was not sent in ${MODEL_RELAY.header}, the header the relay sends it in`);
       if ((asked.init?.method ?? 'GET') !== 'GET' || asked.init?.body != null) throw new Error('I5: the check is not a GET with no body, so it may spend');
       if (asked.init?.redirect !== 'error') throw new Error('I5: the check follows a redirect, which would carry the key to another origin');
+      if (!(asked.init.signal instanceof AbortSignal)) throw new Error('I5: the check carries no time limit, so a provider that never answers would hold start-up open');
+
+      // A provider that never answers is a key that could not be checked, within the limit given (review: codex).
+      const never: typeof fetch = (_input, init) => new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => { reject(init.signal?.reason instanceof Error ? init.signal.reason : new Error('aborted')); });
+      });
+      const silent = await checkStartup(env, undefined, facts, (key) => probeModelKey(key, never, 50));
+      if (silent.ok || !silent.problems.some((p) => p.includes('could not be checked') && p.includes('TimeoutError'))) {
+        throw new Error(`I5: a provider that never answered did not refuse start-up as unchecked: ${JSON.stringify(silent.ok ? [] : silent.problems)}`);
+      }
 
       // Every other answer refuses, and says which kind of refusal it is.
       const refusedWith = async (probe: typeof fetch, what: string): Promise<string> => {

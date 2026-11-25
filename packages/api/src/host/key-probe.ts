@@ -40,9 +40,12 @@ function failure(error: unknown): string {
  * Asks the provider whether it accepts `key`. Null only for a 2xx answer.
  * Neither line holds the key or anything the provider sent but its status.
  * A redirect is an error rather than followed, so the key goes to the one
- * origin named here.
+ * origin named here. A provider that has not answered in `timeoutMs` is one
+ * that could not be reached.
  */
-export async function probeModelKey(key: string, request: typeof fetch = (input, init) => fetch(input, init)): Promise<string | null> {
+export async function probeModelKey(
+  key: string, request: typeof fetch = (input, init) => fetch(input, init), timeoutMs: number = MODEL_KEY_PROBE_TIMEOUT_MS,
+): Promise<string | null> {
   const host = new URL(MODEL_KEY_PROBE_URL).host;
   let status: number;
   try {
@@ -50,7 +53,7 @@ export async function probeModelKey(key: string, request: typeof fetch = (input,
       method: 'GET',
       headers: { [MODEL_RELAY.header]: key, 'anthropic-version': API_VERSION },
       redirect: 'error',
-      signal: AbortSignal.timeout(MODEL_KEY_PROBE_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     status = response.status;
     // The body is not read: only the status decides, and nothing of it is printed.
