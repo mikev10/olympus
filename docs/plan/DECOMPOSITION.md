@@ -2354,7 +2354,7 @@ raised at `review` by the reviewer and security seats (R9), at `spec` and
 Nothing records what happened to one afterwards, so the line cannot say
 whether a family's or a seat's findings are worth acting on.
 
-**Amendment:** A-R28-01 (D-A-FO-01). Checked against the code, a review seat
+**Amendments:** A-R28-01 (D-A-FO-01); A-R28-02 (D-A-FO-02) renames `resolved` to `addressed`, since a change reaching the cited place is not proof the problem is fixed. Checked against the code, a review seat
 raises no findings (its task passes whatever its claim says, D-P4-07), a
 critic's findings cite nothing, and no evidence records which lines a check
 ran. The unit therefore gives every source a located finding before it
@@ -2372,20 +2372,20 @@ Deliverables:
 - **Line coverage in the evidence.** The coverage adapters, TypeScript and
   Python, report each changed file's executed and unexecuted changed lines,
   and the evidence records them beside `coverageDelta`.
-- **Derived outcomes.** `resolved` for a code finding: a later run's merged
+- **Derived outcomes.** `addressed` for a code finding: a later run's merged
   change altered a hunk holding the cited line, mapped through the history
   since the finding's commit, and its pinned coverage check passed with a
-  changed line of that hunk executed. `resolved` for a critic finding: its
+  changed line of that hunk executed. `addressed` for a critic finding: its
   file changed between the draft it was raised against and the locked draft,
   and at `test-design` the locked draft has a base record; a `spec` critic
-  finding is never resolved. A finding citing a record is never resolved.
+  finding is never addressed. A finding citing a record is never addressed.
   `dismissed`: a person's, through the API and the CLI, with a
   `DismissalCause` and no text. `open`: no outcome record; an unknown outcome
-  is open, never read as resolved.
-- **Write-once records.** `resolved` and `dismissed` are content-addressed
+  is open, never read as addressed.
+- **Write-once records.** `addressed` and `dismissed` are content-addressed
   Vault records with `collectedBy: 'runtime'`, naming the finding by its
   source record and index, refused when the finding already has one.
-- **Rates.** R2 derives resolved, dismissed, and open over findings raised,
+- **Rates.** R2 derives addressed, dismissed, and open over findings raised,
   per reviewer family and per seat kind (`review`, `security`, `critic`, each
   nightly reviewer job), each with its sample and bound.
 

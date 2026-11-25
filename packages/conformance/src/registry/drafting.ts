@@ -1275,17 +1275,17 @@ export const CRITIC_FINDING_NAMES_A_DRAFT_FILE: LocalAssertion = runtime({
 });
 
 /**
- * R28: a critic finding is resolved when the file it cites changed between
+ * R28: a critic finding is addressed when the file it cites changed between
  * the draft it was raised against and the locked draft, and at test-design
  * that locked draft has a base record. No check covers a spec file, so a spec
  * finding never is; and a file that did not change resolves nothing.
  */
 export const CRITIC_FINDING_RESOLVED_BY_THE_LOCK: LocalAssertion = runtime({
-  id: 'I2.critic-finding-resolved-by-its-locked-draft',
+  id: 'I2.critic-finding-addressed-by-its-locked-draft',
   title:
-    'when a test draft is locked, a critic finding on a file whose hash differs between the draft the critic read and the locked draft, which has a base record, is resolved draft-changed, once; a finding on a file that did not change stays open; a spec critic finding is never resolved, though its file changed (R28)',
+    'when a test draft is locked, a critic finding on a file whose hash differs between the draft the critic read and the locked draft, which has a base record, is addressed draft-changed, once; a finding on a file that did not change stays open; a spec critic finding is never addressed, though its file changed (R28)',
   run: async () => {
-    await withLine('r28-critic-resolved-', async (rig) => {
+    await withLine('r28-critic-addressed-', async (rig) => {
       const spec = `.drafts/${rig.runId}/spec.md`;
       const manifest = `.drafts/${rig.runId}/acceptance.json`;
       const check = 'checks/hello.check.cjs';
@@ -1314,15 +1314,15 @@ export const CRITIC_FINDING_RESOLVED_BY_THE_LOCK: LocalAssertion = runtime({
       const outcomes = (await vault.readFindingOutcomes()).map((e) => e.record);
       const ofCheck = outcomes.filter((o) => o.finding.source.kind === 'critic' && o.finding.source.record.hash === testCritic.hash && o.finding.index === 0);
       const resolution = ofCheck[0]?.outcome;
-      if (ofCheck.length !== 1 || resolution?.kind !== 'resolved' || resolution.resolution.kind !== 'draft-changed' || resolution.resolution.lock.hash !== lock.hash
+      if (ofCheck.length !== 1 || resolution?.kind !== 'addressed' || resolution.resolution.kind !== 'draft-changed' || resolution.resolution.lock.hash !== lock.hash
         || resolution.resolution.raised === resolution.resolution.locked) {
-        throw new Error(`R28: the test critic's finding on a changed file was not resolved by the lock: ${JSON.stringify(outcomes)}`);
+        throw new Error(`R28: the test critic's finding on a changed file was not addressed by the lock: ${JSON.stringify(outcomes)}`);
       }
       if (outcomes.some((o) => o.finding.source.kind === 'critic' && o.finding.source.record.hash === testCritic.hash && o.finding.index === 1)) {
-        throw new Error('R28: a critic finding on a file that did not change was resolved');
+        throw new Error('R28: a critic finding on a file that did not change was addressed');
       }
       if (outcomes.some((o) => o.finding.source.kind === 'critic' && o.finding.source.record.hash === specCritic.hash)) {
-        throw new Error('R28: a spec critic finding was resolved; no check covers a spec file');
+        throw new Error('R28: a spec critic finding was addressed; no check covers a spec file');
       }
       const { listFindings } = await api();
       const open = (await listFindings(vault)).filter((f) => f.seat === 'critic' && f.outcome.kind === 'open');

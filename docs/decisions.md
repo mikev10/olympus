@@ -12759,3 +12759,16 @@ The R28 bundle from `reviewed/R53` exceeded the runner's 599,000-byte ceiling, b
 - **Fixed (codex-1), 9549f48:** `I5.resume-holds-the-recorded-readiness-ceiling` drives `resumeRun` over a `not-scanned` record and a pre-R40 record above L0, not only the helper. Reverse: drop the loop.
 - **Not holding (gemini-1):** the at-ceiling checks use `port(1)` with an L1 request; they pin the boundary.
 - **Reverse the split:** review both ranges together, which needs a payload ceiling above 600 KB.
+
+## A-R28-02: a finding's outcome is named for what the runtime proves
+
+Confirmed by the maintainer on 2026-11-24, taking D-R28-08's recommendation (codex-1, gemini-2 of R28's review).
+
+### D-A-FO-02: `resolved` becomes `addressed`, and a fix is a later outcome
+
+- **Problem, verified on `v2` at 999f431:** `FindingOutcome`'s `resolved` (`packages/vault/src/types.ts:1369`) is written when a covered change rewrote the hunk holding the cited line (`packages/api/src/findings.ts:407`) or the cited draft file changed before lock (`findings.ts:298`). Neither proves the cited problem fixed, yet R2 publishes the count as each seat's `resolved` rate (`packages/api/src/outcomes.ts:134`), and R11 is to read those rates to seat reviewers.
+- **Choice:** rename the outcome and the rate to `addressed`, documented as "a runtime-observed change reached the cited place; not proof the problem is fixed". The two resolution kinds, `covered-change` and `draft-changed`, already name what each proves and stay. Assertion ids that say `resolved` say `addressed`: `I2.code-finding-addressed-by-covered-change`, `I2.critic-finding-addressed-by-its-locked-draft`, `I5.record-finding-never-addressed`.
+- **Rejected, for now: a `remediated` outcome established by an independently checked regression assertion.** It is the stronger claim, but no part of the line writes a regression assertion tied to a finding, so building it here would be a new unit's scope, not a rename. It is #232, owned by R11, since R11 is the first reader that needs "fixed" rather than "addressed". Until it exists, nothing reports a finding fixed.
+- **Rejected: keep `resolved` and document its meaning.** The name is what R11 and every reader of the rates sees; a doc comment does not travel with a number.
+- **Assumptions, verified:** no v2 package is published (`npm view @olympus-ai/vault` is 404), so no store outside a developer's machine holds a `resolved` record, and the reader refusing one (I5) strands nothing released. A dev store written before this change is refused at read with the reader's cause, never read as open or addressed. The CLI's `findings` summary is the only user-facing text that says `resolved` (`packages/cli/src/cli.ts:94`).
+- **Reverse:** rename `addressed` back to `resolved` in the same files and ids.

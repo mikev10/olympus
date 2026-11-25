@@ -4,7 +4,7 @@
  * the tree it reviewed, or is refused with its cause; it never moves its
  * task's status. An outcome is a write-once runtime record; a finding with
  * none is open. R2 counts them per seat kind and per family, and says a
- * resolved rate it had no input for is unmeasured rather than zero.
+ * addressed rate it had no input for is unmeasured rather than zero.
  */
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -127,7 +127,7 @@ async function withStore<T>(body: (vault: Vault) => Promise<T>): Promise<T> {
 export const FINDING_WITHOUT_OUTCOME_IS_OPEN: LocalAssertion = runtime({
   id: 'I5.finding-without-outcome-is-open',
   title:
-    'a located finding with no outcome record lists as open, never resolved; a refused finding is never listed; and a second outcome for a finding is refused, writing nothing, so its first stands (R28)',
+    'a located finding with no outcome record lists as open, never addressed; a refused finding is never listed; and a second outcome for a finding is refused, writing nothing, so its first stands (R28)',
   run: async () => {
     await withStore(async (vault) => {
       const { listFindings, dismissFinding } = await api();
@@ -151,7 +151,7 @@ export const FINDING_WITHOUT_OUTCOME_IS_OPEN: LocalAssertion = runtime({
 export const FINDING_RATES_PER_SEAT_AND_FAMILY: LocalAssertion = runtime({
   id: 'I5.finding-rates-say-what-they-could-not-measure',
   title:
-    "R2 derives resolved, dismissed, and open over findings raised, per seat kind and per reviewer family, each with its sample and bound; a group holding a code finding, where no run recorded line coverage, has its resolved rate unmeasured, never 0 of n (R28, D-R28-01)",
+    "R2 derives addressed, dismissed, and open over findings raised, per seat kind and per reviewer family, each with its sample and bound; a group holding a code finding, where no run recorded line coverage, has its addressed rate unmeasured, never 0 of n (R28, D-R28-01)",
   run: async () => {
     await withStore(async (vault) => {
       const { outcomes, listFindings, dismissFinding } = await api();
@@ -163,7 +163,7 @@ export const FINDING_RATES_PER_SEAT_AND_FAMILY: LocalAssertion = runtime({
       const seat = findings.bySeat['nightly:nightly-tree-review'];
       const family = findings.byFamily['nightly-family'];
       if (seat === undefined || family === undefined || seat.raised !== 2 || family.raised !== 2) throw new Error(`I5: the findings were counted as ${JSON.stringify(findings)}`);
-      if (seat.resolved.kind !== 'unmeasured') throw new Error(`I5: a resolved rate with no line coverage read ${JSON.stringify(seat.resolved)}`);
+      if (seat.addressed.kind !== 'unmeasured') throw new Error(`I5: a addressed rate with no line coverage read ${JSON.stringify(seat.addressed)}`);
       if (seat.dismissed.kind !== 'rate' || seat.dismissed.count !== 1 || seat.dismissed.sample !== 2 || seat.dismissed.bound.side !== 'upper') throw new Error(`I5: the dismissed rate is ${JSON.stringify(seat.dismissed)}`);
       if (seat.open.kind !== 'rate' || seat.open.count !== 1 || seat.open.sample !== 2) throw new Error(`I5: the open rate is ${JSON.stringify(seat.open)}`);
       const window = await outcomes(vault, { from: '2026-11-21T00:00:00.000Z' });

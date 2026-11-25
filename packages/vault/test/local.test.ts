@@ -574,17 +574,19 @@ describe('findings and their outcomes (R28)', () => {
       kind: 'covered-change' as const, runId: 'run-2' as RunId, mergeCommit: 'd'.repeat(40), path: 'src/a.ts', line: 3,
       hunk: { oldStart: 2, oldLines: 2, newStart: 2, newLines: 3 }, executed: [3], evidence: { runId: 'run-2' as RunId, kind: 'evidence' as const, hash: 'e'.repeat(64) },
     };
-    const resolved = (resolution: unknown, f: FindingRef = finding): FindingOutcomeRecord => ({ ...dismissal, finding: f, outcome: { kind: 'resolved', resolution } } as FindingOutcomeRecord);
-    expect(await vault.recordFindingOutcome(resolved(covered))).not.toBeNull();
-    await expect(vault.recordFindingOutcome(resolved({ ...covered, line: 9 }, { ...finding, index: 2 }))).rejects.toThrow(/does not hold the cited line/);
-    await expect(vault.recordFindingOutcome(resolved({ ...covered, executed: [] }, { ...finding, index: 2 }))).rejects.toThrow(/executed line/);
-    await expect(vault.recordFindingOutcome(resolved({ ...covered, executed: [9] }, { ...finding, index: 2 }))).rejects.toThrow(/executed line/);
+    const addressed = (resolution: unknown, f: FindingRef = finding): FindingOutcomeRecord => ({ ...dismissal, finding: f, outcome: { kind: 'addressed', resolution } } as FindingOutcomeRecord);
+    expect(await vault.recordFindingOutcome(addressed(covered))).not.toBeNull();
+    await expect(vault.recordFindingOutcome(addressed({ ...covered, line: 9 }, { ...finding, index: 2 }))).rejects.toThrow(/does not hold the cited line/);
+    await expect(vault.recordFindingOutcome(addressed({ ...covered, executed: [] }, { ...finding, index: 2 }))).rejects.toThrow(/executed line/);
+    await expect(vault.recordFindingOutcome(addressed({ ...covered, executed: [9] }, { ...finding, index: 2 }))).rejects.toThrow(/executed line/);
     const critic: FindingRef = { source: { kind: 'critic', record: { runId, kind: 'critic-result', hash: 'f'.repeat(64) } }, index: 0 };
-    await expect(vault.recordFindingOutcome(resolved(covered, critic))).rejects.toThrow(/by its draft/);
+    await expect(vault.recordFindingOutcome(addressed(covered, critic))).rejects.toThrow(/by its draft/);
     const changed = { kind: 'draft-changed', lock: { runId, kind: 'draft-lock', hash: '1'.repeat(64) }, raised: '2'.repeat(64), locked: '3'.repeat(64) };
-    await expect(vault.recordFindingOutcome(resolved(changed, { ...finding, index: 3 }))).rejects.toThrow(/only a critic finding/);
-    await expect(vault.recordFindingOutcome(resolved({ ...changed, locked: '2'.repeat(64) }, critic))).rejects.toThrow(/did not change/);
-    expect(await vault.recordFindingOutcome(resolved(changed, critic))).not.toBeNull();
+    await expect(vault.recordFindingOutcome(addressed(changed, { ...finding, index: 3 }))).rejects.toThrow(/only a critic finding/);
+    await expect(vault.recordFindingOutcome(addressed({ ...changed, locked: '2'.repeat(64) }, critic))).rejects.toThrow(/did not change/);
+    expect(await vault.recordFindingOutcome(addressed(changed, critic))).not.toBeNull();
+    // A-R28-02: the outcome is named for what it proves; a record still saying `resolved` is refused, never read as addressed (I5).
+    await expect(vault.recordFindingOutcome({ ...addressed(changed, { ...critic, index: 1 }), outcome: { kind: 'resolved', resolution: changed } } as unknown as FindingOutcomeRecord)).rejects.toThrow(/addressed or dismissed/);
   });
 
   test('the stub keeps one outcome per finding too', async () => {

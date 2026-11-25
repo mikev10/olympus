@@ -146,19 +146,19 @@ describe('finding rates (R28)', () => {
   const f = (seat: string, family: string, code: boolean, outcome: FindingInput['outcome']): FindingInput => ({ seat, family, code, outcome });
 
   it('are each a proportion over findings raised, per seat kind and per family', () => {
-    const { findings } = deriveOutcomes([run({})], {}, null, [f('critic', 'gpt', false, 'resolved'), f('critic', 'gpt', false, 'open'), f('critic', 'claude', false, 'dismissed')]);
+    const { findings } = deriveOutcomes([run({})], {}, null, [f('critic', 'gpt', false, 'addressed'), f('critic', 'gpt', false, 'open'), f('critic', 'claude', false, 'dismissed')]);
     expect(findings.bySeat.critic?.raised).toBe(3);
-    expect(findings.bySeat.critic?.resolved).toMatchObject({ kind: 'rate', count: 1, sample: 3, bound: { side: 'lower' } });
+    expect(findings.bySeat.critic?.addressed).toMatchObject({ kind: 'rate', count: 1, sample: 3, bound: { side: 'lower' } });
     expect(findings.bySeat.critic?.dismissed).toMatchObject({ kind: 'rate', count: 1, sample: 3, bound: { side: 'upper' } });
     expect(findings.bySeat.critic?.open).toMatchObject({ kind: 'rate', count: 1, sample: 3 });
     expect(findings.byFamily.gpt?.raised).toBe(2);
     expect(findings.byFamily.claude?.raised).toBe(1);
   });
 
-  it('leave a code seat\'s resolved rate unmeasured, never 0 of n, where no run recorded line coverage (D-R28-01)', () => {
+  it('leave a code seat\'s addressed rate unmeasured, never 0 of n, where no run recorded line coverage (D-R28-01)', () => {
     const items = [f('review', 'gpt', true, 'open'), f('review', 'gpt', true, 'dismissed')];
-    expect(deriveOutcomes([run({})], {}, null, items).findings.bySeat.review?.resolved).toEqual({ kind: 'unmeasured', cause: 'no-line-coverage' });
-    expect(deriveOutcomes([run({ lineCoverage: true })], {}, null, items).findings.bySeat.review?.resolved).toMatchObject({ kind: 'rate', count: 0, sample: 2 });
+    expect(deriveOutcomes([run({})], {}, null, items).findings.bySeat.review?.addressed).toEqual({ kind: 'unmeasured', cause: 'no-line-coverage' });
+    expect(deriveOutcomes([run({ lineCoverage: true })], {}, null, items).findings.bySeat.review?.addressed).toMatchObject({ kind: 'rate', count: 0, sample: 2 });
     expect(deriveOutcomes([run({})], {}, null, items).findings.bySeat.review?.dismissed).toMatchObject({ kind: 'rate', count: 1, sample: 2 });
   });
 
@@ -166,16 +166,16 @@ describe('finding rates (R28)', () => {
     const gaps: FindingGapInput[] = [{ seat: 'review', family: 'gpt', kind: 'refused' }, { seat: 'review', family: 'gpt', kind: 'unreadable' }, { seat: 'security', family: 'gpt', kind: 'refused' }];
     const { findings } = deriveOutcomes([run({})], {}, null, [f('review', 'gpt', true, 'open')], { gaps });
     expect(findings.bySeat.review).toMatchObject({ raised: 1, refused: 1, unreadable: 1 });
-    expect(findings.bySeat.security).toMatchObject({ raised: 0, refused: 1, unreadable: 0, resolved: { kind: 'no-sample' } });
+    expect(findings.bySeat.security).toMatchObject({ raised: 0, refused: 1, unreadable: 0, addressed: { kind: 'no-sample' } });
     expect(findings.byFamily.gpt).toMatchObject({ raised: 1, refused: 2, unreadable: 1 });
   });
 
-  it('measure a resolved rate where a resolution exists or any run in the store recorded line coverage, not only runs in the window (R28 triage, codex-5)', () => {
-    const items = [f('review', 'gpt', true, 'resolved'), f('review', 'gpt', true, 'open')];
-    expect(deriveOutcomes([run({})], {}, null, items).findings.bySeat.review?.resolved).toMatchObject({ kind: 'rate', count: 1, sample: 2 });
+  it('measure a addressed rate where a resolution exists or any run in the store recorded line coverage, not only runs in the window (R28 triage, codex-5)', () => {
+    const items = [f('review', 'gpt', true, 'addressed'), f('review', 'gpt', true, 'open')];
+    expect(deriveOutcomes([run({})], {}, null, items).findings.bySeat.review?.addressed).toMatchObject({ kind: 'rate', count: 1, sample: 2 });
     const open = [f('review', 'gpt', true, 'open')];
-    expect(deriveOutcomes([run({})], {}, null, open, { lineCoverage: true }).findings.bySeat.review?.resolved).toMatchObject({ kind: 'rate', count: 0, sample: 1 });
-    expect(deriveOutcomes([run({ lineCoverage: true })], {}, null, open, { lineCoverage: false }).findings.bySeat.review?.resolved).toEqual({ kind: 'unmeasured', cause: 'no-line-coverage' });
+    expect(deriveOutcomes([run({})], {}, null, open, { lineCoverage: true }).findings.bySeat.review?.addressed).toMatchObject({ kind: 'rate', count: 0, sample: 1 });
+    expect(deriveOutcomes([run({ lineCoverage: true })], {}, null, open, { lineCoverage: false }).findings.bySeat.review?.addressed).toEqual({ kind: 'unmeasured', cause: 'no-line-coverage' });
   });
 
   it('are empty where nothing was raised', () => {

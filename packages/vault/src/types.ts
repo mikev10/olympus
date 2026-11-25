@@ -1338,7 +1338,9 @@ export interface FindingRef {
 }
 
 /**
- * Why a finding is resolved, from the runtime's own records only (R28, I2).
+ * Why a finding is addressed, from the runtime's own records only (R28, A-R28-02, I2):
+ * a runtime-observed change reached the place it cites. Never proof that the
+ * cited problem is fixed; no outcome claims that yet.
  * `covered-change`: a later run's merged change altered a hunk holding the
  * cited line, mapped to that run's base, and its pinned coverage check passed
  * with a changed line of the hunk executed. `draft-changed`: the cited file's
@@ -1362,11 +1364,11 @@ export type FindingResolution =
 
 /**
  * What became of a finding (R28). `open` is never recorded: a finding with no
- * outcome record is open, so an unknown outcome never reads as resolved. A
+ * outcome record is open, so an unknown outcome never reads as addressed. A
  * dismissal is a person's, with a cause and no text (A-R16-05).
  */
 export type FindingOutcome =
-  | { readonly kind: 'resolved'; readonly resolution: FindingResolution }
+  | { readonly kind: 'addressed'; readonly resolution: FindingResolution }
   | { readonly kind: 'dismissed'; readonly cause: DismissalCause };
 
 /** A finding's one outcome, write-once and content-addressed (R28). `at` is the runtime's clock. */

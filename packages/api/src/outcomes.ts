@@ -83,7 +83,7 @@ export interface RunRecords {
   readonly observations: readonly ObservationRecord[];
   /**
    * Whether any evidence bundle of the run records changed-line coverage, the
-   * one input a code finding is resolved by (R28). False for every run until
+   * one input a code finding is addressed by (R28). False for every run until
    * M3 gives a coverage check's report a channel (D-P7-05).
    */
   readonly lineCoverage: boolean;
@@ -115,14 +115,14 @@ export interface FindingInput {
   readonly family: string;
   /** Whether only a covered change could resolve it, which needs line coverage in the evidence. */
   readonly code: boolean;
-  readonly outcome: 'open' | 'resolved' | 'dismissed';
+  readonly outcome: 'open' | 'addressed' | 'dismissed';
 }
 
 /**
  * What became of the findings one seat kind or one family raised (R28), over
- * findings raised, each with its sample and bound. `resolved` is `unmeasured`
+ * findings raised, each with its sample and bound. `addressed` is `unmeasured`
  * where the group holds a finding only a covered change could resolve and no
- * run in the window recorded line coverage: a rate of nothing resolved there
+ * run in the window recorded line coverage: a rate of nothing addressed there
  * would be a measurement no input could have made (D-R28-01).
  */
 export interface FindingRates {
@@ -131,7 +131,7 @@ export interface FindingRates {
   readonly refused: number;
   /** Results the group returned that could not be read at all, whose findings are unknown in number (R28 triage). */
   readonly unreadable: number;
-  readonly resolved: Proportion | { readonly kind: 'unmeasured'; readonly cause: 'no-line-coverage' };
+  readonly addressed: Proportion | { readonly kind: 'unmeasured'; readonly cause: 'no-line-coverage' };
   readonly dismissed: Proportion;
   readonly open: Proportion;
 }
@@ -493,12 +493,12 @@ function findingRates(items: readonly FindingInput[], gaps: readonly FindingGapI
   const n = items.length;
   const count = (o: FindingInput['outcome']): number => items.filter((f) => f.outcome === o).length;
   // A resolution on record is the input itself, so the rate is measured wherever one exists (R28 triage, codex-5).
-  const measured = lineCoverage || count('resolved') > 0 || !items.some((f) => f.code);
+  const measured = lineCoverage || count('addressed') > 0 || !items.some((f) => f.code);
   return {
     raised: n,
     refused: gaps.filter((g) => g.kind === 'refused').length,
     unreadable: gaps.filter((g) => g.kind === 'unreadable').length,
-    resolved: measured ? successRate(count('resolved'), n) : { kind: 'unmeasured', cause: 'no-line-coverage' },
+    addressed: measured ? successRate(count('addressed'), n) : { kind: 'unmeasured', cause: 'no-line-coverage' },
     dismissed: failureRate(count('dismissed'), n),
     open: failureRate(count('open'), n),
   };

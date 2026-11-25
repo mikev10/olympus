@@ -711,7 +711,7 @@ const isLine = (n: unknown): boolean => Number.isSafeInteger(n) && (n as number)
 function resolutionProblem(r: unknown, source: unknown): string | undefined {
   if (!isRecord(r) || !isRecord(source)) return 'it carries no resolution';
   if (r.kind === 'covered-change') {
-    if (source.kind === 'critic') return 'a critic finding is resolved by its draft, never by a change';
+    if (source.kind === 'critic') return 'a critic finding is addressed by its draft, never by a change';
     if (!hasString(r, 'runId') || typeof r.mergeCommit !== 'string' || !COMMIT.test(r.mergeCommit)) return 'it names no resolving run and merge commit';
     if (!hasString(r, 'path') || r.path === '' || !isLine(r.line)) return 'it names no cited path and line';
     const h = r.hunk;
@@ -725,7 +725,7 @@ function resolutionProblem(r: unknown, source: unknown): string | undefined {
     return undefined;
   }
   if (r.kind === 'draft-changed') {
-    if (source.kind !== 'critic') return 'only a critic finding is resolved by its draft';
+    if (source.kind !== 'critic') return 'only a critic finding is addressed by its draft';
     if (!isRef(r.lock) || (r.lock as VaultRef).kind !== 'draft-lock') return 'it names no draft lock';
     if (typeof r.raised !== 'string' || !SHA256_HEX.test(r.raised) || typeof r.locked !== 'string' || !SHA256_HEX.test(r.locked)) return "it names no file hash at each end";
     if (r.raised === r.locked) return 'a file that did not change resolves nothing';
@@ -745,8 +745,8 @@ export function findingOutcomeProblem(r: unknown): string | undefined {
     if (Object.keys(outcome).some((k) => k !== 'kind' && k !== 'cause')) return 'a dismissal carries a cause and nothing else';
     return typeof outcome.cause === 'string' && LOCAL_DISMISSAL_CAUSES.has(outcome.cause) ? undefined : 'its cause is not a dismissal cause';
   }
-  if (outcome.kind === 'resolved') return resolutionProblem(outcome.resolution, (r.finding as { source: unknown }).source);
-  return 'an outcome is resolved or dismissed; open is never written';
+  if (outcome.kind === 'addressed') return resolutionProblem(outcome.resolution, (r.finding as { source: unknown }).source);
+  return 'an outcome is addressed or dismissed; open is never written';
 }
 
 /** R19: an approved draft's lock, whole. */
