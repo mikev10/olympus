@@ -17,3 +17,20 @@ const LOWER = new Set(DEPENDENCY_TREES.map((t) => t.toLowerCase()));
 export function isDependencyTree(name: string): boolean {
   return LOWER.has(name.toLowerCase());
 }
+
+/**
+ * The caches a stack's own tools write inside a dependency tree when they run
+ * over a writable one, each as the entry a dependency-tree write is recorded
+ * under: Vite's default `cacheDir`, where Vitest keeps its results
+ * (D-R57-03). A builder that runs its tests writes there on every build. A
+ * write under one is never carried, as no dependency-tree write is, and is not
+ * recorded as one: the tree a check runs over has every dependency tree
+ * replaced by the runtime's install first, so nothing in a cache reaches a
+ * check. Matched exactly, case and all, so a variant is recorded as before.
+ */
+export const TOOL_CACHES: readonly string[] = Object.freeze(['node_modules/.vite']);
+
+/** Whether a recorded dependency-tree entry is one of `TOOL_CACHES`, at the tree's root or below a directory of it. */
+export function isToolCache(entry: string): boolean {
+  return TOOL_CACHES.some((cache) => entry === cache || entry.endsWith(`/${cache}`));
+}

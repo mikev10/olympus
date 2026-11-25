@@ -65,6 +65,8 @@ export const BASE_COMMIT = '0'.repeat(40);
  * admission's tool check (D-R36a-07) passes over a stub that runs no tool.
  */
 export const TEST_TOOLS: readonly string[] = ['Read', 'Write'];
+/** What a wrapped stub declares: the fixture's grant, and `Bash`, which the shipped examples grant the builder (R57). */
+export const DECLARED_TEST_TOOLS: readonly string[] = [...TEST_TOOLS, 'Bash'];
 export const BUILDER = 'builder' as RoleId;
 export const REVIEWER = 'reviewer' as RoleId;
 
@@ -343,14 +345,14 @@ const DECLARING = new WeakMap<Driver, Driver>();
 /** Each declaring wrapper, back to the driver it wraps, so wrapping again starts from the driver itself. */
 const UNDECLARED = new WeakMap<Driver, Driver>();
 
-/** `driver`, declaring `TEST_TOOLS` when it declares no tool itself; every other member is its own. */
+/** `driver`, declaring `DECLARED_TEST_TOOLS` when it declares no tool itself; every other member is its own. */
 export function declaring<D extends Driver>(driver: D): D {
   if (driver.declaredTools().length > 0) return driver;
   const known = DECLARING.get(driver);
   if (known !== undefined) return known as D;
   const wrapped = new Proxy(driver, {
     get(target, key, receiver) {
-      if (key === 'declaredTools') return () => TEST_TOOLS;
+      if (key === 'declaredTools') return () => DECLARED_TEST_TOOLS;
       const value = Reflect.get(target, key, receiver) as unknown;
       return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value;
     },

@@ -19,6 +19,7 @@ import { LOCKED_PATH_IN_DIFF_IS_TAMPER } from './verification.js';
 import { COMPOSED_HOST_LOCKED_TEST_CHANGE_FAILS } from './composition.js';
 import { DEPENDENCY_TREES_ARE_THE_BASES, PASSING_ON_THE_BASE_REFUSES } from './base-run.js';
 import { R34_I3 } from './install.js';
+import { R57_I3 } from './builder-run.js';
 import { R29_I3 } from './stacks.js';
 import { R20_I3 } from './roles.js';
 import { R23_I3 } from './workspace-instructions.js';
@@ -247,6 +248,7 @@ export const I3: InvariantEntry = {
     ...R29_I3,
     // R34: every check runs over the runtime's install of the verified tree's lockfile.
     ...R34_I3,
+    ...R57_I3,
   ],
   pending: [
     pending({

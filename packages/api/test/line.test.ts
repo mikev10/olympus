@@ -1029,11 +1029,12 @@ describe('the change cannot replace its judge (D-R15-05)', () => {
 
   test('what a passing task wrote under node_modules escalates the integrate exit, by package', async () => {
     const sandbox = new StubSandboxProvider();
-    const driver = new DependencyWriter(sandbox, 'node_modules/.vite/vitest/results.json', '{}');
+    // Not Vite's cache, which a builder running its tests writes on every build and which is not recorded (D-R57-03).
+    const driver = new DependencyWriter(sandbox, 'node_modules/left-pad/index.js', 'module.exports = 0;');
     const parts = stubComponents(workspace, { sandbox, driver });
     const state = refusedState(await startRun(runRequest(runId, workspace, parts)));
     expect(state.tasks[hello]).toBe('passed');
     const escalations = await integrateEscalations(parts.vault, state, (r) => read<EvidenceBundle>(parts.vault, r));
-    expect(escalations.tamperFindings).toContain("written but not carried, since checks run over the base's dependencies: node_modules/.vite");
+    expect(escalations.tamperFindings).toContain("written but not carried, since checks run over the base's dependencies: node_modules/left-pad");
   });
 });

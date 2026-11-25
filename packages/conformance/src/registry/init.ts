@@ -30,7 +30,7 @@ export async function vitestRepository(dir: string): Promise<void> {
 }
 
 /** The repository as a user's clone: committed, with a GitHub origin. */
-function asClone(dir: string): string {
+export function asClone(dir: string): string {
   const commit = commitFixture(dir);
   execFileSync('git', ['-C', dir, 'remote', 'add', 'origin', 'https://github.com/example/calc.git'], { stdio: 'ignore' });
   return commit;

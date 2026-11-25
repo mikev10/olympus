@@ -13579,3 +13579,52 @@ Started on `v2` at ef868ca. Issue #220.
   the real package code. Reverse by emptying the constant.
 - **Only the builder gets `Bash`.** The drafters, critics, and reviewer run no
   tests. Reverse in `packages/api/setup/policy.yaml`.
+
+### D-R57-04: judgment calls made during the work
+
+- **Where Vitest's cache lands was run, not assumed.** The calc corpus
+  repository was installed with npm's declared install in its pinned image.
+  Then `node node_modules/vitest/vitest.mjs run` (4.1.11) ran in the
+  driver's image (`factory-claude-code:2.1.330`) with `--network none`. The
+  tests passed, and the run wrote
+  `node_modules/.vite/vitest/<hash>/results.json` and nothing else in the
+  tree. Over a Windows bind mount the same run writes nothing, because Vitest
+  swallows the write's failure. That case does not apply to a Linux host's
+  workspace.
+- **The CLI runs a `Bash` call without a sandbox of its own.** The driver
+  starts it with `--permission-mode bypassPermissions` and
+  `--permission-prompts none`
+  (`packages/drivers/claude-code/src/driver.ts`). The image has no `bwrap`.
+  The container is the sandbox. A real model calling `Bash` is proven only by
+  the paid run at merge. No local test makes that call.
+- **The base's own dependency trees no longer reach the builder.** With the
+  install removed, `I3.build-tree-holds-the-runtime-install` fails on
+  `node_modules/stale`. Before R57, a dependency tree the base's tree held was
+  in the builder's tree. `installInto` removes every one before it installs.
+  For a stack whose checks run in an image of their own, that is unchanged.
+- **The conformance rig's helpers are exported** (`install.ts`: `EXTRA`,
+  `Recording`, `recording`, `withDependencies`; `init.ts`: `asClone`), not
+  copied.
+- **Guards shown failing.** With `installForBuild` skipped, the install entry
+  fails. With `TOOL_CACHES` empty, the cache entry fails on
+  `["node_modules/.vite","node_modules/extra"]`. With the exemption widened to
+  every `node_modules` entry, it fails on `[]`. With `Bash` dropped from init's
+  builder, the init entry fails.
+- **An existing entry's sample path moved.** The second case of
+  `I3.dependency-trees-are-the-bases` used `node_modules/.vite/...` as its
+  example of a dependency-tree write that escalates. After R57 that path is
+  not recorded, so the entry failed. The property it holds is that a write in
+  a dependency tree escalates the integrate exit, and that is unchanged. The
+  sample is now `node_modules/left-pad/index.js` (`base-run.ts`). The narrowing
+  itself is the one the DECOMPOSITION entry asks this unit to settle, and
+  `I3.builder-tool-cache-is-not-a-dependency-write` asserts its exact edges.
+  Reverse with the exemption.
+- **The shipped examples follow the setup.** `examples/policy.yaml` and
+  `examples/roles/builder.md` must equal init's setup byte for byte
+  (`packages/api/test/init.test.ts`), so they carry the same grant and role
+  text. The api test harness wraps a stub driver to declare `Read` and
+  `Write`. It now also declares `Bash` (`DECLARED_TEST_TOOLS`,
+  `packages/api/test/harness.ts`), the same tool the Claude Code driver
+  declares, so the example runs are admitted as before. The fixture's own
+  grant, `TEST_TOOLS`, is unchanged. `line.test.ts` moved its sample
+  escalating write off `.vite`, as `base-run.ts` did.

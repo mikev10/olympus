@@ -146,7 +146,7 @@ import {
   copyOnly,
   omitPaths,
   copyTree,
-  dependencyEntry,
+  notCarriedEntries,
   diffDigest,
   hashAt,
   inDependencyTree,
@@ -1535,6 +1535,9 @@ async function build(ctx: LineContext, task: Task): Promise<StationRefusal | und
   const { start, work } = attemptPaths(workspaces, ctx.run.id, task.id, attemptsOf(ctx.state, task).iterations);
   const base = await accepted(ctx);
   await materialize(workspaces, ctx.run.id, start, base.diff, () => base.tree);
+  // R57: the builder can run the locked tests, so its tree holds the runtime's install of its lockfile.
+  const prepared = await installForBuild(ctx, task, start);
+  if (prepared !== undefined) return prepared;
   // What the role is not given is left out of both copies, so the model never has it and its diff never shows it (D-A-TR-04).
   await omitWithheld(ctx, task.role, start);
   await copyTree(start, work);
@@ -1561,6 +1564,27 @@ async function build(ctx: LineContext, task: Task): Promise<StationRefusal | und
   }
   const ref = await vault.recordTaskResult(ctx.run.id, ran.result);
   await commit(ctx, { tasks: { [task.id]: 'verifying' }, results: { [task.id]: ref } });
+  return undefined;
+}
+
+/**
+ * Puts the runtime's install of `start`'s lockfile in it before it is copied
+ * to the builder's working copy, so the builder can run the locked tests in its
+ * own sandbox, offline (R57). It goes in both copies, so a package the task
+ * changes is still in its own diff and recorded (D-R15-05). It is a tool the
+ * builder uses, never evidence: `verify` replaces every dependency tree with
+ * its own install before any check (I3). Made only where the stack's checks
+ * run in the profile's image, the one the driver's is built on; an install for
+ * an image of its own would not run in the builder's container (D-R57-01).
+ * An install refused or failed here leaves no dependency tree, and `verify`
+ * judges the same refusal (D-R57-03); a sandbox that cannot be provisioned
+ * spends a retry, as at `verify`.
+ */
+async function installForBuild(ctx: LineContext, task: Task, start: string): Promise<StationRefusal | undefined> {
+  const base = basePath(ctx.components.workspaces, ctx.run.id);
+  if ((await checkImageOf(base)) !== null) return undefined;
+  const installed = await installInto(ctx, start, base, task.id, ctx.state.station);
+  if (!installed.ok && installed.at === 'provision') return spendRetry(ctx, task, installed.reason);
   return undefined;
 }
 
@@ -1665,7 +1689,7 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
   // D-R15-05: what the task wrote in a dependency tree is recorded and escalated, never carried. Every
   // check, and the runner a suite check starts, runs over the runtime's install of the tree's lockfile (R34).
   const own = written.filter((entry) => !inDependencyTree(entry.path));
-  const notCarried = [...new Set(written.filter((entry) => inDependencyTree(entry.path)).map((entry) => dependencyEntry(entry.path)))].sort();
+  const notCarried = notCarriedEntries(written.map((entry) => entry.path));
 
   // I3: the task's copy is not where the Vault checks the locks, so its diff is checked instead.
   // A locked path in it is the tamper the Vault's own check can no longer see.
