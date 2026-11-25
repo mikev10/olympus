@@ -131,7 +131,7 @@ describe('what a draft may put on a terminal', () => {
 });
 
 describe('what is printed stands for exactly one sequence of bytes (review: codex-1, codex-2, gemini-1)', () => {
-  const linesOf = (bytes: string | Uint8Array): string[] => draftLines({ ...VIEW, files: [{ path: 'f', sha256: 'h', base64: b64(bytes) }] } as unknown as DraftView, NAME);
+  const linesOf = (bytes: string | Uint8Array): string[] => draftLines({ ...VIEW, files: [{ path: 'f', sha256: 'h', base64: b64(bytes) }] }, NAME);
 
   test('a file that is not UTF-8 is shown byte for byte, never replaced by a notice', () => {
     const lines = linesOf(new Uint8Array([0x73, 0x65, 0x63, 0xff, 0x72, 0x65, 0x74, 0x0a, 0x5c, 0x09, 0x7f]));

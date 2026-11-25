@@ -40,11 +40,17 @@ export function visible(text: string, keep = ''): string {
 
 /** Bytes that are not UTF-8, as lines: printable ASCII as itself, a backslash doubled, every other byte as `\x{..}`. */
 function byteLines(bytes: Uint8Array): string[] {
-  const lines = [''];
+  const lines: string[] = [];
+  let line = '';
   for (const byte of bytes) {
-    if (byte === 0x0a) lines.push('');
-    else lines[lines.length - 1] += byte === 0x5c ? '\\\\' : byte >= 0x20 && byte <= 0x7e ? String.fromCharCode(byte) : `\\x{${byte.toString(16).padStart(2, '0')}}`;
+    if (byte === 0x0a) {
+      lines.push(line);
+      line = '';
+    } else if (byte === 0x5c) line += '\\\\';
+    else if (byte >= 0x20 && byte <= 0x7e) line += String.fromCharCode(byte);
+    else line += `\\x{${byte.toString(16).padStart(2, '0')}}`;
   }
+  lines.push(line);
   return lines;
 }
 
