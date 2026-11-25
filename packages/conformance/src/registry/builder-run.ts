@@ -75,6 +75,10 @@ export const BUILD_TREE_HOLDS_THE_INSTALL: LocalAssertion = runtime({
       if (tree.stale) throw new Error(`R57: the builder's tree holds ${STALE}, which only the base's own tree held`);
       const bundle = await lastBundle(rig, components);
       if (bundle?.install === null || bundle?.install === undefined) throw new Error(`R57: verify recorded no install of its own: ${JSON.stringify(bundle?.install)}`);
+      // The build tree's inputs are ones the run already installed, so the build reuses that install and runs no installer of its own.
+      const { STAND_IN_INSTALL_IMAGE } = await adapters();
+      const installs = sandbox.provisioned.filter((p) => p.spec.image === STAND_IN_INSTALL_IMAGE).length;
+      if (installs !== 1) throw new Error(`R57: the run provisioned ${String(installs)} install sandboxes, not the base run's one`);
     });
   },
 });
@@ -103,6 +107,9 @@ export const BUILDER_CACHE_IS_NOT_RECORDED: LocalAssertion = runtime({
       if (JSON.stringify(bundle.notCarried) !== JSON.stringify([EXTRA])) {
         throw new Error(`R57: the writes recorded in a dependency tree were ${JSON.stringify(bundle.notCarried)}, not exactly ${EXTRA}`);
       }
+      // Neither write is carried: the change's diff holds no path in a dependency tree, the cache's included (R57 review, codex).
+      const carried = bundle.diff.filter((entry) => entry.path.split('/').includes('node_modules')).map((entry) => entry.path);
+      if (carried.length > 0) throw new Error(`R57: the change's diff carries ${carried.join(', ')}`);
     });
   },
 });
