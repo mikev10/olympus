@@ -512,6 +512,8 @@ describe('coverage.py', () => {
     const adapter = new CoveragePyAdapter({ report, sourceRoot: '/workspace', tests });
     // Changed: 2 (docstring, not a statement), 3, 4 covered, 5 a statement the report excluded: 2 of 3.
     expect(await adapter.changedLineCoverage(base, head)).toBeCloseTo(2 / 3);
+    // R28: the same lines, named: the excluded statement is an obligation the report could not remove.
+    expect(await adapter.changedLineReport(base, head)).toEqual([{ path: 'hello/__init__.py', executed: [3, 4], unexecuted: [5] }]);
   });
 
   test('a report that is not coverage.py JSON is refused', async () => {

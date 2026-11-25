@@ -12504,6 +12504,303 @@ missing check.
   unreachable through admission everywhere, as it already was through the
   factory host, until a unit gives a scan a way to grant it.
 
+## R28: Finding outcomes, derived by the runtime
+
+Started on `v2` at 2767a57, after A-R28-01 (D-A-FO-01) merged as #219.
+Every dependency (P14, R2, R9, R13b, R19, R29) is merged and tagged
+`reviewed/*` (`git tag -l 'reviewed/*'`).
+
+### D-R28-01: boundary, verified
+
+- **Deliverables:**
+  - Located review findings: the reviewer and the security seat end with
+    `{"findings": [{ "category", "path", "line" }, …]}`, read strictly; an
+    unlocated finding is refused with its cause, an unreadable result is
+    recorded as unreadable, and the findings record sits beside the result.
+    The task's status is unchanged.
+  - Located critic findings: `{"findings": [{ "path", "note" }, …]}`, `path`
+    one of the draft's files.
+  - Line coverage in the evidence: both coverage adapters report each changed
+    file's executed and unexecuted changed lines; `TamperReport` records them
+    beside `coverageDelta`.
+  - Derived outcomes: `resolved` (code and critic rules), `dismissed` (a
+    person's, API and CLI, cause and no text), `open` (no record).
+  - Write-once outcome records, content-addressed, `collectedBy: 'runtime'`.
+  - R2 rates per reviewer family and per seat kind, each with sample and bound.
+  - The contract amendments the entry lists, the role texts, the assertions,
+    and changesets.
+- **Out of scope, verbatim:** "changing which reviewers are seated based on
+  the rate (R11's); turning a review finding into a status or a send-back
+  (M3's rubric and panel); resolving a finding fixed outside Olympus, which
+  stays open until a person dismisses it."
+- **Acceptance, as commands:** `pnpm typecheck`, `pnpm lint`, `pnpm test`,
+  `pnpm conformance`, with an assertion per deliverable sentence, each failing
+  when its behaviour is deleted (I8), the six the entry names among them.
+- **Invariants touched:**
+  - I2: no model reports an outcome or a status; a review finding never
+    moves its task's status; outcomes come from diffs, evidence, draft
+    records, or a person.
+  - I5: unlocated, unreadable, unmappable, or uncovered leaves a finding open.
+  - I7: a review finding's note stays in the claim and enters no prompt; a
+    critic's note goes to its drafter as today (D-A-DS-07's exception).
+  - I1: outcomes are written by the runtime through named Vault operations.
+  - I6: rates are keyed by the seat's recorded family, never an inferred one.
+  - I8, I10.
+- **Pending registry entries owed:** none. `grep -rn R28
+  packages/conformance/src packages/conformance/pending-baseline.json` finds
+  nothing.
+- **Gate paths:** `packages/{vault,integrity,adapters}/src/types.ts` and
+  `packages/conformance/` are protected (`.github/protected-paths.txt`), so
+  the pull request carries `gate-change`, as the entry declares.
+
+**Assumptions, each verified:**
+
+- A review seat's task passes whatever its claim says, recorded through
+  `recordTaskResult` and `commit(... 'passed')`
+  (`packages/api/src/line.ts:1952-1957`). The security seat is the same path
+  (`line.ts:1899`).
+- The tree a seat reviews is the latest accepted tree, `accepted(ctx).tree`,
+  copied to the seat's view filtered by its grants (`line.ts:1833-1845`,
+  `1383-1397`); its line numbers are that tree's.
+- That tree is the tree `integrate` pushes: `IntegrationOpened.commit` is
+  "`baseCommit`'s tree with the accepted diff applied", its only parent
+  `baseCommit` (`packages/vault/src/types.ts:459-463`).
+- The nightly tree reviewer's strict read, `readReviewResult` and
+  `elementFields`, with `held.has(path)` and `lineCount`, already locates a
+  file and line and refuses `unlocated` / `unrecordable`
+  (`packages/api/src/nightly-review.ts:231-262`, `539-563`); the
+  `nightly-tree-finding` schema checks category, path, and line
+  (`packages/core/src/trigger/schemas.ts:196-200`).
+- A critic's result is `string[]`, read by `readCriticResult`
+  (`packages/api/src/drafting.ts:721-734`), counted for send-back
+  (`drafting.ts:251`), and sent to the drafter as `critic-findings`
+  (`drafting.ts:381`).
+- A draft records each file's path and hash (`DraftRecord.files`,
+  `types.ts:598-613`); the locked draft's files are in `DraftLockRecord`
+  (`types.ts:646-654`); `readBaseRun(runId, draft)` names a draft's base
+  record or null (Vault interface).
+- Every pinned coverage check is refused at `verify`, so `coverageDelta` is
+  null in every real run (`line.ts:1576-1589`, D-P7-05). M3 owns the channel.
+- `analyzeTamper(base, head)` takes `base` as the prior accepted tree and
+  `head` as the task's tree (`line.ts:1676`,
+  `packages/api/src/tamper.ts:161-187`). Both adapters build per-file
+  executed sets before counting (`packages/adapters/src/coverage.ts:147-176`,
+  `packages/adapters/src/python/coverage.ts:87-136`).
+- `integrate` has no local checkout: `GitHubIntegrator` works over the API
+  (`packages/api/src/integrate.ts:136-252`). The history walk has one, the
+  merged runs with their merge commits, and `firstParents`, `commitOf`,
+  `commitDiff` (`packages/api/src/observe.ts:237-330`,
+  `packages/api/src/history.ts`).
+- Candidate dismissal takes `{cause}` only, from `DISMISSAL_CAUSES`
+  (`packages/api/src/http/server.ts:240-248`, `599-611`). The CLI has no
+  dismiss command (`grep -n dismiss packages/cli/src` is empty).
+- R2's rates are `Proportion`s with a one-sided Clopper–Pearson bound
+  (`packages/api/src/bounds.ts:15-50`), derived purely by `deriveOutcomes`
+  (`packages/api/src/outcomes.ts:572`); `Outcomes` lives in `outcomes.ts`,
+  not a gate path.
+- A write-once record per key is `createExclusive` on a name beside a
+  content-addressed object (`recordBaseRun`,
+  `packages/vault/src/local/vault.ts:998-1012`).
+
+**Where the code differs from the entry:**
+
+- The pinned coverage check the code-finding rule reads cannot occur in a
+  real run (above). Raised as a stop; the maintainer chose option A on
+  2026-11-23: build the rule as amended, reachable only when M3's channel
+  lands; prove it with an injected report; record the limit as M3's; and R2
+  reports a code-finding resolved rate as `unmeasured`, with its cause, never
+  as 0 of n, when no run in the window recorded line coverage. Rejected: R28
+  builds the channel (M3's, and a suite-written hit count would decide an
+  outcome, I3); move the rule to M3 (a deliverable leaves the unit).
+- D-A-FO-01 recommended deriving resolutions when `integrate` merges.
+  `integrate` has no checkout to map lines through; the history walk does.
+
+**Choice points:**
+
+1. *The commit a review seat's finding is read against.* Chosen: the
+   finding's run's `IntegrationOpened.commit`, whose tree is the reviewed
+   tree. Line numbers are fixed at review time; the commit is joined when
+   the run merges. A run that never merged cited code that never landed: its
+   findings stay open. A nightly tree finding's commit is its subject's
+   `commit`. Rejected: the run's `baseCommit` (the cited line is in the
+   changed tree, not the base). Reverse: name `baseCommit` and map through
+   the run's own diff.
+2. *When resolutions are derived.* Chosen: in the history walk, for each
+   merged run it walks, over the code findings open at that point.
+   Rejected: at `integrate` (no checkout). Reverse: give `integrate` a
+   checkout and call the same derivation there.
+3. *Mapping a line through history.* Chosen: a zero-context diff from the
+   finding's commit to the resolving run's `baseCommit`. A hunk whose old
+   side holds the line means it was rewritten in between: unmappable, open.
+   Otherwise the line shifts by the hunks wholly before it. A cited file
+   absent at either end is unmappable. Reverse: walk commit by commit.
+4. *Whose coverage counts for the resolving run.* Chosen: the latest
+   accepted bundle's, whose head tree is the integrated tree, so its line
+   numbers are the resolving diff's new side; its coverage check must be
+   recorded and passed. An earlier task's report is in another tree's
+   numbering and is not read. A hunk with no new-side line (a pure deletion)
+   has nothing to execute and resolves nothing. Reverse: map each bundle's
+   lines forward.
+5. *How findings are named.* Chosen: by source and index, the source a
+   review findings record, a critic record, or a nightly record, each by its
+   hash. Nightly findings join directly, not through candidates, since a
+   finding can have no candidate. Reverse: key nightly findings by candidate.
+6. *Where a review seat's findings live.* Chosen: a content-addressed
+   `review-findings` record under the run, listed like decisions, so
+   `RunState` does not change. Reverse: add a ref to `RunState`.
+7. *A critic finding naming another path.* Chosen: kept in the record as
+   refused `unlocated`, never measured; it still sends the draft back with
+   the runtime's own text, as an unreadable result does today, since it is
+   not a clean result (I5). Reverse: drop refused findings from send-back.
+8. *A critic record stored before R28* holds strings. Chosen: each is read
+   as refused `recorded-before`, never measured. Reverse: refuse to read it.
+9. *Role text.* Each seat's role states the JSON result shape and that a
+   note is read by a person, never the runtime, as R13b's tree prompt does.
+
+### D-R28-02: the reviewer's categories are its role's questions
+
+- **Ambiguous:** A-R28-01 gives the review seats `{ category, path, line }`
+  and names no categories for the run's reviewer. `TREE_CATEGORIES` are the
+  security reviewer's questions (`packages/core/src/trigger/schemas.ts:96-100`).
+- **Chosen:** `REVIEW_CATEGORIES`, one per question `reviewer.md` asks:
+  `spec-mismatch`, `beyond-spec`, `untested-behavior`, `check-bypassed`,
+  `uncovered-breakage`. The security seat keeps `TREE_CATEGORIES`. Each seat
+  is held to its own set; another seat's category is `unrecordable`. Fields
+  are checked as `checkFields` checks a schema (caps, `tree-path`,
+  `decimal`), in `packages/api/src/findings.ts`, without a new
+  `CandidateSchema`, since a seat's finding is never an intake candidate.
+- **Rejected:** one shared set (the security seat's questions do not fit a
+  reviewer's, and a rate per category would mix them); free categories (an
+  unbounded value in a record, I7).
+- **Reverse:** drop `REVIEW_CATEGORIES` and read `TREE_CATEGORIES` for both.
+
+### D-R28-03: the line report names its coverage check
+
+- **Chosen:** `TamperReport.changedLines` is `{ check, files } | null`: the
+  pinned coverage check's id beside the lines, so a resolution judges that
+  check's own result in the same bundle (passed as the gate judges one). The
+  bundle does not record which check is the coverage check otherwise, and
+  reading the manifest artifact later is reading a file outside the Vault.
+  `TamperOptions.coverage` gains `check`.
+- **Rejected:** "any required check passed" (the rejection in D-A-FO-01);
+  reading the verification manifest at walk time (not a Vault record).
+- **Reverse:** drop `check`, and resolve from the gate's pass of the task.
+
+### D-R28-04: finding rates stay out of the nightly drift snapshot
+
+- **Found:** the nightly integrity job flattens R2's figures over settled
+  runs and reports any change as `rate-drift`
+  (`packages/api/src/nightly.ts:302-310`). An outcome is written after its
+  run settles, by a person or a later merge, so a findings rate moves with no
+  run changing; and a snapshot taken before R28 holds no findings key, so
+  even an empty one would read as drift once.
+- **Chosen:** the snapshot is taken from `deriveOutcomes` without
+  `findings`. The rates are R2's to report (`GET /outcomes`), never the
+  snapshot's to compare.
+- **Reverse:** flatten `findings` again, and accept one drift per upgrade.
+
+### D-R28-05: a refused critic finding goes back in the runtime's words
+
+- **Chosen:** the drafter is sent `<path>: <note>` for a located finding
+  (D-A-DS-07's exception, unchanged in substance), and the runtime's own
+  sentence for an unlocated, unreadable, or pre-R28 one. The critic's text of
+  an unlocated finding never reaches a prompt, since it cited nothing the
+  runtime could check. `core`'s `critic-findings` part stays a list of
+  strings, so no contract in `core/src/station/types.ts` changes.
+- **Reverse:** send the critic's note for an unlocated finding too.
+
+### D-R28-06: where the dismissal lives
+
+- **Chosen:** `GET /findings` lists every located finding with its outcome
+  (`open` where none), and `POST /findings/:id/dismiss` takes `{cause}` alone,
+  validated by the same `dismissBody` as a candidate's (400 on any other key);
+  404 for an id naming no located finding, 409 for one already decided. The
+  CLI has `findings` and `dismiss-finding <id> --cause`. A finding's id is
+  `review:<run>:<hash>:<index>`, `critic:<run>:<hash>:<index>`, or
+  `nightly:<hash>:<index>`. A refused finding cannot be dismissed: it was
+  never measured.
+- **Reverse:** remove the two routes and commands.
+
+### D-R28-07: known limits
+
+- **No code finding resolves today (M3).** A pinned coverage check is refused
+  at `verify` (D-P7-05), so no bundle carries line coverage, and R2 reports a
+  code seat's resolved rate as `unmeasured` (D-R28-01, option A). The rule is
+  proven by `I2.code-finding-resolved-by-covered-change` over a store whose
+  evidence carries an injected report. M3 owns the channel.
+- **A finding fixed outside Olympus, or on a line rewritten in between,
+  stays open** until a person dismisses it (the entry's out-of-scope list).
+- **A review finding of a run that never merged stays open:** the code it
+  cites never landed, so no history holds it.
+- **Only the resolving run's last accepted bundle's lines are read** (choice
+  4): a line covered only by an earlier task of that run, in another tree's
+  numbering, resolves nothing.
+- **The reviewed tree is taken to be the pushed tree.** `review` sends nothing
+  back (D-P4-07) and `integrate` pushes the accepted diff, so the two are the
+  same tree; the findings record names the diff digest it was read against
+  (`tree`), and a later unit that lets review send work back must join on it.
+
+### D-R28-08: external review, what was fixed and what is owned elsewhere
+
+Triage: `docs/reviews/2026-11-23-R28-finding-outcomes-triage.md`. Both families counted on the first run.
+
+- **Fixed (codex-2, gemini-1), d9c5a8c:** each rate group carries `refused` and `unreadable` counts beside `raised`, from the same records; a malformed critic element is refused alone as `unrecordable` (a new `CriticFinding` cause), keeping the located findings beside it. Rejected: counting refused findings as raised and open, which puts what nothing can resolve into a resolved rate. Reverse: drop the two counts and return unreadable from inside `readCriticResult`'s loop.
+- **Fixed (codex-5), d9c5a8c:** a resolved rate is measured where a resolution is on record, or where any run in the store recorded line coverage in a passed task's last bundle; not only runs in the window, and never a failed attempt's. Reverse: read `runs.some(r => r.lineCoverage)` over the window again.
+- **Fixed (codex-6), 2327ec4:** the stack assertion checks each fixture's own lines. Reverse: compare the fraction with the report again.
+- **Recorded, the maintainer's to decide (codex-1, gemini-2):** "resolved" proves a covered edit of the hunk that held the cited line, or a changed draft file, not that the cited problem was fixed. That is A-R28-01's rule as chosen. Recommendation: before R11 reads these rates to seat reviewers, rename the two resolution kinds for what they prove, or add a remediation outcome that an independently checked regression assertion establishes. Either is an amendment.
+- **Known limit, owner R11 (codex-3):** repeated or near-repeated findings in one result count as independent findings, inflating a rate and its sample. No local rule separates one problem cited twice from two problems on one line. R11, which reads the rates to choose seats, owns making the count resistant to it.
+- **Known limit, owner M3 (codex-4):** a workload-written coverage report can claim hits that never ran; pending as `I3.coverage-report-is-not-writable-by-the-suite`.
+- **Not holding (gemini-3):** line 0 is out of the `decimal` class and is refused `unrecordable`; it never reaches the Vault.
+
+### D-R28-09: the A-R40-02 amendment's external review, folded into R28's
+
+The R28 bundle from `reviewed/R53` exceeded the runner's 599,000-byte ceiling, because the A-R40-02 amendment and a tooling commit had merged to `v2` after that tag. The maintainer chose two reviews: R28 from `a320a01`, and `reviewed/R53..a320a01` on its own as `A-R40-02`. Both counted. Triage: `docs/reviews/2026-11-23-A-R40-02-readiness-scan-admission-triage.md`.
+
+- **Fixed (codex-1), 9549f48:** `I5.resume-holds-the-recorded-readiness-ceiling` drives `resumeRun` over a `not-scanned` record and a pre-R40 record above L0, not only the helper. Reverse: drop the loop.
+- **Not holding (gemini-1):** the at-ceiling checks use `port(1)` with an L1 request; they pin the boundary.
+- **Reverse the split:** review both ranges together, which needs a payload ceiling above 600 KB.
+
+## A-R53-02: one build of a tag at a time (#231)
+
+Confirmed by the maintainer on 2026-11-24, taking #231's first option. Found
+merging R54: a rerun of the paid job failed with `No such image` for an ID
+`recordedImage` had just returned.
+
+- **What is built.** `recordedImage` holds a lock per tag, a directory beside
+  the tag's records, around the whole of inspect, build, and record. A second
+  caller waits, then finds the tag present and recorded and returns the same
+  ID. No contract, type, or gate path changes.
+- **Verified.**
+  - Two `docker build --tag` of one tag at once give two content IDs, the tag
+    ends on one, and `docker image inspect` of the other fails (run by hand
+    on Docker 29.8.0 with the containerd image store, the store the CI runner
+    has; the runner's log shows the same on 29.4.2).
+  - `init.paid.test.ts` and `line.paid.test.ts` each reach `ensureImage`
+    through `composeHost` in `beforeAll` (`packages/api/src/host/compose.ts`),
+    in separate workers, against the one records directory under the home
+    directory.
+  - Nothing in `recordedImage` serialises inspect and build (read).
+  - The tag exists before its record is written, so an unlocked reader in
+    that window reads a tag with no record and refuses it as replaced. The
+    lock therefore covers the reader's path too, not only the build.
+  - `packages/sandbox/src/local/image.ts` matches no pattern in
+    `.github/protected-paths.txt`.
+- **A lock left behind is refused, never taken over.** The holder writes its
+  host name and process ID inside the lock. A waiter that reads a holder on
+  this host whose process is gone refuses at once and names the directory to
+  remove; one that waits past the build's time limit refuses the same way.
+  Rejected: removing a stale lock and carrying on. Two waiters that both
+  judge it stale can each remove it, the second removing the first's fresh
+  lock, which is the race again. A refusal costs the operator one `rm` after
+  a build was killed; a wrong takeover costs a run that fails on a missing
+  image. Reverse by deleting `withTagLock` and its call.
+- **Rejected: build the image once in the paid suite's global setup.** It
+  fixes CI and leaves two hosts started together racing.
+- **Rejected: a CI step that builds before the line step.** CI only, and a
+  gate-path change for a defect that is in the product.
+- **Not changed.** Whether an image this host built and recorded should be
+  rebuilt when its tag is gone but its ID is still held: unchanged, a build.
+
 ## R54: The `deep` tier's model, chosen by the benchmark
 
 Started on `v2` at 03518f9. Issue #171.

@@ -19,7 +19,8 @@ import { changedLines, splitLines } from '../line-diff.js';
 import { refuse } from '../refusal.js';
 import { isDependencyTree } from '../trees.js';
 import type { CoverageAdapter, TestFrameworkAdapter } from '../types.js';
-import { REPORT_CAP } from '../coverage.js';
+import { coverageFraction, REPORT_CAP } from '../coverage.js';
+import type { ChangedLineCoverage } from '@olympus-ai/integrity';
 import { childrenOf, lineOf, parsePython, statementsOf, type PythonModule } from './parse.js';
 
 export interface CoveragePyOptions {
@@ -113,13 +114,16 @@ export class CoveragePyAdapter implements CoverageAdapter {
   }
 
   async changedLineCoverage(base: string, head: string): Promise<number> {
+    return coverageFraction(await this.changedLineReport(base, head));
+  }
+
+  async changedLineReport(base: string, head: string): Promise<ChangedLineCoverage[]> {
     const report = await this.#readReport();
     const tests = new Set((await this.#options.tests.enumerateSuites(head)).map((file) => toPosix(file)));
     const headPosix = toPosix(head).replace(/\/+$/u, '');
     const isSource = (path: string): boolean => path.endsWith('.py') && !isConfigFile(path) && !tests.has(`${headPosix}/${path}`);
     const changes = await diffTrees(base, head, isSource, { skipDirectory: (name) => isDependencyTree(name) || VCS_DIRECTORIES.has(name) });
-    let total = 0;
-    let covered = 0;
+    const out: ChangedLineCoverage[] = [];
     for (const { path, change } of changes) {
       if (change === 'removed') continue;
       const after = await readRegularFile(join(head, path), SOURCE_FILE_CAP);
@@ -128,12 +132,9 @@ export class CoveragePyAdapter implements CoverageAdapter {
       const entry = report.get(path);
       const executable = executablePythonLines(parsePython(after, path));
       for (const line of entry?.measured ?? []) executable.add(line);
-      for (const line of changed) {
-        if (!executable.has(line)) continue;
-        total++;
-        if (entry?.executed.has(line) === true) covered++;
-      }
+      const lines = [...changed].filter((line) => executable.has(line)).sort((a, b) => a - b);
+      if (lines.length > 0) out.push({ path, executed: lines.filter((line) => entry?.executed.has(line) === true), unexecuted: lines.filter((line) => entry?.executed.has(line) !== true) });
     }
-    return total === 0 ? 1 : covered / total;
+    return out.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   }
 }

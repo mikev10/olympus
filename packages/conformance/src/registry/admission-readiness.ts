@@ -187,6 +187,20 @@ export const RESUME_HOLDS_THE_RECORDED_CEILING: LocalAssertion = runtime({
       if (after.station !== 'intake' || Object.keys(after.tasks).length > 0 || after.version !== before.version) {
         throw new Error(`I5: the refused resume moved the run (station ${after.station}, ${String(Object.keys(after.tasks).length)} tasks)`);
       }
+      // An unscanned record above L0 is refused by the resume itself too, not only by the helper (A-R40-02 review, codex-1):
+      // one that says no scan ran, and one written before R40 with no readiness term at all.
+      for (const [name, readiness] of [
+        ['not-scanned', { kind: 'not-scanned', because: 'no-scanner' }],
+        ['pre-r40', undefined],
+      ] as const) {
+        const id = `${rig.runId}-${name}` as RunId;
+        const admitted = await components.vault.recordAdmission({ ...at(readiness), run: { ...record.run, id } });
+        const held = await components.vault.commitRunState({ ...state, runId: id, admission: admitted, version: '0' }, '0');
+        const refused = await resumeRun({ runId: id, components });
+        if (refused.ok || refused.reason !== 'readiness-unscanned') throw new Error(`I5: a resume over a record ${name} above L0 was ${refused.ok ? 'driven' : refused.reason}`);
+        const left = await components.vault.readRunState(id);
+        if (left.station !== 'intake' || Object.keys(left.tasks).length > 0 || left.version !== held.version) throw new Error(`I5: the refused resume of a record ${name} moved the run`);
+      }
     });
   },
 });

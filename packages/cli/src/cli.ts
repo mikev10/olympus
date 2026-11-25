@@ -10,7 +10,7 @@
  */
 import { readFile } from 'node:fs/promises';
 import { parseArgs, parseEnv } from 'node:util';
-import type { ApproveBody, CreateRunBody, ErrorBody, RejectBody, TelemetryExport } from '@olympus-ai/api';
+import type { ApproveBody, CreateRunBody, DismissBody, ErrorBody, RejectBody, TelemetryExport } from '@olympus-ai/api';
 
 export interface CliIo {
   readonly env: Readonly<Record<string, string | undefined>>;
@@ -90,6 +90,11 @@ export const COMMANDS: readonly Command[] = [
       from: { type: 'string', value: '<time>', help: 'only runs admitted at or after this ISO time' },
       to: { type: 'string', value: '<time>', help: 'only runs admitted before this ISO time' },
     },
+  },
+  { name: 'findings', args: '', summary: 'every located review, critic, and nightly finding, and whether it is open, resolved, or dismissed', flags: {} },
+  {
+    name: 'dismiss-finding', args: '<finding id>', summary: 'record that a finding will not be worked, with a cause and no text',
+    flags: { cause: { type: 'string', value: '<cause>', help: 'required: not-a-defect, duplicate, insufficient-detail, or not-reproducible' } },
   },
   {
     name: 'telemetry', args: '<run id>...', summary: 'a finished run as OTLP/JSON traces and metrics, printed or sent to a collector',
@@ -556,6 +561,17 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<ExitCo
       }
       case 'outcomes':
         return await outcomes(io, t, own);
+      case 'findings': {
+        const { positionals: named } = parseOwn(command, own);
+        if (named.length > 0) throw new UsageError(`findings takes no positional arguments: ${named.join(' ')}`);
+        return report(io, await call(io, t, 'GET', 'findings'));
+      }
+      case 'dismiss-finding': {
+        const { values: flags, positionals: named } = parseOwn(command, own);
+        const [id = ''] = one(named, ['<finding id>']);
+        const body: DismissBody = { cause: required(str(flags, 'cause'), '--cause') as DismissBody['cause'] };
+        return report(io, await call(io, t, 'POST', `findings/${encodeURIComponent(id)}/dismiss`, body));
+      }
       case 'telemetry':
         return await telemetry(io, t, own);
       case 'readiness': {

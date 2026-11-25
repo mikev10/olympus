@@ -26,9 +26,11 @@ Check the draft against the rubric. At the least:
 Your final message is your result, and nothing else: one JSON object,
 
 ```
-{"findings": ["...", "..."]}
+{"findings": [{"path": "...", "note": "..."}]}
 ```
 
-Each finding is one problem, said so the drafter can fix it. Give no severity
-and no praise. If you found nothing wrong, return `{"findings": []}`. Anything
-other than that object is counted as a finding.
+Each finding is one problem. `path` is the draft file it is in, exactly as
+the draft names it, and `note` says the problem so the drafter can fix it.
+Give no severity and no praise. If you found nothing wrong, return
+`{"findings": []}`. Anything other than that object is counted as a finding,
+and so is a finding whose `path` is not a file of the draft.

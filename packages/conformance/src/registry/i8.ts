@@ -8,6 +8,7 @@ import { conformanceRoot, entryDivergence, toPosix, walkFiles, workspacePackages
 import { claimKeys } from './claims.js';
 import { assertReconciliationRefuses } from './reconciliation.js';
 import { CEILING_BEARING_PROBE_CHECK_IS_EXERCISED, CEILING_BEARING_PROBE_HAS_AN_ASSERTION } from './readiness.js';
+import { R28_ASSERTIONS } from './findings.js';
 
 const CONFORMANCE = '@olympus-ai/conformance';
 
@@ -15,6 +16,8 @@ const CONFORMANCE = '@olympus-ai/conformance';
 export const I8: InvariantEntry = {
   title: INVARIANTS.I8,
   assertions: [
+    // R28: each stack names the changed lines a finding's resolution reads.
+    ...R28_ASSERTIONS.I8,
     CEILING_BEARING_PROBE_HAS_AN_ASSERTION,
     CEILING_BEARING_PROBE_CHECK_IS_EXERCISED,
     runtime({

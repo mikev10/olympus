@@ -34,7 +34,7 @@ export {
   type WorkspaceStore,
 } from './workspace.js';
 export { boundTo, egressFor, evidenceFactsOf, integrateEscalations, readIntegration, UNANALYSED_TESTS, type GateFailedCheck, type GateFailure, type LineArtifacts } from './line.js';
-export { builderModels, manifestDraftPath, readCriticResult, specDraftPaths, type DraftingContext, type DraftingDrivers } from './drafting.js';
+export { builderModels, manifestDraftPath, criticNote, readCriticResult, specDraftPaths, type DraftingContext, type DraftingDrivers } from './drafting.js';
 export { DEFAULT_RUBRICS_DIRECTORY, RUBRIC_MAX_BYTES, type ReadRubric } from './rubrics.js';
 export { DRAFT_DIR, defectBytes, defectIntentText, isDraftableDirectory, parseQuestions, parseReproduction, parseRunRequirements, type DefectPart, type Questions, type Reproduction, type RunRequirements } from './spec-parts.js';
 export * from './http/server.js';
@@ -67,7 +67,11 @@ export {
 } from './observation-plan.js';
 export { GitHubCheckReader, type GitHubCheckReaderOptions } from './checks.js';
 export { GitHubBranchProtection, readinessScanner, type ReadinessScanner, type ReadinessScannerOptions } from './readiness-scan.js';
-export { classifyReversal, type ChangeInverse, type CommitDiff, type Reversal } from './history.js';
+export { classifyReversal, parseHunkRanges, type ChangeInverse, type CommitDiff, type HunkRange, type Reversal } from './history.js';
+export {
+  dismissFinding, findingId, holdingHunk, listFindings, mapLine, outcomesByFinding, parseFindingId, raisedFindings, readSeatFindings, resolveCodeFindings, resolveCriticFindings, seatCategories,
+  type Citation, type CodeResolutions, type FindingSummary, type RaisedFinding,
+} from './findings.js';
 export {
   FINDINGS_REVIEWER_ROLE, JUDGING_ROLES, authorsOf as nightlyAuthorsOf, dayItems, readReviewResult, reviewedDay, seatLevel, type NightlySeatOptions,
 } from './nightly-review.js';

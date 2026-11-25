@@ -11,6 +11,7 @@ import {
   isDraftableDirectory,
   parseQuestions,
   parseRunRequirements,
+  criticNote,
   readCriticResult,
   requestProblems,
   worstCaseCost,
@@ -18,14 +19,37 @@ import {
 } from '../src/index.js';
 
 describe('a critic\'s result (D-A-DS-07)', () => {
-  it('is a list of findings with no severity, and anything else is one finding', () => {
-    expect(readCriticResult('{"findings": []}')).toEqual({ readable: true, findings: [] });
-    expect(readCriticResult('```json\n{"findings": ["statement 2 is not testable"]}\n```')).toEqual({ readable: true, findings: ['statement 2 is not testable'] });
-    for (const narrative of ['Looks good!', '{"findings": [], "severity": "low"}', '{"findings": [""]}', '{"findings": "none"}', '[]', '']) {
-      const read = readCriticResult(narrative);
+  const paths = new Set(['spec.md']);
+  it('is a list of located findings with no severity; any other envelope is one unreadable finding, and any other element one unrecordable finding', () => {
+    expect(readCriticResult('{"findings": []}', paths)).toEqual({ readable: true, findings: [] });
+    expect(readCriticResult('```json\n{"findings": [{"path": "spec.md", "note": "statement 2 is not testable"}]}\n```', paths))
+      .toEqual({ readable: true, findings: [{ kind: 'located', path: 'spec.md', note: 'statement 2 is not testable' }] });
+    for (const narrative of ['Looks good!', '{"findings": [], "severity": "low"}', '{"findings": "none"}', '[]', '']) {
+      const read = readCriticResult(narrative, paths);
       expect(read.readable).toBe(false);
-      expect(read.findings).toHaveLength(1);
+      expect(read.findings).toEqual([{ kind: 'refused', cause: 'unreadable' }]);
     }
+    for (const narrative of [
+      '{"findings": ["statement 2 is not testable"]}', '{"findings": [{"path": "spec.md", "note": ""}]}',
+      '{"findings": [{"path": "spec.md", "note": "x", "severity": "low"}]}', '{"findings": [{"note": "x"}]}',
+    ]) {
+      expect(readCriticResult(narrative, paths), narrative).toEqual({ readable: true, findings: [{ kind: 'refused', cause: 'unrecordable' }] });
+    }
+  });
+
+  it('refuses a malformed element on its own and keeps the located findings beside it (R28 triage, codex-2)', () => {
+    expect(readCriticResult('{"findings": [{"path": "spec.md", "note": "y"}, {"path": "spec.md"}, "loose text"]}', paths))
+      .toEqual({ readable: true, findings: [{ kind: 'located', path: 'spec.md', note: 'y' }, { kind: 'refused', cause: 'unrecordable' }, { kind: 'refused', cause: 'unrecordable' }] });
+  });
+
+  it('refuses a finding naming a file the draft does not hold as unlocated, and keeps it (R28)', () => {
+    expect(readCriticResult('{"findings": [{"path": "other.md", "note": "x"}, {"path": "spec.md", "note": "y"}]}', paths))
+      .toEqual({ readable: true, findings: [{ kind: 'refused', cause: 'unlocated' }, { kind: 'located', path: 'spec.md', note: 'y' }] });
+  });
+
+  it('sends a drafter the located note with its file, and the runtime\'s own text for a refused finding (R28)', () => {
+    expect(criticNote({ kind: 'located', path: 'spec.md', note: 'y' })).toBe('spec.md: y');
+    expect(criticNote({ kind: 'refused', cause: 'unlocated' })).not.toContain('other.md');
   });
 });
 
@@ -104,7 +128,7 @@ describe('rates keyed by independence grade (D-A-DS-06)', () => {
   const run = (id: string, reviewGrade: string, critiques: RunRecords['critiques'] = []): RunRecords => ({
     runId: id as RunId, ending: 'merged', requestedLevel: 2, stack: 's', startedAt: null, mergedAt: null, approvalsSpent: 0,
     tasks: [{ taskId: 't' as TaskId, station: 'build', status: 'passed', iterations: 1, attempts: [{ outcome: 'passed', claimMismatch: false }], firstModel: 'm', models: ['m'] }],
-    decisions: [], usage: [], cost: null, reviewGrade, critiques, observations: [], mergeCommit: null,
+    decisions: [], usage: [], cost: null, reviewGrade, critiques, observations: [], mergeCommit: null, lineCoverage: false,
   });
 
   it('keeps the false-done rate and the autonomy ratio per review grade, and critic findings per critic grade', () => {

@@ -336,7 +336,7 @@ describe('the verdict follows the checks and nothing else (I2)', () => {
     const [ref] = state.evidenceRefs;
     if (ref === undefined) throw new Error('no evidence written');
     expect((await read<EvidenceBundle>(components.vault, ref)).tamper).toEqual({
-      assertionsWeakened: [], skipMarkersAdded: [], testsDeleted: [], snapshotsRegenerated: [], coverageDelta: null, protectedPathsTouched: [], suppressionMarkersAdded: [],
+      assertionsWeakened: [], skipMarkersAdded: [], testsDeleted: [], snapshotsRegenerated: [], coverageDelta: null, changedLines: null, protectedPathsTouched: [], suppressionMarkersAdded: [],
     });
   });
 });

@@ -38,9 +38,34 @@ the code and the evidence.
 
 ## What to say
 
-Your final message is your review. It is recorded beside the evidence for the
-person who approves the change; it does not decide anything. Every finding
-names a file and a line, in the diff or in the base, and says what is wrong
-there and what an attacker could do with it. If you found nothing, say so and
-say what you checked. If you could not review something, say what and why. Do
-not soften a finding and do not invent one.
+Your final message is your result, and nothing else: one JSON object,
+
+```
+{"findings": [{"category": "...", "path": "...", "line": 1, "note": "..."}]}
+```
+
+One finding per problem. `category` is the question it answers:
+
+- `unchecked-input`: input reaches a query, a command, a path, a template, or
+  a deserializer without being checked.
+- `exposed-secret`: a secret is written into the code, a log, an error, or a
+  response.
+- `unenforced-authorization`: an authorization rule is not enforced, or is
+  enforced on one path and not another.
+- `weakened-check`: a check is weakened, skipped, or suppressed so that it
+  passes.
+- `reachable-before-authentication`: an entry point, route, or code path is
+  reachable before authentication.
+- `unnamed-surface`: an administrative, debug, or legacy surface the spec does
+  not name.
+- `unsafe-default`: a default configuration turns a control off.
+- `weakening-combination`: settings that each look safe weaken a control
+  together.
+
+`path` is a file in the working directory, relative to it, and `line` a line
+in that file. `note` says what is wrong there and what an attacker could do
+with it; it is read by a person, never by the runtime. If you found nothing,
+return `{"findings": []}`. A finding that names no file and line the working
+directory holds is not recorded, and a message that is not this object is
+recorded as unreadable, never as nothing found. Your result decides nothing.
+Do not soften a finding and do not invent one.
