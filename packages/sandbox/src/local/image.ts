@@ -10,7 +10,7 @@
  * the evidence records as `harnessImage`, and what the line provisions from.
  */
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { dockerCli } from './docker.js';
 import { refuse } from './refusal.js';
@@ -137,6 +137,12 @@ export interface RecordedImageOptions {
   readonly records: string;
   readonly executable?: string;
   readonly timeoutMs?: number;
+  /**
+   * How long to wait for another caller that is building this tag. Defaults
+   * to the build's own limit and a minute more, which a running build cannot
+   * outlast.
+   */
+  readonly lockWaitMs?: number;
 }
 
 /** A tag as a directory name: `:` and `/` are not portable in one. */
@@ -146,6 +152,72 @@ function recordDirectory(records: string, tag: string): string {
 
 async function recorded(records: string, tag: string, id: string): Promise<boolean> {
   return (await stat(join(recordDirectory(records, tag), id.slice('sha256:'.length))).catch(() => null))?.isFile() === true;
+}
+
+/** Whether a process of this host is running. A process this one may not signal is running. */
+function running(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+/**
+ * Run `work` as the only caller holding `tag`'s lock under `records`
+ * (A-R53-02).
+ *
+ * Two builds of one tag give two content IDs and leave the tag on one; the
+ * engine no longer holds the other, so its caller is handed an image that
+ * cannot start. And a tag exists before its record is written, so a caller
+ * that reads between the two would refuse a build in progress as a replaced
+ * image. The lock covers both: it is held from the first look at the tag
+ * until the record is written.
+ *
+ * The lock is a directory beside the tag's records, made by one `mkdir`,
+ * which either creates it or fails. A lock left behind is refused and never
+ * taken over: two waiters that each judged it left behind could each remove
+ * it, the second removing the first's new lock.
+ */
+async function withTagLock<T>(records: string, tag: string, waitMs: number, work: () => Promise<T>): Promise<T> {
+  const lock = `${recordDirectory(records, tag)}.lock`;
+  const holderFile = join(lock, 'holder');
+  await mkdir(records, { recursive: true });
+  const deadline = Date.now() + waitMs;
+  for (;;) {
+    const made = await mkdir(lock).then(
+      () => true,
+      (error: unknown) => {
+        if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
+        refuse('image', `the lock for building ${tag} could not be taken at ${lock}: ${String(error)}`);
+      },
+    );
+    if (made) break;
+    // Unreadable while its holder is between making the lock and naming itself: waited on like any other.
+    const holder: unknown = await readFile(holderFile, 'utf8').then((text) => JSON.parse(text) as unknown, () => null);
+    if (isObject(holder) && holder.host === hostname() && typeof holder.pid === 'number' && !running(holder.pid)) {
+      refuse(
+        'image',
+        `${tag} is locked at ${lock} by process ${String(holder.pid)} of this host, which is no longer running, so a build of it was cut short. ` +
+          'A lock left behind is refused, never taken over; remove that directory and the next start builds.',
+      );
+    }
+    if (Date.now() >= deadline) {
+      refuse(
+        'image',
+        `${tag} is locked at ${lock} and was still held after ${String(waitMs)} ms, longer than a build may take. ` +
+          'If no other host is building it, remove that directory and the next start builds.',
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, Math.min(250, Math.max(1, deadline - Date.now()))));
+  }
+  try {
+    await writeFile(holderFile, `${JSON.stringify({ host: hostname(), pid: process.pid, at: new Date().toISOString() })}\n`);
+    return await work();
+  } finally {
+    await rm(lock, { recursive: true, force: true });
+  }
 }
 
 /**
@@ -158,8 +230,16 @@ async function recorded(records: string, tag: string, id: string): Promise<boole
  * over. A build records the ID `--iidfile` names, the image that build
  * produced, before it is returned. The caller provisions from the ID, so a
  * tag moved afterwards changes nothing that runs.
+ *
+ * One caller at a time per tag (A-R53-02): callers that start together wait
+ * on the first, then read the tag it built and recorded.
  */
 export async function recordedImage(options: RecordedImageOptions): Promise<string> {
+  const waitMs = options.lockWaitMs ?? (options.timeoutMs ?? 600_000) + 60_000;
+  return withTagLock(options.records, options.tag, waitMs, () => inspectOrBuild(options));
+}
+
+async function inspectOrBuild(options: RecordedImageOptions): Promise<string> {
   const executable = options.executable ?? 'docker';
   const { tag, records } = options;
   const present = await dockerCli(executable, ['image', 'inspect', '--format', '{{.Id}}', tag], { timeoutMs: 60_000 }).catch((error: unknown) => {
