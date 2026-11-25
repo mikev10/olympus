@@ -1,3 +1,19 @@
+# External review of R57, gemini, 2026-11-25
+
+The external review of R57, which gives the builder the runtime's install and `Bash` so it can run the locked tests, and exempts Vite's cache from the dependency-write record. Triage: `2026-11-25-R57-builder-runs-tests-triage.md`.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini. A direct `generateContent` API call to `gemini-3.1-pro-preview`, offering no tools. `cleanRoom` is `null`, because an API call loads no local configuration.
+- **Cross-family agreement:** gemini-1 (a build continues past a failed install) was raised by codex too, as codex-2.
+- **Date:** 2026-11-25
+- **Bundle:** `2026-11-25-R57-builder-runs-tests-review-bundle.txt`, SHA-256 `b2a05df7e410b6d70056420e85fe42cd0a0ab0e8a75fce0c1f57d913908d46e9`, base `c53f09a` (`reviewed/R55`), head `194f06a` (the unit branch before review). Every new file in full and every modified file as a function-context diff, 19 files. `docs/decisions.md`, `docs/plan/`, `docs/reviews/`, and `pnpm-lock.yaml` were excluded. Prompt: `2026-11-25-R57-builder-runs-tests-review-prompt.txt`.
+- **Citations:** line numbers are positions in the bundle's diffs, so they are hints, not repository locations.
+- **Prior context and lookups:** it says it had none and made no external lookups. That is a self-report and cannot be checked.
+- **Coverage, and any gap:** it answered item 6 at length and reported one item-3-style finding. Items 1, 2, 4, 5, and 7 came back empty. Item 7 was not addressed.
+
+---
+
 BASE: c53f09a
 HEAD: 194f06a
 packages/conformance/src/registry/install.ts

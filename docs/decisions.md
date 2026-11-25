@@ -13636,3 +13636,28 @@ Started on `v2` at ef868ca. Issue #220. Rebased onto c53f09a (R55, merged during
   now replaces `tools: [Read, Write, Bash]`, the builder's grant (`first-run.ts`).
   The property is unchanged: an undeclared grant is refused at admission,
   naming the builder, before the estimate.
+
+### D-R57-05: review fixes
+
+Both families counted on their first runs. Codex raised two findings, and
+Gemini raised one, which matches one of Codex's. All three hold. The triage is
+`docs/reviews/2026-11-25-R57-builder-runs-tests-triage.md`.
+
+- **codex-2 and gemini-1, fixed (3a8e3e8).** `build` read `spendRetry`'s
+  `undefined`, which means a retry is still to come, as "go on". So a failed
+  install, and a failed provision too, still reached the builder.
+  `installForBuild` now returns its outcome tagged, and every failure ends the
+  attempt. Shown failing first: the builder was asked three times over a
+  failed install. This replaces D-R57-03's "an install refused or failed at
+  `build` does not stop the build". Reverse in `installForBuild`.
+- **The build reuses the run's install (f196e6e).** The build-tree entry
+  asserts that one install sandbox is provisioned per run, the base run's. The
+  failure path above is therefore reachable only when that cache is missing.
+- **codex-1, known limit, no owner needed.** The dependency-write record
+  compares the final working copy with the start copy. A write the builder
+  reverts before it returns leaves no trace, as one made with `Write` already
+  could before R57. D-R15-05 records what a change leaves in a dependency
+  tree, not every write. Nothing reverted or left there reaches a check,
+  because `verify` replaces every dependency tree first.
+- **Codex coverage note, fixed (f196e6e).** The cache entry also fails when
+  the change's diff carries any `node_modules` path.
