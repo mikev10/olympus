@@ -97,6 +97,8 @@ export const MODEL_METER: Readonly<RelayMeter> = Object.freeze({
     'claude-opus-5-5': price(4, 20, 0.2),
     'claude-opus-5': price(5, 25, 0.5),
     'claude-opus-4-8': price(5, 25, 0.5),
+    // Listed at $8 and $40 per million tokens, cache reads at $0.20, as read on 2026-11-23 (R54).
+    'claude-fable-5-2': price(8, 40, 0.2),
     'claude-fable-5-1': price(10, 50, 0.25),
     'claude-fable-5': price(10, 50, 1),
   }),

@@ -59,7 +59,7 @@ means the paid run has not happened.
 **Standing authorization (D-TOOLING-11):** this skill may add `run-driver`,
 and rerun a failed paid job once, without asking, while the week's paid runs
 stay within the cap. The cap is **$2 per rolling 7 days**, counted at
-**15 cents per paid run**, so 13 runs. The ledger is
+**40 cents per paid run** (D-TOOLING-12), so 5 runs. The ledger is
 `.claude/handoff/run-driver-ledger.jsonl` in the **main checkout**, never in
 a worktree, maintainer-local and excluded from git:
 
@@ -73,7 +73,7 @@ sessions would each spend a full $2. Create the directory if it is absent.
 One line per paid run this skill starts:
 
 ```
-{"at":"<ISO time>","unit":"<id>","pr":<n>,"kind":"label|rerun","usd":0.15}
+{"at":"<ISO time>","unit":"<id>","pr":<n>,"kind":"label|rerun","usd":0.40}
 ```
 
 Before adding the label or rerunning, sum `usd` over lines from the last 7

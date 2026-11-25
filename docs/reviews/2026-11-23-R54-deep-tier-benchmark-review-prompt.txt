@@ -1,0 +1,146 @@
+The code under review is in the file
+`2026-11-23-R54-deep-tier-benchmark-review-bundle.txt` (SHA-256 221f7416648bf8050a04dbf8628a0675ffb3c9e9ff87f390559c5ca6cfe89896) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing how a TypeScript project decides which language model sits in
+one tier of its agent driver: a paid benchmark run per model, a rule that
+compares two runs, and the committed files that record the outcome. The bundle
+also carries a second, separate change to run admission. You have the source
+and nothing else — no design documents, no author reasoning, no prior version,
+no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The project runs coding agents through a fixed line of stations and maps three
+tiers (`fast`, `standard`, `deep`) to exact model ids in its Claude Code driver
+(`TIER_MODELS` in `packages/drivers/claude-code/src/driver.ts`). It has a
+benchmark of seeded false-dones (work that claims to be finished and is not)
+and clean controls. Its model tier seats a real model in two arms: the driver
+alone, asked in strict JSON whether an item's work is done, and a drafting
+critic that reads a scripted draft through the real line. This change lets that
+tier be told which corpus, tier, model, and per-call spending limit to run
+(`modelRunPlan`), adds `compareRuns`, which reads two committed result files
+and says whether a candidate model replaces a baseline, adds a GitHub Actions
+workflow that performs the two paid runs when a pull-request label is added,
+adds a list price for the candidate model to the relay's meter, and commits
+both models' result files and their comparison under `docs/benchmark/`. A test
+recomputes every committed comparison from the two result files it names.
+
+The second change makes run admission refuse any run requested above the
+lowest autonomy level when no readiness scan ran, and gives the in-process
+callers (test rigs, the benchmark) a scan to pass.
+
+It must hold against a capable, motivated party trying to get the tier map
+changed, or left unchanged, on a comparison that does not say so: by a result
+file that is not what a run produced, by a comparison of two runs that were not
+the same tasks, by a rule that can be satisfied without the candidate being no
+worse, or by spending past a cap. For the second change: trying to be admitted
+above the lowest autonomy level with no scan. Assume no deceptive intent — only
+that the easiest path gets taken.
+
+That party controls what a model returns in either arm, the environment
+variables a benchmark run is started with, the contents of a pull request
+(result files under `docs/benchmark/` included), and the fields of a run
+request. It does not control the committed benchmark corpus, the repository's
+secrets or who may add a label to a pull request, the price list in the
+driver's source once merged, or the components the runtime is wired with — the
+Vault, the sandbox provider, and the drivers are runtime-selected and trusted,
+even where a function takes one as an argument — and it does not control code
+running inside the runtime's own process.
+
+The invariants at stake:
+
+- Fail closed. A missing required check, an absent capability, an unreadable
+  setting, or an incomplete result is a refusal — never a silent degrade, never
+  a warning that lets the run continue.
+- The runtime derives status; the model never reports it. A model's verdict is
+  a claim, counted as a claim, and no decision is taken from a model's account
+  of itself.
+- Reviewers never share the author's model family. The family is a value the
+  driver assigns explicitly and is never inferred from a model name.
+- Default deny. A capability not granted in policy is unavailable, and a
+  derived number may lower an autonomy level but never raise one.
+- Every capability claim maps to an executable assertion that fails when the
+  capability is deleted.
+
+The mechanisms that matter most:
+
+- `modelRunPlan` reads and validates every run setting before any container
+  starts, and derives the result file's name from the tier and model.
+- `compareRuns` refuses two results that differ in corpus digest, repetitions,
+  arms, or trial counts, or that name the same model; otherwise it computes, per
+  arm, false-dones let through and clean work refused over every trial, and
+  sets `change` only when the candidate is no worse in every arm and its run
+  cost less.
+- The spend cap: a run refuses a call whose worst case would pass the cap, and
+  the workflow runs only on one label, with the caps written in the file.
+- The test that holds each committed comparison to the two result files it
+  names, byte for byte.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+Effort level per tier or per station. R14 placed the tier per station; an
+effort setting beside it is its own amendment.
+
+Unit ids such as R14 and decision ids such as D-R7-17 or A-R40-02 that appear
+in comments refer to documents you do not have. They mean nothing you need:
+judge the code as written.
+
+THE QUESTION
+
+How would I get the tier map changed, or kept, on evidence that does not
+support it — a comparison that says `change` when the candidate was worse or
+cost more, a comparison of runs that were not the same tasks, a committed
+result that no run produced, or a paid run that spends past its cap or runs
+when nobody authorized it? And for the second change: how would I be admitted
+above the lowest autonomy level with no readiness scan?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.
