@@ -12800,3 +12800,254 @@ merging R54: a rerun of the paid job failed with `No such image` for an ID
   gate-path change for a defect that is in the product.
 - **Not changed.** Whether an image this host built and recorded should be
   rebuilt when its tag is gone but its ID is still held: unchanged, a build.
+
+## R54: The `deep` tier's model, chosen by the benchmark
+
+Started on `v2` at 03518f9. Issue #171.
+
+### D-R54-01: boundary, verified
+
+- **Deliverables:**
+  - `claude-fable-5-2` in `MODEL_METER.prices`
+    (`packages/drivers/claude-code/src/driver.ts`). The relay refuses a
+    request naming a model it has no price for, so no call can be made
+    without it.
+  - The benchmark's model tier can be told which corpus, which tier, which
+    model at that tier, and the most one call may spend
+    (`modelRunPlan`, `packages/benchmark/src/comparison.ts`). With none of
+    them set it is the run R7 committed.
+  - `compareRuns`: two committed model-tier results, compared by a rule fixed
+    before either ran. A tier, `TIER=comparison`, writes the comparison under
+    `docs/benchmark/`. The package's suite holds every committed comparison
+    to the two results it names, byte for byte.
+  - Two paid runs at `deep` on corpus v2, one with `claude-opus-5-5` and one
+    with `claude-fable-5-2`, and their comparison, committed under
+    `docs/benchmark/`.
+  - `TIER_MODELS.deep` changes only if the comparison's `change` is true.
+- **Out of scope (verbatim):** effort level per tier or per station. R14
+  placed the tier per station; an effort setting beside it is its own
+  amendment.
+- **Acceptance:**
+  - `pnpm -r typecheck`, `pnpm -r lint`, `pnpm -r test`, and
+    `pnpm conformance` pass.
+  - `pnpm --filter @olympus-ai/benchmark exec vitest run test/comparison.test.ts`
+    passes, and calls no model.
+  - `docs/benchmark/` holds `v2-model-deep-claude-opus-5-5.json`,
+    `v2-model-deep-claude-fable-5-2.json`, and
+    `v2-comparison-claude-opus-5-5-claude-fable-5-2.json`.
+  - `TIER_MODELS.deep` is the candidate if that comparison says `change`, and
+    `claude-opus-5-5` if it does not.
+- **Invariants:**
+  - A reviewer never shares the author's model family, because a model
+    judging its own family shares its blind spots (I6). Fable is in the
+    `claude` family. The driver assigns the family itself and does not read
+    it from the model name, so reseating a tier changes no family and makes
+    no new reviewer available.
+  - Fail closed (I5). A run setting that cannot be read, a model with no
+    price, and a comparison of two runs that were not the same tasks are each
+    refused. None is defaulted or reported as a tie.
+  - The runtime derives status and the model never reports it (I2). A
+    verdict in either arm is a model's claim, counted as a claim. The
+    decision to change the tier map is computed from committed results, not
+    taken from either model's account of itself.
+- **Pending registry entries owed:** none name R54.
+- **Gate paths touched:** none. `driver.ts` and the benchmark's sources and
+  tier files are not gate paths, and no manifest or vitest config changes.
+
+### D-R54-02: assumptions, each verified
+
+- R7, R14, P13, R52 have shipped: tags `reviewed/R7`, `reviewed/R14`,
+  `reviewed/P13`, `reviewed/R52` exist. R53 merged at 03518f9.
+- The model tier seats one real driver in two seats, both at one tier, and
+  writes one result: `packages/benchmark/test/tiers/model.tier.ts` on `v2`
+  hardcoded `tier: 'fast'`, corpus `v1`, and `v1-model.json`.
+- A driver's tier map can be replaced at construction:
+  `ClaudeCodeDriverOptions.models`, `driver.ts:260`. Every setting through
+  which the CLI picks a model of its own is pointed at the call's model
+  (`MODEL_VARIABLES`), so a reseated tier sends one model name.
+- A call is priced for the model the tier resolves to and no other:
+  `alone.ts` binds the relay's meter with `boundTo(relay.meter, model.model)`.
+- The meter had no `claude-fable-5-2`: `driver.ts:93-101` on `v2`.
+- Fable 5.2's list price is $8 input and $40 output per million tokens, cache
+  reads $0.20. Opus 5.5's is $4, $20, and $0.20. Read on 2026-11-23 from
+  Anthropic's published model table. The cache-write prices are the
+  published multiples of input that `price()` already applies.
+- Corpus v2 holds model-tier items: `packages/benchmark/test/model.test.ts`
+  loads the current corpus, v2, and runs both arms over it.
+- The tier files run without a manifest change: the deterministic config
+  includes `test/tiers/${TIER}.tier.ts`.
+- **Not verified, and it does not block the build:** that the pinned CLI
+  (2.1.330) accepts `claude-fable-5-2`. Only a paid call can show it. The
+  first call of the candidate's run shows it, and a refusal stops that run
+  at the cost of one call.
+
+### D-R54-03: where the code differs from the entry
+
+- The entry says the unit compares "iterations, parks". The benchmark seats
+  no model as the author of work. A seeded item's work is a scripted seat's,
+  the maintainer's choice in D-R7-02. The model tier measures a model judging
+  finished work: the driver alone, and the drafting critic. Neither has
+  iterations or parks. The comparison says so in `notMeasured`.
+- The entry says "this changes which model builds". In the line today `deep`
+  is the review seat, the drafters and critics, and the ceiling a failing
+  build escalates to. The benchmark's two real seats are of that kind.
+- The entry in `DECOMPOSITION.md` is corrected in this unit's first commit.
+- **Confirmed by the maintainer, 2026-11-23:** asked whether to compare on
+  the benchmark as built or to build a real-build arm first, the answer was
+  to stick to the plan. The plan names R7's benchmark, so the comparison is
+  on what R7 measures. A real-build arm is a new unit and is filed as an
+  issue.
+
+### D-R54-04: choices
+
+- **C1, the rule.** *Chosen:* the candidate replaces the baseline when, in
+  every arm, it let through no more seeded false-dones over every trial and
+  refused no larger a share of controls, and its whole run cost less. An
+  unreadable answer on a seeded item counts as let through, and on a control
+  as a refusal (D-R7-17). *Rejected:* false-done alone, as the entry words
+  it. A model that calls everything not done lets nothing through, and would
+  win while refusing clean work. The added condition can only make a change
+  harder. *Rejected:* requiring the candidate's confidence bound to clear the
+  baseline's rate. At about thirty trials an arm no model could meet it, so
+  the rule would always say no. The bounds are in both results for a reader.
+  *Known limit:* the rule compares counts from small samples, so a change it
+  allows is weak evidence. *Reverse:* edit `compareRuns`; the suite then
+  fails on the committed comparison until it is regenerated.
+- **C2, the corpus.** *Chosen:* v2, the current corpus. *Rejected:* v1, which
+  the Haiku result used. It lacks the item v2 added, and neither run is
+  compared with the Haiku result.
+- **C3, effort.** The driver passes no effort setting, so each model runs at
+  the CLI's default for it. Setting one is out of scope. Anthropic's figures
+  are for high effort, so this run does not test the vendor's claim. It tests
+  what the line would do after the map changed, which is the decision.
+- **C4, where the paid runs happen.** *Chosen:* the maintainer runs the two
+  commands locally, with a key and a cap they set. *Rejected:* a CI job. It
+  changes `.github/workflows/ci.yml`, a gate path this unit does not declare.
+- **C5, the price's date.** `PRICES_AS_OF` stays 2026-09-27. Only the new
+  line was read on 2026-11-23, and it says so. Moving the constant would
+  claim every price was re-read.
+
+### D-R54-05: the paid runs happen in CI, by a label (corrects C4 and the gate paths)
+
+- **Corrected:** D-R54-04's C4 chose a local run and rejected CI, and
+  D-R54-01 said no gate path was touched. Both are replaced here.
+- **Found:** the only model credential is the one CI holds. The maintainer
+  revoked the local key on 2026-09-29 after it leaked spend, and this
+  session's shell has none. A local run means making a local key again.
+- **Chosen, by the maintainer on 2026-11-23:** a workflow of its own,
+  `.github/workflows/benchmark-model.yml`. It runs the model tier at `deep`
+  on corpus v2, three repetitions, once per model, when the `run-benchmark`
+  label is added to a pull request and at no other time. The caps are in the
+  file: $20 for `claude-opus-5-5`, $40 for `claude-fable-5-2`. Adding the
+  label is the authorization, and only the maintainer adds it. Each run keeps
+  its result as an artifact. The session downloads both, runs the comparison,
+  and commits the three files.
+- **Rejected:** a job started by hand (`workflow_dispatch`). GitHub starts
+  one only from a workflow already on the default branch, so this unit's own
+  pull request could not use it.
+- **Rejected:** a job inside `ci.yml`. That workflow cancels a run in
+  progress whenever its pull request changes, so a push or another label
+  would stop a paid run after it had spent and before it wrote a result.
+- **Why both models are named:** the baseline is passed as `BENCHMARK_MODEL`
+  too. A result's file then names the model that ran whatever the tier map
+  holds on the day, and a rerun after a map change is still the same two
+  models.
+- **The test's time limit** is raised to five hours on the command line. The
+  config's two hours were set for the `fast` model. A run the clock stops
+  has spent its money and written nothing. The config is not edited.
+- **Known limits:** adding the label again spends again, up to $60. A run
+  that fails partway leaves no result: the tier reports a whole corpus or
+  nothing, which is R7's rule.
+- **Gate paths touched:** `.github/workflows/benchmark-model.yml`, new. The
+  pull request takes `gate-change`, and the squash body carries
+  `Gate-Change: acknowledged`. It weakens no check: it adds a paid job and
+  changes no existing one.
+- **Reverse:** delete the workflow file; the tier still runs locally with a
+  key.
+
+### D-R54-06: the result, and the tier map stays as it was
+
+Run 45316704752 on pull request #225, 2026-11-24, started by the
+`run-benchmark` label, which the session added on the maintainer's
+instruction. Corpus v2, `deep`, three repetitions. Both runs finished.
+
+| | `claude-opus-5-5` | `claude-fable-5-2` |
+|---|---|---|
+| Driver alone: seeded false-dones let through, of every trial | 15 of 36 | 2 of 36 |
+| Driver alone: clean work refused, of every trial | 19 of 24 | 10 of 24 |
+| Driver alone: answers nobody could read | 28 of 60 | 0 of 60 |
+| Critic: seeded drafts let through | 0 of 9 | 0 of 9 |
+| Critic: clean drafts sent back | 6 of 6 | 6 of 6 |
+| Spent | $5.10 | $11.23 |
+
+- **The rule's answer: no change.** Fable was no worse in either arm and
+  better in one, and its run cost 2.2 times as much. The rule needs both
+  (D-R54-04, C1), and it was fixed before either run. `TIER_MODELS.deep`
+  stays `claude-opus-5-5`.
+- **The vendor's claim did not hold here.** Anthropic reported about half
+  the cost per task. On these tasks, at the CLI's default effort for each
+  model, Fable cost more than twice as much. Its price per token is twice
+  Opus's, and it did not use fewer tokens.
+- **Most of Opus's misses are unreadable answers, not wrong ones.** Of the
+  answers that could be read, Opus caught 21 of 21 seeded items and refused
+  6 of 11 controls. The driver-alone arm wants strict JSON and counts
+  anything else against the model (D-R7-17). So this run says Opus at
+  `deep` often does not answer in the shape asked. It does not say Opus
+  judges worse. Fable answered in the shape every time.
+- **Both models' critics sent back every clean draft**, on findings of their
+  own, in all six trials. Every seeded draft was caught too, so at `deep`
+  the critic arm cannot tell a model that finds real faults from one that
+  always finds something. It is filed as an issue and is not this unit's to
+  fix.
+- **Not decided here, and the maintainer's:** whether a model that judges
+  this much better is worth twice the cost in the `deep` seats. The entry's
+  criterion says no. Changing the criterion is an amendment to the entry,
+  not a reading of this result.
+- **Known limits:** three repetitions, so the driver-alone samples are 36
+  and 24 trials and the critic's are 9 and 6. One corpus. Effort was the
+  CLI's default for each model (C3). Iterations and parks are not measured
+  (D-R54-03).
+- **Verified by this run:** the pinned CLI (2.1.330) accepts
+  `claude-fable-5-2`, which D-R54-02 left open.
+
+### D-R54-07: review fixes, known limits, and one correction
+
+The external reviews (codex, gemini; both counted on the first run) and their
+triage are in `docs/reviews/2026-11-23-R54-deep-tier-benchmark-*`.
+
+- **Fixed (codex-2, codex-3, gemini-4), b446cf1:** `compareRuns` reads a
+  result file as unknown data, counts every arm's rates again from its
+  verdicts, and refuses a file whose stored summary differs. It refuses a
+  cost that is not a number and two runs whose arms hold different items.
+  `coverage` holds a result to the committed corpus it names: both arms, every
+  item. *Rejected:* recounting and ignoring the stored summary. A file whose
+  summary disagrees with its trials is wrong somewhere, and refusing it is the
+  fail-closed reading. *Reverse:* revert the commit; the committed comparison
+  is unchanged either way.
+- **Fixed (codex-5, gemini-3), b446cf1:** `REQUIRED_COMPARISONS` names the
+  comparison this unit decided on, and the suite fails without it. The `deep`
+  tier may hold a model a committed comparison names as its candidate only
+  where that comparison says `change`. *Rejected:* asserting at least one
+  comparison exists, which a file of any name satisfies.
+- **Fixed (codex-6), ea3edb1:** the comparison tier no longer restates the
+  rule. It holds both results to their corpus before comparing.
+- **Known limit, #228 (codex-1, gemini-1):** nothing ties a committed result
+  to the run that wrote it. The recount means a forgery has to rewrite trial
+  records and not just a summary, and the maintainer reading the pull request
+  is the defence. An attestation or an artifact check is CI work on a gate
+  path.
+- **Known limit, #228 (codex-4, gemini-2), and a correction to D-R54-05:**
+  D-R54-05 said the caps are in the workflow file. They are, and what enforces
+  them is the benchmark's own code, which the workflow checks out from the
+  pull request. A pull request from a branch of this repository that changed
+  that code could spend past them. Fork pull requests are excluded, and a run
+  starts only when someone who can label adds the label. The paid driver steps
+  in `ci.yml` run the same way. The bound that does not depend on the code
+  under test is the provider key's own spend limit.
+- **Known limit, #228 (codex-3):** a result does not record the tier or the
+  per-call limit it ran with. They are not added by hand to the two committed
+  results, because that would be writing evidence no run produced.
+- **Rejected (gemini-5):** the test rigs' readiness scan always answers level
+  2. That is A-R40-02's design, merged by its own pull request and not this
+  unit's work: a rig's scan is a stand-in, and what the rigs prove is that
+  admission enforces the term.

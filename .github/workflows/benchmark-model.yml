@@ -1,0 +1,92 @@
+# The false-done benchmark's model tier, one model against another in the
+# `deep` seats (R54, D-R54-05).
+#
+# THIS SPENDS MONEY. It runs only at the moment the `run-benchmark` label is
+# added to a pull request, and adding the label is the authorization: one
+# labelling may spend up to the sum of the caps below, and adding the label
+# again spends again. A push never starts it, and no other label does.
+#
+# Its own workflow, not a job in CI, because CI cancels a run in progress when
+# its pull request changes. A paid run cancelled halfway has spent its money
+# and written no result. Nothing here cancels a run in progress.
+#
+# A fork's pull request holds no secret and is not run: the tier would refuse
+# for want of a key, after the daemon had been set up for nothing.
+#
+# Each run writes one result file and keeps it as an artifact. It is
+# committed to the pull request by whoever compares the two
+# (`TIER=comparison`), never by this workflow, which cannot write to the
+# repository.
+name: Benchmark, model tier
+
+on:
+  pull_request:
+    branches: [v2]
+    types: [labeled]
+
+concurrency:
+  group: benchmark-model-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  model-tier:
+    name: model tier at deep, ${{ matrix.model }}
+    if: github.event.label.name == 'run-benchmark' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    strategy:
+      # One model's run failing says nothing about the other's, which has its own cap and its own result.
+      fail-fast: false
+      matrix:
+        include:
+          # The most each run may spend, in US dollars. The tier refuses a call whose worst case would pass it.
+          - model: claude-opus-5-5
+            cap: '20'
+          - model: claude-fable-5-2
+            cap: '40'
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # The check image, the egress proxy the install reaches the registry through, and the two pinned scanners.
+      - name: Docker daemon and the pinned images
+        run: |
+          docker version --format 'server {{.Server.Version}}, {{.Server.Os}} containers'
+          docker pull --quiet node@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5
+          docker pull --quiet node@sha256:b6f26b36c8ff49624cfdac716b8ea1138d606df02586a77d364bb5536a634f85
+          docker pull --quiet zricethezav/gitleaks@sha256:0e99e8821643ea5b235718642b93bb32486af9c8162c8b8731f7cbdc951a7f46
+          docker pull --quiet semgrep/semgrep@sha256:30e6afa99ebd8e7b4115d4904898108eb4bf77025819e9263f09cf14e6f6e549
+
+      # Both models are named, the baseline too, so a result's file says which model ran whatever the tier map
+      # holds on the day. The test's own limit is raised to five hours on the command line: a `deep` model
+      # answers slower than the `fast` one the config's two hours were set for, and a run stopped by the clock
+      # has spent its money and written nothing.
+      - name: Model tier of corpus v2 at deep, under the cap
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          BENCHMARK_CORPUS: v2
+          BENCHMARK_TIER: deep
+          BENCHMARK_MODEL: ${{ matrix.model }}
+          BENCHMARK_REPETITIONS: '3'
+          BENCHMARK_CALL_USD: '1'
+          BENCHMARK_CAP_USD: ${{ matrix.cap }}
+        run: pnpm --filter @olympus-ai/benchmark exec vitest run --config vitest.config.model.ts --testTimeout 18000000
+
+      - name: Keep the result
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-model-${{ matrix.model }}
+          path: docs/benchmark/v2-model-deep-${{ matrix.model }}.json
+          if-no-files-found: error
+          retention-days: 30

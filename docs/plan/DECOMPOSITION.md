@@ -3366,13 +3366,21 @@ reports (2026-11-09) that Claude Fable 5.2 at high effort scores within 0.2
 points of Opus 5.5 on its coding benchmark at about half the cost per task.
 That is the vendor's number. The unit runs R7's benchmark with each model in
 the `deep` seats, on the same tasks and repetitions, and compares the
-false-done rate, iterations, parks, and cost from the evidence. The tier map
-(`driver.ts`) changes only if the candidate is no worse on false-done and
-costs less; the result is committed under `docs/benchmark/` either way.
+false-dones let through, the clean work refused, and the cost from the
+evidence. The tier map (`driver.ts`) changes only if the candidate is no
+worse on either and costs less; the result is committed under
+`docs/benchmark/` either way.
+
+The benchmark seats a model as a judge of finished work, alone and as a
+drafting critic, and never as its author (D-R7-02). So the comparison says
+nothing about iterations or parks, and records that it does not
+(D-R54-03). Measuring them needs an arm in which a real model builds, which
+is its own unit.
 
 Fable is in the `claude` family. A reviewer may never share the author's
 model family, because a model judging its own family shares its blind
-spots, so this changes which model builds, not who reviews.
+spots, so this changes which model sits in the `claude` driver's `deep`
+seats, not who may review whom.
 
 **Out of scope:** effort level per tier or per station. R14 placed the tier
 per station; an effort setting beside it is its own amendment.
