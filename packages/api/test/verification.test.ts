@@ -25,7 +25,7 @@ import {
   treeDigest,
   writesOutsideGrant,
 } from '../src/index.js';
-import { basePath, copyOnly, copyTree, dependencyEntry, hashAt, inDependencyTree, localWorkspaceStore, materialize, treePath } from '../src/workspace.js';
+import { basePath, copyOnly, copyTree, dependencyEntry, hashAt, inDependencyTree, localWorkspaceStore, materialize, notCarriedEntries, treePath } from '../src/workspace.js';
 
 let base: string;
 
@@ -298,6 +298,22 @@ describe('a dependency tree is one whatever its spelling (D-R15-05)', () => {
     expect(inDependencyTree('src/node_modules.ts')).toBe(false);
     expect(dependencyEntry('Node_Modules/vitest/vitest.mjs')).toBe('Node_Modules/vitest');
     expect(dependencyEntry('pkg/NODE_MODULES/@scope/x/index.js')).toBe('pkg/NODE_MODULES/@scope/x');
+  });
+});
+
+// R57: a builder that runs vitest writes its results under node_modules/.vite on every build.
+describe("a tool's own cache is not a recorded dependency write, and nothing else is spared (D-R57-03)", () => {
+  test("Vite's cache, at the root or in a nested package, is left out; every other write is recorded, a case variant included", () => {
+    expect(notCarriedEntries([
+      'node_modules/.vite/vitest/0000/results.json',
+      'packages/a/node_modules/.vite/vitest/0000/results.json',
+      'node_modules/vitest/vitest.mjs',
+      'node_modules/.VITE/vitest/0000/results.json',
+      'node_modules/.pnpm/vitest@4.1.11/node_modules/vitest/vitest.mjs',
+      'node_modules/extra/node_modules/.vite/x.json',
+      'node_modules/.vite-cache/x.json',
+      'src/index.ts',
+    ])).toEqual(['node_modules/.VITE', 'node_modules/.pnpm', 'node_modules/.vite-cache', 'node_modules/extra', 'node_modules/vitest']);
   });
 });
 

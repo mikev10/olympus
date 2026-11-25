@@ -4,9 +4,9 @@
  * Workspace. The invariant assertions themselves are the registry's; what is
  * here is the rest of the behaviour, read by field.
  */
-import { mkdir, stat, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import { hashedLockfile, standInNpmInstaller } from '@olympus-ai/adapters';
+import { mkdir, rm, stat, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { hashedLockfile, STAND_IN_INSTALL_IMAGE, standInNpmInstaller } from '@olympus-ai/adapters';
 import { STATION_CONTRACTS, type RoleId, type RunId, type RunState, type TaskId, type TaskRequest, type TaskResult, type VaultRef } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
 import { StubSandboxProvider, type ExecResult, type RelaySpec, type SandboxHandle, type SandboxSpec, type Teardown } from '@olympus-ai/sandbox';
@@ -14,6 +14,7 @@ import type { BaseRunRecord, EnforcementDecision, EvidenceBundle, LockVerdict, U
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { approveStation, costTotals, readUsage, resumeRun, runStanding, startRun, type ComponentGraph, type RunOutcome } from '../src/index.js';
 import { integrateEscalations, UNANALYSED_TESTS } from '../src/line.js';
+import { installPath } from '../src/workspace.js';
 import {
   approvals,
   built,
@@ -25,6 +26,7 @@ import {
   removeWorkspace,
   runRequest,
   STATIC_ANALYSIS_CHECK,
+  storeFor,
   stubComponents,
   TEST_TOOLS,
   writeChecks,
@@ -1029,11 +1031,69 @@ describe('the change cannot replace its judge (D-R15-05)', () => {
 
   test('what a passing task wrote under node_modules escalates the integrate exit, by package', async () => {
     const sandbox = new StubSandboxProvider();
-    const driver = new DependencyWriter(sandbox, 'node_modules/.vite/vitest/results.json', '{}');
+    // Not Vite's cache, which a builder running its tests writes on every build and which is not recorded (D-R57-03).
+    const driver = new DependencyWriter(sandbox, 'node_modules/left-pad/index.js', 'module.exports = 0;');
     const parts = stubComponents(workspace, { sandbox, driver });
     const state = refusedState(await startRun(runRequest(runId, workspace, parts)));
     expect(state.tasks[hello]).toBe('passed');
     const escalations = await integrateEscalations(parts.vault, state, (r) => read<EvidenceBundle>(parts.vault, r));
-    expect(escalations.tamperFindings).toContain("written but not carried, since checks run over the base's dependencies: node_modules/.vite");
+    expect(escalations.tamperFindings).toContain("written but not carried, since checks run over the base's dependencies: node_modules/left-pad");
+  });
+});
+
+/**
+ * Removes the run's install cache after every read-only sandbox, so the build reinstalls instead of reusing the
+ * base run's install, and fails every install after the first: the one way a build's install can fail (R57 review).
+ */
+class FailingReinstall extends DelegatingSandbox {
+  installs = 0;
+  readonly #failing = new Set<SandboxHandle>();
+  readonly #readOnly = new Set<SandboxHandle>();
+  constructor(inner: StubSandboxProvider, private readonly installs_: string) {
+    super(inner);
+  }
+  override async provision(spec: SandboxSpec): Promise<SandboxHandle> {
+    const handle = await this.inner.provision(spec);
+    if (spec.image === STAND_IN_INSTALL_IMAGE) {
+      this.installs += 1;
+      if (this.installs > 1) this.#failing.add(handle);
+    } else if (spec.mounts.workspace.mode === 'ro') this.#readOnly.add(handle);
+    return handle;
+  }
+  override exec(h: SandboxHandle, cmd: string[], options?: Parameters<StubSandboxProvider['exec']>[2]): Promise<ExecResult> {
+    if (this.#failing.has(h)) return Promise.resolve({ exitCode: 1, stdout: '', stderr: 'registry unreachable', durationMs: 0 });
+    return this.inner.exec(h, cmd, options);
+  }
+  override async destroy(h: SandboxHandle): Promise<Teardown> {
+    const teardown = await this.inner.destroy(h);
+    if (this.#readOnly.has(h)) await rm(this.installs_, { recursive: true, force: true });
+    return teardown;
+  }
+}
+
+/** The dependency writer, counting the calls it was asked to make. */
+class CountingWriter extends DependencyWriter {
+  calls = 0;
+  override runTask(req: TaskRequest): Promise<TaskResult> {
+    this.calls += 1;
+    return super.runTask(req);
+  }
+}
+
+describe("a build whose install fails is not handed to the builder (R57 review, codex-2, gemini-1)", () => {
+  test('a failed install at build spends the attempt, and the builder is never asked', async () => {
+    await writeFile(join(workspace, 'package.json'), JSON.stringify({ name: 'hello', private: true }));
+    await writeFile(join(workspace, 'package-lock.json'), hashedLockfile('hello', ['node_modules/extra']));
+    await mkdir(join(workspace, 'node_modules', 'extra'), { recursive: true });
+    await writeFile(join(workspace, 'node_modules', 'extra', 'index.js'), "module.exports = 'extra';\n");
+    await writeChecks(workspace, [HELLO_CHECK, STATIC_ANALYSIS_CHECK]);
+    const inner = new StubSandboxProvider();
+    const sandbox = new FailingReinstall(inner, dirname(installPath(storeFor(workspace), runId, 'key')));
+    const driver = new CountingWriter(inner, 'hello.txt', 'hello');
+    const parts = stubComponents(workspace, { sandbox, driver, installers: [standInNpmInstaller(workspace)] });
+    const state = refusedState(await startRun(runRequest(runId, workspace, parts, { policy: policy({ installRegistries: ['registry.npmjs.org'] }) })));
+    expect(sandbox.installs, 'the build reinstalled').toBeGreaterThan(1);
+    expect(driver.calls, 'the builder was asked to build over a failed install').toBe(0);
+    expect(state.tasks[hello]).toBe('parked');
   });
 });

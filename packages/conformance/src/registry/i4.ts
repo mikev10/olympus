@@ -23,6 +23,7 @@ import { READINESS_NEVER_RAISES_A_CAP, ABSENT_SCAN_IS_NOT_A_PASS } from './readi
 import { R20_I4 } from './roles.js';
 import { R13A_I4 } from './nightly.js';
 import { R34_I4 } from './install.js';
+import { R57_I4 } from './builder-run.js';
 import { R40_I4 } from './admission-readiness.js';
 import { R36A_I4 } from './first-run.js';
 import { R13B_I4 } from './nightly-review.js';
@@ -52,6 +53,7 @@ export const I4: InvariantEntry = {
     ...R13A_I4,
     // R34: the install's egress is the granted registries alone, and none is granted unless policy says so.
     ...R34_I4,
+    ...R57_I4,
     ...R36A_I4,
     ...R40_I4,
     // R13b: the nightly reviewers.

@@ -3477,6 +3477,17 @@ and for the Anthropic dialect the relay forwards the body unchanged, so that
 request can name a server-side tool nothing granted. No init seat holds `Bash`
 today. Granting it before R56 would open that path on every init install.
 
+**Out of scope:** a builder install for a stack whose checks run in an image
+of their own (Python); what a retry is told (D-R37-03); the drafter's
+instructions and the fixture's intent; any tool or egress for any other seat;
+a field on `TestFrameworkAdapter` or `DependencyInstaller`; taking the paid
+init assertion off the intermittent list.
+
+**Acceptance:** `pnpm -r typecheck`, `pnpm -r lint`, `pnpm -r test`, and
+`pnpm conformance` pass, each new entry shown failing with its guard removed;
+the paid suites, `I5.init-setup-merges-on-the-real-driver` among them, run
+under `run-driver` at merge (D-R57-01).
+
 ## Working Rules
 
 1. **One unit per session.** Load `F1-spine.md`, `CLAUDE.md`, and this unit's section. Nothing else.
