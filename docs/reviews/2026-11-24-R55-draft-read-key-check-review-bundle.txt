@@ -1,0 +1,2655 @@
+BASE: reviewed/R56
+HEAD: 29ea48a
+
+=== COMMITS ===
+29ea48a Merge v2 (R56) into unit/r55
+5cdf1ec R55: an operator can read a draft, and the host refuses a rejected key (#175, #176)
+5fcb600 R55: boundary, assumptions, and choices recorded; the entry gains its missing parts
+
+=== CHANGED ===
+ .changeset/r55-read-a-draft.md                   |  12 ++
+ .changeset/r55-rejected-key.md                   |  10 ++
+ README.md                                        |  15 +-
+ docs/decisions.md                                | 197 +++++++++++++++++++++++
+ docs/plan/DECOMPOSITION.md                       |  14 ++
+ packages/api/src/draft-view.ts                   | 100 ++++++++++++
+ packages/api/src/host/config.ts                  |  29 +++-
+ packages/api/src/host/key-probe.ts               |  64 ++++++++
+ packages/api/src/http/server.ts                  |  26 ++-
+ packages/api/src/http/wire.ts                    |   3 +
+ packages/api/src/index.ts                        |   2 +
+ packages/api/test/draft-view.test.ts             | 106 ++++++++++++
+ packages/api/test/host-config.test.ts            |   7 +-
+ packages/api/test/paid/key-probe.paid.test.ts    |  20 +++
+ packages/cli/src/cli.ts                          |  16 +-
+ packages/cli/src/draft.ts                        |  88 ++++++++++
+ packages/cli/test/draft.test.ts                  | 131 +++++++++++++++
+ packages/conformance/src/registry/draft-read.ts  | 116 +++++++++++++
+ packages/conformance/src/registry/headless.ts    |   2 +-
+ packages/conformance/src/registry/i5.ts          |   2 +
+ packages/conformance/src/registry/i9.ts          |   4 +-
+ packages/conformance/src/registry/init.ts        |   3 +-
+ packages/conformance/src/registry/release.ts     |  36 ++++-
+ packages/conformance/src/registry/startup-key.ts | 114 +++++++++++++
+ 24 files changed, 1094 insertions(+), 23 deletions(-)
+
+
+===== .changeset/r55-read-a-draft.md =====
+---
+"@olympus-ai/api": minor
+"olympus-ai": minor
+---
+
+R55 (#175): `olympus-ai draft <run id> <station>` prints the draft a person is
+asked to approve: its hash, whether it is waiting and the `approve` command
+for it, every file, and the questions part. It reads the new
+`GET /runs/:id/draft?station=<station>`, never the store. The service returns
+a draft only while its stored bytes still hash to the hash an approval names,
+and the command prints a model's text with control characters and direction
+overrides as escapes, each file line behind a margin.
+
+===== .changeset/r55-rejected-key.md =====
+---
+"@olympus-ai/api": minor
+---
+
+R55 (#176): `factory-host` checks `ANTHROPIC_API_KEY` with the provider before
+it listens, with one request that spends nothing, and refuses to start, in the
+same list as every other start-up problem, when the provider rejects the key
+or the check could not be made. Before, a host with an invalid key admitted a
+run and failed every attempt until it parked. `checkStartup` takes the check
+as a fourth argument, which defaults to the real request.
+
+===== README.md =====
+diff --git a/README.md b/README.md
+index ef4e4e6..cd6559e 100644
+--- a/README.md
++++ b/README.md
+@@ -334,8 +334,10 @@ factory-host --env-file $HOME\.factory\host.env
+ 
+ `factory-host --env-file` reads the file through the same table as its
+ environment: a name the host does not read is refused, and so is one set in
+-both with different values. Once it listens it prints one line, and stays in
+-the foreground until Ctrl+C:
++both with different values. Before it listens it asks the model provider
++whether it accepts `ANTHROPIC_API_KEY`, with one request that spends nothing,
++and does not start on a key the provider rejects or one it could not check.
++Once it listens it prints one line, and stays in the foreground until Ctrl+C:
+ 
+ ```
+ factory-host: listening on http://127.0.0.1:7300, admitting runs from /path/to/repo; stop with Ctrl+C
+@@ -362,9 +364,12 @@ figure by running the same command again with `--approve-cost <usd>`.
+ 
+ Then follow it with `olympus-ai status <run id>` or `events <run id>`. When
+ `status` shows the run awaiting approval, pass the gate with
+-`olympus-ai approve <run id> <station>:1`; at `spec` and `test-design`, which
+-were drafted, add `--draft <hash>` with the draft's hash as `status` names it,
+-having read the draft first. `olympus-ai report <run id>` prints what it cost
++`olympus-ai approve <run id> <station>:1`. At `spec` and `test-design`, which
++were drafted, read the draft first: `olympus-ai draft <run id> spec` (or
++`test-design`) prints its files, its open questions and assumptions, its
++hash, and the `approve` command for it, which adds `--draft <hash>`. To send
++it back instead, `olympus-ai reject` takes the same hash.
++`olympus-ai report <run id>` prints what it cost
+ and what was decided. Every command prints its flags with
+ `olympus-ai <command> --help`.
+ 
+
+===== packages/api/src/draft-view.ts =====
+/**
+ * A draft as a person reads it before deciding it (R55, #175): the files the
+ * runtime recorded, byte for byte, under the hash an approval names.
+ *
+ * Nothing is returned unless the bytes still hash to that hash (I5). A person
+ * approves a hash having read these bytes, so bytes that no longer match it
+ * are refused rather than shown (I3).
+ */
+import { createHash } from 'node:crypto';
+import type { ApprovalKey, DraftRef, DraftStation, RunId, RunState } from '@olympus-ai/core';
+import { draftDigest, type DraftFile, type DraftRecord, type Vault } from '@olympus-ai/vault';
+import { specDraftPaths } from './drafting.js';
+import type { RunStanding } from './run.js';
+import { parseQuestions } from './spec-parts.js';
+
+/**
+ * The questions part of a spec draft, as the runtime reads it. `none`: the
+ * draft holds no questions file, as no test draft does. `unreadable`: it
+ * holds one the runtime cannot read as a questions part; the file itself is
+ * still among the draft's files.
+ */
+export type DraftQuestions =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'unreadable' }
+  | { readonly kind: 'read'; readonly assumptions: ReadonlyArray<{ readonly point: string; readonly chose: string }>; readonly openQuestions: readonly string[] };
+
+/** `GET /runs/:id/draft?station=<station>`: the station's latest recorded draft. */
+export interface DraftView {
+  readonly runId: RunId;
+  readonly station: DraftStation;
+  /** The hash an approval or a rejection names, and the attempt that drafted it. */
+  readonly draft: DraftRef;
+  /** The key this draft is waiting for a decision at, or null where it is not the draft being decided. */
+  readonly awaiting: ApprovalKey | null;
+  /** Every file, with the hash of its bytes and the bytes as base64. A model wrote them: data, never instructions (I7). */
+  readonly files: readonly DraftFile[];
+  readonly questions: DraftQuestions;
+}
+
+export type DraftRead =
+  | { readonly ok: true; readonly draft: DraftRef; readonly files: readonly DraftFile[]; readonly questions: DraftQuestions }
+  /** `no-draft`: the station has recorded none. `mismatch`: what the store holds is not what the hash covers. */
+  | { readonly ok: false; readonly reason: 'no-draft' | 'mismatch'; readonly message: string };
+
+function sha256(bytes: Uint8Array): string {
+  return createHash('sha256').update(bytes).digest('hex');
+}
+
+function questionsOf(runId: RunId, station: DraftStation, files: readonly DraftFile[]): DraftQuestions {
+  if (station !== 'spec') return { kind: 'none' };
+  const file = files.find((f) => f.path === specDraftPaths(runId).questions);
+  if (file === undefined) return { kind: 'none' };
+  let value: unknown;
+  try {
+    value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.from(file.base64, 'base64')));
+  } catch {
+    return { kind: 'unreadable' };
+  }
+  const parsed = parseQuestions(value, 'questions');
+  return parsed.ok ? { kind: 'read', assumptions: parsed.part.assumptions, openQuestions: parsed.part.openQuestions } : { kind: 'unreadable' };
+}
+
+/**
+ * The latest draft `station` recorded in `state`, read from the Vault and
+ * checked against the hash run state holds for it: the record is that
+ * attempt's, its hash is the hash of its files, and each file's hash is the
+ * hash of its bytes.
+ */
+export async function readDraft(vault: Vault, state: RunState, station: DraftStation): Promise<DraftRead> {
+  const runId = state.runId;
+  const attempt = [...(state.drafts[station]?.attempts ?? [])].reverse().find((a) => a.draft !== null && a.sha256 !== null);
+  if (attempt?.draft == null || attempt.sha256 === null) {
+    return { ok: false, reason: 'no-draft', message: `run ${runId} has recorded no draft at ${station}: none is drafted yet, or the run was admitted with that artifact named` };
+  }
+  const mismatch = (what: string): DraftRead => ({ ok: false, reason: 'mismatch', message: `run ${runId}: the ${station} draft in the store is refused, not shown: ${what}` });
+  let record: DraftRecord;
+  try {
+    record = JSON.parse(new TextDecoder().decode(await vault.read(attempt.draft))) as DraftRecord;
+  } catch (error) {
+    return mismatch(`its record could not be read (${error instanceof Error ? error.message : String(error)})`);
+  }
+  // Read as unknown: the record is the store's, and its type is a claim about it until checked.
+  const stored: unknown = record.files;
+  if (!Array.isArray(stored) || record.runId !== runId || record.station !== station || record.attempt !== attempt.attempt) {
+    return mismatch('its record is not the record of this run, station, and attempt');
+  }
+  if (record.sha256 !== attempt.sha256 || draftDigest(record.files) !== attempt.sha256) return mismatch('its files do not hash to the hash run state holds');
+  for (const file of record.files) {
+    if (typeof file.base64 !== 'string' || sha256(Buffer.from(file.base64, 'base64')) !== file.sha256) return mismatch(`the bytes of ${JSON.stringify(file.path)} do not hash to its recorded hash`);
+  }
+  const files = record.files.map(({ path, sha256: hash, base64 }) => ({ path, sha256: hash, base64 }));
+  return { ok: true, draft: { sha256: attempt.sha256, attempt: attempt.attempt }, files, questions: questionsOf(runId, station, files) };
+}
+
+/** The key `draft` waits at, where the run's standing names exactly it as the draft being decided; null otherwise. */
+export function awaitingKey(standing: RunStanding, station: DraftStation, draft: DraftRef): ApprovalKey | null {
+  if (standing.standing !== 'awaiting-approval' || standing.draft === null) return null;
+  const waiting = standing.draft;
+  return waiting.station === station && waiting.draft.sha256 === draft.sha256 && waiting.draft.attempt === draft.attempt ? standing.key : null;
+}
+
+===== packages/api/src/host/config.ts =====
+diff --git a/packages/api/src/host/config.ts b/packages/api/src/host/config.ts
+index 168424d..863e6cb 100644
+--- a/packages/api/src/host/config.ts
++++ b/packages/api/src/host/config.ts
+@@ -14,6 +14,7 @@ import { readFile } from 'node:fs/promises';
+ import { parseEnv } from 'node:util';
+ import { MIN_TOKEN_LENGTH } from '../http/server.js';
+ import { containerUser, parseCodexSeats, parseEndpointFile, type HostCodex, type HostEndpoint } from './compose.js';
++import { probeModelKey, type KeyProbe } from './key-probe.js';
+ import { probeSymlinks, type MakeLink } from './symlinks.js';
+ import type { ContainerUser } from '../workspace.js';
+ 
+@@ -59,33 +60,34 @@ export const HOST_VARIABLES: readonly HostVariable[] = [
+ /** The host's settings, read and checked: everything `main.ts` needs before it composes. */
+ export interface HostSettings {
+   readonly token: string;
+   readonly port: number;
+   readonly listenHost: string;
+   readonly policyFile: string;
+   readonly rolesDirectory: string;
+   readonly rubricsDirectory: string | null;
+   readonly store: string;
+   readonly repository: string;
+   readonly trees: string;
+   readonly modelKey: string;
+   readonly principal: string;
+   readonly git: { readonly repository: string; readonly baseBranch: string; readonly token: string };
+   readonly containerUser: ContainerUser | undefined;
+   /** The endpoint file's path and key; the file is read by `main.ts`, after this check. */
+   readonly endpoint: { readonly file: string; readonly key: string } | null;
+   readonly codex: HostCodex | null;
+   readonly checksToken: string | null;
+   /** A subscription's secret by its full name, and only a name with the webhook prefix (D-A-TF-05). */
+   readonly webhookSecret: (name: string) => string | undefined;
+ }
+ 
+ /**
+- * A refusal still carries the two inputs whose own checks can run without the
+- * rest, so start-up reports their problems in the same list (review: codex-5).
++ * A refusal still carries the three inputs whose own checks can run without
++ * the rest, so start-up reports their problems in the same list (review:
++ * codex-5, R55).
+  */
+ export type HostConfigResult =
+   | { readonly ok: true; readonly settings: HostSettings }
+-  | { readonly ok: false; readonly problems: readonly string[]; readonly trees: string; readonly endpoint: HostSettings['endpoint'] };
++  | { readonly ok: false; readonly problems: readonly string[]; readonly trees: string; readonly endpoint: HostSettings['endpoint']; readonly modelKey: string };
+ 
+ function declared(name: string): HostVariable | undefined {
+   return HOST_VARIABLES.find((v) => (v.prefix === true ? name.startsWith(v.name) && name.length > v.name.length : v.name === name));
+@@ -105,72 +107,72 @@ export function hostFacts(): HostFacts {
+ /**
+  * Reads and checks the host's environment, collecting every problem rather
+  * than stopping at the first. Nothing outside the table is read: asking for
+  * an undeclared name is a programming error and throws.
+  */
+ export function readHostConfig(env: Readonly<Record<string, string | undefined>>, facts: HostFacts = hostFacts()): HostConfigResult {
+   const problems: string[] = [];
+   const get = (name: string): string => {
+     if (declared(name) === undefined) throw new Error(`factory-host: ${name} is read but not declared in HOST_VARIABLES`);
+     return env[name] ?? '';
+   };
+   const required = (name: string): string => {
+     const value = get(name);
+     if (value === '') problems.push(`${name} is not set: ${declared(name)?.purpose ?? ''}`);
+     return value;
+   };
+   const optional = (name: string): string | null => {
+     const value = get(name);
+     return value === '' ? null : value;
+   };
+   // Each check that throws is caught here and listed, so one bad pair does not hide the rest.
+   const checked = <T>(read: () => T, fallback: T): T => {
+     try {
+       return read();
+     } catch (error) {
+       problems.push((error instanceof Error ? error.message : String(error)).replace(/^factory-host: /u, ''));
+       return fallback;
+     }
+   };
+ 
+   const token = required('FACTORY_API_TOKEN');
+   if (token !== '' && token.length < MIN_TOKEN_LENGTH) problems.push(`FACTORY_API_TOKEN is shorter than ${String(MIN_TOKEN_LENGTH)} characters`);
+   const portText = required('FACTORY_LISTEN_PORT');
+   const port = Number(portText);
+   if (portText !== '' && (!/^\d+$/u.test(portText) || port > 65535)) problems.push(`FACTORY_LISTEN_PORT is not a port: ${portText}`);
+   const policyFile = required('FACTORY_POLICY_FILE');
+   const rolesDirectory = required('FACTORY_ROLES_DIR');
+   const store = required('FACTORY_VAULT_STORE');
+   const repository = required('FACTORY_REPOSITORY');
+   const trees = required('FACTORY_TREES');
+   const modelKey = required('ANTHROPIC_API_KEY');
+   const git = { repository: required('FACTORY_GIT_REPOSITORY'), baseBranch: required('FACTORY_GIT_BASE_BRANCH'), token: required('FACTORY_GIT_TOKEN') };
+   const user = checked(() => containerUser({ FACTORY_CONTAINER_UID: get('FACTORY_CONTAINER_UID'), FACTORY_CONTAINER_GID: get('FACTORY_CONTAINER_GID') }), undefined);
+   // On a host with no uids there is none to derive, so the pair is required here, in this list, not at composition (#136).
+   if (!facts.uids && get('FACTORY_CONTAINER_UID') === '' && get('FACTORY_CONTAINER_GID') === '') {
+     problems.push('FACTORY_CONTAINER_UID and FACTORY_CONTAINER_GID are not set, and this host has no uids to run sandboxes as: set both, such as 1000 and 1000 (init writes them)');
+   }
+   const endpointFile = get('FACTORY_ENDPOINT_CONFIG');
+   const endpointKey = get('FACTORY_ENDPOINT_KEY');
+   // A key with no file is half a configuration. A file with no key is the file's to allow: only one declaring scheme 'none' does.
+   if (endpointFile === '' && endpointKey !== '') problems.push('FACTORY_ENDPOINT_KEY is set without FACTORY_ENDPOINT_CONFIG');
+   const codex = checked(() => parseCodexSeats(get('FACTORY_CODEX_SEATS'), get('FACTORY_CODEX_KEY')), null);
+   const listenHost = optional('FACTORY_LISTEN_HOST') ?? '127.0.0.1';
+   const principal = optional('FACTORY_PRINCIPAL') ?? 'local';
+   const rubricsDirectory = optional('FACTORY_RUBRICS_DIR');
+   const checksToken = optional('FACTORY_CHECKS_TOKEN');
+ 
+-  if (problems.length > 0) return { ok: false, problems, trees, endpoint: endpointFile === '' ? null : { file: endpointFile, key: endpointKey } };
++  if (problems.length > 0) return { ok: false, problems, trees, modelKey, endpoint: endpointFile === '' ? null : { file: endpointFile, key: endpointKey } };
+   return {
+     ok: true,
+     settings: {
+       token, port, listenHost, policyFile, rolesDirectory, rubricsDirectory, store, repository, trees, modelKey, principal, git,
+       containerUser: user,
+       endpoint: endpointFile === '' ? null : { file: endpointFile, key: endpointKey },
+       codex, checksToken,
+       // Only a name with the webhook prefix is ever read, so a policy cannot name another host secret as one.
+       webhookSecret: (name) => (name.startsWith(WEBHOOK_SECRET_PREFIX) && name.length > WEBHOOK_SECRET_PREFIX.length ? optional(name) ?? undefined : undefined),
+     },
+   };
+ }
+ 
+ /** The refusal start-up prints: every problem, then where the docs are. No stack trace. */
+@@ -197,40 +199,51 @@ HostRefusal.prototype.name = 'HostRefusal';
+ /** What start-up composes from: the checked settings and the endpoint file, read and parsed. */
+ export type StartupResult =
+   | { readonly ok: true; readonly settings: HostSettings; readonly endpoint: HostEndpoint | null }
+   | { readonly ok: false; readonly problems: readonly string[] };
+ 
+ /**
+  * Every check start-up makes before it composes, all of them, into one list:
+- * the environment, the endpoint file named, and whether the trees directory
+- * can hold a symbolic link. A check whose input is unset is skipped, since the
+- * missing variable is already listed (I5, review: codex-5).
++ * the environment, the endpoint file named, whether the trees directory can
++ * hold a symbolic link, and whether the provider accepts the model key (R55,
++ * #176). A check whose input is unset is skipped, since the missing variable
++ * is already listed (I5, review: codex-5).
++ *
++ * `probeKey` defaults to the real request, so a caller that names none gets
++ * the check; only a test passes another.
+  */
+-export async function checkStartup(env: Readonly<Record<string, string | undefined>>, makeLink?: MakeLink, facts: HostFacts = hostFacts()): Promise<StartupResult> {
++export async function checkStartup(
++  env: Readonly<Record<string, string | undefined>>, makeLink?: MakeLink, facts: HostFacts = hostFacts(), probeKey: KeyProbe = probeModelKey,
++): Promise<StartupResult> {
+   const read = readHostConfig(env, facts);
+   const problems = read.ok ? [] : [...read.problems];
+   const source = read.ok ? read.settings.endpoint : read.endpoint;
+   let endpoint: HostEndpoint | null = null;
+   if (source !== null) {
+     try {
+       endpoint = parseEndpointFile(await readFile(source.file, 'utf8'), source.key);
+     } catch (error) {
+       problems.push(`FACTORY_ENDPOINT_CONFIG (${source.file}): ${(error instanceof Error ? error.message : String(error)).replace(/^factory-host: /u, '')}`);
+     }
+   }
+   const trees = read.ok ? read.settings.trees : read.trees;
+   if (trees !== '') {
+     const links = await probeSymlinks(trees, makeLink);
+     if (links !== null) problems.push(links);
+   }
++  const modelKey = read.ok ? read.settings.modelKey : read.modelKey;
++  if (modelKey !== '') {
++    const rejected = await probeKey(modelKey);
++    if (rejected !== null) problems.push(rejected);
++  }
+   if (!read.ok || problems.length > 0) return { ok: false, problems };
+   return { ok: true, settings: read.settings, endpoint };
+ }
+ 
+ /**
+  * The environment file named by `--env-file` (#134), merged with the
+  * process's environment. Every name in the file must be one the table
+  * declares: a misspelt name is refused rather than ignored. A name set in
+  * both with different values is refused rather than resolved by a rule the
+  * reader would have to remember (I5). The file's values are checked with the
+  * rest by `checkStartup`, in the same list.
+  */
+
+===== packages/api/src/host/key-probe.ts =====
+/**
+ * The start-up check of the model key (R55, #176). A host that listens with a
+ * key the provider rejects admits a run and then fails every attempt of it
+ * until it parks. So start-up asks the provider once, with a request that
+ * spends nothing, and the host listens only if the provider accepted the key
+ * (I5): a rejected key refuses, and so does a check that could not be made.
+ *
+ * The origin and the header are the relay's own (`MODEL_RELAY`), so the key
+ * is checked against the provider the relay will send it to. Nothing in the
+ * environment turns the check off or points it elsewhere.
+ */
+import { KEY_VARIABLE, MODEL_RELAY } from '@olympus-ai/driver-claude-code';
+
+/** The relay's provider. A relay to a local upstream would have no provider to ask, and the host does not load. */
+function providerOrigin(): string {
+  if (typeof MODEL_RELAY.upstream !== 'string') throw new Error('factory-host: the model relay names a local upstream, so there is no provider to check the model key with');
+  return MODEL_RELAY.upstream;
+}
+
+/** The one request: a list of models, one entry long. A `GET`, which the provider does not bill. */
+export const MODEL_KEY_PROBE_URL = `${providerOrigin()}/v1/models?limit=1`;
+
+/** The API version the request names; the provider refuses a request that names none. */
+const API_VERSION = '2023-06-01';
+
+/** How long the provider has to answer before the key counts as unchecked. */
+export const MODEL_KEY_PROBE_TIMEOUT_MS = 10_000;
+
+/** A key's check: null when the provider accepted it, or the line start-up lists. */
+export type KeyProbe = (key: string) => Promise<string | null>;
+
+/** What went wrong reaching the provider, as a code or an error's name: never its message, which is not ours to print. */
+function failure(error: unknown): string {
+  const cause = (error as { cause?: { code?: unknown } } | null)?.cause;
+  if (typeof cause?.code === 'string') return cause.code;
+  return error instanceof Error ? error.name : 'unknown error';
+}
+
+/**
+ * Asks the provider whether it accepts `key`. Null only for a 2xx answer.
+ * Neither line holds the key or anything the provider sent but its status.
+ * A redirect is an error rather than followed, so the key goes to the one
+ * origin named here.
+ */
+export async function probeModelKey(key: string, request: typeof fetch = (input, init) => fetch(input, init)): Promise<string | null> {
+  const host = new URL(MODEL_KEY_PROBE_URL).host;
+  let status: number;
+  try {
+    const response = await request(MODEL_KEY_PROBE_URL, {
+      method: 'GET',
+      headers: { [MODEL_RELAY.header]: key, 'anthropic-version': API_VERSION },
+      redirect: 'error',
+      signal: AbortSignal.timeout(MODEL_KEY_PROBE_TIMEOUT_MS),
+    });
+    status = response.status;
+    // The body is not read: only the status decides, and nothing of it is printed.
+    await response.body?.cancel();
+  } catch (error) {
+    return `${KEY_VARIABLE} could not be checked: ${host} could not be reached (${failure(error)}); the host does not start on a key it could not check`;
+  }
+  if (status >= 200 && status < 300) return null;
+  if (status === 401 || status === 403) return `${KEY_VARIABLE} was rejected by ${host} (${String(status)}): every model call would fail, so set a key the provider accepts`;
+  return `${KEY_VARIABLE} could not be checked: ${host} answered ${String(status)}; the host does not start on a key it could not check`;
+}
+
+===== packages/api/src/http/server.ts =====
+diff --git a/packages/api/src/http/server.ts b/packages/api/src/http/server.ts
+index 29508ca..fffa9f9 100644
+--- a/packages/api/src/http/server.ts
++++ b/packages/api/src/http/server.ts
+@@ -14,13 +14,14 @@
+ import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
+ import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+ import { isAbsolute } from 'node:path';
+-import { isApprovalKey, isRunTemplate, type CandidateId, type RunCancellation, type RunId, type RunState, type TaskId } from '@olympus-ai/core';
++import { DRAFT_STATIONS, isApprovalKey, isRunTemplate, type CandidateId, type DraftStation, type RunCancellation, type RunId, type RunState, type TaskId } from '@olympus-ai/core';
+ import { MAX_DELIVERY_BYTES } from '@olympus-ai/triggers';
+ import { DISMISSAL_CAUSES, UNSUBSCRIBED_BUCKET, isNoRunState, type AttemptFailure, type CandidateRecord, type DismissalCause, type IntakeEntry } from '@olympus-ai/vault';
+ import { Intake, type DeliveryOutcome, type SecretSource } from '../intake.js';
+ import { startSchedules, type Scheduler } from '../schedule.js';
+ import { NightlyJobs, type NightlyTarget } from '../nightly.js';
+ 
++import { awaitingKey, readDraft } from '../draft-view.js';
+ import { loadPolicyFile } from '../policy-file.js';
+ import type { ReadinessScanner } from '../readiness-scan.js';
+ import { admitRun, approveStation, cancelRun, rejectDraft, resumeRun, runStanding, type DriveHooks, type RunOutcome } from '../run.js';
+@@ -29,7 +30,7 @@ import { runReport, type RunReport } from '../report.js';
+ import { outcomes, type OutcomeWindow } from '../outcomes.js';
+ import { dismissFinding, listFindings } from '../findings.js';
+ import { telemetryOf, type TelemetryExport } from '../telemetry.js';
+-import type { ApproveBody, BugFixIntentBody, CandidateSummary, CandidateView, CreateRunBody, DismissBody, CreatedRun, DeliveryAnswer, DriveEnd, ErrorBody, ErrorCode, RejectBody, RunEvent, RunView } from './wire.js';
++import type { ApproveBody, BugFixIntentBody, CandidateSummary, CandidateView, CreateRunBody, DismissBody, CreatedRun, DeliveryAnswer, DraftView, DriveEnd, ErrorBody, ErrorCode, RejectBody, RunEvent, RunView } from './wire.js';
+ 
+ export interface ApiServerOptions {
+   readonly components: BuiltGraph;
+@@ -337,449 +338,470 @@ function refusalStatus(outcome: Exclude<RunOutcome, { ok: true }>): number {
+ export function createApiServer(options: ApiServerOptions): ApiServer {
+   if (typeof options.token !== 'string' || options.token.length < MIN_TOKEN_LENGTH) {
+     throw new Error(`api server: the local token must be at least ${String(MIN_TOKEN_LENGTH)} characters`);
+   }
+   if (typeof options.principal !== 'string' || options.principal.trim() === '') throw new Error('api server: principal must name who the token is');
+   const expected = digest(`Bearer ${options.token}`);
+   const { components, principal } = options;
+   const runs = new Map<RunId, Tracked>();
+   const open = new Set<ServerResponse>();
+   // The nightly jobs are given the sandbox, the scanners, and the Vault, and no builder or integrator (I2). The two
+   // reviewer jobs seat the reviewer driver, under the roles runs are admitted with (R13b, D-R13b-03, D-R13b-07).
+   const jobs = new NightlyJobs({
+     vault: components.vault, sandbox: components.sandbox, workspaces: components.workspaces,
+     limits: components.profile === null ? null : components.profile.limits, scanners: components.scanners,
+     target: options.nightlyTarget ?? null,
+     seat: {
+       driver: components.reviewer, roles: options.rolesDirectory,
+       image: components.profile === null ? 'none' : imageFor(components.profile, components.reviewer),
+     },
+   });
+   const intake = new Intake({ vault: components.vault, secrets: options.secrets ?? (() => undefined), jobs });
+   let scheduler: Scheduler | null = null;
+ 
+   const tracked = (runId: RunId): Tracked => {
+     let entry = runs.get(runId);
+     if (entry === undefined) {
+       entry = { drive: null, cancel: null, lastOutcome: null, streams: new Set() };
+       runs.set(runId, entry);
+     }
+     return entry;
+   };
+ 
+   const publish = (entry: Tracked, event: RunEvent): void => {
+     for (const stream of entry.streams) stream(event);
+   };
+ 
+   /** Drives a run in the background; the returned promise never rejects. */
+   const drive = (runId: RunId, start: (hooks: DriveHooks) => Promise<RunOutcome>): void => {
+     const entry = tracked(runId);
+     entry.cancel = null;
+     const hooks: DriveHooks = {
+       cancelRequested: () => entry.cancel,
+       onCommit: (state) => { publish(entry, { event: 'state', data: state }); },
+       onAttemptFailed: (task, failure) => {
+         publish(entry, { event: 'attempt-failed', data: { task, failure } });
+         options.log?.(attemptLine(runId, task, failure));
+       },
+       onGateFailed: (task, failure) => {
+         publish(entry, { event: 'gate-failed', data: { task, failure } });
+       },
+     };
+     entry.drive = start(hooks)
+       .then((outcome): DriveEnd => ({ kind: 'outcome', outcome }), (error: unknown): DriveEnd => ({ kind: 'error', message: describe(error) }))
+       .then((end) => (end.kind === 'error' ? halt(runId, end) : end))
+       .then(async (end) => {
+         entry.lastOutcome = end;
+         entry.drive = null;
+         entry.cancel = null;
+         const standing = await runStanding(components.vault, runId).then((s) => s.standing, () => undefined);
+         if (standing !== undefined) publish(entry, { event: 'standing', data: standing });
+         publish(entry, { event: 'end', data: end });
+       });
+   };
+ 
+   /**
+    * A drive that ended in an error, rather than a refusal the line committed,
+    * left the run's state as it was mid-step, which status would read as open
+    * and a cancel would relabel. The halt is committed so the stop is the
+    * Vault's record, and survives this process (A-P9-02). A run already
+    * cancelled keeps that record instead; if the halt cannot be committed, the
+    * drive's end says so.
+    */
+   const halt = async (runId: RunId, end: DriveEnd & { kind: 'error' }): Promise<DriveEnd> => {
+     try {
+       const state = await components.vault.readRunState(runId);
+       if (state.cancelled !== null || state.halted !== null) return end;
+       await components.vault.commitRunState({ ...state, halted: { at: new Date().toISOString(), message: end.message } }, state.version);
+       return end;
+     } catch (error) {
+       return { kind: 'error', message: `${end.message}; the halt could not be recorded: ${describe(error)}` };
+     }
+   };
+ 
+   /** The per-run report, read from the Vault alone (D-I1b-07). */
+   const report = async (runId: RunId): Promise<RunReport> => {
+     try {
+       await components.vault.readRunState(runId);
+     } catch (error) {
+       throw new HttpError(404, 'not-found', `no run ${runId}: ${describe(error)}`);
+     }
+     return runReport(components.vault, runId);
+   };
+ 
+   /**
+    * The run's records as OTLP/JSON, for the client to send where its operator
+    * chooses: the service itself never makes an outbound request (D-R12-02).
+    */
+   const telemetry = async (runId: RunId): Promise<TelemetryExport> => {
+     try {
+       await components.vault.readRunState(runId);
+     } catch (error) {
+       // A state that cannot be read is a fault, never absence (I5). A run refused at admission has no
+       // state and is still exported; only a run with no record at all is absent.
+       if (!isNoRunState(error)) throw error;
+       if ((await components.vault.readDecisions(runId)).length === 0) throw new HttpError(404, 'not-found', `no run ${runId}: ${describe(error)}`);
+     }
+     const result = await telemetryOf(components.vault, runId);
+     if (!result.ok) throw new HttpError(409, 'not-finished', `run ${runId} has not finished, so its records may still change and it is not exported`);
+     return result.export;
+   };
+ 
+   const view = async (runId: RunId): Promise<RunView> => {
+     // Taken before the read, not after: a drive that ends while the state is read has committed
+     // past what was read, and a view saying `driving: false` beside that state would present a
+     // stale standing as settled. Read first, a drive running at the start is still reported.
+     const entry = runs.get(runId);
+     const driving = entry?.drive != null;
+     const lastOutcome = entry?.lastOutcome ?? null;
+     let read: { state: RunState; standing: RunView['standing'] };
+     try {
+       read = await runStanding(components.vault, runId);
+     } catch (error) {
+       throw new HttpError(404, 'not-found', `no run ${runId}: ${describe(error)}`);
+     }
+     return { runId, state: read.state, standing: read.standing, driving, lastOutcome };
+   };
+ 
++  /**
++   * The station's latest recorded draft, for a person to read before deciding
++   * it (R55, #175). One read of the run gives both the draft and whether it is
++   * the one waiting, so the two cannot describe different moments. Bytes that
++   * no longer hash to the recorded hash are refused, never shown (I5).
++   */
++  const draft = async (runId: RunId, station: string | null): Promise<DraftView> => {
++    const named = DRAFT_STATIONS.find((s) => s === station);
++    if (named === undefined) throw new HttpError(400, 'bad-request', `station is one of ${DRAFT_STATIONS.join(', ')}: the stations a run can draft at`);
++    const drafting: DraftStation = named;
++    const now = await view(runId);
++    const read = await readDraft(components.vault, now.state, drafting);
++    if (!read.ok) throw new HttpError(read.reason === 'no-draft' ? 404 : 500, read.reason === 'no-draft' ? 'not-found' : 'internal', read.message);
++    return { runId, station: drafting, draft: read.draft, awaiting: awaitingKey(now.standing, drafting, read.draft), files: read.files, questions: read.questions };
++  };
++
+   const create = async (body: CreateRunBody): Promise<CreatedRun> => {
+     const policy = await loadPolicyFile(options.policyFile);
+     if (!policy.ok) throw new HttpError(422, 'refused', `the server's policy file is refused: ${policy.message}`, policy);
+     const runId = randomUUID() as RunId;
+     const { intent, ...request } = body;
+     const admission = await admitRun({
+       runId,
+       ...request,
+       // Only this route, authenticated as the principal, supplies an intent (R19, I7), a bug fix's as its parts (A-R16-02).
+       intent: intent === undefined ? null : typeof intent === 'string' ? { text: intent, from: 'principal' } : { ...intent, from: 'principal', template: 'bug-fix' },
+       rubrics: options.rubricsDirectory ?? null,
+       policy: policy.policy,
+       roles: options.rolesDirectory,
+       components,
+       // The host's scanner, so a run above its base commit's ceiling is refused (R40); none, and the record says no scan ran.
+       readiness: options.readiness ?? null,
+     });
+     if (!admission.ok) throw new HttpError(refusalStatus(admission), 'refused', `run refused: ${admission.reason}`, admission);
+     const { admitted } = admission;
+     drive(runId, (hooks) => admitted.drive(hooks));
+     return { runId, worstCase: admitted.worstCase, state: admitted.state };
+   };
+ 
+   const approve = async (runId: RunId, body: ApproveBody): Promise<RunView> => {
+     const entry = tracked(runId);
+     if (entry.drive !== null) throw new HttpError(409, 'conflict', `run ${runId} is being driven; it is not waiting for an approval`);
+     await view(runId);
+     const outcome = await approveStation({ runId, key: body.key, draft: body.draft ?? null, approvedBy: principal, vault: components.vault });
+     if (!outcome.ok) throw new HttpError(outcome.reason === 'invalid-request' ? 400 : 409, 'refused', outcome.message, outcome);
+     drive(runId, (hooks) => resumeRun({ runId, components }, hooks));
+     return view(runId);
+   };
+ 
+   const reject = async (runId: RunId, body: RejectBody): Promise<RunView> => {
+     const entry = tracked(runId);
+     if (entry.drive !== null) throw new HttpError(409, 'conflict', `run ${runId} is being driven; it is not waiting for a decision on a draft`);
+     await view(runId);
+     const outcome = await rejectDraft({ runId, key: body.key, draft: body.draft, notes: body.notes ?? null, reason: body.reason ?? null, rejectedBy: principal, vault: components.vault });
+     if (!outcome.ok) throw new HttpError(outcome.reason === 'invalid-request' ? 400 : 409, 'refused', outcome.message, outcome);
+     // A draft sent back is drafted again; a parked run is driven only to record where it stopped.
+     drive(runId, (hooks) => resumeRun({ runId, components }, hooks));
+     return view(runId);
+   };
+ 
+   const cancel = async (runId: RunId): Promise<RunView> => {
+     await view(runId);
+     const entry = tracked(runId);
+     const inFlight = entry.drive;
+     if (inFlight !== null) {
+       entry.cancel = { by: principal, at: new Date().toISOString() };
+       await inFlight;
+       const after = await view(runId);
+       if (after.state.cancelled === null) {
+         throw new HttpError(409, 'refused', `run ${runId} finished before the cancellation was taken; there is nothing to cancel`, after.standing);
+       }
+       return after;
+     }
+     const outcome = await cancelRun({ runId, by: principal, vault: components.vault });
+     if (!outcome.ok) throw new HttpError(outcome.reason === 'finished' ? 409 : 400, 'refused', outcome.message, outcome);
+     const now = await view(runId);
+     publish(entry, { event: 'state', data: now.state });
+     publish(entry, { event: 'standing', data: now.standing });
+     return now;
+   };
+ 
+   const events = async (runId: RunId, res: ServerResponse): Promise<void> => {
+     const now = await view(runId);
+     const entry = tracked(runId);
+     res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store', connection: 'keep-alive' });
+     open.add(res);
+     const write = (event: RunEvent): void => {
+       res.write(`event: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`);
+     };
+     const finish = (): void => {
+       entry.streams.delete(stream);
+       open.delete(res);
+       res.end();
+     };
+     const stream = (event: RunEvent): void => {
+       write(event);
+       if (event.event === 'end') finish();
+     };
+     write({ event: 'state', data: now.state });
+     write({ event: 'standing', data: now.standing });
+     if (entry.drive === null) {
+       write({ event: 'end', data: entry.lastOutcome });
+       open.delete(res);
+       res.end();
+       return;
+     }
+     entry.streams.add(stream);
+     res.on('close', () => {
+       entry.streams.delete(stream);
+       open.delete(res);
+     });
+   };
+ 
+   /**
+    * `POST /events/<subscription>`, the one route outside the local token: a
+    * delivery authenticates by its signature (D-A-TF-06). The subscription is
+    * checked before the body is read, and nothing a refusal answers with is
+    * the body's text.
+    */
+   const deliver = async (req: IncomingMessage, res: ServerResponse, id: string): Promise<void> => {
+     const policy = await loadPolicyFile(options.policyFile);
+     // A policy that does not load grants no subscription; nothing is read or recorded against it (I5).
+     if (!policy.ok) throw new HttpError(503, 'refused', 'the server has no policy that loads, so no subscription is granted');
+     const subscription = intake.subscription(policy.policy, id);
+     let outcome: DeliveryOutcome;
+     if (subscription === null) {
+       outcome = await intake.count(UNSUBSCRIBED_BUCKET, 'not-subscribed');
+       discard(req, MAX_DELIVERY_BYTES);
+     } else {
+       const body = await readCapped(req, MAX_DELIVERY_BYTES);
+       if (body === 'oversize') {
+         outcome = await intake.count(subscription.id, 'oversize');
+         discard(req, MAX_DELIVERY_BYTES);
+       } else {
+         const signature = req.headers['x-hub-signature-256'];
+         outcome = await intake.deliver(policy.policy, subscription, typeof signature === 'string' ? signature : undefined, body);
+       }
+     }
+     send(res, deliveryStatus(outcome), outcome satisfies DeliveryAnswer);
+   };
+ 
+   const listIntake = async (): Promise<CandidateSummary[]> => {
+     const entries = await components.vault.readTriggerDecisions();
+     return entries.flatMap((entry) => (entry.candidate === null ? [] : [summary({ ...entry, candidate: entry.candidate })]));
+   };
+ 
+   const readIntake = async (id: string): Promise<CandidateView> => {
+     const entry = /^[0-9a-f]{64}$/.test(id) ? await components.vault.readCandidate(id as CandidateId) : null;
+     if (entry?.candidate == null) throw new HttpError(404, 'not-found', `no intake candidate ${id}`);
+     const c = entry.candidate;
+     return { ...summary({ ...entry, candidate: c }), body: c.body, signedAt: c.signedAt, decisionSha256: entry.sha256 };
+   };
+ 
+   /** A person's dismissal: once, of a candidate neither admitted nor expired, with a cause and no text (A-R16-05). */
+   const dismissIntake = async (id: string, body: DismissBody): Promise<CandidateSummary> => {
+     const entry = /^[0-9a-f]{64}$/.test(id) ? await components.vault.readCandidate(id as CandidateId) : null;
+     if (entry?.candidate == null) throw new HttpError(404, 'not-found', `no intake candidate ${id}`);
+     if (entry.expiredAt !== null) throw new HttpError(409, 'conflict', `candidate ${id} expired at ${entry.expiredAt}; an expired candidate is already recorded as not worked`);
+     if (!(await components.vault.dismissCandidate(entry.candidate.id, body.cause, new Date().toISOString()))) {
+       throw new HttpError(409, 'conflict', `candidate ${id} was admitted or dismissed before`);
+     }
+     const after = await components.vault.readCandidate(entry.candidate.id);
+     if (after?.candidate == null) throw new Error(`server: candidate ${id} is gone after its dismissal`);
+     return summary({ ...after, candidate: after.candidate });
+   };
+ 
+   /**
+    * `GET /readiness`: the scan's report for one revision, as a stream. A bad
+    * revision is refused before the stream opens; then `started` names the
+    * commit, a comment every 15 s keeps a client waiting through a scan that
+    * outlasts its header timeout, and one `report` or `failed` event ends it.
+    * Read-only: nothing is written, and admission does not read the ceiling.
+    */
+   const readiness = async (revision: string, res: ServerResponse): Promise<void> => {
+     const scanner = options.readiness ?? null;
+     if (scanner === null) throw new HttpError(409, 'refused', 'this server scans no repository; readiness is served by factory-host over its FACTORY_REPOSITORY');
+     let commit: string;
+     try {
+       commit = await scanner.resolve(revision);
+     } catch (error) {
+       throw new HttpError(400, 'bad-request', error instanceof Error ? error.message : String(error));
+     }
+     res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store', connection: 'keep-alive' });
+     open.add(res);
+     res.write(`event: started\ndata: ${JSON.stringify({ revision, commit })}\n\n`);
+     const beat = setInterval(() => { res.write(': scanning\n\n'); }, 15_000);
+     try {
+       const report = await scanner.scan(commit);
+       res.write(`event: report\ndata: ${JSON.stringify(report)}\n\n`);
+     } catch (error) {
+       res.write(`event: failed\ndata: ${JSON.stringify({ message: error instanceof Error ? error.message : String(error) })}\n\n`);
+     } finally {
+       clearInterval(beat);
+       open.delete(res);
+       res.end();
+     }
+   };
+ 
+   const route = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+     const url = new URL(req.url ?? '/', 'http://server.invalid');
+     const parts = url.pathname.split('/').filter((p) => p !== '');
+     const method = req.method ?? 'GET';
+     if (parts[0] === 'events') {
+       if (parts.length !== 2 || method !== 'POST') throw new HttpError(404, 'not-found', `no route ${url.pathname}`);
+       await deliver(req, res, decodeURIComponent(parts[1] ?? ''));
+       return;
+     }
+     const presented = digest(req.headers.authorization ?? '');
+     if (!timingSafeEqual(presented, expected)) throw new HttpError(401, 'unauthorized', 'a valid local token is required');
+     if (parts[0] === 'intake' && parts.length === 3 && parts[2] === 'dismiss') {
+       if (method !== 'POST') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
+       send(res, 200, await dismissIntake(decodeURIComponent(parts[1] ?? ''), dismissBody(await readJson(req))));
+       return;
+     }
+     if (parts[0] === 'intake' && parts.length <= 2) {
+       if (method !== 'GET') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
+       send(res, 200, parts.length === 1 ? await listIntake() : await readIntake(decodeURIComponent(parts[1] ?? '')));
+       return;
+     }
+     // A finding's outcome (R28): listed for a person to read, and dismissed by one, with a cause and no text.
+     if (parts[0] === 'findings' && parts.length === 1) {
+       if (method !== 'GET') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
+       send(res, 200, await listFindings(components.vault));
+       return;
+     }
+     if (parts[0] === 'findings' && parts.length === 3 && parts[2] === 'dismiss') {
+       if (method !== 'POST') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
+       const id = decodeURIComponent(parts[1] ?? '');
+       const done = await dismissFinding(components.vault, id, dismissBody(await readJson(req)).cause, new Date().toISOString());
+       if (done.kind === 'unknown') throw new HttpError(404, 'not-found', `no located finding ${id}`);
+       if (done.kind === 'decided') throw new HttpError(409, 'conflict', `finding ${id} is already ${done.outcome.kind}; a finding has one outcome`);
+       send(res, 200, done.finding);
+       return;
+     }
+     if (parts[0] === 'nightly' && parts.length === 1) {
+       if (method !== 'GET') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
+       send(res, 200, await components.vault.readNightly());
+       return;
+     }
+     if (parts[0] === 'outcomes' && parts.length === 1) {
+       if (method !== 'GET') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
+       send(res, 200, await outcomes(components.vault, outcomeWindow(url.searchParams)));
+       return;
+     }
+     if (parts[0] === 'readiness' && parts.length === 1) {
+       if (method !== 'GET') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
+       await readiness(url.searchParams.get('revision') ?? 'HEAD', res);
+       return;
+     }
+     if (parts[0] !== 'runs' || parts.length > 3) throw new HttpError(404, 'not-found', `no route ${url.pathname}`);
+     if (parts.length === 1) {
+       if (method !== 'POST') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
+       send(res, 201, await create(createBody(await readJson(req))));
+       return;
+     }
+     const runId = decodeURIComponent(parts[1] ?? '') as RunId;
+     const action = parts[2];
+     if (action === undefined) {
+       if (method !== 'GET') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
+       send(res, 200, await view(runId));
+       return;
+     }
++    if (action === 'draft') {
++      if (method !== 'GET') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
++      send(res, 200, await draft(runId, url.searchParams.get('station')));
++      return;
++    }
+     if (action === 'report') {
+       if (method !== 'GET') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
+       send(res, 200, await report(runId));
+       return;
+     }
+     if (action === 'telemetry') {
+       if (method !== 'GET') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
+       send(res, 200, await telemetry(runId));
+       return;
+     }
+     if (action === 'events') {
+       if (method !== 'GET') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
+       await events(runId, res);
+       return;
+     }
+     if (action === 'approve' || action === 'cancel' || action === 'reject') {
+       if (method !== 'POST') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
+       if (action === 'approve') send(res, 200, await approve(runId, approveBody(await readJson(req))));
+       else if (action === 'reject') send(res, 200, await reject(runId, rejectBody(await readJson(req))));
+       else send(res, 200, await cancel(runId));
+       return;
+     }
+     throw new HttpError(404, 'not-found', `no route ${url.pathname}`);
+   };
+ 
+   const server: Server = createServer((req, res) => {
+     route(req, res).catch((error: unknown) => {
+       const http = error instanceof HttpError ? error : new HttpError(500, 'internal', describe(error));
+       if (res.headersSent) {
+         res.end();
+         return;
+       }
+       sendError(res, http);
+     });
+   });
+ 
+   return {
+     listen: async (port, host) => {
+       // The schedule is the service's: what a stop missed is recorded before the first request is taken (D-A-TF-08).
+       scheduler ??= await startSchedules(async () => {
+         const loaded = await loadPolicyFile(options.policyFile);
+         return loaded.ok ? loaded.policy : null;
+       }, components.vault, intake);
+       return new Promise((resolveUrl, reject) => {
+         server.once('error', reject);
+         server.listen(port, host, () => {
+           server.off('error', reject);
+           const address = server.address();
+           if (address === null || typeof address === 'string') {
+             reject(new Error('api server: listening on something other than a TCP port'));
+             return;
+           }
+           const shown = address.family === 'IPv6' ? `[${address.address}]` : address.address;
+           resolveUrl(`http://${shown}:${String(address.port)}`);
+         });
+       });
+     },
+     close: async () => {
+       scheduler?.stop();
+       scheduler = null;
+       for (const res of open) res.end();
+       open.clear();
+       await new Promise<void>((done) => {
+         server.close(() => { done(); });
+         server.closeAllConnections();
+       });
+       await Promise.all([...runs.values()].flatMap((entry) => (entry.drive === null ? [] : [entry.drive])));
+     },
+   };
+ }
+ 
+ /**
+  * An ISO 8601 date-time with `Z` or an offset. Without a zone `Date.parse`
+  * reads a time in the server's own, so one request would name a different
+  * window on every host.
+  */
+
+===== packages/api/src/http/wire.ts =====
+diff --git a/packages/api/src/http/wire.ts b/packages/api/src/http/wire.ts
+index ac61206..d772841 100644
+--- a/packages/api/src/http/wire.ts
++++ b/packages/api/src/http/wire.ts
+@@ -14,6 +14,9 @@ import type { GateFailure } from '../line.js';
+ import type { WorstCaseCost } from '../cost.js';
+ import type { RequestedArtifacts, RunOutcome, RunStanding } from '../run.js';
+ 
++/** `GET /runs/:id/draft`: a draft for a person to read before deciding it (R55). */
++export type { DraftQuestions, DraftView } from '../draft-view.js';
++
+ /** `POST /runs`. The components and the policy are the server's own; a request names neither (D-P9-01). */
+ export interface CreateRunBody {
+   /** Absolute, on the server's host. */
+
+===== packages/api/src/index.ts =====
+diff --git a/packages/api/src/index.ts b/packages/api/src/index.ts
+index ae838d3..37f80b6 100644
+--- a/packages/api/src/index.ts
++++ b/packages/api/src/index.ts
+@@ -40,6 +40,8 @@ export { DRAFT_DIR, defectBytes, defectIntentText, isDraftableDirectory, parseQu
+ export * from './http/server.js';
+ export * from './host/compose.js';
+ export { checkStartup, HOST_VARIABLES, hostFacts, mergeEnvFile, readHostConfig, type HostFacts, type HostVariable } from './host/config.js';
++export { MODEL_KEY_PROBE_URL, probeModelKey, type KeyProbe } from './host/key-probe.js';
++export { awaitingKey, readDraft, type DraftRead } from './draft-view.js';
+ export { CONFIG_DIRECTORY_NAME, DEFAULT_PORT, githubRepository, HOST_ENV_FILE, INIT_GRAPH, initReport, initSetup, NO_UID_CONTAINER_USER, RUN_FILES_DIRECTORY, SETUP_DIRECTORY, stackManifest, stackPolicy, type InitOutcome, type InitRefusal, type InitRequest } from './init.js';
+ export type * from './http/wire.js';
+ export { SCAN_CONFIG, scanTree, type ScanOptions, type ScanOutcome } from './scan.js';
+
+===== packages/api/test/draft-view.test.ts =====
+/**
+ * R55 (#175): the draft a person reads is the draft the hash covers. The
+ * route's own behaviour, through the CLI, is `I9.draft-is-read-through-the-api`.
+ */
+import { createHash } from 'node:crypto';
+import { describe, expect, test } from 'vitest';
+import type { DraftAttempt, RunId, RunState, VaultRef } from '@olympus-ai/core';
+import { draftDigest, type DraftFile, type DraftRecord, type Vault } from '@olympus-ai/vault';
+import { awaitingKey, readDraft, specDraftPaths, type RunStanding } from '../src/index.js';
+
+const RUN = 'run-r55' as RunId;
+const REF = { runId: RUN, kind: 'draft', hash: 'a'.repeat(64) } as VaultRef;
+
+function file(path: string, text: string): DraftFile {
+  const bytes = Buffer.from(text, 'utf8');
+  return { path, sha256: createHash('sha256').update(bytes).digest('hex'), base64: bytes.toString('base64') };
+}
+
+const QUESTIONS = { assumptions: [{ point: 'the greeting', chose: 'hello' }], openQuestions: ['which file?'] };
+const SPEC = file(specDraftPaths(RUN).spec, '# spec\n');
+const FILES = [SPEC, file(specDraftPaths(RUN).questions, JSON.stringify(QUESTIONS))];
+
+function record(overrides: Partial<DraftRecord> = {}): DraftRecord {
+  return {
+    runId: RUN, station: 'spec', attempt: 1, sha256: draftDigest(FILES), files: FILES, discarded: [], problems: [],
+    model: {} as DraftRecord['model'], role: {} as DraftRecord['role'], collectedBy: 'runtime',
+    ...overrides,
+  };
+}
+
+function attempt(overrides: Partial<DraftAttempt> = {}): DraftAttempt {
+  return { attempt: 1, draft: REF, sha256: draftDigest(FILES), critic: null, baseRun: null, failed: [], sentBack: null, ...overrides };
+}
+
+function state(attempts: readonly DraftAttempt[]): RunState {
+  return { runId: RUN, drafts: { spec: { attempts, locked: null, parked: false } } } as unknown as RunState;
+}
+
+function vault(stored: unknown): Vault {
+  return { read: () => Promise.resolve(new TextEncoder().encode(JSON.stringify(stored))) } as unknown as Vault;
+}
+
+describe('readDraft', () => {
+  test('returns the latest recorded draft with its files and the questions part as read', async () => {
+    const read = await readDraft(vault(record()), state([attempt()]), 'spec');
+    expect(read).toEqual({ ok: true, draft: { sha256: draftDigest(FILES), attempt: 1 }, files: FILES, questions: { kind: 'read', ...QUESTIONS } });
+  });
+
+  test('an attempt that has drafted nothing yet is passed over for the last one that has', async () => {
+    const read = await readDraft(vault(record()), state([attempt(), attempt({ attempt: 2, draft: null, sha256: null, failed: null })]), 'spec');
+    expect(read.ok && read.draft.attempt).toBe(1);
+  });
+
+  test('a station with no draft is no-draft, whether it has no attempts or none recorded', async () => {
+    for (const s of [state([]), state([attempt({ draft: null, sha256: null })]), { runId: RUN, drafts: {} } as unknown as RunState]) {
+      expect(await readDraft(vault(record()), s, 'spec')).toMatchObject({ ok: false, reason: 'no-draft' });
+    }
+    expect(await readDraft(vault(record()), state([attempt()]), 'test-design')).toMatchObject({ ok: false, reason: 'no-draft' });
+  });
+
+  test('bytes, a file list, or a record that does not match the hash run state holds is refused, with no file returned', async () => {
+    const changed = [{ ...SPEC, base64: Buffer.from('other bytes').toString('base64') }, ...FILES.slice(1)];
+    const extra = [...FILES, file('extra.md', 'x')];
+    const cases: unknown[] = [
+      record({ files: changed }),
+      record({ files: extra }),
+      record({ files: extra, sha256: draftDigest(extra) }),
+      record({ attempt: 2 }),
+      record({ station: 'test-design' }),
+      record({ runId: 'another-run' as RunId }),
+      { ...record(), files: 'none' },
+    ];
+    for (const stored of cases) {
+      const read = await readDraft(vault(stored), state([attempt()]), 'spec');
+      expect(read, JSON.stringify(stored).slice(0, 80)).toMatchObject({ ok: false, reason: 'mismatch' });
+      expect(read).not.toHaveProperty('files');
+    }
+    const unreadable = { read: () => Promise.reject(new Error('no such object')) } as unknown as Vault;
+    expect(await readDraft(unreadable, state([attempt()]), 'spec')).toMatchObject({ ok: false, reason: 'mismatch' });
+  });
+
+  test('a questions file the runtime cannot read is unreadable, and a draft without one has none', async () => {
+    for (const text of ['not json', '{"openQuestions": []}', '[]']) {
+      const files = [SPEC, file(specDraftPaths(RUN).questions, text)];
+      const read = await readDraft(vault(record({ files, sha256: draftDigest(files) })), state([attempt({ sha256: draftDigest(files) })]), 'spec');
+      expect(read.ok && read.questions).toEqual({ kind: 'unreadable' });
+    }
+    const files = [SPEC];
+    const read = await readDraft(vault(record({ files, sha256: draftDigest(files) })), state([attempt({ sha256: draftDigest(files) })]), 'spec');
+    expect(read.ok && read.questions).toEqual({ kind: 'none' });
+  });
+});
+
+describe('awaitingKey', () => {
+  const draft = { sha256: 'h', attempt: 2 };
+  const waiting = { standing: 'awaiting-approval', key: 'spec:1', escalations: [], draft: { station: 'spec', draft, failed: [], problems: [], critic: null, attemptsLeft: 1 } } as RunStanding;
+
+  test('is the key only where the standing names this station, hash, and attempt as the draft waiting', () => {
+    expect(awaitingKey(waiting, 'spec', draft)).toBe('spec:1');
+    expect(awaitingKey(waiting, 'spec', { sha256: 'h', attempt: 1 })).toBeNull();
+    expect(awaitingKey(waiting, 'spec', { sha256: 'other', attempt: 2 })).toBeNull();
+    expect(awaitingKey(waiting, 'test-design', draft)).toBeNull();
+    expect(awaitingKey({ standing: 'open' }, 'spec', draft)).toBeNull();
+    expect(awaitingKey({ standing: 'awaiting-approval', key: 'integrate:1', escalations: [], draft: null }, 'spec', draft)).toBeNull();
+  });
+});
+
+===== packages/api/test/host-config.test.ts =====
+diff --git a/packages/api/test/host-config.test.ts b/packages/api/test/host-config.test.ts
+index 659ad82..8350954 100644
+--- a/packages/api/test/host-config.test.ts
++++ b/packages/api/test/host-config.test.ts
+@@ -21,6 +21,9 @@ const documented = (v: (typeof HOST_VARIABLES)[number]): string => (v.prefix ===
+ /** A host with uids, as Linux and macOS are: the container user is optional there, so these tests are the same on every OS. */
+ const HAS_UIDS: HostFacts = { uids: true };
+ 
++/** The provider's answer, stood in for: the key in `FULL` is not a real one, and `I5.host-refuses-a-rejected-key` owns that check (R55). */
++const ACCEPTED = (): Promise<null> => Promise.resolve(null);
++
+ const FULL: Record<string, string> = {
+   FACTORY_API_TOKEN: 'x'.repeat(32), FACTORY_LISTEN_PORT: '7300', FACTORY_POLICY_FILE: '/p.yaml', FACTORY_ROLES_DIR: '/roles',
+   FACTORY_VAULT_STORE: '/store', FACTORY_REPOSITORY: '/repo', FACTORY_TREES: '/trees', ANTHROPIC_API_KEY: 'k',
+@@ -138,35 +141,35 @@ describe('the symlink probe (#28, #123)', () => {
+ describe('every start-up problem in one list (review: codex-5)', () => {
+   test('a missing variable, a short token, an unreadable endpoint file, and trees that cannot hold a link are listed together', async () => {
+     const dir = await mkdtemp(join(tmpdir(), 'r35-startup-'));
+     try {
+       const blocker = join(dir, 'a-file');
+       await writeFile(blocker, 'not a directory');
+       const { FACTORY_GIT_TOKEN: _token, ...rest } = FULL;
+       const result = await checkStartup({
+         ...rest, FACTORY_API_TOKEN: 'short', FACTORY_TREES: join(blocker, 'trees'),
+         FACTORY_ENDPOINT_CONFIG: join(dir, 'no-such-endpoint.json'), FACTORY_ENDPOINT_KEY: 'k',
+-      }, undefined, HAS_UIDS);
++      }, undefined, HAS_UIDS, ACCEPTED);
+       expect(result.ok).toBe(false);
+       if (result.ok) return;
+       const text = result.problems.join('\n');
+       expect(text).toMatch(/FACTORY_GIT_TOKEN is not set/u);
+       expect(text).toMatch(/FACTORY_API_TOKEN is shorter than 32 characters/u);
+       expect(text).toMatch(/FACTORY_ENDPOINT_CONFIG \(.*no-such-endpoint\.json\)/u);
+       expect(text).toMatch(/cannot hold a symbolic link/u);
+       expect(result.problems).toHaveLength(4);
+     } finally {
+       await rm(dir, { recursive: true, force: true });
+     }
+   });
+ 
+   test('a configuration with every check passing is returned with its settings', async () => {
+     const dir = await mkdtemp(join(tmpdir(), 'r35-startup-'));
+     try {
+-      const result = await checkStartup({ ...FULL, FACTORY_TREES: join(dir, 'trees') }, undefined, HAS_UIDS);
++      const result = await checkStartup({ ...FULL, FACTORY_TREES: join(dir, 'trees') }, undefined, HAS_UIDS, ACCEPTED);
+       expect(result.ok).toBe(true);
+       if (result.ok) expect(result.settings.trees).toBe(join(dir, 'trees'));
+     } finally {
+       await rm(dir, { recursive: true, force: true });
+     }
+   });
+ });
+
+===== packages/api/test/paid/key-probe.paid.test.ts =====
+/**
+ * R55 (#176): the start-up key check against the real provider.
+ *
+ * **This file needs `ANTHROPIC_API_KEY` and is never skipped.** It spends
+ * nothing: the check is one `GET` of the model list. It is in the paid suite
+ * because that suite is the only place a real key exists, so this is where
+ * "the provider accepts a valid key at this route" is run rather than read
+ * from the provider's documentation (D-R55-04, C8).
+ */
+import { expect, test } from 'vitest';
+import { probeModelKey } from '../../src/host/key-probe.js';
+
+test('the real provider accepts the real key at the start-up check, and rejects a made-up one', async () => {
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (key === undefined || key === '') throw new Error('the key check needs ANTHROPIC_API_KEY; it is never skipped');
+  expect(await probeModelKey(key)).toBeNull();
+  const refused = await probeModelKey(`${key.slice(0, 8)}-made-up-for-the-key-check`);
+  expect(refused).toMatch(/^ANTHROPIC_API_KEY was rejected by api\.anthropic\.com \(401\)/u);
+  expect(refused).not.toContain(key);
+});
+
+===== packages/cli/src/cli.ts =====
+diff --git a/packages/cli/src/cli.ts b/packages/cli/src/cli.ts
+index 27904ab..92de219 100644
+--- a/packages/cli/src/cli.ts
++++ b/packages/cli/src/cli.ts
+@@ -11,6 +11,7 @@
+ import { readFile } from 'node:fs/promises';
+ import { parseArgs, parseEnv } from 'node:util';
+ import type { ApproveBody, CreateRunBody, DismissBody, ErrorBody, RejectBody, TelemetryExport } from '@olympus-ai/api';
++import { draftLines, isDraftView } from './draft.js';
+ 
+ export interface CliIo {
+   readonly env: Readonly<Record<string, string | undefined>>;
+@@ -45,68 +46,69 @@ export interface Command {
+ /**
+  * Every command and its flags (R35, #126): the parser's options are built
+  * from this table and `<command> --help` prints it, so a flag cannot be
+  * accepted without being documented, or documented without being accepted.
+  */
+ export const COMMANDS: readonly Command[] = [
+   {
+     name: 'create', args: '', summary: 'admit a run; a refusal names what to fix',
+     flags: {
+       workspace: { type: 'string', value: '<abs path>', help: 'required: the host\'s FACTORY_REPOSITORY, as an absolute path' },
+       'base-commit': { type: 'string', value: '<sha>', help: 'required: the commit the run starts from, as a full sha' },
+       level: { type: 'string', value: '<0-3>', help: 'required: the autonomy level asked for; more than policy allows is refused' },
+       spec: { type: 'string', multiple: true, value: '<path>', help: 'a spec file, relative to the workspace; repeatable; or --draft-spec' },
+       tests: { type: 'string', multiple: true, value: '<path>', help: 'an acceptance-test file, relative to the workspace; repeatable; or --draft-tests' },
+       manifest: { type: 'string', value: '<path>', help: 'required: the verification manifest, the checks the runtime runs' },
+       graph: { type: 'string', value: '<path>', help: 'required: the task graph' },
+       'security-part': { type: 'string', value: '<path>', help: 'the spec\'s security part; without it the run is refused at the spec exit' },
+       'run-requirements': { type: 'string', value: '<path>', help: 'the spec\'s run-requirements part' },
+       questions: { type: 'string', value: '<path>', help: 'the spec\'s questions part' },
+       'acceptance-manifest': { type: 'string', value: '<path>', help: 'the acceptance checks\' manifest, run on the base before build' },
+       'approve-cost': { type: 'string', value: '<usd>', help: 'approves the worst-case cost in US dollars, the figure a refused create prints' },
+       'draft-spec': { type: 'boolean', help: 'draft the spec on the line from --intent instead of naming it; needs FACTORY_RUBRICS_DIR' },
+       'draft-tests': { type: 'boolean', help: 'draft the acceptance tests on the line instead of naming them' },
+       intent: { type: 'string', value: '<text>', help: 'what the run is for, the text a drafted spec is written from' },
+     },
+   },
+   { name: 'status', args: '<run id>', summary: 'the run\'s station, tasks, and gates', flags: {} },
++  { name: 'draft', args: '<run id> <station>', summary: 'print a draft\'s files and questions, to read before deciding it; <station> is spec or test-design', flags: {} },
+   {
+     name: 'approve', args: '<run id> <station:level>', summary: 'pass a gate the policy holds for a person',
+-    flags: { draft: { type: 'string', value: '<hash>', help: 'the draft approved, as status names it, at a drafting station' } },
++    flags: { draft: { type: 'string', value: '<hash>', help: 'the draft approved, as status and draft name it, at a drafting station' } },
+   },
+   {
+     name: 'reject', args: '<run id> <station:level>', summary: 'send a draft back',
+     flags: {
+       draft: { type: 'string', value: '<hash>', help: 'required: the draft rejected' },
+       notes: { type: 'string', value: '<text>', help: 'at spec: what to change' },
+       reason: { type: 'string', value: '<reason>', help: 'at test-design: not-black-box, does-not-follow-spec, not-runnable, or misses-spec-cases' },
+     },
+   },
+   { name: 'cancel', args: '<run id>', summary: 'stop a run', flags: {} },
+   { name: 'events', args: '<run id>', summary: 'stream the run\'s events, one line each', flags: {} },
+   { name: 'report', args: '<run id>', summary: 'cost, cache-hit rate, gates, iterations, mismatches, refusals, and the merge, from the Vault', flags: {} },
+   {
+     name: 'outcomes', args: '', summary: 'safety and throughput rates over every run, each with its sample and bound',
+     flags: {
+       from: { type: 'string', value: '<time>', help: 'only runs admitted at or after this ISO time' },
+       to: { type: 'string', value: '<time>', help: 'only runs admitted before this ISO time' },
+     },
+   },
+   { name: 'findings', args: '', summary: 'every located review, critic, and nightly finding, and whether it is open, resolved, or dismissed', flags: {} },
+   {
+     name: 'dismiss-finding', args: '<finding id>', summary: 'record that a finding will not be worked, with a cause and no text',
+     flags: { cause: { type: 'string', value: '<cause>', help: 'required: not-a-defect, duplicate, insufficient-detail, or not-reproducible' } },
+   },
+   {
+     name: 'telemetry', args: '<run id>...', summary: 'a finished run as OTLP/JSON traces and metrics, printed or sent to a collector',
+     flags: {
+       endpoint: { type: 'string', value: '<otlp url>', help: 'send to <url>/v1/traces and /v1/metrics (or OTEL_EXPORTER_OTLP_ENDPOINT)' },
+       header: { type: 'string', multiple: true, value: '<name=value>', help: 'a collector header; repeatable (or OTEL_EXPORTER_OTLP_HEADERS)' },
+     },
+   },
+   {
+     name: 'readiness', args: '', summary: 'the autonomy ceiling the host\'s repository supports at a commit, with every probe\'s outcome',
+     flags: { revision: { type: 'string', value: '<rev>', help: 'the revision scanned; default HEAD of the host\'s FACTORY_REPOSITORY' } },
+   },
+ ];
+ 
+ /** The flags every command takes, read before the command's own. */
+@@ -496,101 +498,113 @@ async function telemetry(io: CliIo, t: Target, args: string[]): Promise<ExitCode
+ export async function runCli(argv: readonly string[], io: CliIo): Promise<ExitCode> {
+   try {
+     const { values, positionals } = parseArgs({
+       args: [...argv],
+       strict: false,
+       allowPositionals: true,
+       options: { url: { type: 'string' }, token: { type: 'string' }, 'env-file': { type: 'string' }, help: { type: 'boolean' } },
+     });
+     const [command] = positionals;
+     if (command === undefined) {
+       io.out(USAGE);
+       return values.help === true ? 0 : 2;
+     }
+     const row = COMMANDS.find((c) => c.name === command);
+     if (row === undefined) throw new UsageError(`unknown command '${command}'`);
+     // Help needs no server: it is printed from the table before a URL or token is asked for.
+     if (values.help === true) {
+       io.out(commandHelp(row));
+       return 0;
+     }
+     // What remains once the global options are taken out: the command's own arguments.
+     const own = stripGlobals(argv).slice(1);
+     const t = await target({
+       url: typeof values.url === 'string' ? values.url : undefined,
+       token: typeof values.token === 'string' ? values.token : undefined,
+       envFile: typeof values['env-file'] === 'string' ? values['env-file'] : undefined,
+     }, io.env);
+     switch (command) {
+       case 'create':
+         return await create(io, t, own);
+       case 'status': {
+         const [runId = ''] = one(parseOwn(command, own).positionals, ['<run id>']);
+         return report(io, await call(io, t, 'GET', runPath(runId)));
+       }
++      case 'draft': {
++        // One request; the draft comes from the API, never from the store (I9, R55).
++        const [runId = '', station = ''] = one(parseOwn(command, own).positionals, ['<run id>', '<station>']);
++        const res = await call(io, t, 'GET', `${runPath(runId, 'draft')}?${new URLSearchParams({ station }).toString()}`);
++        if (res.status < 200 || res.status >= 300) return report(io, res);
++        if (!isDraftView(res.body)) {
++          io.err('the API answered something that is not a draft');
++          return 1;
++        }
++        for (const line of draftLines(res.body, COMMAND)) io.out(line);
++        return 0;
++      }
+       case 'approve': {
+         const { values: flags, positionals: named } = parseOwn(command, own);
+         const [runId = '', key = ''] = one(named, ['<run id>', '<station:level>']);
+         const draft = str(flags, 'draft');
+         const body: ApproveBody = { key: key as ApproveBody['key'], ...(draft === undefined ? {} : { draft }) };
+         return report(io, await call(io, t, 'POST', runPath(runId, 'approve'), body));
+       }
+       case 'reject': {
+         const { values: flags, positionals: named } = parseOwn(command, own);
+         const [runId = '', key = ''] = one(named, ['<run id>', '<station:level>']);
+         const notes = str(flags, 'notes');
+         const reason = str(flags, 'reason');
+         const body: RejectBody = {
+           key: key as RejectBody['key'],
+           draft: required(str(flags, 'draft'), '--draft'),
+           ...(notes === undefined ? {} : { notes }),
+           ...(reason === undefined ? {} : { reason: reason as NonNullable<RejectBody['reason']> }),
+         };
+         return report(io, await call(io, t, 'POST', runPath(runId, 'reject'), body));
+       }
+       case 'cancel': {
+         const [runId = ''] = one(parseOwn(command, own).positionals, ['<run id>']);
+         return report(io, await call(io, t, 'POST', runPath(runId, 'cancel')));
+       }
+       case 'events': {
+         const [runId = ''] = one(parseOwn(command, own).positionals, ['<run id>']);
+         return await events(io, t, runId);
+       }
+       case 'report': {
+         const [runId = ''] = one(parseOwn(command, own).positionals, ['<run id>']);
+         return report(io, await call(io, t, 'GET', runPath(runId, 'report')));
+       }
+       case 'outcomes':
+         return await outcomes(io, t, own);
+       case 'findings': {
+         const { positionals: named } = parseOwn(command, own);
+         if (named.length > 0) throw new UsageError(`findings takes no positional arguments: ${named.join(' ')}`);
+         return report(io, await call(io, t, 'GET', 'findings'));
+       }
+       case 'dismiss-finding': {
+         const { values: flags, positionals: named } = parseOwn(command, own);
+         const [id = ''] = one(named, ['<finding id>']);
+         const body: DismissBody = { cause: required(str(flags, 'cause'), '--cause') as DismissBody['cause'] };
+         return report(io, await call(io, t, 'POST', `findings/${encodeURIComponent(id)}/dismiss`, body));
+       }
+       case 'telemetry':
+         return await telemetry(io, t, own);
+       case 'readiness': {
+         const { values: flags, positionals: named } = parseOwn(command, own);
+         if (named.length > 0) throw new UsageError(`readiness takes no positional arguments: ${named.join(' ')}`);
+         return await readiness(io, t, str(flags, 'revision'));
+       }
+       default:
+         throw new UsageError(`'${command}' is in the command table but has no handler`);
+     }
+   } catch (error) {
+     if (error instanceof UsageError || (error instanceof TypeError && 'code' in error && String(error.code).startsWith('ERR_PARSE_ARGS'))) {
+       io.err(error.message);
+       io.err(USAGE);
+       return 2;
+     }
+     io.err(`could not reach the API: ${error instanceof Error ? error.message : 'unknown error'}`);
+     return 2;
+   }
+ }
+ 
+ /** The argument vector without `--url`, `--token`, and their values, in either `--flag value` or `--flag=value` form. */
+
+===== packages/cli/src/draft.ts =====
+/**
+ * A draft as a person reads it before deciding it (R55, #175): the answer of
+ * `GET /runs/:id/draft`, printed as text. The files are a model's, so nothing
+ * of them reaches the terminal as written: a character that moves the cursor,
+ * hides text, or reorders a line is printed as an escape, and every line of a
+ * file sits behind a margin, so it cannot pass as one of this command's own
+ * lines. What a person reads is then what the hash they approve covers.
+ */
+import type { DraftView } from '@olympus-ai/api';
+
+/**
+ * Whether a character moves the cursor, hides, or reorders text on a
+ * terminal: the control characters, the zero-width and direction marks, and
+ * the direction overrides and isolates.
+ */
+function unprintable(code: number): boolean {
+  return code < 0x20 || (code >= 0x7f && code <= 0x9f) || (code >= 0x200b && code <= 0x200f) || (code >= 0x202a && code <= 0x202e) || (code >= 0x2060 && code <= 0x2069) || code === 0xfeff;
+}
+
+/** `text` with every unprintable character but those in `keep` written as a `\u{..}` escape. */
+export function visible(text: string, keep = ''): string {
+  let out = '';
+  for (const char of text) {
+    const code = char.codePointAt(0) ?? 0;
+    out += unprintable(code) && !keep.includes(char) ? `\\u{${code.toString(16)}}` : char;
+  }
+  return out;
+}
+
+/** Whether a response body has a draft's shape; anything else is reported, not printed as one. */
+export function isDraftView(value: unknown): value is DraftView {
+  if (typeof value !== 'object' || value === null) return false;
+  const v = value as { [K in keyof DraftView]?: unknown };
+  const draft = v.draft as { sha256?: unknown; attempt?: unknown } | null | undefined;
+  const questions = v.questions as { kind?: unknown } | null | undefined;
+  return typeof v.runId === 'string' && typeof v.station === 'string'
+    && typeof draft?.sha256 === 'string' && typeof draft.attempt === 'number'
+    && (v.awaiting === null || typeof v.awaiting === 'string')
+    && Array.isArray(v.files) && v.files.every((f: { path?: unknown; sha256?: unknown; base64?: unknown } | null) => typeof f?.path === 'string' && typeof f.sha256 === 'string' && typeof f.base64 === 'string')
+    && (questions?.kind === 'none' || questions?.kind === 'unreadable' || questions?.kind === 'read');
+}
+
+/**
+ * The lines the command prints: the hash and whether the draft is waiting,
+ * each file behind a `| ` margin, then the questions part as the runtime
+ * read it. `command` is the executable's name, for the approval it suggests.
+ */
+export function draftLines(view: DraftView, command: string): string[] {
+  const run = visible(view.runId);
+  const lines = [
+    `run ${run}: the ${visible(view.station)} draft, attempt ${String(view.draft.attempt)}`,
+    `hash ${visible(view.draft.sha256)}`,
+    view.awaiting === null
+      ? 'not waiting for a decision: status names the draft that is, if one is'
+      : `waiting for a decision at ${visible(view.awaiting)}; to approve it: ${command} approve ${run} ${visible(view.awaiting)} --draft ${visible(view.draft.sha256)}`,
+  ];
+  for (const file of view.files) {
+    const bytes = Buffer.from(file.base64, 'base64');
+    lines.push('', `file ${visible(file.path)} (${String(bytes.length)} bytes, sha256 ${visible(file.sha256)})`);
+    let text: string;
+    try {
+      text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    } catch {
+      lines.push('| (not UTF-8 text; not shown)');
+      continue;
+    }
+    if (text === '') {
+      lines.push('| (empty)');
+      continue;
+    }
+    const content = text.split(/\r?\n/u);
+    if (content.at(-1) === '') content.pop();
+    for (const line of content) lines.push(`| ${visible(line, '\t')}`);
+  }
+  lines.push('');
+  const { questions } = view;
+  if (questions.kind === 'none') {
+    lines.push('questions: this draft has no questions part');
+  } else if (questions.kind === 'unreadable') {
+    lines.push('questions: the questions file could not be read as a questions part; it is printed above as written');
+  } else {
+    lines.push(`open questions: ${questions.openQuestions.length === 0 ? 'none' : String(questions.openQuestions.length)}`);
+    questions.openQuestions.forEach((question, i) => lines.push(`  ${String(i + 1)}. ${visible(question)}`));
+    lines.push(`assumptions: ${questions.assumptions.length === 0 ? 'none' : String(questions.assumptions.length)}`);
+    questions.assumptions.forEach((a, i) => lines.push(`  ${String(i + 1)}. ${visible(a.point)}`, `     chose: ${visible(a.chose)}`));
+  }
+  return lines;
+}
+
+===== packages/cli/test/draft.test.ts =====
+/**
+ * R55 (#175): what `draft` asks the API for and what it prints. A draft is a
+ * model's text, so what reaches the terminal is checked character by
+ * character here; the command against a real server is the conformance
+ * registry's `I9.draft-is-read-through-the-api`.
+ */
+import { describe, expect, test } from 'vitest';
+import type { DraftView } from '@olympus-ai/api';
+import { runCli, type CliIo } from '../src/cli.js';
+import { draftLines, visible } from '../src/draft.js';
+
+const b64 = (text: string | Uint8Array): string => Buffer.from(text).toString('base64');
+
+const VIEW = {
+  runId: 'run-1', station: 'spec', draft: { sha256: 'abc123', attempt: 2 }, awaiting: 'spec:1',
+  files: [{ path: '.drafts/run-1/spec.md', sha256: 'f1', base64: b64('# spec\n\nSay hello.\n') }],
+  questions: { kind: 'read', assumptions: [{ point: 'the greeting', chose: 'hello' }], openQuestions: ['which file?'] },
+} as unknown as DraftView;
+
+interface Asked { url: string; method: string | undefined }
+
+function answering(status: number, body: unknown): { io: CliIo; out: string[]; err: string[]; asked: Asked[] } {
+  const out: string[] = [];
+  const err: string[] = [];
+  const asked: Asked[] = [];
+  const io: CliIo = {
+    env: {},
+    out: (line) => { out.push(line); },
+    err: (line) => { err.push(line); },
+    fetch: ((u: URL | string, init?: RequestInit) => { asked.push({ url: String(u), method: init?.method }); return Promise.resolve(new Response(JSON.stringify(body), { status })); }) as typeof fetch,
+  };
+  return { io, out, err, asked };
+}
+
+/** The executable's name, alone in its string: the one spelling the I10 scan exempts. */
+const NAME = 'olympus-ai';
+
+const TARGET = ['--url', 'http://127.0.0.1:1', '--token', 't'];
+
+/** The characters a line printed for a person must not hold: controls, and the marks that hide or reorder text. */
+function hidden(line: string): boolean {
+  return Array.from(line).some((char) => {
+    const code = char.codePointAt(0) ?? 0;
+    return (code < 0x20 && code !== 0x09) || (code >= 0x7f && code <= 0x9f) || (code >= 0x200b && code <= 0x200f) || (code >= 0x202a && code <= 0x202e) || (code >= 0x2060 && code <= 0x2069);
+  });
+}
+
+describe('the draft command', () => {
+  test('makes one GET for the run and station, and prints the hash, the approval, each file behind a margin, and the questions', async () => {
+    const api = answering(200, VIEW);
+    expect(await runCli(['draft', 'run-1', 'spec', ...TARGET], api.io)).toBe(0);
+    expect(api.asked).toEqual([{ url: 'http://127.0.0.1:1/runs/run-1/draft?station=spec', method: 'GET' }]);
+    expect(api.out).toEqual([
+      'run run-1: the spec draft, attempt 2',
+      'hash abc123',
+      `waiting for a decision at spec:1; to approve it: ${NAME} approve run-1 spec:1 --draft abc123`,
+      '',
+      'file .drafts/run-1/spec.md (19 bytes, sha256 f1)',
+      '| # spec',
+      '| ',
+      '| Say hello.',
+      '',
+      'open questions: 1',
+      '  1. which file?',
+      'assumptions: 1',
+      '  1. the greeting',
+      '     chose: hello',
+    ]);
+    expect(api.err).toEqual([]);
+  });
+
+  test('a refusal is reported as any other, and a body that is not a draft is not printed as one', async () => {
+    const refused = answering(404, { error: 'not-found', message: 'run run-1 has recorded no draft at spec' });
+    expect(await runCli(['draft', 'run-1', 'spec', ...TARGET], refused.io)).toBe(1);
+    expect(refused.out).toEqual([]);
+    expect(refused.err[0]).toBe('error 404 not-found: run run-1 has recorded no draft at spec');
+    for (const body of [{}, { ...VIEW, files: [{ path: 'p' }] }, { ...VIEW, questions: { kind: 'other' } }, 'text', null]) {
+      const odd = answering(200, body);
+      expect(await runCli(['draft', 'run-1', 'spec', ...TARGET], odd.io)).toBe(1);
+      expect(odd.out).toEqual([]);
+    }
+  });
+
+  test('needs a run and a station', async () => {
+    const api = answering(200, VIEW);
+    expect(await runCli(['draft', 'run-1', ...TARGET], api.io)).toBe(2);
+    expect(api.asked).toEqual([]);
+  });
+});
+
+describe('what a draft may put on a terminal', () => {
+  test('control characters, zero-width marks, and direction overrides are printed as escapes; a tab in a file is kept', () => {
+    expect(visible('a\u001b[2Jb')).toBe('a\\u{1b}[2Jb');
+    expect(visible('x‮y⁦z​﻿')).toBe('x\\u{202e}y\\u{2066}z\\u{200b}\\u{feff}');
+    expect(visible('a\tb\rc\u0000\u007f\u009b')).toBe('a\\u{9}b\\u{d}c\\u{0}\\u{7f}\\u{9b}');
+    expect(visible('a\tb', '\t')).toBe('a\tb');
+    expect(visible('plain text, with é and 日本')).toBe('plain text, with é and 日本');
+  });
+
+  test("a file cannot clear the screen, forge one of the command's lines, or hide in its path or the questions", () => {
+    const hostile = {
+      ...VIEW,
+      files: [
+        { path: 'spec\u001b[1A.md', sha256: 'f1', base64: b64('safe\u001b[2J\nhash 0000\nfile other.md (1 bytes, sha256 x)\r\nlast\rline') },
+        { path: 'binary', sha256: 'f2', base64: b64(new Uint8Array([0xff, 0xfe, 0x00])) },
+        { path: 'empty', sha256: 'f3', base64: '' },
+      ],
+      questions: { kind: 'read', assumptions: [{ point: 'p\nhash 1111', chose: 'c‮' }], openQuestions: ['q\u001b[2K'] },
+    } as unknown as DraftView;
+    const lines = draftLines(hostile, NAME);
+    for (const line of lines) expect(hidden(line), line).toBe(false);
+    expect(lines.filter((l) => l.startsWith('hash '))).toEqual(['hash abc123']);
+    expect(lines.filter((l) => l.startsWith('file '))).toHaveLength(3);
+    expect(lines).toContain('file spec\\u{1b}[1A.md (63 bytes, sha256 f1)');
+    expect(lines).toContain('| safe\\u{1b}[2J');
+    expect(lines).toContain('| hash 0000');
+    expect(lines).toContain('| file other.md (1 bytes, sha256 x)');
+    expect(lines).toContain('| last\\u{d}line');
+    expect(lines).toContain('| (not UTF-8 text; not shown)');
+    expect(lines).toContain('| (empty)');
+    expect(lines).toContain('  1. q\\u{1b}[2K');
+    expect(lines).toContain('  1. p\\u{a}hash 1111');
+    expect(lines).toContain('     chose: c\\u{202e}');
+  });
+
+  test('a draft that is not waiting says so, and one with no questions part or an unreadable one says which', () => {
+    expect(draftLines({ ...VIEW, awaiting: null }, NAME)[2]).toBe('not waiting for a decision: status names the draft that is, if one is');
+    expect(draftLines({ ...VIEW, questions: { kind: 'none' } }, NAME).at(-1)).toBe('questions: this draft has no questions part');
+    expect(draftLines({ ...VIEW, questions: { kind: 'unreadable' } }, NAME).at(-1)).toMatch(/could not be read as a questions part/u);
+  });
+});
+
+===== packages/conformance/src/registry/draft-read.ts =====
+/**
+ * R55 (#175): a person asked to approve a draft can read it. The CLI, as its
+ * own process given only a URL and a token, prints the draft waiting at a
+ * station; the bytes it prints are the bytes the hash `status` names covers;
+ * and the service refuses, rather than shows, a draft whose stored bytes no
+ * longer hash to that hash (I9, I5, I3).
+ */
+import { createHash } from 'node:crypto';
+import { join } from 'node:path';
+import type { DraftView, RunView } from '@olympus-ai/api';
+import type { VaultRef } from '@olympus-ai/core';
+import type { DraftRecord, Vault } from '@olympus-ai/vault';
+import { runtime } from '../kit/assert.js';
+import type { LocalAssertion } from '../kit/types.js';
+import { admitAndDrive, awaiting, drafting, helloSpec, lastAttempt } from './drafting.js';
+import { cli } from './headless.js';
+import { withLine } from './line.js';
+
+const api = async () => import('@olympus-ai/api');
+
+const TOKEN = 'conformance-draft-read-token-0123456789';
+
+/** A Vault that returns one record with a file's bytes changed and every recorded hash left as it was. */
+function withChangedBytes(vault: Vault, ref: VaultRef): Vault {
+  return new Proxy(vault, {
+    get(target, name, receiver) {
+      const value: unknown = Reflect.get(target, name, receiver);
+      if (name !== 'read' || typeof value !== 'function') return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+      return async (asked: VaultRef): Promise<Uint8Array> => {
+        const bytes = await target.read(asked);
+        if (asked.kind !== ref.kind || asked.hash !== ref.hash) return bytes;
+        const record = JSON.parse(new TextDecoder().decode(bytes)) as DraftRecord;
+        const [first, ...rest] = record.files;
+        if (first === undefined) throw new Error('R55 control: the draft recorded holds no file');
+        const changed = { ...record, files: [{ ...first, base64: Buffer.from('bytes nobody hashed').toString('base64') }, ...rest] };
+        return new TextEncoder().encode(JSON.stringify(changed));
+      };
+    },
+  });
+}
+
+export const DRAFT_IS_READ_THROUGH_THE_API: LocalAssertion = runtime({
+  id: 'I9.draft-is-read-through-the-api',
+  title:
+    "the CLI, a separate process given only a URL and a token, prints the draft waiting at a station: the hash status names, the key it waits at, and every line of every file; " +
+    "the bytes the API returns hash to that hash; a station that drafts nothing, a station with no draft, and a request with no token are refused; " +
+    'and a draft whose stored bytes no longer hash to the recorded hash is refused with none of them printed (R55, #175)',
+  run: async () => {
+    await withLine('r55-draft-', async (rig) => {
+      const { createApiServer } = await api();
+      const { draftDigest } = await import('@olympus-ai/vault');
+      const r = await drafting(rig);
+      awaiting(await admitAndDrive(r), 'spec:1', 'a drafted spec');
+      const attempt = lastAttempt(await rig.state(), 'spec');
+      if (attempt.sha256 === null || attempt.draft === null) throw new Error('R55 control: the spec attempt recorded no draft');
+      const hash = attempt.sha256;
+      const components = await r.components();
+      const options = { token: TOKEN, principal: 'conformance', policyFile: join(rig.roles, '..', 'no-policy.yaml'), rolesDirectory: rig.roles };
+      const server = createApiServer({ ...options, components });
+      const url = await server.listen(0, '127.0.0.1');
+      try {
+        const remote = ['--url', url, '--token', TOKEN];
+        const get = async (path: string, token: string | null = TOKEN): Promise<Response> => fetch(`${url}/${path}`, token === null ? {} : { headers: { authorization: `Bearer ${token}` } });
+
+        // What status names is what the route returns, and its bytes hash to it.
+        const status = (await (await get(`runs/${rig.runId}`)).json()) as RunView;
+        const named = status.standing.standing === 'awaiting-approval' ? status.standing.draft?.draft.sha256 : undefined;
+        if (named !== hash) throw new Error(`R55 control: status names the draft ${String(named)}, not the one drafted`);
+        const view = (await (await get(`runs/${rig.runId}/draft?station=spec`)).json()) as DraftView;
+        if (view.draft.sha256 !== named || view.awaiting !== 'spec:1') throw new Error(`I9: the route returned the draft ${view.draft.sha256} waiting at ${String(view.awaiting)}, not the one status names at spec:1`);
+        for (const file of view.files) {
+          if (createHash('sha256').update(Buffer.from(file.base64, 'base64')).digest('hex') !== file.sha256) throw new Error(`I3: the bytes returned for ${file.path} do not hash to its hash`);
+        }
+        if (draftDigest(view.files) !== named) throw new Error('I3: the files returned do not hash to the hash an approval names');
+        if (view.questions.kind !== 'read') throw new Error(`I9: the questions part was returned as ${view.questions.kind}`);
+
+        // The CLI prints it: one process, one URL, one token.
+        const shown = await cli(['draft', rig.runId, 'spec', ...remote]);
+        if (shown.code !== 0) throw new Error(`I9: the CLI's draft command exited ${String(shown.code)}\n${shown.stderr}`);
+        const printed = shown.stdout.split(/\r?\n/u);
+        if (!printed.includes(`hash ${hash}`)) throw new Error(`I9: the CLI did not print the draft's hash\n${shown.stdout}`);
+        if (!printed.some((line) => line.startsWith('waiting for a decision at spec:1') && line.endsWith(`--draft ${hash}`))) throw new Error(`I9: the CLI did not say the draft is waiting at spec:1\n${shown.stdout}`);
+        for (const [path, text] of Object.entries(helloSpec(rig.runId))) {
+          if (!printed.some((line) => line.startsWith(`file ${path} (`))) throw new Error(`I9: the CLI printed no header for ${path}\n${shown.stdout}`);
+          for (const line of text.split('\n').filter((l) => l !== '')) {
+            if (!printed.includes(`| ${line}`)) throw new Error(`I9: the CLI did not print this line of ${path}: ${line}\n${shown.stdout}`);
+          }
+        }
+        if (!printed.some((line) => line.startsWith('open questions:'))) throw new Error(`I9: the CLI printed no questions\n${shown.stdout}`);
+
+        // Refusals: a station that drafts nothing, one with no draft yet, and no token.
+        const notDrafting = await cli(['draft', rig.runId, 'build', ...remote]);
+        if (notDrafting.code !== 1 || !notDrafting.stderr.includes('error 400') || notDrafting.stdout !== '') throw new Error(`I9: a draft asked for at build was not refused as a bad request\n${notDrafting.stderr}`);
+        const none = await cli(['draft', rig.runId, 'test-design', ...remote]);
+        if (none.code !== 1 || !none.stderr.includes('error 404') || none.stdout !== '') throw new Error(`I9: a station with no draft was not refused as not found\n${none.stderr}`);
+        const anonymous = await get(`runs/${rig.runId}/draft?station=spec`, null);
+        if (anonymous.status !== 401) throw new Error(`I9: the draft was returned to a request with no token (${String(anonymous.status)})`);
+      } finally {
+        await server.close();
+      }
+
+      // Bytes that no longer hash to the recorded hash are refused, and none is printed.
+      const tampered = createApiServer({ ...options, components: { ...components, vault: withChangedBytes(components.vault, attempt.draft) } });
+      const tamperedUrl = await tampered.listen(0, '127.0.0.1');
+      try {
+        const refused = await cli(['draft', rig.runId, 'spec', '--url', tamperedUrl, '--token', TOKEN]);
+        if (refused.code !== 1 || !refused.stderr.includes('error 500') || !refused.stderr.includes('refused, not shown')) throw new Error(`I5: a draft whose bytes were changed was not refused\n${refused.stdout}\n${refused.stderr}`);
+        if (refused.stdout !== '' || refused.stderr.includes('nobody hashed')) throw new Error(`I5: bytes that do not hash to the draft's hash were printed\n${refused.stdout}`);
+      } finally {
+        await tampered.close();
+      }
+    });
+  },
+});
+
+export const R55_I9: readonly LocalAssertion[] = [DRAFT_IS_READ_THROUGH_THE_API];
+
+===== packages/conformance/src/registry/headless.ts =====
+diff --git a/packages/conformance/src/registry/headless.ts b/packages/conformance/src/registry/headless.ts
+index 5cded47..1ef357f 100644
+--- a/packages/conformance/src/registry/headless.ts
++++ b/packages/conformance/src/registry/headless.ts
+@@ -45,24 +45,24 @@ function packageDir(name: string): string {
+ interface Ran { readonly code: number | null; readonly stdout: string; readonly stderr: string }
+ 
+ /** One CLI command as its own process: stdin closed, no URL but the one passed, no token but the one passed. */
+-function cli(args: readonly string[]): Promise<Ran> {
++export function cli(args: readonly string[]): Promise<Ran> {
+   const main = join(packageDir('olympus-ai'), 'src', 'main.ts');
+   return new Promise((resolveRan, reject) => {
+     const env: Record<string, string> = {};
+     for (const key of ['PATH', 'Path', 'SystemRoot', 'TEMP', 'TMP', 'HOME', 'USERPROFILE']) {
+       const value = process.env[key];
+       if (value !== undefined) env[key] = value;
+     }
+     const child = spawn(process.execPath, [...NODE_ARGS, main, ...args], { stdio: ['ignore', 'pipe', 'pipe'], env });
+     let stdout = '';
+     let stderr = '';
+     child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf8'); });
+     child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8'); });
+     const timer = setTimeout(() => { child.kill(); reject(new Error(`I9: the CLI did not finish: ${args.join(' ')}`)); }, TIMEOUT_MS);
+     child.on('error', reject);
+     child.on('close', (code) => {
+       clearTimeout(timer);
+       resolveRan({ code, stdout, stderr });
+     });
+   });
+ }
+
+===== packages/conformance/src/registry/i5.ts =====
+diff --git a/packages/conformance/src/registry/i5.ts b/packages/conformance/src/registry/i5.ts
+index c9cb273..7cfb7a4 100644
+--- a/packages/conformance/src/registry/i5.ts
++++ b/packages/conformance/src/registry/i5.ts
+@@ -41,6 +41,7 @@ import { R36A_I5 } from './first-run.js';
+ import { R40_I5 } from './admission-readiness.js';
+ import { R37_I5 } from './gate-retry.js';
+ import { R36B_I5 } from './init.js';
++import { R55_I5 } from './startup-key.js';
+ import { R29_I5 } from './stacks.js';
+ import { R25_ASSERTIONS } from './property.js';
+ import { R28_ASSERTIONS } from './findings.js';
+@@ -64,499 +65,500 @@ const CONTENDERS = 8;
+ /** I5: Fail closed. */
+ export const I5: InvariantEntry = {
+   title: INVARIANTS.I5,
+   assertions: [
+     // R53: the image every driver call ran in, by content (A-R53-01).
+     ...R53_I5,
+     // R24: the target repository's instructions as granted context.
+     ...R24_I5,
+     // R20: the role compiler.
+     // R19: drafting at spec and test-design.
+     // R36a: the pinned CLI calls every tier's model (#152). Paid, under the run-driver label.
+     external({
+       id: 'I5.every-tier-model-callable-by-the-pinned-cli',
+       title:
+         "every tier's model is one the pinned CLI can call: one minimal call per tier through the driver's own image reaches the model the tier resolves to, "
+         + 'so a tier map and a CLI pin that drift apart fail here rather than parking every seat of that tier (#152)',
+       level: 'runtime',
+       package: '@olympus-ai/driver-claude-code',
+       file: 'test/invariants.test.ts',
+     }),
+     ...R19_ASSERTIONS.I5,
+     ...R36A_I5,
+     // R37: a run parked on its gate says which check failed.
+     ...R37_I5,
+     ...R36B_I5,
++    ...R55_I5,
+     ...R16_ASSERTIONS.I5,
+     ...R20_I5,
+     // R22: the trigger framework.
+     ...R22_I5,
+     // R10: the trust ratchet.
+     ...R10_I5,
+     // R13a: the nightly checks that call no model.
+     ...R13A_I5,
+     // R29: every supported stack carries every control the TypeScript set does.
+     ...R29_I5,
+     ...R25_ASSERTIONS.I5,
+     // R28: an unreadable or unlocated finding is never a clean one, and an unknown outcome is open.
+     ...R28_ASSERTIONS.I5,
+     // R34: a lockfile an install cannot verify, or an install that fails a hash, starts no check.
+     ...R34_I5,
+     ...R40_I5,
+     ...R8A_I5,
+     ...R8B_I5,
+     ...R8A_REVIEW_I5,
+     // R13b: the nightly reviewers.
+     ...R13B_I5,
+     // R17: security at the gate.
+     ...R17_I5,
+     // R4: parallel task execution.
+     ...R4_I5,
+     // R2: a rate over nothing, a run refused at admission, and an estimate with no history each refuse to guess.
+     OUTCOMES_REFUSE_WITHOUT_A_SAMPLE,
+     // R12: an unfinished run, an unrecorded time, and a lost reading are refused or marked, never guessed.
+     TELEMETRY_GUESSES_NOTHING,
+     INDETERMINATE_PROBE_LOWERS,
+     UNSUPPORTED_STACK_REFUSES,
+     REFUSAL_NAMES_THE_BOUNDING_TERM,
+     INTEGRATE_MERGES_THE_VERIFIED_TREE,
+     FAILED_INTEGRATION_NEVER_REPORTS_DONE,
+     runtime({
+       id: 'I5.policy-document-load-is-hardened',
+       title: 'policy.yaml is read by a parser pinned to an exact version, and an alias, a document past the byte cap, and nesting past the depth limit are each refused by default and admitted only when that one setting is relaxed',
+       run: assertPolicyLoadIsHardened,
+     }),
+     compileError({
+       id: 'I5.transition-has-no-warn-and-continue',
+       title:
+         'StationTransition advances or refuses with a closed reason and the typed payload that reason names beside a message; there is no warned or degraded advance and no prose-only refusal',
+       fixture: 'i5/transition-has-no-warn-and-continue.ts',
+     }),
+     compileError({
+       id: 'I5.policy-refusal-is-explicit',
+       title: 'PolicyResolution and CapabilityResolution refuse with a reason and detail or succeed with the value; no downgrade marker',
+       fixture: 'i5/policy-refusal-is-explicit.ts',
+     }),
+     compileError({
+       id: 'I5.station-requires-declared-capabilities',
+       title: 'StationContract.requires accepts only keys of DriverCapabilities',
+       fixture: 'i5/station-requires-declared-capabilities.ts',
+     }),
+     compileError({
+       id: 'I5.adapter-set-declares-absent-controls',
+       title: 'AdapterSet slots are T | null, never optional, and unavailableControls() is required',
+       fixture: 'i5/adapter-set-declares-absent-controls.ts',
+     }),
+     compileError({
+       id: 'I5.check-result-declares-suite-count',
+       title: 'CheckResult.suiteCount is required: null is a declared unknown, omission is not representable',
+       fixture: 'i5/check-result-declares-suite-count.ts',
+     }),
+     compileOk({
+       id: 'I5.stubs-declare-unsafe',
+       title:
+         'StubVault, StubSandboxProvider, and StubDriver are each assignable to DeclaresUnsafe: the type shape, which a declare-only field would also satisfy; runtime existence is proved by I5.unsafe-component-refused-above-l1',
+       fixture: 'i5/stubs-declare-unsafe.ts',
+     }),
+     runtime({
+       id: 'I5.unsafe-component-refused-above-l1',
+       title:
+         'startRun with every stub wired is refused at L2 and L3, naming StubVault, StubSandboxProvider, StubDriver, its missing integrator, and its stand-in scanners in that order, before anything is recorded; at L1 the same graph is not refused as unsafe and carries the hello fixture through review to the integrate approval',
+       run: async () => {
+         await withLine('s1-hello-', async (rig) => {
+           const [api, core, sandbox, vault] = await Promise.all([
+             import('@olympus-ai/api'),
+             import('@olympus-ai/core'),
+             import('@olympus-ai/sandbox'),
+             import('@olympus-ai/vault'),
+           ]);
+           // The stub as it is, declaring the tools the rig grants and nothing else of its own, so it is still named StubDriver (D-R36a-07).
+           const stub = Object.assign(Object.create(new core.StubDriver()) as InstanceType<typeof core.StubDriver>, { declaredTools: () => RIG_TOOLS });
+           const stubSandbox = new sandbox.StubSandboxProvider();
+           const builder = doingTheWork(stub, stubSandbox);
+           const components = api.buildGraph({
+             vault: new vault.StubVault(rig.dirs.artifacts),
+             sandbox: stubSandbox,
+             driver: builder,
+             reviewer: builder,
+             workspaces: rig.workspaces,
+             scanners: api.STAND_IN_SCANNERS,
+           });
+ 
+           for (const level of [2, 3] as const) {
+             const outcome = await api.startRun(await rig.request(components, { requestedLevel: level }));
+             if (outcome.ok || outcome.reason !== 'unsafe-above-l1') {
+               const got = outcome.ok ? 'ok' : outcome.reason;
+               throw new Error(`I5: a run at L${String(level)} with every stub wired was not refused as unsafe-above-l1 (got ${got})`);
+             }
+             const names = outcome.unsafe.map((u) => u.component);
+             if (names.join(',') !== SKELETON_COMPONENTS.join(',')) {
+               throw new Error(`I5: the L${String(level)} refusal named [${names.join(', ')}]; expected [${SKELETON_COMPONENTS.join(', ')}]`);
+             }
+             for (const u of outcome.unsafe) {
+               if (u.cannotEnforce.length === 0) throw new Error(`I5: ${u.component} declares itself unsafe but names nothing it cannot enforce`);
+             }
+             let recorded = true;
+             try {
+               await components.vault.readRunState(rig.runId);
+             } catch {
+               recorded = false;
+             }
+             if (recorded) throw new Error(`I5: the L${String(level)} refusal left run state behind`);
+           }
+ 
+           const l1 = await api.startRun(await rig.request(components));
+           if (l1.ok || l1.reason !== 'refused' || l1.at !== 'integrate' || l1.transition.reason !== 'approval-required') {
+             const got = l1.ok ? 'a completed run' : l1.reason === 'refused' ? `${l1.at}: ${l1.transition.reason}` : l1.reason;
+             throw new Error(`I5: the hello fixture at L1 ended as ${got}, not at the integrate approval; a runtime that refuses everything does not satisfy this assertion`);
+           }
+         });
+       },
+     }),
+     runtime({
+       id: 'I5.stale-commit-is-refused-under-contention',
+       title:
+         'concurrent commitRunState calls from separate processes against one ifVersion leave exactly one winner holding the whole record; every loser is refused with a reason rather than silently applied, and a stale commit afterwards stores nothing',
+       run: async () => {
+         await withVaultDirs('p1-i5-contend-', async (dirs, base) => {
+           const runId = 'i5-contend';
+           const outcomes = await contendOnCommit(dirs, base, runId, '0', CONTENDERS);
+ 
+           const winners = outcomes.filter((o) => o.ok);
+           if (winners.length !== 1) {
+             const detail = outcomes.map((o) => `${o.tag}: ${o.ok ? `stored ${String(o.version)}` : `refused (${o.message})`}`);
+             throw new Error(
+               `I5: ${String(CONTENDERS)} processes committed run state from version 0 and ${String(winners.length)} succeeded; ` +
+                 'exactly one may. A lost update is a silent degrade of the only record task status lives in.' +
+                 `\n  ${detail.join('\n  ')}`,
+             );
+           }
+           const [winner] = winners;
+           if (winner === undefined) throw new Error('I5: the winner list has one entry and no entry in it');
+           if (winner.version !== '1') {
+             throw new Error(`I5: the winning commit stored version ${String(winner.version)}, expected 1`);
+           }
+           for (const loser of outcomes.filter((o) => !o.ok)) {
+             if (loser.message === '') {
+               throw new Error(`I5: the refused commit from ${loser.tag} carries no reason; a refusal that says nothing is a silent failure`);
+             }
+           }
+ 
+           // The record that landed must be one writer's whole state, not a
+           // blend: each child tags its own `tasks`, so the stored state names
+           // exactly one of them.
+           const { LocalVault } = await import('@olympus-ai/vault');
+           const vault = new LocalVault(dirs);
+           const stored = await vault.readRunState(runId as RunId);
+           if (stored.version !== '1') throw new Error(`I5: the stored state is at version ${stored.version}, expected 1`);
+           const tags = Object.keys(stored.tasks);
+           if (tags.length !== 1 || tags[0] !== winner.tag) {
+             throw new Error(`I5: the stored state carries tasks [${tags.join(', ')}]; expected only the winner's ${winner.tag}`);
+           }
+ 
+           // The same refusal, uncontended: a commit from a version that has
+           // already been superseded stores nothing at all.
+           let stale = true;
+           try {
+             await vault.commitRunState({ ...stored, version: '0' }, '0');
+           } catch {
+             stale = false;
+           }
+           if (stale) throw new Error('I5: a commit from the superseded version 0 was accepted');
+           const after = await vault.readRunState(runId as RunId);
+           if (after.version !== '1' || Object.keys(after.tasks).join(',') !== winner.tag) {
+             throw new Error(`I5: the refused stale commit changed the store to version ${after.version} with tasks [${Object.keys(after.tasks).join(', ')}]`);
+           }
+         });
+       },
+     }),
+     runtime({
+       id: 'I5.over-request-refused',
+       title:
+         'the real engine refuses a level above the global cap, the station cap, or the role ceiling with reason exceeds-cap, carries no level on the refusal, and grants a request at or below the tightest bound at exactly the level asked for',
+       run: async () => {
+         const { StrictPolicyEngine } = await import('@olympus-ai/core');
+         const engine = new StrictPolicyEngine();
+         const policy = engine.resolvePolicy(grantingDocument());
+ 
+         // Three bounds, three different values, so each refusal names the one
+         // that actually bit. `build` is capped below the role ceiling, which is
+         // itself below the global cap.
+         const overRequests: Array<{ readonly level: AutonomyLevel; readonly station: StationId; readonly bound: string }> = [
+           { level: 2, station: 'build', bound: `the ${String(BUILD_CAP)} cap on build` },
+           { level: 3, station: 'verify', bound: `the role ceiling of ${String(ROLE_CEILING)}` },
+         ];
+         for (const { level, station, bound } of overRequests) {
+           const outcome = engine.resolveAutonomy(level, station, GRANTED_ROLE, policy);
+           if (outcome.ok) {
+             throw new Error(
+               `I5: L${String(level)} at '${station}' was granted at L${String(outcome.level)} against ${bound}. ` +
+                 'An over-request must be refused; a downgrade returns a level the caller never asked for and did not ' +
+                 'agree to, while reporting success.',
+             );
+           }
+           if (outcome.reason !== 'exceeds-cap') {
+             throw new Error(`I5: L${String(level)} at '${station}' was refused as '${outcome.reason}'; expected 'exceeds-cap'`);
+           }
+           if (Object.hasOwn(outcome, 'level')) {
+             throw new Error(`I5: the refusal for L${String(level)} at '${station}' carries a level; there must be nothing on it to mistake for a grant`);
+           }
+           if (outcome.detail === '') {
+             throw new Error(`I5: the refusal for L${String(level)} at '${station}' carries no detail`);
+           }
+         }
+ 
+         // The global cap, which the fixture document sets to the maximum and
+         // so can never bite on its own. Lowered here, it must refuse a request
+         // the station cap and role ceiling would both have allowed.
+         const grounded = engine.resolvePolicy({ ...grantingDocument(), globalCap: 0, stationCaps: {} });
+         const global = engine.resolveAutonomy(1, 'verify', GRANTED_ROLE, grounded);
+         if (global.ok) {
+           throw new Error(`I5: L1 at 'verify' was granted at L${String(global.level)} under a global cap of L0`);
+         }
+         if (global.reason !== 'exceeds-cap') {
+           throw new Error(`I5: a request above the global cap was refused as '${global.reason}'; expected 'exceeds-cap'`);
+         }
+         if (!global.detail.includes('global L0')) {
+           throw new Error(`I5: the refusal does not name the bound that bit: ${global.detail}`);
+         }
+         if (!engine.resolveAutonomy(0, 'verify', GRANTED_ROLE, grounded).ok) {
+           throw new Error('I5: L0 under a global cap of L0 was refused; the cap is a ceiling, not an exclusion');
+         }
+ 
+         // The control: a request within every bound is granted, and granted at
+         // the level requested rather than raised or lowered to a cap. An engine
+         // that refused everything would satisfy the loop above.
+         for (const level of [0, 1] as const) {
+           const outcome = engine.resolveAutonomy(level, 'build', GRANTED_ROLE, policy);
+           if (!outcome.ok) {
+             throw new Error(`I5: L${String(level)} at 'build' is within every bound and was refused (${outcome.reason}: ${outcome.detail})`);
+           }
+           if (outcome.level !== level) {
+             throw new Error(`I5: L${String(level)} at 'build' resolved to L${String(outcome.level)}; a request inside the caps is granted as asked, never adjusted`);
+           }
+         }
+       },
+     }),
+     runtime({
+       id: 'I5.malformed-document-refused-at-resolve',
+       title:
+         'resolvePolicy refuses a value that does not validate as a PolicyDocument, even though the parameter type says it is one, so a caller that asserts past the compiler cannot resolve a grant out of a malformed document; a genuine document still resolves',
+       run: async () => {
+         const { StrictPolicyEngine } = await import('@olympus-ai/core');
+         const engine = new StrictPolicyEngine();
+         const document = grantingDocument();
+         const scope = document.roles[GRANTED_ROLE];
+         if (scope === undefined) throw new Error('I5: the fixture document defines no granted role');
+ 
+         // Each of these is what a caller produces by writing `value as
+         // PolicyDocument`. Without the guard, the first resolves a global cap
+         // of 99 and grants every level; the rest widen a scope the document
+         // never authorised.
+         const rogues: Array<{ readonly what: string; readonly value: unknown }> = [
+           { what: 'a global cap of 99', value: { ...document, globalCap: 99 } },
+           { what: 'a role ceiling of 99', value: { ...document, roles: { [GRANTED_ROLE]: { ...scope, autonomyCeiling: 99 } } } },
+           { what: 'a station id that is not one of the ten', value: { ...document, roles: { [GRANTED_ROLE]: { ...scope, stations: ['deploy'] } } } },
+           { what: 'an unknown top-level key', value: { ...document, backdoor: true } },
+         ];
+         for (const { what, value } of rogues) {
+           let refused = false;
+           try {
+             engine.resolvePolicy(value as never);
+           } catch {
+             refused = true;
+           }
+           if (!refused) {
+             throw new Error(
+               `I5: resolvePolicy accepted ${what}. The parameter type is a compiler claim, and a control that holds ` +
+                 'only while every caller remembers to validate first is not closed.',
+             );
+           }
+         }
+ 
+         // The control: a genuine document resolves. A guard that threw on
+         // everything would satisfy the loop above and break the engine.
+         const policy = engine.resolvePolicy(document);
+         if (policy.globalCap !== document.globalCap) {
+           throw new Error(`I5: a valid document resolved to globalCap ${String(policy.globalCap)}, expected ${String(document.globalCap)}`);
+         }
+       },
+     }),
+     runtime({
+       id: 'I5.malformed-autonomy-level-refused',
+       title:
+         'resolveAutonomy refuses a requested level that is not one of the four, rather than comparing it against the cap: NaN, a negative, and a fraction all survive a numeric comparison and would otherwise be answered with success carrying a level that is not a level',
+       run: async () => {
+         const { AUTONOMY_LEVELS, StrictPolicyEngine } = await import('@olympus-ai/core');
+         const engine = new StrictPolicyEngine();
+         const policy = engine.resolvePolicy(grantingDocument());
+ 
+         for (const [label, level] of [
+           ['NaN', Number.NaN], ['-1', -1], ['2.5', 2.5], ['4', 4],
+         ] as const) {
+           let refused = false;
+           try {
+             const outcome = engine.resolveAutonomy(level as never, 'verify', GRANTED_ROLE, policy);
+             if (outcome.ok) {
+               throw new Error(
+                 `I5: resolveAutonomy answered ${label} with success at level ${String(outcome.level)}. ` +
+                   'An unsupported input is a refusal, and success is the one answer a caller must never get for a ' +
+                   'level nobody can honour.',
+               );
+             }
+           } catch (error) {
+             if (error instanceof Error && error.message.startsWith('I5:')) throw error;
+             refused = true;
+           }
+           if (!refused) throw new Error(`I5: resolveAutonomy returned a refusal rather than refusing ${label} outright`);
+         }
+ 
+         // The control: every real level is still answered normally.
+         for (const level of AUTONOMY_LEVELS) {
+           const outcome = engine.resolveAutonomy(level, 'verify', GRANTED_ROLE, policy);
+           const allowed = level <= ROLE_CEILING;
+           if (outcome.ok !== allowed) {
+             throw new Error(`I5: level ${String(level)} at 'verify' was ${outcome.ok ? 'granted' : 'refused'}, expected the opposite`);
+           }
+         }
+       },
+     }),
+     runtime({
+       id: 'I5.sandbox-egress-allowlist-enforced',
+       title:
+         'a sandbox provisioned with egress mode allowlist reaches the one host it names and no other, by name and by address; ' +
+         'the direct route does not exist, so unsetting every proxy variable reaches nothing; an empty allow list is refused rather ' +
+         'than read as deny-all or allow-all; and deny-all is unchanged, with --network none, no proxy, and no network created',
+       run: async () => {
+         await withProvider('i5-egress-allowlist-', async (provider, dirs) => {
+           // An allowlist that names nothing is refused. It is not deny-all wearing the wrong
+           // name, and it is not permission to reach everything; either reading would be the
+           // silent degrade this invariant exists to refuse (D-P2-07, reversed by P10).
+           const empty = await refusalFrom(() => provider.provision(specFor(dirs, 'rw', { egress: { mode: 'allowlist', allow: [] } })));
+           if (empty.layer !== 'egress') {
+             throw new Error(`I5: an empty allowlist was refused at the ${empty.layer} layer, not the egress layer`);
+           }
+ 
+           // deny-all is untouched by the allowlist existing: no proxy is started beside a
+           // sandbox entitled to no egress, and no network is created for it.
+           await withSandbox(provider, specFor(dirs), async (handle) => {
+             const controls = provider.appliedControls(handle);
+             if (controls.egress.mode !== 'deny-all') {
+               throw new Error(`I5: a deny-all spec was applied as ${controls.egress.mode}`);
+             }
+             // `network: 'none'` is the type's guarantee once the mode is deny-all, so what is
+             // read here is what Docker was actually told and what the container actually got.
+             if (!controls.runArgs.join(' ').includes('--network none')) {
+               throw new Error(`I5: a deny-all sandbox was not started with --network none: ${controls.runArgs.join(' ')}`);
+             }
+             const interfaces = await provider.exec(handle, ['ls', '/sys/class/net']);
+             if (interfaces.stdout.trim().split(/\s+/).join(',') !== 'lo') {
+               throw new Error(`I5: a deny-all sandbox has interfaces [${interfaces.stdout.trim()}]; expected loopback alone`);
+             }
+           });
+ 
+           const name = originName();
+           const handle = await provider.provision(specFor(dirs, 'rw', { egress: { mode: 'allowlist', allow: [name] } }));
+           const { egress } = allowlistControls(provider, handle);
+           try {
+             await withOrigin(egress.proxy.outboundNetwork, name, async (origin) => {
+               // The grant. The body proves the origin answered, not the proxy on its behalf.
+               const reached = await provider.exec(handle, [
+                 'sh', '-c', `wget -T 8 -O - http://${origin.name}:${String(ORIGIN_PORT)}/ 2>&1`,
+               ]);
+               if (!reached.stdout.includes(ORIGIN_BODY)) {
+                 throw new Error(`I5: the allowlisted host was not reached: ${reached.stdout}${reached.stderr}`);
+               }
+ 
+               // Refused by name, and by address. The second is the one that matters: a refusal
+               // that only ever fires on a name is a DNS failure wearing an allowlist's clothes.
+               for (const host of [BLOCKED_NAME, BLOCKED_ADDRESS]) {
+                 const answer = await throughProxy(provider, handle, `GET http://${host}/ HTTP/1.0`);
+                 if (!answer.includes('403') || !answer.includes(host)) {
+                   throw new Error(`I5: ${host} is not on the allowlist and was not refused by name in the answer: ${answer}`);
+                 }
+               }
+ 
+               // The strongest form: the origin's own address, which the proxy demonstrably
+               // reaches, refused for the one reason under test — the address is not on the list.
+               const sameHost = await throughProxy(provider, handle, `GET http://${origin.address}:${String(ORIGIN_PORT)}/ HTTP/1.0`);
+               if (!sameHost.includes('403') || sameHost.includes(ORIGIN_BODY)) {
+                 throw new Error(`I5: a reachable host was allowed by address although only its name was granted: ${sameHost}`);
+               }
+ 
+               // There is nothing to bypass. The internal network carries no default route, so a
+               // process that unsets every proxy variable is left with no second path to take.
+               const routes = await provider.exec(handle, ['sh', '-c', 'ip route']);
+               if (routes.stdout.includes('default')) {
+                 throw new Error(`I5: the sandbox has a default route, so the proxy is a convention rather than the only way out: ${routes.stdout}`);
+               }
+               const bypass = await provider.exec(handle, [
+                 'sh', '-c',
+                 'unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY; ' +
+                   `wget -T 4 -O - http://${origin.address}:${String(ORIGIN_PORT)}/ 2>&1`,
+               ]);
+               if (bypass.exitCode === 0 || bypass.stdout.includes(ORIGIN_BODY)) {
+                 throw new Error(`I5: the allowlisted host was reached with every proxy variable unset: ${bypass.stdout}`);
+               }
+             });
+           } finally {
+             await provider.destroy(handle);
+           }
+ 
+           // The proxy is the sandbox's, and goes with it. One left running is a route off the
+           // host with no workload behind it and nobody watching it.
+           for (const [kind, leaked] of [
+             ['container', egress.proxy.name],
+             ['network', egress.proxy.internalNetwork],
+             ['network', egress.proxy.outboundNetwork],
+           ] as const) {
+             if (await dockerHas(kind, leaked)) throw new Error(`I5: the ${kind} ${leaked} outlived the sandbox it served`);
+           }
+         });
+       },
+     }),
+     STATION_MISSING_CAPABILITY_REFUSED,
+     TASK_ATTEMPTS_ARE_BOUNDED,
+     OVER_REQUEST_REFUSED_AT_ADMISSION,
+     UNSUPPORTED_STACK_IS_LOUD,
+     // P11: a provider with no probe is named, never trusted to observe the product from inside it.
+     HTTP_PROBE_ABSENT_IS_NAMED,
+     ADAPTER_REFUSAL_ENFORCED_AT_ADMISSION,
+     CHECK_COMMAND_HAS_A_GRAMMAR,
+     MISSING_CHECK_OR_SHRUNKEN_SUITE_REFUSES,
+     WORKSPACE_IS_WRITABLE_BY_THE_TASK,
+     // P13: what the relay cannot count, it charges or refuses; it never forwards it free.
+     MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE,
+     // R6: the same, under the openai-chat dialect (A-R6-01).
+     MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE_OPENAI_CHAT,
+     MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE_OPENAI_RESPONSES,
+     // R21: http and no credential are each a declaration, never an inference (A-R21-01, A-R21-02).
+     MODEL_RELAY_REFUSES_AN_UNDECLARED_LOCAL_ENDPOINT,
+     // I1a: what the walking skeleton's own declaration stood in for, each now refusing on its own.
+     UNSAFE_DECLARATION_SURVIVES_COMPOSITION,
+     ADAPTER_REFUSAL_REFUSES_L3_END_TO_END,
+     UNANALYSED_TESTS_ESCALATE_THE_APPROVAL,
+     external({
+       id: 'I5.unanalysed-tests-are-not-reported-clean',
+       title:
+         'an L2 run on the composed host over a repository with no vitest or jest stops at the integrate approval for the unanalysed suite, which escalates an exit that would otherwise advance; paid, one build and one review call',
+       level: 'runtime',
+       package: '@olympus-ai/api',
+       file: 'test/paid/line.paid.test.ts',
+     }),
+     // R36a, extended by R36b: init's output, nothing written by hand, through the real driver to a merged pull request. Paid.
+     external({
+       id: 'I5.init-setup-merges-on-the-real-driver',
+       title:
+         "init's output on a TypeScript repository with vitest, with no file written by hand, drafting the spec and the tests from the README's intent, runs on the composed host with the Claude Code driver in every seat through each gate a person holds at L1 — the drafted spec, the drafted tests, and the merge — to a pull request merged into the base branch; paid (R36a, R36b)",
+       level: 'runtime',
+       package: '@olympus-ai/api',
+       file: 'test/paid/init.paid.test.ts',
+     }),
+     // R15: no default declaration, nothing to reproduce is refused, and a check that did not start is not a failure.
+     BASE_DECLARATION_HAS_NO_DEFAULT,
+     NOTHING_FAILING_ON_THE_BASE_IS_REFUSED,
+     UNSTARTED_BASE_CHECK_REFUSES,
+     SUITE_CHECK_RUNS_WHAT_IT_NAMES,
+   ],
+   pending: [],
+ };
+
+===== packages/conformance/src/registry/i9.ts =====
+diff --git a/packages/conformance/src/registry/i9.ts b/packages/conformance/src/registry/i9.ts
+index 0d62a8a..e192701 100644
+--- a/packages/conformance/src/registry/i9.ts
++++ b/packages/conformance/src/registry/i9.ts
+@@ -5,6 +5,7 @@ import ts from 'typescript';
+ import { workspacePackages, workspaceRelative } from '../kit/workspace.js';
+ import { assertApiRunsHeadless } from './headless.js';
+ import { assertPackagedHostRuns } from './release.js';
++import { R55_I9 } from './draft-read.js';
+ import { SANDBOX_OUTPUT_IS_BOUNDED } from './output.js';
+ 
+ /**
+@@ -119,45 +120,46 @@ function assertHostLogsFailedAttempts(): void {
+ /** I9: The runtime is a service; the CLI is a client. */
+ export const I9: InvariantEntry = {
+   title: INVARIANTS.I9,
+   assertions: [
+     runtime({
+       id: 'I9.core-never-touches-a-terminal',
+       title: 'no file in core imports a terminal module or touches process streams, argv, exit, isTTY, or console, and every .ts under its src is in the scanned program',
+       run: () => {
+         assertNeverTouchesATerminal('@olympus-ai/core');
+       },
+     }),
+     runtime({
+       id: 'I9.api-never-touches-a-terminal',
+       title: 'no file in api imports a terminal module or touches process streams, argv, exit, isTTY, or console, by spelling or by binding, and every .ts under its src is in the scanned program; the one exception is the host executable\'s entry, which exports nothing and may only read its arguments (--env-file), write to stderr (its refusal, the line it prints once listening, and each failed-attempt line the service hands it), and set its exit code (A-HS-01, A-HS-03, D-R36b-05)',
+       run: () => {
+         assertNeverTouchesATerminal('@olympus-ai/api', HOST_ENTRY);
+       },
+     }),
+     runtime({
+       id: 'I9.host-logs-failed-attempts',
+       title: 'the host executable hands the service a log that writes each failed-attempt line to stderr, so an attempt that fails is printed by the process running it (A-HS-03, #149)',
+       run: assertHostLogsFailedAttempts,
+     }),
+     runtime({
+       id: 'I9.api-runs-headless',
+       title: 'the API process, spawned with stdin closed and no TTY, serves a run from create to passed, and the CLI, a separate process given only a URL and a token, drives every step over HTTP',
+       run: assertApiRunsHeadless,
+     }),
+     runtime({
+       id: 'I9.packaged-host-runs',
+-      title: 'the packed packages install into an empty directory; factory-host, started from its installed bin, refuses an empty environment with every required variable in one list and no stack frame, and configured from the shipped examples listens headless; the CLI, from its own installed bin, reaches it over HTTP (R35)',
++      title: 'the packed packages install into an empty directory; factory-host, started from its installed bin, refuses an empty environment with every required variable in one list and no stack frame, and configured from the shipped examples refuses a model key the provider rejects (R55) and otherwise listens headless; the CLI, from its own installed bin, reaches it over HTTP (R35)',
+       run: assertPackagedHostRuns,
+       // Builds, packs, installs, and composes the host, which builds the driver image on a cold Docker cache.
+       timeoutMs: 1_200_000,
+     }),
++    ...R55_I9,
+     compileError({
+       id: 'I9.no-dom-in-lib',
+       title: 'the compiler lib has no DOM: document, window, navigator, localStorage, and addEventListener are unknown names',
+       fixture: 'i9/core-has-no-dom.ts',
+     }),
+     // R14: what a command prints is bounded while it is read, so a check cannot exhaust the runtime's host (D-P8-15).
+     SANDBOX_OUTPUT_IS_BOUNDED,
+   ],
+   pending: [],
+ };
+
+===== packages/conformance/src/registry/init.ts =====
+diff --git a/packages/conformance/src/registry/init.ts b/packages/conformance/src/registry/init.ts
+index 3287e77..5b6758d 100644
+--- a/packages/conformance/src/registry/init.ts
++++ b/packages/conformance/src/registry/init.ts
+@@ -44,50 +44,51 @@ async function init(repository: string, configDirectory: string, hostHasUids = t
+ export const INIT_SETUP_ADMITTED: LocalAssertion = runtime({
+   id: 'I5.init-setup-admitted',
+   title:
+     "init on a TypeScript repository with vitest writes a policy, roles, rubrics, a host environment file the host's start-up checks accept, and a manifest and graph under .factory/ that admission accepts for a run drafting its spec and tests, with the Claude Code driver in every seat: the only answer left is the cost to approve; and the policy, roles, and rubrics are outside the repository, a configuration directory equal to, inside, or containing it being refused with nothing written (R36b)",
+   run: async () => {
+     const { checkStartup, loadPolicyFile, mergeEnvFile, startRun } = await api();
+     await withVaultDirs('r36b-init-', async (dirs, base) => {
+       await vitestRepository(dirs.artifacts);
+       const baseCommit = asClone(dirs.artifacts);
+       // Outside means outside: a configuration directory equal to, inside, or containing the
+       // repository is refused, and nothing is written (R36b review, codex-3).
+       for (const [where, overlapping] of [['equal to', dirs.artifacts], ['inside', join(dirs.artifacts, 'cfg')], ['containing', dirname(dirs.artifacts)]] as const) {
+         const refusedOverlap = await init(dirs.artifacts, overlapping, false);
+         if (refusedOverlap.ok || refusedOverlap.reason !== 'config-inside-repository') {
+           throw new Error(`R36b: a configuration directory ${where} the repository was answered ${JSON.stringify(refusedOverlap)}, not refused`);
+         }
+         if (existsSync(join(overlapping, 'policy.yaml')) || existsSync(join(dirs.artifacts, '.factory'))) throw new Error(`R36b: init refused a configuration directory ${where} the repository but wrote files`);
+       }
+       const config = join(base, 'config');
+       const outcome = await init(dirs.artifacts, config, false);
+       if (!outcome.ok) throw new Error(`R36b: init refused a vitest repository: ${JSON.stringify(outcome)}`);
+       if (outcome.stack !== 'vitest@4') throw new Error(`R36b: init detected ${outcome.stack}, not vitest@4`);
+       if (outcome.written.some((f) => f.startsWith(dirs.artifacts) && !f.includes('.factory'))) throw new Error('R36b: init wrote outside .factory/ in the repository');
+       for (const f of ['policy.yaml', 'host.env', join('roles', 'builder.md'), join('rubrics', 'spec.md')]) {
+         if (!existsSync(join(config, f))) throw new Error(`R36b: init wrote no ${f} in the configuration directory`);
+       }
+       // The host's own start-up checks, over the file and the two values set by hand.
+       const text = await readFile(outcome.envFile, 'utf8');
+       const merged = mergeEnvFile(outcome.envFile, text, { ANTHROPIC_API_KEY: 'sk-ant-by-hand', FACTORY_GIT_TOKEN: 'git-token-by-hand' });
+       if (!merged.ok) throw new Error(`R36b: the host refuses init's environment file: ${merged.problems.join('; ')}`);
+-      const startup = await checkStartup(merged.env, undefined, { uids: false });
++      // The key set by hand is not a real one, so the provider's answer is stood in for; `I5.host-refuses-a-rejected-key` owns that check (R55).
++      const startup = await checkStartup(merged.env, undefined, { uids: false }, () => Promise.resolve(null));
+       if (!startup.ok) throw new Error(`R36b: the host's start-up refuses init's configuration: ${startup.problems.join('; ')}`);
+       if (startup.settings.repository !== dirs.artifacts && startup.settings.repository.toLowerCase() !== dirs.artifacts.toLowerCase()) {
+         throw new Error(`R36b: the environment file admits ${startup.settings.repository}, not the repository`);
+       }
+       const loaded = await loadPolicyFile(startup.settings.policyFile);
+       if (!loaded.ok) throw new Error(`R36b: init's policy does not load: ${JSON.stringify(loaded)}`);
+       const req: RunRequest = {
+         runId: 'r36b-init' as RunRequest['runId'],
+         baseCommit, requestedLevel: 1, workspace: dirs.artifacts, policy: loaded.policy,
+         roles: startup.settings.rolesDirectory, rubrics: startup.settings.rubricsDirectory,
+         components: await exampleGraph(dirs, base), approvedCostUsd: null, readiness: RIG_READINESS,
+         intent: { text: 'Add a multiply(a, b) function to src/math.ts that returns the product.', from: 'principal' },
+         artifacts: { spec: 'draft', acceptanceTests: 'draft', verificationManifest: '.factory/verify.json', taskGraph: '.factory/graph.json' },
+       };
+       const admitted = await startRun(req);
+       if (admitted.ok || admitted.reason !== 'cost-unapproved') throw new Error(`R36b: a run from init's files was answered ${JSON.stringify(admitted)}, not with the cost to approve`);
+     });
+   },
+ });
+
+===== packages/conformance/src/registry/release.ts =====
+diff --git a/packages/conformance/src/registry/release.ts b/packages/conformance/src/registry/release.ts
+index c1559fe..ef354a2 100644
+--- a/packages/conformance/src/registry/release.ts
++++ b/packages/conformance/src/registry/release.ts
+@@ -1,18 +1,26 @@
+ /**
+  * `I9.packaged-host-runs` (R35, #55): the one supported way to run, tested as
+  * a user runs it. `scripts/local-release.ts` builds every released package,
+  * packs each as npm would publish it, and installs the tarballs into an empty
+  * directory. Then, from that install and nothing in the checkout:
+  *
+  * - every installed `bin` names JavaScript the tarball holds;
+  * - `factory-host`, started from its `bin` with nothing set, refuses with
+  *   every required variable in one list, no stack frame, and a non-zero exit,
+  *   before it listens (I5);
+  * - `factory-host`, configured with the shipped examples, listens, headless,
+  *   and `olympus-ai`, started from its own `bin` as a separate process, reaches
+- *   it over HTTP and nothing else (I9).
++ *   it over HTTP and nothing else (I9);
++ * - `factory-host`, with everything else valid, refuses a model key the
++ *   provider rejects, before it listens (I5, R55).
++ *
++ * The key here is not a real one, and start-up asks the provider about it
++ * (R55). So the configured host is started with a module preloaded through
++ * `NODE_OPTIONS` that answers that one request, and passes every other to
++ * the real `fetch`. The host is the installed one and its start-up path is
++ * its own: nothing in the product reads these variables or can skip the check.
+  *
+  * A `bin` pointing at TypeScript, a missing shebang, a file the tarball does
+  * not ship, an install that reaches back into the checkout, or a refusal that
+  * prints a stack fails here.
+  */
+@@ -23,16 +31,28 @@ import { cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+ import { createServer } from 'node:net';
+ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
++import { pathToFileURL } from 'node:url';
+ import { workspaceRoot } from '../kit/workspace.js';
+ 
+ const BUILD_MS = 600_000;
+ const LISTEN_MS = 600_000;
++/** The preloaded module: the provider's answer to the key check, from the two variables beside it. */
++const PROVIDER_STAND_IN = [
++  'const real = globalThis.fetch;',
++  'const asked = process.env.CONFORMANCE_KEY_PROBE_URL;',
++  'const status = Number(process.env.CONFORMANCE_KEY_PROBE_STATUS);',
++  "globalThis.fetch = (input, init) => (String(input instanceof Request ? input.url : input) === asked ? Promise.resolve(new Response('{}', { status })) : real(input, init));",
++  '',
++].join('\n');
+ /** Required variables a refusal must name; the table in packages/api/src/host/config.ts is their source. */
+ const REQUIRED = [
+   'FACTORY_API_TOKEN', 'FACTORY_LISTEN_PORT', 'FACTORY_POLICY_FILE', 'FACTORY_ROLES_DIR', 'FACTORY_VAULT_STORE',
+   'FACTORY_REPOSITORY', 'FACTORY_TREES', 'ANTHROPIC_API_KEY', 'FACTORY_GIT_REPOSITORY', 'FACTORY_GIT_BASE_BRANCH', 'FACTORY_GIT_TOKEN',
+ ];
+ 
++/** The model key the configured host is given: not a real one, and no run is started. */
++const MADE_UP_KEY = 'unused-no-run-is-started';
++
+ interface Ran { readonly code: number | null; readonly stdout: string; readonly stderr: string }
+ 
+ /** The variables a child process needs to find node, git, and Docker, and nothing of the factory's. */
+@@ -119,89 +139,101 @@ async function git(cwd: string, ...args: string[]): Promise<void> {
+ export async function assertPackagedHostRuns(): Promise<void> {
+   const root = workspaceRoot();
+   const dir = await mkdtemp(join(tmpdir(), 'r35-release-'));
+   let host: ChildProcess | undefined;
+   try {
+     const install = join(dir, 'install');
+     const released = await run(process.execPath, [join(root, 'scripts', 'local-release.ts'), install], { cwd: root, env: { ...baseEnv() }, timeoutMs: BUILD_MS });
+     if (released.code !== 0) throw new Error(`I9: the local release failed\n${released.stderr}`);
+     const hostBin = installedBin(install, '@olympus-ai/api', 'factory-host');
+     const cliBin = installedBin(install, 'olympus-ai', 'olympus-ai');
+     if (hostBin.startsWith(root) || cliBin.startsWith(root)) throw new Error('I9: an installed bin resolves into the checkout');
+     // Each command is then run as the README says to, from node_modules/.bin, never as node <file> (review: codex-2, gemini-4).
+     const hostCmd = linkedBin(install, 'factory-host');
+     const cliCmd = linkedBin(install, 'olympus-ai');
+     const runLinked = (linked: Linked, args: readonly string[], env: Record<string, string>): Promise<Ran> => {
+       const call = invoke(linked, args);
+       return run(call.command, call.args, { cwd: dir, env, timeoutMs: 60_000, shell: call.shell });
+     };
+ 
+     // Nothing set: one refusal naming every required variable, no frame, a non-zero exit.
+     const refused = await runLinked(hostCmd, [], baseEnv());
+     if (refused.code === 0) throw new Error('I9: factory-host started with nothing set');
+     const missing = REQUIRED.filter((name) => !refused.stderr.includes(`${name} is not set`));
+     if (missing.length > 0) throw new Error(`I9: the refusal does not name ${missing.join(', ')}\n${refused.stderr}`);
+     if (/^\s+at /mu.test(refused.stderr)) throw new Error(`I9: the refusal prints a stack trace\n${refused.stderr}`);
+     // The executable prints the list itself (A-HS-01): its first line is the refusal, not Node's report of an uncaught throw.
+     if (!refused.stderr.startsWith('factory-host: not started;') || refused.stderr.includes('node:internal')) {
+       throw new Error(`I9: the refusal is not printed by the executable as one list\n${refused.stderr}`);
+     }
+     if (!refused.stderr.includes('.env.example')) throw new Error(`I9: the refusal does not say where the variables are described\n${refused.stderr}`);
+ 
+     // Configured from the shipped examples: the host listens and the CLI reaches it.
+     const repository = join(dir, 'repo');
+     await mkdir(repository);
+     await git(repository, 'init', '--quiet', '--initial-branch=main');
+     await writeFile(join(repository, 'README.md'), 'a repository for the packaged-host assertion\n');
+     await git(repository, 'add', 'README.md');
+     await git(repository, 'commit', '--quiet', '-m', 'base');
+     await cp(join(root, 'examples', 'roles'), join(dir, 'roles'), { recursive: true });
+     const token = randomBytes(24).toString('hex');
++    const standIn = join(dir, 'provider-stand-in.mjs');
++    await writeFile(standIn, PROVIDER_STAND_IN);
++    const { MODEL_KEY_PROBE_URL } = await import('@olympus-ai/api');
+     const port = await freePort();
+     const env: Record<string, string> = {
+       ...baseEnv(),
+       FACTORY_API_TOKEN: token, FACTORY_LISTEN_PORT: String(port), FACTORY_POLICY_FILE: join(root, 'examples', 'policy.yaml'),
+       FACTORY_ROLES_DIR: join(dir, 'roles'), FACTORY_VAULT_STORE: join(dir, 'store'), FACTORY_REPOSITORY: repository, FACTORY_TREES: join(dir, 'trees'),
+-      ANTHROPIC_API_KEY: 'unused-no-run-is-started', FACTORY_GIT_REPOSITORY: 'example/unused', FACTORY_GIT_BASE_BRANCH: 'main', FACTORY_GIT_TOKEN: 'unused',
++      ANTHROPIC_API_KEY: MADE_UP_KEY, FACTORY_GIT_REPOSITORY: 'example/unused', FACTORY_GIT_BASE_BRANCH: 'main', FACTORY_GIT_TOKEN: 'unused',
+       // A host with no uids names who sandboxes run as (D-I1b-10); one with them derives it.
+       ...(process.getuid === undefined ? { FACTORY_CONTAINER_UID: '1000', FACTORY_CONTAINER_GID: '1000' } : {}),
++      // The provider accepts the key, as far as this host can tell (R55).
++      NODE_OPTIONS: `--import ${pathToFileURL(standIn).href}`, CONFORMANCE_KEY_PROBE_URL: MODEL_KEY_PROBE_URL, CONFORMANCE_KEY_PROBE_STATUS: '200',
+     };
+     let hostErr = '';
+     // Trees under a regular file cannot hold a link: start-up must refuse there, with everything else valid, so a
+     // host whose start-up skipped the probe fails here (review: codex-3).
+     const blocker = join(dir, 'a-file');
+     await writeFile(blocker, 'not a directory');
+     const unlinkable = await runLinked(hostCmd, [], { ...env, FACTORY_TREES: join(blocker, 'trees') });
+     if (unlinkable.code === 0 || !unlinkable.stderr.includes('cannot hold a symbolic link')) {
+       throw new Error(`I9: factory-host did not refuse trees that cannot hold a symbolic link\n${unlinkable.stderr}`);
+     }
++    // A key the provider rejects: start-up must refuse there, with everything else valid, naming the variable and
++    // never its value, so an installed host whose start-up skipped the check fails here (R55, #176).
++    const rejected = await runLinked(hostCmd, [], { ...env, CONFORMANCE_KEY_PROBE_STATUS: '401' });
++    if (rejected.code === 0 || !rejected.stderr.includes('ANTHROPIC_API_KEY was rejected') || rejected.stderr.includes(MADE_UP_KEY)) {
++      throw new Error(`I9: factory-host did not refuse a model key the provider rejects
++${rejected.stderr}`);
++    }
+     const launch = invoke(hostCmd, []);
+     const started = spawn(launch.command, launch.args, { cwd: dir, env, stdio: ['ignore', 'ignore', 'pipe'], shell: launch.shell });
+     host = started;
+     started.stderr.on('data', (chunk: Buffer) => { hostErr += chunk.toString('utf8'); });
+     const url = `http://127.0.0.1:${String(port)}`;
+     const cli = (...args: string[]): Promise<Ran> => runLinked(cliCmd, [...args, '--url', url, '--token', token], baseEnv());
+     const deadline = Date.now() + LISTEN_MS;
+     for (;;) {
+       if (started.exitCode !== null) throw new Error(`I9: the configured factory-host exited ${String(started.exitCode)}\n${hostErr}`);
+       const ran = await cli('outcomes');
+       if (ran.code === 0) {
+         JSON.parse(ran.stdout);
+         break;
+       }
+       if (Date.now() > deadline) throw new Error(`I9: factory-host did not answer within ${String(LISTEN_MS)} ms\n${ran.stderr}\n${hostErr}`);
+       await new Promise((r) => setTimeout(r, 1000));
+     }
+     const unknown = await cli('status', 'no-such-run');
+     if (unknown.code !== 1 || !unknown.stderr.includes('error 404')) throw new Error(`I9: the CLI did not report the host's 404 for an unknown run\n${unknown.stderr}`);
+     const help = await runLinked(cliCmd, ['create', '--help'], baseEnv());
+     if (help.code !== 0 || !help.stdout.includes('--workspace')) throw new Error(`I9: the installed CLI's create --help failed\n${help.stderr}`);
+   } finally {
+     if (host?.exitCode === null) {
+       const exited = new Promise((r) => host?.once('exit', r));
+       // Under a shell (Windows), the child is cmd.exe; the host is its child, so the whole tree is stopped.
+       stop(host);
+       await exited;
+     }
+     await rm(dir, { recursive: true, force: true });
+   }
+ }
+
+===== packages/conformance/src/registry/startup-key.ts =====
+/**
+ * R55 (#176): the host refuses a model key its provider rejects, before it
+ * listens, in the same list as every other start-up problem. A check that
+ * could not be made refuses too: only an accepted key starts the host (I5).
+ *
+ * No request leaves this process. The provider's answers are stood in for by
+ * a `fetch` the assertion passes, and by one put in the global's place for
+ * the default path, so what is proven is what start-up does with each answer
+ * and that start-up asks at all. That the real provider accepts a real key is
+ * the paid init suite's to prove (`packages/api/test/paid/`). The installed
+ * host's own refusal is in `release.ts`.
+ */
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { runtime } from '../kit/assert.js';
+import type { LocalAssertion } from '../kit/types.js';
+
+const api = async () => import('@olympus-ai/api');
+
+const KEY = 'sk-ant-made-up-for-the-start-up-assertion';
+
+interface Seen { url: string; init: RequestInit | undefined }
+
+/** A provider that answers every request with `status`, and records what it was asked. */
+function answering(status: number, seen: Seen[]): typeof fetch {
+  return (input, init) => {
+    seen.push({ url: input instanceof Request ? input.url : String(input), init });
+    return Promise.resolve(new Response('{"note":"a body start-up must not print"}', { status }));
+  };
+}
+
+export const HOST_REFUSES_A_REJECTED_KEY: LocalAssertion = runtime({
+  id: 'I5.host-refuses-a-rejected-key',
+  title:
+    "start-up asks the model provider once, with a GET that carries the key in the relay's header to the relay's origin and no body, and refuses unless the answer is a 2xx: " +
+    '401 and 403 as a rejected key, any other status or no answer as a key that could not be checked, each beside the other start-up problems, naming the variable and never its value; ' +
+    'an unset key is listed once and not asked about; and a caller that passes no probe gets the real one (R55, #176)',
+  run: async () => {
+    const { checkStartup, probeModelKey, MODEL_KEY_PROBE_URL } = await api();
+    const { MODEL_RELAY } = await import('@olympus-ai/driver-claude-code');
+    const dir = await mkdtemp(join(tmpdir(), 'r55-startup-'));
+    const facts = { uids: true };
+    const env: Record<string, string> = {
+      FACTORY_API_TOKEN: 'x'.repeat(32), FACTORY_LISTEN_PORT: '7300', FACTORY_POLICY_FILE: '/p.yaml', FACTORY_ROLES_DIR: '/roles',
+      FACTORY_VAULT_STORE: '/store', FACTORY_REPOSITORY: '/repo', FACTORY_TREES: join(dir, 'trees'), ANTHROPIC_API_KEY: KEY,
+      FACTORY_GIT_REPOSITORY: 'o/r', FACTORY_GIT_BASE_BRANCH: 'main', FACTORY_GIT_TOKEN: 't',
+    };
+    try {
+      // An accepted key starts, and the request is the one named.
+      const seen: Seen[] = [];
+      const accepted = await checkStartup(env, undefined, facts, (key) => probeModelKey(key, answering(200, seen)));
+      if (!accepted.ok) throw new Error(`I5: start-up refused a key the provider accepted: ${accepted.problems.join('; ')}`);
+      const [asked] = seen;
+      if (seen.length !== 1 || asked === undefined) throw new Error(`I5: start-up asked the provider ${String(seen.length)} times, not once`);
+      if (asked.url !== MODEL_KEY_PROBE_URL || typeof MODEL_RELAY.upstream !== 'string' || !asked.url.startsWith(`${MODEL_RELAY.upstream}/`)) throw new Error(`I5: the key was sent to ${asked.url}, not to the relay's own origin`);
+      const headers = new Headers(asked.init?.headers);
+      if (headers.get(MODEL_RELAY.header) !== KEY) throw new Error(`I5: the key was not sent in ${MODEL_RELAY.header}, the header the relay sends it in`);
+      if ((asked.init?.method ?? 'GET') !== 'GET' || asked.init?.body != null) throw new Error('I5: the check is not a GET with no body, so it may spend');
+      if (asked.init?.redirect !== 'error') throw new Error('I5: the check follows a redirect, which would carry the key to another origin');
+
+      // Every other answer refuses, and says which kind of refusal it is.
+      const refusedWith = async (probe: typeof fetch, what: string): Promise<string> => {
+        const result = await checkStartup(env, undefined, facts, (key) => probeModelKey(key, probe));
+        if (result.ok) throw new Error(`I5: the host would start although ${what}`);
+        const [line] = result.problems;
+        if (result.problems.length !== 1 || line === undefined) throw new Error(`I5: ${what}, and start-up listed ${JSON.stringify(result.problems)}`);
+        if (!line.startsWith('ANTHROPIC_API_KEY ')) throw new Error(`I5: the refusal does not name the variable: ${line}`);
+        if (line.includes(KEY) || line.includes('must not print')) throw new Error(`I5: the refusal prints the key or the provider's body: ${line}`);
+        return line;
+      };
+      for (const status of [401, 403]) {
+        const line = await refusedWith(answering(status, []), `the provider answered ${String(status)}`);
+        if (!line.includes('was rejected') || !line.includes(String(status))) throw new Error(`I5: a ${String(status)} is not reported as a rejected key: ${line}`);
+      }
+      for (const status of [400, 404, 429, 500, 529]) {
+        const line = await refusedWith(answering(status, []), `the provider answered ${String(status)}`);
+        if (!line.includes('could not be checked') || !line.includes(String(status))) throw new Error(`I5: a ${String(status)} is not reported as a key that could not be checked: ${line}`);
+      }
+      const unreachable = await refusedWith(() => Promise.reject(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ENOTFOUND' } })), 'the provider could not be reached');
+      if (!unreachable.includes('could not be checked') || !unreachable.includes('ENOTFOUND')) throw new Error(`I5: an unreachable provider is not reported as such: ${unreachable}`);
+
+      // Beside the other problems, in one list.
+      const several = await checkStartup({ ...env, FACTORY_API_TOKEN: 'short' }, undefined, facts, (key) => probeModelKey(key, answering(401, [])));
+      if (several.ok || several.problems.length !== 2 || !several.problems.some((p) => p.includes('FACTORY_API_TOKEN')) || !several.problems.some((p) => p.includes('was rejected'))) {
+        throw new Error(`I5: a rejected key is not listed beside the other start-up problems: ${JSON.stringify(several.ok ? [] : several.problems)}`);
+      }
+
+      // An unset key is the missing variable's line, once; there is nothing to ask the provider.
+      const unasked: Seen[] = [];
+      const { ANTHROPIC_API_KEY: _unset, ...without } = env;
+      const missing = await checkStartup(without, undefined, facts, (key) => probeModelKey(key, answering(200, unasked)));
+      if (missing.ok || unasked.length !== 0 || missing.problems.filter((p) => p.includes('ANTHROPIC_API_KEY')).length !== 1) {
+        throw new Error(`I5: an unset key was not refused once, unasked: ${JSON.stringify(missing.ok ? [] : missing.problems)}`);
+      }
+
+      // No probe passed: the real one runs. The global is stood in for here, so the request goes nowhere.
+      const real = globalThis.fetch;
+      const byDefault: Seen[] = [];
+      globalThis.fetch = answering(401, byDefault);
+      try {
+        const result = await checkStartup(env, undefined, facts);
+        if (result.ok || !result.problems.some((p) => p.includes('was rejected'))) throw new Error('I5: start-up with no probe named does not check the key');
+        if (byDefault.length !== 1 || byDefault[0]?.url !== MODEL_KEY_PROBE_URL) throw new Error(`I5: start-up's own probe asked ${JSON.stringify(byDefault.map((s) => s.url))}`);
+      } finally {
+        globalThis.fetch = real;
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  },
+});
+
+export const R55_I5: readonly LocalAssertion[] = [HOST_REFUSES_A_REJECTED_KEY];
+
+=== BUNDLE END === bc535feffb123d49d3d75ea45536ac32

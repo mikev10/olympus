@@ -10,7 +10,15 @@
  *   before it listens (I5);
  * - `factory-host`, configured with the shipped examples, listens, headless,
  *   and `olympus-ai`, started from its own `bin` as a separate process, reaches
- *   it over HTTP and nothing else (I9).
+ *   it over HTTP and nothing else (I9);
+ * - `factory-host`, with everything else valid, refuses a model key the
+ *   provider rejects, before it listens (I5, R55).
+ *
+ * The key here is not a real one, and start-up asks the provider about it
+ * (R55). So the configured host is started with a module preloaded through
+ * `NODE_OPTIONS` that answers that one request, and passes every other to
+ * the real `fetch`. The host is the installed one and its start-up path is
+ * its own: nothing in the product reads these variables or can skip the check.
  *
  * A `bin` pointing at TypeScript, a missing shebang, a file the tarball does
  * not ship, an install that reaches back into the checkout, or a refusal that
@@ -23,15 +31,27 @@ import { cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { workspaceRoot } from '../kit/workspace.js';
 
 const BUILD_MS = 600_000;
 const LISTEN_MS = 600_000;
+/** The preloaded module: the provider's answer to the key check, from the two variables beside it. */
+const PROVIDER_STAND_IN = [
+  'const real = globalThis.fetch;',
+  'const asked = process.env.CONFORMANCE_KEY_PROBE_URL;',
+  'const status = Number(process.env.CONFORMANCE_KEY_PROBE_STATUS);',
+  "globalThis.fetch = (input, init) => (String(input instanceof Request ? input.url : input) === asked ? Promise.resolve(new Response('{}', { status })) : real(input, init));",
+  '',
+].join('\n');
 /** Required variables a refusal must name; the table in packages/api/src/host/config.ts is their source. */
 const REQUIRED = [
   'FACTORY_API_TOKEN', 'FACTORY_LISTEN_PORT', 'FACTORY_POLICY_FILE', 'FACTORY_ROLES_DIR', 'FACTORY_VAULT_STORE',
   'FACTORY_REPOSITORY', 'FACTORY_TREES', 'ANTHROPIC_API_KEY', 'FACTORY_GIT_REPOSITORY', 'FACTORY_GIT_BASE_BRANCH', 'FACTORY_GIT_TOKEN',
 ];
+
+/** The model key the configured host is given: not a real one, and no run is started. */
+const MADE_UP_KEY = 'unused-no-run-is-started';
 
 interface Ran { readonly code: number | null; readonly stdout: string; readonly stderr: string }
 
@@ -156,14 +176,19 @@ export async function assertPackagedHostRuns(): Promise<void> {
     await git(repository, 'commit', '--quiet', '-m', 'base');
     await cp(join(root, 'examples', 'roles'), join(dir, 'roles'), { recursive: true });
     const token = randomBytes(24).toString('hex');
+    const standIn = join(dir, 'provider-stand-in.mjs');
+    await writeFile(standIn, PROVIDER_STAND_IN);
+    const { MODEL_KEY_PROBE_URL } = await import('@olympus-ai/api');
     const port = await freePort();
     const env: Record<string, string> = {
       ...baseEnv(),
       FACTORY_API_TOKEN: token, FACTORY_LISTEN_PORT: String(port), FACTORY_POLICY_FILE: join(root, 'examples', 'policy.yaml'),
       FACTORY_ROLES_DIR: join(dir, 'roles'), FACTORY_VAULT_STORE: join(dir, 'store'), FACTORY_REPOSITORY: repository, FACTORY_TREES: join(dir, 'trees'),
-      ANTHROPIC_API_KEY: 'unused-no-run-is-started', FACTORY_GIT_REPOSITORY: 'example/unused', FACTORY_GIT_BASE_BRANCH: 'main', FACTORY_GIT_TOKEN: 'unused',
+      ANTHROPIC_API_KEY: MADE_UP_KEY, FACTORY_GIT_REPOSITORY: 'example/unused', FACTORY_GIT_BASE_BRANCH: 'main', FACTORY_GIT_TOKEN: 'unused',
       // A host with no uids names who sandboxes run as (D-I1b-10); one with them derives it.
       ...(process.getuid === undefined ? { FACTORY_CONTAINER_UID: '1000', FACTORY_CONTAINER_GID: '1000' } : {}),
+      // The provider accepts the key, as far as this host can tell (R55).
+      NODE_OPTIONS: `--import ${pathToFileURL(standIn).href}`, CONFORMANCE_KEY_PROBE_URL: MODEL_KEY_PROBE_URL, CONFORMANCE_KEY_PROBE_STATUS: '200',
     };
     let hostErr = '';
     // Trees under a regular file cannot hold a link: start-up must refuse there, with everything else valid, so a
@@ -173,6 +198,13 @@ export async function assertPackagedHostRuns(): Promise<void> {
     const unlinkable = await runLinked(hostCmd, [], { ...env, FACTORY_TREES: join(blocker, 'trees') });
     if (unlinkable.code === 0 || !unlinkable.stderr.includes('cannot hold a symbolic link')) {
       throw new Error(`I9: factory-host did not refuse trees that cannot hold a symbolic link\n${unlinkable.stderr}`);
+    }
+    // A key the provider rejects: start-up must refuse there, with everything else valid, naming the variable and
+    // never its value, so an installed host whose start-up skipped the check fails here (R55, #176).
+    const rejected = await runLinked(hostCmd, [], { ...env, CONFORMANCE_KEY_PROBE_STATUS: '401' });
+    if (rejected.code === 0 || !rejected.stderr.includes('ANTHROPIC_API_KEY was rejected') || rejected.stderr.includes(MADE_UP_KEY)) {
+      throw new Error(`I9: factory-host did not refuse a model key the provider rejects
+${rejected.stderr}`);
     }
     const launch = invoke(hostCmd, []);
     const started = spawn(launch.command, launch.args, { cwd: dir, env, stdio: ['ignore', 'ignore', 'pipe'], shell: launch.shell });

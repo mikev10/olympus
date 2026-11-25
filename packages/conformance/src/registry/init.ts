@@ -71,7 +71,8 @@ export const INIT_SETUP_ADMITTED: LocalAssertion = runtime({
       const text = await readFile(outcome.envFile, 'utf8');
       const merged = mergeEnvFile(outcome.envFile, text, { ANTHROPIC_API_KEY: 'sk-ant-by-hand', FACTORY_GIT_TOKEN: 'git-token-by-hand' });
       if (!merged.ok) throw new Error(`R36b: the host refuses init's environment file: ${merged.problems.join('; ')}`);
-      const startup = await checkStartup(merged.env, undefined, { uids: false });
+      // The key set by hand is not a real one, so the provider's answer is stood in for; `I5.host-refuses-a-rejected-key` owns that check (R55).
+      const startup = await checkStartup(merged.env, undefined, { uids: false }, () => Promise.resolve(null));
       if (!startup.ok) throw new Error(`R36b: the host's start-up refuses init's configuration: ${startup.problems.join('; ')}`);
       if (startup.settings.repository !== dirs.artifacts && startup.settings.repository.toLowerCase() !== dirs.artifacts.toLowerCase()) {
         throw new Error(`R36b: the environment file admits ${startup.settings.repository}, not the repository`);

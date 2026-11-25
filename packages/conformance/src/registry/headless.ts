@@ -45,7 +45,7 @@ function packageDir(name: string): string {
 interface Ran { readonly code: number | null; readonly stdout: string; readonly stderr: string }
 
 /** One CLI command as its own process: stdin closed, no URL but the one passed, no token but the one passed. */
-function cli(args: readonly string[]): Promise<Ran> {
+export function cli(args: readonly string[]): Promise<Ran> {
   const main = join(packageDir('olympus-ai'), 'src', 'main.ts');
   return new Promise((resolveRan, reject) => {
     const env: Record<string, string> = {};

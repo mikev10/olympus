@@ -3400,6 +3400,20 @@ and every attempt fails 401 until it parks.
   to listen when the provider rejects the key, beside the other start-up
   refusals. Missing or rejected, the host fails closed
 
+**Out of scope:** approving, rejecting, or editing a draft from the new
+command, which `approve` and `reject` already do; reading any attempt but a
+station's latest; probing `FACTORY_CODEX_KEY` or `FACTORY_ENDPOINT_KEY`,
+neither of which has a request known to spend nothing and to be open to every
+valid key.
+
+**Done when:** `pnpm typecheck`, `pnpm lint`, `pnpm test`, and
+`pnpm conformance` pass, with an assertion for each bullet above that fails
+when its behaviour is deleted (I8).
+
+**Gate paths:** `packages/conformance/`, for those assertions. The pull
+request carries `gate-change`, and the squash body carries
+`Gate-Change: acknowledged`.
+
 **Why after R36b:** both touch `packages/api` and `packages/cli`, which
 R36b is changing.
 

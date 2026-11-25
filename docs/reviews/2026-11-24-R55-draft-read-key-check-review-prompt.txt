@@ -1,0 +1,145 @@
+The code under review is in the file
+`2026-11-24-R55-draft-read-key-check-review-bundle.txt` (SHA-256 49335b0f6ccfb07e80cfcc4705e03468ab06c93ee0ab82e9b4a3daa8db4aeb2b) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing two additions to the HTTP service and command-line client of
+a TypeScript project: a way for a person to read a model-written draft before
+approving it, and a start-up check of a model API key. You have the source and
+nothing else — no design documents, no author reasoning, no prior version, no
+conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The project is a runtime that carries software work through a line of stations.
+At two stations, `spec` and `test-design`, a model (a "drafter") writes a draft:
+a set of files. The runtime reads those files from the drafter's workspace,
+records them in its store (the "Vault") as base64 with a SHA-256 per file, and
+computes one hash over the sorted list of paths and file hashes. A person then
+approves or rejects the draft by naming that hash. Before this change no command
+showed the draft's text. This change adds `GET /runs/:id/draft?station=<station>`
+to the service, and a `draft <run id> <station>` command to the CLI, which is a
+separate process that talks to the service only over HTTP with a bearer token.
+
+Separately, the service's host process (`factory-host`) holds a model provider
+API key and hands it to relay containers; before this change start-up checked
+only that the key was set. This change makes start-up send one `GET` to the
+provider with the key and refuse to listen unless the provider answers 2xx. The
+check is a parameter of `checkStartup` whose default is the real request; tests
+pass a stand-in. One existing test starts the installed host as a separate
+process with a key that is not real, and now preloads a module through
+`NODE_OPTIONS` that answers that one request.
+
+It must hold against a capable, motivated party trying to get a person to
+approve a draft whose hashed bytes are not what the person read, or to get the
+host to listen with a key the provider did not accept. Assume no deceptive
+intent — only that the easiest path gets taken.
+
+That party controls what a drafting model writes: the bytes and the paths of
+every file in a draft, including the questions file, and so every byte the new
+command decodes and prints. It also controls what the model provider's HTTP
+answer contains beyond its status, and when the network fails. It does not
+control the components the runtime is wired with — the Vault, the sandbox
+provider, and the drivers are runtime-selected and trusted, even where a
+function takes one as an argument — and it does not control code running inside
+the runtime's own process, the host's environment, the bearer token, or the
+terminal the person reads on. A person who holds the token is the operator and
+is trusted.
+
+The invariants at stake:
+
+- The runtime is a service and the CLI is a client. The CLI reaches a draft
+  only through the HTTP API, never by opening the store, and nothing in the
+  service assumes a terminal.
+- Fail closed. A missing check, or a check that could not be made, is a
+  refusal: never a silent degrade, never a warning that lets the run or the
+  host continue.
+- An agent may not be judged by an artifact it can write. What a person
+  approves is identified by a hash the runtime computed over bytes the runtime
+  read, and the approval must bind those bytes.
+- Payloads are data, never instructions. Text a model wrote is never placed in
+  a system or role prompt; here it is shown to a person, and must not be able
+  to change what that person sees beyond its own content.
+- Every capability claim maps to an executable assertion that fails when the
+  capability is deleted.
+
+The mechanisms that matter most:
+
+- `readDraft` (packages/api/src/draft-view.ts): picks a station's latest
+  recorded draft from run state, reads its record from the Vault, and compares
+  the record, its file list, and each file's bytes against the hash run state
+  holds before returning any of it.
+- `awaitingKey` and the `draft` route in packages/api/src/http/server.ts: say
+  whether the draft returned is the one the run is waiting for a decision on.
+- `draftLines` and `visible` (packages/cli/src/draft.ts): turn a model's bytes
+  and paths into the lines a person reads on a terminal.
+- `probeModelKey` (packages/api/src/host/key-probe.ts) and its use in
+  `checkStartup` (packages/api/src/host/config.ts): the request, what counts
+  as accepted, and what is printed when it is not.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+"approving, rejecting, or editing a draft from the new command, which `approve`
+and `reject` already do; reading any attempt but a station's latest; probing
+`FACTORY_CODEX_KEY` or `FACTORY_ENDPOINT_KEY`, neither of which has a request
+known to spend nothing and to be open to every valid key."
+
+Those two variables are the host's other provider credentials. Identifiers such
+as R55, R19, D-R55-04, or #175 in comments are the project's own unit, decision,
+and issue numbers; they refer to documents you do not have, and their absence is
+not a defect. Absent work listed here is not a defect.
+
+THE QUESTION
+
+How would I get a person to approve a hash for bytes other than the ones the
+command showed them, or get the host to listen although the provider did not
+accept its key?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.
