@@ -26,7 +26,7 @@ const docker = promisify(execFile);
 
 /** Fails on a tree whose install does not hold `extra`, and passes on one that does. */
 const NEEDS_EXTRA = { id: 'needs-extra', kind: 'behavioral', onBase: 'fails', command: ['node', '-e', "require('extra')"], required: true, timeoutMs: 10_000 };
-const EXTRA = 'node_modules/extra';
+export const EXTRA = 'node_modules/extra';
 
 /** Every file under `root`, by its path relative to it. */
 async function listing(root: string, at = ''): Promise<string[]> {
@@ -44,7 +44,7 @@ async function listing(root: string, at = ''): Promise<string[]> {
  * workspace held when it was provisioned; an exec in a sandbox of `scripted`'s
  * image is answered with its result instead of run.
  */
-class Recording implements SandboxProvider {
+export class Recording implements SandboxProvider {
   readonly id = 'recording-stub';
   readonly provisioned: Array<{ readonly spec: SandboxSpec; readonly listed: readonly string[] }> = [];
   readonly #scriptedHandles = new Set<SandboxHandle>();
@@ -67,7 +67,7 @@ class Recording implements SandboxProvider {
   }
 }
 
-async function recording(scripted?: { image: string; result: ExecResult }): Promise<Recording> {
+export async function recording(scripted?: { image: string; result: ExecResult }): Promise<Recording> {
   const { StubSandboxProvider } = await import('@olympus-ai/sandbox');
   return new Recording(new StubSandboxProvider(), scripted);
 }
@@ -78,7 +78,7 @@ async function recording(scripted?: { image: string; result: ExecResult }): Prom
  * also holds `extra` under `node_modules`, where the stand-in installs it
  * from, so a check that ran over the base's own trees would find it.
  */
-async function withDependencies(rig: LineRig, lockfile: string): Promise<void> {
+export async function withDependencies(rig: LineRig, lockfile: string): Promise<void> {
   const root = rig.dirs.artifacts;
   await writeFile(join(root, 'package.json'), JSON.stringify({ name: 'hello', private: true }));
   await writeFile(join(root, 'package-lock.json'), lockfile);

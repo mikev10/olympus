@@ -37,7 +37,11 @@ roles:
   builder:
     stations: [build, verify]
     writableGlobs: ["**"]          # narrow to the paths a change may touch, e.g. ["src/**", "test/**"]
-    tools: [Read, Write]
+    # Bash runs the acceptance tests in the builder's own sandbox before it
+    # finishes, over the runtime's install of the lockfile, with no network.
+    # What it runs decides nothing: the runtime's checks do, over a tree with
+    # its own install, where the builder never ran.
+    tools: [Read, Write, Bash]
     network: { egress: none }      # or a list of hosts, e.g. [registry.npmjs.org]
     tier: standard                 # fast, standard, or deep: the model size this seat asks for
     tierByStation: {}

@@ -14,6 +14,15 @@ acceptance tests exactly as they are written: they decide the task.
 
 The repository is in your working directory. Make the change there.
 
+## Run the acceptance tests before you finish
+
+The repository's dependencies are installed in your working directory, and
+you can run commands there. There is no network, so nothing more can be
+installed. Before you finish, run the acceptance tests with the repository's
+own test runner, for example `npx vitest run` in a repository that uses
+vitest. If a test fails, read why, fix your change, and run the tests again.
+Do not stop while a test fails that your change can make pass.
+
 ## What you must not do
 
 - Do not edit the spec, the acceptance tests, the verification manifest, or

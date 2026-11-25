@@ -117,8 +117,8 @@ export const UNDECLARED_TOOL_REFUSED_BEFORE_THE_ESTIMATE: LocalAssertion = runti
     await withVaultDirs('r36a-undeclared-', async (_dirs, base) => {
       const policyFile = join(base, 'policy.yaml');
       const text = await readFile(join(examples(), 'policy.yaml'), 'utf8');
-      const lowered = text.replace('tools: [Read, Write]', 'tools: [read, Write]');
-      if (lowered === text) throw new Error('R36a control: the example policy grants no [Read, Write] to lower');
+      const lowered = text.replace('tools: [Read, Write, Bash]', 'tools: [read, Write, Bash]');
+      if (lowered === text) throw new Error("R36a control: the example policy grants the builder no [Read, Write, Bash] to lower");
       await writeFile(policyFile, lowered);
       await exampleCreate(policyFile, false, (outcome) => {
         if (outcome.ok || outcome.reason !== 'policy-refused' || outcome.refusal.reason !== 'capability-missing' || outcome.role !== 'builder' || outcome.station !== 'build'

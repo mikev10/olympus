@@ -28,7 +28,7 @@
 import { createHash } from 'node:crypto';
 import { copyFile, cp, lstat, mkdir, readlink, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { diffTrees, hashRegularFile, isDependencyTree, walkTree, type WalkOptions } from '@olympus-ai/adapters';
+import { diffTrees, hashRegularFile, isDependencyTree, isToolCache, walkTree, type WalkOptions } from '@olympus-ai/adapters';
 import type { DraftSeat, DraftStation, RunId, TaskId } from '@olympus-ai/core';
 import { materialize as materializeCommit, resolveCommit } from '@olympus-ai/readiness';
 import type { DiffEntry } from '@olympus-ai/vault';
@@ -321,6 +321,16 @@ export function dependencyEntry(path: string): string {
   const name = parts[at + 1];
   const scoped = name?.startsWith('@') === true && parts.length > at + 3;
   return parts.slice(0, Math.min(parts.length, at + (scoped ? 3 : 2))).join('/');
+}
+
+/**
+ * The entries a task's writes in a dependency tree are recorded under
+ * (D-R15-05), sorted and each once, leaving out a tool's own cache: a builder
+ * that runs its tests writes one on every build, and nothing in it reaches a
+ * check (D-R57-03).
+ */
+export function notCarriedEntries(paths: readonly string[]): string[] {
+  return [...new Set(paths.filter(inDependencyTree).map(dependencyEntry))].filter((entry) => !isToolCache(entry)).sort();
 }
 
 /** A task's own diff: every path outside `.git` whose content differs between the tree it was handed and the tree it left. */
