@@ -129,9 +129,22 @@ describe('buildGraph', () => {
 describe('ClaudeCodeDriver.relayRequest', () => {
   test('is the relay the driver exports, as a copy a caller cannot change it through', () => {
     const driver = new ClaudeCodeDriver({ provider: new StubSandboxProvider() });
-    const relay = driver.relayRequest();
+    const relay = driver.relayRequest(['Read']);
     expect(relay).toStrictEqual({ ...MODEL_RELAY, paths: [...MODEL_RELAY.paths] });
     relay.paths.push('/v1/other');
-    expect(driver.relayRequest().paths).toStrictEqual(MODEL_RELAY.paths);
+    expect(driver.relayRequest(['Read']).paths).toStrictEqual(MODEL_RELAY.paths);
+  });
+
+  test('forwards web search only when the grant holds WebSearch, by the exact type the pinned CLI sends (A-R56-01)', () => {
+    const driver = new ClaudeCodeDriver({ provider: new StubSandboxProvider() });
+    const search = { type: 'web_search_20250305', perUseUsd: 0.01 };
+    expect(driver.relayRequest(['Read', 'WebSearch']).serverTools).toStrictEqual([search]);
+    for (const tools of [[], ['Read', 'Bash', 'WebFetch'], ['websearch'], ['mcp__server__WebSearch']]) {
+      expect(driver.relayRequest(tools).serverTools, JSON.stringify(tools)).toStrictEqual([]);
+    }
+    // A caller cannot widen the driver's map through a grant it was handed.
+    const granted = driver.relayRequest(['WebSearch']);
+    (granted.serverTools[0] as { perUseUsd: number }).perUseUsd = 0;
+    expect(driver.relayRequest(['WebSearch']).serverTools).toStrictEqual([search]);
   });
 });

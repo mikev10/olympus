@@ -29,7 +29,7 @@ function forgetful(inner: Driver): Driver {
     capabilities: () => inner.capabilities(),
     declaredTools: () => inner.declaredTools(),
     resolveModel: (tier) => inner.resolveModel(tier),
-    relayRequest: () => inner.relayRequest(),
+    relayRequest: (tools) => inner.relayRequest(tools),
     runTask: (req) => inner.runTask(req),
     cancel: (taskId) => inner.cancel(taskId),
     emitArtifacts: (roles, dir) => inner.emitArtifacts(roles, dir),

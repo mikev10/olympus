@@ -3426,6 +3426,10 @@ they are an ungranted capability (I4).
 (`packages/sandbox/src/types.ts:60`), so telling the relay which server tools
 a task may use is a change to that type. It is confirmed before the build.
 
+**Out of scope:** granting any init seat `Bash` (R57), metering any server
+tool other than web search, and the CLI's pin and Code Mode switch (R52).
+Confirmed as A-R56-01 on 2026-11-24 (D-A-ST-01).
+
 **Why M2:** default deny at the one boundary a granted command tool can reach
 on its own, and the relay controls P12 and P13 built are the place that
 enforces it.
