@@ -2265,6 +2265,13 @@ its decisions carry a `TOOLING` id rather than a unit's. The design is
 - **Rejected:** (a) a GitHub approval review as the merge signal, unavailable as above; (b) a label as the signal, forgeable by the session; (c) asking per paid run, which spent a turn per run for a decision with a known answer; (d) rerunning any paid failure, which would hide a real defect, so only listed intermittents with an owning unit are rerun, once.
 - **Reverse:** delete `.claude/skills/merge-unit/`, restore `triage-review` §9's printed commands and `WORKFLOW.md` step 7's text, and ask per paid run again.
 
+### D-TOOLING-12: a paid run is counted at 40 cents, not 15
+
+- **Problem:** the ledger counted each paid run at $0.15, but the runs cost more. Run 45504526619 (PR #230, 2026-11-24), where every paid suite ran fresh, reported about $0.41 in model costs. Run 45524132461, which reused both driver reports from cache, metered $0.21 for the init assertion alone. The ledger understated the week's spend, so the $2 cap allowed more spending than it said.
+- **Chosen:** count each paid run at $0.40, the measured cost of a full run, rounded down to the nearest 5 cents. The $2 cap stays, so it now covers 5 runs a week instead of 13.
+- **Rejected:** (a) counting each run's actual metered cost, which the skill cannot read until the run ends, though the ledger line is written before the run starts; (b) raising the cap to keep 13 runs, which would raise spend, the opposite of the aim.
+- **Reverse:** set the rate in `merge-unit` §2 and its ledger example back to 15 cents and 13 runs.
+
 ## P6: Verification + evidence
 
 ### D-P6-01: The unit spec was completed before the code, after a contradiction in the ledger was resolved
