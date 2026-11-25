@@ -16,14 +16,16 @@ Extract from its entry: scope, deliverables, out-of-scope, acceptance criteria.
 
 ## 2. Verify done-when
 
-Run every command in the unit's acceptance criteria, plus the standing four:
+Run every command in the unit's acceptance criteria, plus the standing run,
+once, on code `node scripts/local-check.ts preflight` already passed:
 
 ```
-pnpm -r typecheck
-pnpm -r lint
-pnpm -r test
-git ls-files -- .plan/          # must print nothing: the directory is maintainer-local
+node scripts/local-check.ts full
 ```
+
+It checks that `git ls-files -- .plan/` prints nothing, runs `pnpm typecheck`
+and `pnpm lint`, then every package's tests, each on its own, and the
+conformance package last, as CI orders them (D-TOOLING-13).
 
 The last check is scoped to the maintainer-local directory on purpose. The
 tracked planning documents live under `docs/plan/`, so a search for the word
@@ -43,14 +45,15 @@ model credentials exist only as CI's Actions secrets, so neither
 `pnpm --filter @olympus-ai/driver-codex test` can run on a
 maintainer's machine, and any change under `packages/` leaves each driver's
 recorded report stale (D-A-CI-07). A unit's "the driver test runs once"
-criterion is met by the pull request's `run-driver` job, not locally. Run
-everything else with both driver packages excluded:
+criterion is met by the pull request's `run-driver` job, not locally.
+`local-check full` runs each driver's files that call no model, as CI does
+without the label, and applies the rule below itself: it prints the entries
+only CI can run as `NOT RUN HERE`, never as passed, and exits non-zero on any
+other failure. Never run `pnpm -r test` in its place: it runs the conformance
+package before the packages whose reports it reads, and in R55 it never
+reached `api`, `cli`, or `benchmark`, with `--no-bail` or without.
 
-```
-pnpm -r --no-bail --filter '!@olympus-ai/driver-claude-code' --filter '!@olympus-ai/driver-codex' test
-```
-
-That run passes when every failure in it is a paid suite's report and nothing
+The run passes when every failure in it is a paid suite's report and nothing
 else. Locally that report is stale, absent on a fresh clone, or the record of
 a run that refused for want of a key; none of those is evidence, and CI's is
 the only one that counts:
