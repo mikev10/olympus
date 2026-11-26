@@ -13684,3 +13684,59 @@ Confirmed by the maintainer on 2026-11-24, taking D-R28-08's recommendation (cod
 - **Rejected: keep `resolved` and document its meaning.** The name is what R11 and every reader of the rates sees; a doc comment does not travel with a number.
 - **Assumptions, verified:** no v2 package is published (`npm view @olympus-ai/vault` is 404), so no store outside a developer's machine holds a `resolved` record, and the reader refusing one (I5) strands nothing released. A dev store written before this change is refused at read with the reader's cause, never read as open or addressed. The CLI's `findings` summary is the only user-facing text that says `resolved` (`packages/cli/src/cli.ts:94`).
 - **Reverse:** rename `addressed` back to `resolved` in the same files and ids.
+
+## Amendment: R5 splits, and drafting at `plan` gains its spec
+
+The maintainer ran `/start-unit R5` on 2026-11-25. The unit stopped before any code: the entry had no deliverables, out-of-scope list, conformance or acceptance criteria, and its neighbours disagreed with it about what R5 is. The maintainer took the session's recommendation to split it and to write this amendment. The split (D-A-GD-01) is confirmed. D-A-GD-02 to D-A-GD-07 are the session's proposals, each checked against the code on `v2` at 3566c06, and wait for the maintainer; merging the amendment is the confirmation. Docs only: no package, contract or gate path changes here.
+
+### D-A-GD-01: R5 becomes R5a (drafting at `plan`, M2) and R5b (goal decomposition, M3)
+
+- **Problem, verified:** the R5 entry described a goal that becomes several specs, each its own run. Four other places assigned R5 the step from one spec to its task graph: R19's entry ("a graph derived from the spec is R5's"), R20's ("R5's planner role"), `R4-parallel.md` ("R5 decomposes goals into graphs"), and `VISION-GAP.md` (step 2, "plan decomposition (pull R5 forward from M3)"). They are different units. The first needs a new artifact in the frozen vocabulary, runs that have a parent, and a status derived across runs; none of that exists (`packages/core/src/run/types.ts` holds `TriggerLineage` and no parent or goal). The second needs a seat at `plan`, where R19's machinery is one station short.
+- **Choice:** R5a is the second and gets its spec now, `docs/plan/R5-planning.md`. R5b keeps the entry's four binding rules verbatim, depends on R5a since each child run drafts its own graph, and stays M3 with no spec.
+- **Rejected: one unit for both.** Two contract changes that do not depend on each other in one review bundle, and the half the first release needs would wait on the half that needs `learn`.
+- **Reverse:** restore the R5 row and entry, delete `R5-planning.md`, and revert the cross-references in `DECOMPOSITION.md`, `R4-parallel.md`, `VISION-GAP.md` and `F1-spine.md`.
+
+### D-A-GD-02: the bound on a drafted graph is policy's, and admission approves the bound
+
+- **Problem, verified:** admission reads the graph four times before anything runs: the roles it names (`packages/api/src/run.ts:817`), a scope for each (`:1242`), the scopes a trigger admits and narrows (`:1256`, `:1263`), and the worst-case cost (`:1278`), which the approved figure must equal exactly (`:1419`). A drafted graph does not exist yet at any of them.
+- **Choice:** policy gains `planning: { maxBuildTasks, roles }`. Admission makes all four reads over that bound, the person approves the bound's worst case, and a draft outside the bound is sent back as a runtime problem. A policy without `planning` refuses a run that drafts its graph.
+- **Why policy:** the planner picks each task's role, and a role's scope is its tools, egress and budget. The set a model picks from is a grant, and grants are a person's edit to a Vault file, never a request field a trigger's template could carry (default deny: what policy does not grant is unavailable).
+- **Rejected: a bound on the request.** A person could set it per run, but so could whatever built the request, and the role list would be a grant made outside policy.
+- **Rejected: no bound, with the cost approved again at the `plan` gate.** It needs a second cost approval mid-run and lets a run be admitted whose price nobody has seen; at L2 with `plan` on `auto` nobody would see it at all.
+- **Reverse:** move `planning` from `PolicyDocument` to `RunRequest`; the checks do not change.
+
+### D-A-GD-03: the runtime derives a drafted graph's review task
+
+- **Verified:** `parseGraph` already derives the security seat beside each review task (`packages/api/src/validate.ts:665`) and one review task may cover several build tasks (`packages/api/src/line.ts:1967`).
+- **Choice:** a drafted graph holds build tasks only. The runtime adds one review task that depends on every build task. A draft naming a review task is sent back.
+- **Rejected: the planner writes review tasks, held to `parseGraph`'s coverage rule.** Coverage would hold, but the planner is on the author's side, and how the work is grouped for review would be its choice. One review over everything also has a fixed cost, which the admission bound needs.
+- **Reverse:** accept review tasks in a draft and count up to `maxBuildTasks` of them in the bound.
+
+### D-A-GD-04: a task states its objective
+
+- **Verified:** `Task` has no field saying what the task is for (`packages/core/src/run/types.ts:72`), and a builder is handed only `id`, `station`, `role` and `dependsOn` of every task (`line.ts:1553`). With one build task the locked spec is the task. With several, no builder can tell which part is its own.
+- **Choice:** `Task.objective: string | null`, required and size-capped on a drafted build task, null allowed on a supplied graph. It reaches the builder inside the `task-graph` grant, with its dependencies' objectives, and never a review seat, which is already refused the plan (`packages/core/src/station/contracts.ts:22`).
+- **Rejected: a separate plan document.** A second artifact to lock and approve, saying in prose what the graph must say per task anyway.
+- **Rejected: require it on supplied graphs too.** Every existing multi-task graph would be refused for a field a person writing the spec and the graph together does not need.
+- **Reverse:** drop the field; a drafted graph is then limited to one build task.
+
+### D-A-GD-05: `dependencySet` stays unenforced
+
+- **Verified:** the field is required by the parser (`validate.ts:621`), copied (`:659`), and read by nothing else in any package.
+- **Choice:** R5a does not enforce it and says so in its out-of-scope list. R4's conflict check is what stops two tasks overwriting one path.
+- **Rejected: fail a task whose change leaves its set.** A planner cannot know every file a change will touch (a lockfile, a generated file), so correct work would park on the planner's guess. It would also change the meaning of every supplied graph.
+- **Rejected: send back a draft whose unordered tasks have overlapping sets.** Without enforcement the sets say nothing about what the tasks will write, so the check would be on a guess.
+- **Owner of the field's reader:** the distributed scheduler (M4b), as the field's own comment says.
+
+### D-A-GD-06: the planner keeps the three grants `plan` already has
+
+- **Verified:** `STATION_CONTRACTS.plan` allows `repo-instructions`, `locked-spec` and `base-repo-readonly` (`contracts.ts:188`). The acceptance tests and the intent are not among them.
+- **Choice:** unchanged. The planner is not granted the tests as context or the intent. Files the base itself holds are in its tree as they are in any seat's.
+- **Rejected: grant the intent.** The locked spec is what the run is held to; a planner reading the intent could plan work the spec did not approve, and on a triggered run the intent is extracted from untrusted input.
+- **Reverse:** add the grant to the `plan` contract.
+
+### D-A-GD-07: "goal" is not added to the frozen vocabulary yet
+
+- **Choice:** the spine's M1 out list gains "drafting at plan (M2)" and "goal decomposition (M3)", and nothing else in the spine changes. The task graph is already an artifact "emitted by `plan`". "Goal" stays R5b's amendment to take first, as its entry says.
+- **Rejected: add the artifact now, as readiness was added before R1.** Readiness had a spec when its term was added. R5b has none, and a frozen term with no spec behind it would fix a meaning nobody has checked against the code.
+- **Order:** not changed by this amendment. `DECOMPOSITION.md`'s suggested order still starts at R58. R5a's dependencies have shipped, so where it goes in the order is the maintainer's call at confirmation.
