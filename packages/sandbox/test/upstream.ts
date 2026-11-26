@@ -176,6 +176,8 @@ function responses(q, s, body, echo) {
   if (usage !== null && t.omit !== 'final') usage.output_tokens = counts.output;
   const response = { id: 'resp_test', object: 'response', model: request.model, status: 'completed',
     output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: JSON.stringify(echo) }] }], usage: usage };
+  // #208: the tier the answer was served at. A stream opens naming the tier as asked for, 'auto', and ends naming the one served.
+  if (t.tier !== undefined) response.service_tier = t.tier;
   let payload;
   let type;
   if (status !== 200) {
@@ -184,7 +186,7 @@ function responses(q, s, body, echo) {
   } else if (request.stream === true) {
     type = 'text/event-stream';
     const events = [
-      ['response.created', { type: 'response.created', response: Object.assign({}, response, { status: 'in_progress', output: [], usage: null }) }],
+      ['response.created', { type: 'response.created', response: Object.assign({}, response, { status: 'in_progress', output: [], usage: null }, t.tier === undefined ? {} : { service_tier: 'auto' }) }],
       ['response.output_text.delta', { type: 'response.output_text.delta', delta: JSON.stringify(echo) }],
     ];
     // 'cut' ends the stream before its final event, as a dropped connection does.

@@ -598,6 +598,17 @@ describe('the openai-responses dialect is metered by the same rules (A-R26-01)',
     expect(meteredReading(await destroyed(handle))).toMatchObject({ calls: 1, refused: 6, exhausted: 'none' });
   });
 
+  test('an answer served at a tier other than the default is counted and then stops the relay, streamed or whole, and the tier a stream opens with is not read (#208)', async () => {
+    const usage = { input: 100, output: 10, cacheRead: 0, cacheWrite: 0 };
+    for (const stream of [true, false]) {
+      const { handle, upstream } = await metered(TEST_BUDGET, {}, RESPONSES);
+      const answers = await send(handle, [respond(usage, { stream }, { tier: 'default' }), respond(usage, { stream }, { tier: 'priority' }), respond(usage)]);
+      expect(answers.map((a) => a.status), String(stream)).toStrictEqual([200, 200, 402]);
+      expect(postsTo(await upstreamLog(upstream))).toHaveLength(2);
+      expect(meteredReading(await destroyed(handle))).toMatchObject({ calls: 2, inputTokens: 200, outputTokens: 20, exhausted: 'unreadable', refused: 1 });
+    }
+  });
+
   test('an unpriced model is refused unsent, a stream cut before response.completed stops the relay, and only the responses path is metered', async () => {
     const { handle, upstream } = await metered(TEST_BUDGET, {}, RESPONSES);
     const usage = { input: 1000, output: 7, cacheRead: 0, cacheWrite: 0 };
@@ -692,6 +703,9 @@ describe('a relay nothing bounds is refused at provisioning, naming the field', 
       /maxOutputTokens/u,
     ],
     ['an empty price table', { meter: { ...TEST_METER, prices: {} } }, /relay\.meter\.prices/u],
+    // #205: a model that searches on every call is billed outside the tokens the meter reads.
+    ['a model that searches on every call', { meter: { ...TEST_METER, prices: { ...TEST_METER.prices, 'gpt-5-search-api': TEST_METER.prices[TEST_MODEL] } } }, /gpt-5-search-api.*searches on every call/u],
+    ['a dated search model', { meter: { ...TEST_METER, prices: { 'gpt-4o-search-preview-2025-03-11': TEST_METER.prices[TEST_MODEL] } } }, /searches on every call/u],
     [
       'a negative price',
       { meter: { ...TEST_METER, prices: { [TEST_MODEL]: { ...TEST_METER.prices[TEST_MODEL], outputPerMTok: -1 } } } },

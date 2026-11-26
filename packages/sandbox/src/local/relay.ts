@@ -28,10 +28,11 @@
  *   call it reads two things, the request's model and the response's usage,
  *   and forwards both bodies unchanged (D-P13-02).
  *
- * Built the way the proxy is: source passed to `node --eval` in the same
- * pinned image, read-only, every capability dropped, nothing mounted.
+ * Built the way the proxy is, in the same pinned image, read-only, every
+ * capability dropped, nothing mounted. Its source arrives on standard input,
+ * where the proxy's is an argument (#207).
  */
-import { createSandboxNetwork, dockerCli } from './docker.js';
+import { createSandboxNetwork, dockerCli, dockerStartWithInput, type InputStart } from './docker.js';
 import { normalizeHost } from './egress.js';
 import { refuse, withLeftovers } from './refusal.js';
 import type { LocalUpstream, MeterReading, ModelPrice, RelayBudget, RelayDialect, RelayMeter, RelayScheme, RelaySpec, ServerToolGrant } from '../types.js';
@@ -65,8 +66,10 @@ export const RELAY_URL = `http://${RELAY_ALIAS}:${String(RELAY_PORT)}`;
 export const METER_PREFIX = 'model-relay-meter ';
 
 /**
- * The relay itself. Passed to `node --eval` as one argv element, so there is
- * no shell, no mount, and no image build between this source and what runs.
+ * The relay itself. Written to the standard input of `node -` in a container
+ * created for it, so there is no shell, no mount, and no image build between
+ * this source and what runs, and its length counts toward no command line
+ * (#207).
  *
  * It fails closed at start: no credential, no header, an upstream that is not
  * an `https` origin, an empty grant, no budget, a meter for a dialect it does
@@ -114,17 +117,15 @@ export const METER_PREFIX = 'model-relay-meter ';
  *   default is counted as read and then stops the relay forwarding, as an
  *   unreadable one does (codex-1). An answer naming no tier, as a local
  *   endpoint's does, is read at the table's rate.
- *
- * This source runs as one `docker run` argument, so its length counts toward
- * the host's command-line limit, 32767 characters on Windows. Explanation
- * belongs in this comment, which is outside it, rather than inside it. What
- * runs is `RELAY_SOURCE`, stripped of whole-line comments and indentation.
  * - Under the `openai-responses` dialect (A-R26-01) the same rules hold with
  *   that API's names: a `POST` to a granted path ending `/responses` is
  *   metered and a `GET` is free; the ceiling is the larger of the model's
  *   `maxOutputTokens` and the request's `max_output_tokens`; the usage is
  *   `input_tokens` (less its cached part, counted as cache reads) and
  *   `output_tokens`, from the body or from the `response.completed` event.
+ *   The tier an answer reports is read from the same two places and by the
+ *   same rule as under `openai-chat` (#208).
+ * - A price table naming a model in `PER_CALL_MODEL` is refused at start (#205).
  * - The credential is written as the spec's scheme says: as it is, or as
  *   `Bearer <credential>` (A-R6-02).
  * - Started local (A-R21-01), the upstream is `http://${LOCAL_UPSTREAM_ALIAS}:<port>`
@@ -143,6 +144,17 @@ export const METER_PREFIX = 'model-relay-meter ';
  * the relay could not count is spend the budget cannot see (D-P13-12).
  */
 export const COUNTED_SERVER_TOOLS: Readonly<Record<string, string>> = Object.freeze({ web_search_20250305: 'web_search_requests' });
+
+/**
+ * The models the relay knows search on every call, whatever the request
+ * asks for: an id ending `-search-preview` or `-search-api`, with or without
+ * a date (#205). A search is billed outside the token counts the meter reads,
+ * and no field of a request turns it off, so a price table naming one is
+ * refused at provisioning and again at the relay's own start. The list is the
+ * names known when it was written: a search model under another name is not
+ * caught here.
+ */
+export const PER_CALL_MODEL = /-search-(?:preview|api)(?:-[0-9]{4}-[0-9]{2}-[0-9]{2})?$/u;
 
 const RELAY_SOURCE_TEXT = `'use strict';
 const http = require('node:http');
@@ -172,6 +184,7 @@ const budget = parsed('RELAY_BUDGET');
 const meter = parsed('RELAY_METER');
 const tools = parsed('RELAY_TOOLS');
 const COUNTED = ${JSON.stringify(COUNTED_SERVER_TOOLS)};
+const PER_CALL = new RegExp(${JSON.stringify(PER_CALL_MODEL.source)});
 
 function positive(n) { return typeof n === 'number' && Number.isFinite(n) && n > 0; }
 function price(n) { return typeof n === 'number' && Number.isFinite(n) && n >= 0; }
@@ -222,6 +235,7 @@ if (prices === null || typeof prices !== 'object' || Array.isArray(prices) || Ob
     })) {
   fail('no price table the relay can charge from');
 }
+if (Object.keys(prices).some(function (m) { return PER_CALL.test(m); })) fail('a price table naming a model billed per call, which the meter cannot count');
 // A-R56-01: the server tools forwarded, each one the relay can count, and none outside the Messages dialect.
 const toolPrice = {};
 if (!Array.isArray(tools) || (tools.length > 0 && meter.dialect !== 'anthropic-messages') || !tools.every(function (t) {
@@ -341,7 +355,7 @@ function usageReader() {
     const s = final ? usage.server_tool_use : null;
     if (s !== null && typeof s === 'object') Object.keys(s).forEach(function (k) { if (count(s[k]) !== null) u.uses[k] = s[k]; });
   };
-  // openai-chat: an answer served at a tier other than the default is not at the table's rate.
+  // openai-chat, openai-responses: an answer served at a tier other than the default is not at the table's rate.
   u.tierOpenai = function (tier) {
     if (tier !== undefined && tier !== null && tier !== 'default') u.offTier = true;
   };
@@ -395,7 +409,10 @@ function streamParser(u) {
     if (openai) { u.tierOpenai(event.service_tier); if (event.usage !== null && typeof event.usage === 'object') u.takeOpenai(event.usage); return; }
     // openai-responses: the usage is the response.completed event's, and no other event's (A-R26-01).
     if (responses) {
-      if (event.type === 'response.completed' && event.response !== null && typeof event.response === 'object') u.takeResponses(event.response.usage);
+      if (event.type === 'response.completed' && event.response !== null && typeof event.response === 'object') {
+        u.tierOpenai(event.response.service_tier);
+        u.takeResponses(event.response.usage);
+      }
       return;
     }
     if (event.type === 'message_start' && event.message !== null && typeof event.message === 'object') u.take(event.message.usage, false);
@@ -429,7 +446,7 @@ function bodyParser(u) {
       let body = null;
       try { body = JSON.parse(Buffer.concat(parts).toString('utf8')); } catch (error) { return; }
       if (body !== null && typeof body === 'object') {
-        if (openai) { u.tierOpenai(body.service_tier); u.takeOpenai(body.usage); } else if (responses) u.takeResponses(body.usage); else u.take(body.usage, true);
+        if (openai) { u.tierOpenai(body.service_tier); u.takeOpenai(body.usage); } else if (responses) { u.tierOpenai(body.service_tier); u.takeResponses(body.usage); } else u.take(body.usage, true);
       }
     },
   };
@@ -819,8 +836,7 @@ server.listen(port, '0.0.0.0', function () {
 
 /**
  * The relay as it is run: `RELAY_SOURCE_TEXT` less its whole-line comments and
- * its indentation, which are for the reader and count toward the command-line
- * limit (R56). No line of the source is a string continued from the line
+ * its indentation, which are for the reader (R56). No line of the source is a string continued from the line
  * before, so a line that begins `//` is always a comment.
  */
 export const RELAY_SOURCE = RELAY_SOURCE_TEXT.split('\n').filter((line) => !/^\s*\/\//u.test(line)).map((line) => line.trimStart()).join('\n');
@@ -884,7 +900,11 @@ export interface AppliedRelay {
    * removes them.
    */
   readonly ownsNetworks: boolean;
-  /** The exact argv `docker run` was given for the relay, so a reviewer can reproduce it. No value in it is secret. */
+  /**
+   * The exact argv `docker create` was given for the relay, so a reviewer can
+   * reproduce it. No value in it is secret. The program it runs is
+   * `RELAY_SOURCE`, written to its standard input and in no argument (#207).
+   */
   readonly runArgs: readonly string[];
 }
 
@@ -1134,6 +1154,13 @@ function checkMeter(meter: unknown): RelayMeter {
   const table: Record<string, ModelPrice> = {};
   for (const [model, price] of Object.entries(prices)) {
     if (model.trim() === '' || !isRecord(price)) refuse('relay', `relay.meter.prices[${JSON.stringify(model)}] is not a price`);
+    if (PER_CALL_MODEL.test(model)) {
+      refuse(
+        'relay',
+        `relay.meter.prices names ${JSON.stringify(model)}, a model that searches on every call and is billed for each search outside the token counts this relay reads. ` +
+          'A price per token cannot charge it, and spend the budget cannot see is refused rather than estimated (#205, D-P13-12).',
+      );
+    }
     const at = (field: PriceField): number => {
       const value = price[field];
       if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
@@ -1165,6 +1192,50 @@ function checkMeter(meter: unknown): RelayMeter {
     table[model] = Object.freeze(checked);
   }
   return { dialect, prices: Object.freeze(table) };
+}
+
+/** Where one relay's container is created: its name, the network it starts on, and what it is made from. */
+export interface RelayTarget {
+  readonly name: string;
+  /** The internal network, the one the sandbox shares. */
+  readonly network: string;
+  readonly labels: readonly string[];
+  readonly image: string;
+  /** The names of the variables whose values the `docker` process holds. Names only: no value is in the argv. */
+  readonly secrets: readonly string[];
+}
+
+/**
+ * The argv `docker create` is given for a relay, exactly as `startRelay`
+ * passes it. The source is not in it: it is written to the standard input of
+ * `node -`, so the length of this list is the plan's own, the meter's price
+ * table above all, and can be measured before any host is asked to start it
+ * (`windowsCommandLineLength`, #207).
+ */
+export function relayCreateArgs(plan: RelayPlan, target: RelayTarget): string[] {
+  return [
+    'create', '--interactive', '--init',
+    '--name', target.name,
+    ...target.labels,
+    '--network', target.network,
+    '--network-alias', RELAY_ALIAS,
+    // A-R21-01: the route to the Docker host, given to this container and to no sandbox.
+    ...(plan.local === null ? [] : ['--add-host', `${LOCAL_UPSTREAM_ALIAS}:host-gateway`, '--env', `RELAY_LOCAL=${plan.local}`]),
+    '--env', `RELAY_UPSTREAM=${plan.upstream}`,
+    '--env', `RELAY_PATHS=${JSON.stringify(plan.paths)}`,
+    '--env', `RELAY_HEADER=${plan.header}`,
+    '--env', `RELAY_SCHEME=${plan.scheme}`,
+    '--env', `RELAY_PORT=${String(RELAY_PORT)}`,
+    '--env', `RELAY_BUDGET=${JSON.stringify(plan.budget)}`,
+    '--env', `RELAY_METER=${JSON.stringify(plan.meter)}`,
+    '--env', `RELAY_TOOLS=${JSON.stringify(plan.serverTools)}`,
+    // Names only: the values are on the `docker` process, never in this argv.
+    ...target.secrets.flatMap((name) => ['--env', name]),
+    '--read-only',
+    '--cap-drop', 'ALL',
+    target.image,
+    'node', '-',
+  ];
 }
 
 /** Docker's own object names for one sandbox's relay (I10: no Greek name reaches `docker ps`). */
@@ -1275,36 +1346,20 @@ export async function startRelay(
     // Under none there is no value, and no variable for one (A-R21-02).
     const secrets: Record<string, string> = credential === null ? {} : { RELAY_CREDENTIAL: credential };
     if (trust !== undefined) secrets.RELAY_TRUST = trust;
-    const runArgs = [
-      'run', '--detach', '--init',
-      '--name', names.container,
-      ...options.labels,
-      '--network', internal,
-      '--network-alias', RELAY_ALIAS,
-      // A-R21-01: the route to the Docker host, given to this container and to no sandbox.
-      ...(plan.local === null ? [] : ['--add-host', `${LOCAL_UPSTREAM_ALIAS}:host-gateway`, '--env', `RELAY_LOCAL=${plan.local}`]),
-      '--env', `RELAY_UPSTREAM=${plan.upstream}`,
-      '--env', `RELAY_PATHS=${JSON.stringify(plan.paths)}`,
-      '--env', `RELAY_HEADER=${plan.header}`,
-      '--env', `RELAY_SCHEME=${plan.scheme}`,
-      '--env', `RELAY_PORT=${String(RELAY_PORT)}`,
-      '--env', `RELAY_BUDGET=${JSON.stringify(plan.budget)}`,
-      '--env', `RELAY_METER=${JSON.stringify(plan.meter)}`,
-      '--env', `RELAY_TOOLS=${JSON.stringify(plan.serverTools)}`,
-      // Names only: the values are on the `docker` process, never in this argv.
-      ...Object.keys(secrets).flatMap((name) => ['--env', name]),
-      '--read-only',
-      '--cap-drop', 'ALL',
-      options.image,
-      'node', '--eval', RELAY_SOURCE,
-    ];
+    const runArgs = relayCreateArgs(plan, { name: names.container, network: internal, labels: options.labels, image: options.image, secrets: Object.keys(secrets) });
     containerId = await run(runArgs, secrets);
-    if (containerId === '') throw new Error('docker run reported no container id for the model relay');
+    if (containerId === '') throw new Error('docker create reported no container id for the model relay');
 
-    // Attached after the container exists, so the relay is never briefly on a network the sandbox can reach.
+    // A second network is attached to a container that exists, and before it starts: the relay never runs without its way out.
     await run(['network', 'connect', outbound, containerId]);
 
-    await requireListening(containerId, options);
+    // #207: the source arrives on standard input. The client that delivers it stays attached, so it is let go once the relay is up or has failed.
+    const start = dockerStartWithInput(options.executable, containerId, RELAY_SOURCE);
+    try {
+      await requireListening(containerId, options, start);
+    } finally {
+      start.release();
+    }
 
     return {
       containerId,
@@ -1330,14 +1385,19 @@ export async function startRelay(
   }
 }
 
-async function requireListening(containerId: string, options: RelayOptions): Promise<void> {
+async function requireListening(containerId: string, options: RelayOptions, start: InputStart): Promise<void> {
   for (let attempt = 0; attempt < READY_ATTEMPTS; attempt += 1) {
+    // Read before the probe: a relay that got part of its source is not one to find listening.
+    const undelivered = start.failure();
+    if (undelivered !== undefined) throw new Error(`the model relay was not started: ${undelivered}`);
     const probe = await dockerCli(options.executable, ['exec', containerId, 'node', '--eval', READY_SOURCE], { timeoutMs: options.timeoutMs });
-    if (probe.exitCode === 0) return;
-    const alive = await dockerCli(options.executable, ['inspect', '--format', '{{.State.Running}}', containerId], { timeoutMs: options.timeoutMs });
-    if (alive.stdout.trim() !== 'true') {
+    if (probe.exitCode === 0 && start.failure() === undefined) return;
+    const state = (await dockerCli(options.executable, ['inspect', '--format', '{{.State.Status}}', containerId], { timeoutMs: options.timeoutMs })).stdout.trim();
+    // `created` is a start still on its way, for as long as the client making it is alive.
+    if (state !== 'running' && !(state === 'created' && !start.ended())) {
       const logs = await dockerCli(options.executable, ['logs', '--tail', '20', containerId], { timeoutMs: options.timeoutMs });
-      throw new Error(`the model relay exited before it listened: ${(logs.stderr + logs.stdout).trim()}`);
+      const said = start.failure();
+      throw new Error(`the model relay exited before it listened: ${(logs.stderr + logs.stdout).trim()}${said === undefined ? '' : ` (${said})`}`);
     }
     await wait(READY_INTERVAL_MS);
   }
