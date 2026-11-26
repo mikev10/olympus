@@ -2,7 +2,7 @@
 
 **Unit:** R4 (M2, maintainer)
 **Depends on:** P4 Station machine, P6 Verification + evidence, I1a and I1b Integration
-**Blocks:** R5 decomposes goals into graphs this unit runs in parallel.
+**Blocks:** R5a drafts the task graphs this unit runs in parallel.
 
 P4 runs tasks one at a time in graph order and records that as a known limit
 (D-P6-11). This unit removes it for `build`: tasks whose dependencies have all
@@ -60,7 +60,7 @@ listed below and land in this unit's pull request.
 - Merging inside a file, and any automatic resolution of a conflict.
 - Verifying tasks in parallel. The accepted tree is a chain; verify stays serial.
 - Review seats in parallel. M1 seats one reviewer; panels are R9 and M3.
-- Goal decomposition (R5).
+- Drafting the task graph (R5a) and goal decomposition (R5b).
 - A parallelism value in policy per role or per station.
 - Raising the egress, budget, or wall-clock grants because tasks overlap. Each task keeps its own.
 
