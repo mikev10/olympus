@@ -154,6 +154,36 @@ export function outcomesOf(report: unknown): TestOutcome[] {
   return out;
 }
 
+/**
+ * What a conformance run's exit status and printed output say that its
+ * report's tests do not (#249). A runner that exits non-zero with no failed
+ * test in its report failed outside one. So did a runner that printed an
+ * unhandled error, whatever else failed beside it: a stale paid report is an
+ * excuse for the entries it names and for nothing else. An exit of zero
+ * beside a failed test is a report this cannot trust either.
+ */
+export function runnerProblems(status: number, output: string, outcomes: readonly TestOutcome[]): string[] {
+  // eslint-disable-next-line no-control-regex -- the escape character is what a colour code starts with
+  const lines = output.replace(/\u001b\[[0-9;]*m/gu, '').split(/\r?\n/u);
+  const problems: string[] = [];
+  // The headings vitest prints over an error no test owns, alone on their line between rules.
+  if (lines.some((line) => /^[\s\u23AF]*Unhandled (Errors?|Rejection)[\s\u23AF]*$/u.test(line))) problems.push('runner: vitest reported an error outside any test');
+  const failed = outcomes.some((o) => o.status === 'failed');
+  if (status !== 0 && !failed) problems.push(`runner: vitest exited ${String(status)} with no failed test in its report`);
+  if (status === 0 && failed) problems.push('runner: vitest exited 0 with a failed test in its report');
+  return problems;
+}
+
+/**
+ * Why a whole-suite run proves nothing, or an empty list (#249). The
+ * acceptance run is every test: one that ran none, or left any unexecuted,
+ * has not shown what `full` says it shows.
+ */
+export function unexecuted(outcomes: readonly TestOutcome[]): string[] {
+  if (!outcomes.some((o) => o.status === 'passed')) return ['runner: no test passed, so the suite did not run'];
+  return outcomes.filter((o) => o.status !== 'passed' && o.status !== 'failed').map((o) => `not executed (${o.status}): ${o.file}: ${o.title}`);
+}
+
 /** A registry id as this script accepts one: what the registry uses, and nothing a pattern could misread. */
 export function isRegistryId(id: string): boolean {
   return /^[A-Za-z][A-Za-z0-9]*(\.[A-Za-z0-9-]+)+$/u.test(id);
@@ -273,14 +303,15 @@ function packageTests(pkg: WorkspacePackage): () => Promise<StepResult> {
 }
 
 /** Runs vitest in the conformance package directly, so a `-t` pattern reaches it as written, and reads its JSON report. */
-async function conformance(args: readonly string[]): Promise<{ status: number; outcomes: TestOutcome[]; problems: string[] }> {
+async function conformance(args: readonly string[]): Promise<{ outcomes: TestOutcome[]; problems: string[]; runner: string[] }> {
   const cwd = join(ROOT, 'packages', 'conformance');
   const scratch = mkdtempSync(join(tmpdir(), 'local-check-'));
   try {
     const report = join(scratch, 'report.json');
     const ran = await run('node', [join(cwd, 'node_modules', 'vitest', 'vitest.mjs'), 'run', ...args, '--reporter=default', '--reporter=json', `--outputFile.json=${report}`], cwd);
     if (!existsSync(report)) throw new Error(`local-check: the conformance run wrote no report (exit ${String(ran.status)})`);
-    return { status: ran.status, outcomes: outcomesOf(JSON.parse(readFileSync(report, 'utf8'))), problems: problemLines(ran.output) };
+    const outcomes = outcomesOf(JSON.parse(readFileSync(report, 'utf8')));
+    return { outcomes, problems: problemLines(ran.output), runner: runnerProblems(ran.status, ran.output, outcomes) };
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
@@ -324,6 +355,7 @@ async function preflight(base: string, ids: readonly string[], steps: Step[]): P
     const ran = await conformance(['test/registry.test.ts', '-t', idPattern(wanted)]);
     // Only the named entries are judged: the registry's problem list covers packages this run did not test.
     const verdict = classify(ran.outcomes, []);
+    verdict.failed.push(...ran.runner);
     const absent = unproven(wanted, ran.outcomes).filter((id) => !verdict.notRunHere.includes(id));
     if (absent.length > 0) return { ok: false, note: `no passed test carried: ${absent.join(', ')}` };
     return { ok: verdict.failed.length === 0, note: describeVerdict(verdict) };
@@ -341,7 +373,7 @@ async function full(steps: Step[]): Promise<void> {
   await step(steps, `tests: ${CONFORMANCE}`, async () => {
     const ran = await conformance([]);
     const verdict = classify(ran.outcomes, ran.problems);
-    if (ran.status !== 0 && verdict.failed.length === 0 && verdict.notRunHere.length === 0) return { ok: false, note: `vitest exited ${String(ran.status)} with no failed test in its report` };
+    verdict.failed.push(...ran.runner, ...unexecuted(ran.outcomes));
     return { ok: verdict.failed.length === 0, note: describeVerdict(verdict) };
   });
 }
