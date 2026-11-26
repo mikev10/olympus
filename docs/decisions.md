@@ -14009,3 +14009,34 @@ accurate about the code, none fixed in this unit
 - **Filed, not this unit's.** `scripts/local-check.ts` does not check the
   runner's exit status in `preflight`, excuses it in `full` whenever a paid
   entry is listed, and does not require that any test ran: #249, under #197.
+
+### A-R58-02: a result returned under a spent budget is judged once (#248)
+
+Confirmed by the maintainer on 2026-11-26, after the triage, taking the
+recommended answer to #248. It supersedes the known limit in D-R58-06 and
+the line of D-R58-04 that judged a successful call as before.
+
+- **Contract.** No type changes shape. `TaskAttempts.budgetSpent`
+  (`packages/core/src/run/types.ts`) changes meaning: it is written when the
+  relay's meter reports the budget spent and a request refused, whether the
+  call failed or returned a result, and no longer only in the commit that
+  parks. `ParkCause`'s `budget-spent` covers both.
+- **Behaviour.** A call that returns a result is judged on it. `runTask`
+  commits the spent budget with the attempt first. `startAttempt` then
+  refuses any further attempt at that task as a `budget-spent` park: after a
+  failed gate, a draft sent back, a conflict that sends the task back to
+  `build`, or a stop that lost the result. A result that finishes the task
+  parks nothing. One place decides it, for the builder, the reviewer, and
+  both drafting seats.
+- **Rejected.** Parking whatever the driver returned (Gemini's fix): it
+  discards a result the gate might pass. Parking inside `verify` when the
+  gate fails: it covers `build` only, and leaves a sent-back draft and a
+  conflict to start another call.
+- **Not reviewed externally.** It was built after both reviews, as their
+  shared finding's fix. `I5.spent-budget-result-is-judged-once` holds it and
+  fails with `startAttempt`'s check removed: the run then spends all three
+  iterations.
+- **Limit that remains.** The budget is still each call's. A task whose
+  calls each end just under their bound can use every iteration.
+- **Reverse** by removing the check in `startAttempt` and the commit in
+  `runTask`, and restoring the two comments.

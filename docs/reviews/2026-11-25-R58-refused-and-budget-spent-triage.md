@@ -51,3 +51,7 @@ Gemini answered one of the prompt's seven items and disclosed nothing about prio
 Codex assessed as sound: the bound and limit coming from the meter and policy, `parkRefusal` throwing on a park with no bound recorded, the version comparison, state-derived standings taking precedence, and the conformance entries not being tautologies. It found no language escape hatch a model could reach. Gemini assessed nothing.
 
 On the framing, Codex accepted it and added a recovery question: after exhaustion is observed, what durable fact prevents another attempt across an interruption. For a failed call, the park is recorded and then committed with `parkedFor` and `budgetSpent`, and the entry resumes the run and finds the same park with no driver call. A stop between the meter reading and the park's commit leaves the task `running`, and the resume replays the call, which `starts` counts. That is the replay every attempt has (A-P4-06), not something this unit adds.
+
+## Addendum, 2026-11-26: codex-1a / gemini-1 is fixed
+
+The maintainer read this triage and confirmed the recommended answer to #248. The finding's outcome changes from a known limit to **fixed** (A-R58-02). A call that returns a result under a spent budget is judged on that result, and the task's next attempt is refused as a `budget-spent` park. `I5.spent-budget-result-is-judged-once` was shown failing with the check removed. The fix was built after both reviews and was not itself reviewed externally.
