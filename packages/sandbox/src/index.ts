@@ -6,6 +6,7 @@ export * from './local/egress.js';
 export * from './local/proxy.js';
 export * from './local/relay.js';
 export * from './local/probe.js';
+export * from './local/browse.js';
 export * from './local/refusal.js';
 export { DockerUnavailable, type DaemonFacts } from './local/docker.js';
 export * from './local/image.js';

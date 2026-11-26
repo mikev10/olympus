@@ -2,6 +2,15 @@ export * from './types.js';
 export { adapterAdmission, type AdapterAdmission } from './autonomy.js';
 export { CliBehavioralAdapter, compareCli, readCliScenario, type CliExpected, type CliInput } from './behavioral.js';
 export {
+  BrowserBehavioralAdapter,
+  canBrowse,
+  compareBrowser,
+  readBrowserScenario,
+  type BrowserExpected,
+  type BrowserExpectedObservation,
+  type BrowserInput,
+} from './browser.js';
+export {
   canProbe,
   compareHttp,
   DEFAULT_READY_WITHIN_MS,

@@ -14,13 +14,15 @@ import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import { resolve as resolvePath } from 'node:path';
 import type {
-  EgressLog, ExecOptions, ExecResult, MeterReading, ProbeRequest, ProbeResult, RelayCallRequest, RelayCallResult, SandboxCapabilities, SandboxHandle, SandboxProvider, SandboxSpec, Teardown,
+  BrowseRequest, BrowseResult, EgressLog, ExecOptions, ExecResult, MeterReading, ProbeRequest, ProbeResult, RelayCallRequest, RelayCallResult, SandboxCapabilities, SandboxHandle, SandboxProvider, SandboxSpec, Teardown,
 } from '../types.js';
 import { CliOutputExceeded, CliTimeout, dockerCli, probeDaemon, type DaemonFacts } from './docker.js';
 import { checkEgress, type EgressPlan } from './egress.js';
 import { mountArgument, mountTable, resolveMounts, type ResolvedMount } from './mounts.js';
 import { canCreateIn } from './ownership.js';
 import { checkProbeRequest, probeRunArgs, readProbeOutput } from './probe.js';
+import { imageId } from './image.js';
+import { BROWSER_IMAGE, browseProgram, browseRunArgs, checkBrowseRequest, readBrowseOutput } from './browse.js';
 import { EGRESS_PROXY_IMAGE, PROXY_ALIAS, PROXY_PORT, readEgress, startProxy, stopProxy, type AppliedProxy, type ProxyOptions } from './proxy.js';
 import { labelArgs } from './labels.js';
 import { refuse, SandboxRefusal, withLeftovers } from './refusal.js';
@@ -218,9 +220,9 @@ interface Sandbox {
    */
   destroyed?: boolean;
   /**
-   * The names of probe containers whose call is still running. Removed before
-   * the sandbox's own container when it ends, so no probe outlives the
-   * namespace it joined (D-P11-02).
+   * The names of probe and browser containers whose call is still running.
+   * Removed before the sandbox's own container when it ends, so none outlives
+   * the namespace it joined (D-P11-02).
    */
   readonly probes: Set<string>;
 }
@@ -409,6 +411,7 @@ export class LocalDockerProvider implements SandboxProvider {
   readonly #vaultPaths: readonly string[];
   readonly #daemon: DaemonFacts;
   readonly #proxyImage: string;
+  #browserImageId: Promise<string> | undefined;
   readonly #credentials: ReadonlyMap<string, string>;
   readonly #relayTrust: string | undefined;
   readonly #hostPorts: ReadonlySet<number>;
@@ -694,6 +697,55 @@ export class LocalDockerProvider implements SandboxProvider {
     } finally {
       sandbox.probes.delete(name);
     }
+  }
+
+  /**
+   * Drives a browser through a scenario's steps from a container in the
+   * sandbox's network namespace (A-R3-01). The browser is started for this
+   * call and removed when it returns; the time it takes is the sandbox's, the
+   * pull of an image the engine does not hold included, so a browser that
+   * outlives the budget ends the sandbox as a command would.
+   */
+  async browse(h: SandboxHandle, request: BrowseRequest): Promise<BrowseResult> {
+    const sandbox = this.#require(h);
+    if (sandbox.ended !== undefined) refuse('lifetime', `sandbox ${h} has ended: ${sandbox.ended}`);
+    checkBrowseRequest(request);
+    const image = await this.#browserImage();
+    // Read again, through a fresh lookup the compiler has not narrowed: the sandbox may have ended while the image was being pulled.
+    const { ended } = this.#require(h);
+    if (ended !== undefined) refuse('lifetime', `sandbox ${h} has ended: ${ended}`);
+    const remaining = await this.#remaining(sandbox, h);
+    const name = `browse-${randomUUID()}`;
+    sandbox.probes.add(name);
+    try {
+      const result = await dockerCli(this.#executable, browseRunArgs(name, sandbox.controls.containerId, image, this.#labels), {
+        timeoutMs: remaining,
+        ...this.#outputCap,
+        stdin: browseProgram(request),
+      });
+      if (result.exitCode !== 0) {
+        throw new Error(`the browser exited ${String(result.exitCode)}: ${(result.stderr.trim() || result.stdout.trim()).slice(0, 2000)}`);
+      }
+      return readBrowseOutput(result.stdout, request, image);
+    } catch (error) {
+      return await this.#overBudget(sandbox, h, error);
+    } finally {
+      sandbox.probes.delete(name);
+    }
+  }
+
+  /**
+   * The content ID of the browser image, read once and pulled by digest when
+   * the engine does not hold it. The container is started from the ID, so the
+   * image a result names is the image that ran. A failed read is not kept: the
+   * next call asks again.
+   */
+  #browserImage(): Promise<string> {
+    this.#browserImageId ??= imageId(BROWSER_IMAGE, { executable: this.#executable, pull: true }).catch((error: unknown) => {
+      this.#browserImageId = undefined;
+      throw error;
+    });
+    return this.#browserImageId;
   }
 
   /**
