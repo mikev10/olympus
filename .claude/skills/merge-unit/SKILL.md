@@ -102,8 +102,10 @@ owns its fix; the entry leaves when that unit merges.
 
 | Assertion | Issue | Owner |
 |---|---|---|
-| `driver.subagents` (`@olympus-ai/driver-claude-code`) | #165 | R38 |
-| `I5.init-setup-merges-on-the-real-driver` (`@olympus-ai/api`) | #220 | R57 |
+
+The list is empty: no paid failure is rerun. (`driver.subagents`, #165, left
+when R38 merged, 3fde9eb. `I5.init-setup-merges-on-the-real-driver`, #220,
+left when R57 merged, df9a614.)
 
 When every newest check is green, remove the label
 (`gh pr edit <n> --remove-label run-driver`), so a later push to the branch
