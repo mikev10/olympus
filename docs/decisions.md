@@ -13696,7 +13696,7 @@ changes: the contract amendments the spec names (A-R3-01, A-R3-02) land in
 R3's own pull request, where the adapter that uses them does. The maintainer
 took the four recommendations put to them on 2026-11-25 (D-A-BR-01 to
 D-A-BR-04). D-A-BR-05 to D-A-BR-08 were found while the spec was written and
-wait on the maintainer's confirmation of this pull request.
+the maintainer confirmed them the same day, on pull request #246.
 
 ### D-A-BR-01: the spec is written before the unit starts
 
@@ -13740,7 +13740,7 @@ wait on the maintainer's confirmation of this pull request.
 - **Chosen:** every refused host is reported. One the scenario's `mayBlock` lists does not fail it; any other does. A document navigation off the loopback always fails it, listed or not. The acknowledgement is in the locked scenario, so the agent cannot add one.
 - **Rejected:** record and pass. It is a warning that lets the check continue.
 - **Reverse:** drop `mayBlock`; every refused host fails.
-- **Waits on** the maintainer's confirmation of this pull request.
+- **Confirmed** by the maintainer, 2026-11-25.
 
 ### D-A-BR-06: `computerUse` stays `false`, and R3 depends on P11, not P5
 
@@ -13748,7 +13748,7 @@ wait on the maintainer's confirmation of this pull request.
 - **Verified:** nothing R3 builds touches `packages/drivers`. It is built beside the probe, which is P11's.
 - **Chosen:** the table's `P8, P5` becomes `P8, P11`.
 - **Reverse:** restore `P5` in the table.
-- **Waits on** the maintainer's confirmation of this pull request.
+- **Confirmed** by the maintainer, 2026-11-25.
 
 ### D-A-BR-07: no real run uses a behavioral adapter, and that is a unit of its own (R76)
 
@@ -13757,7 +13757,7 @@ wait on the maintainer's confirmation of this pull request.
 - **Chosen: (a), as R76.** The wiring needs a contract amendment to `BehavioralCheckSpec`, changes admission and `verify`, and covers `cli` and `http` as much as `browser`. Inside R3 it would triple the unit and be reviewed as a side effect. R76 is placed in the backlog by this amendment so the gap has an owner.
 - **What this means for claims:** after R3, a browser scenario is proved by the conformance suite alone. Nothing may say the line judges a UI with a browser until R76 lands.
 - **Reverse:** fold R76 into R3 and take its contract amendment there.
-- **Waits on** the maintainer's confirmation of this pull request.
+- **Confirmed** by the maintainer, 2026-11-25.
 
 ### D-A-BR-08: the browser container never gets more than the probe's
 
@@ -13765,4 +13765,4 @@ wait on the maintainer's confirmation of this pull request.
 - **Chosen:** the spec binds the outcome and leaves the mechanism to the unit. The container adds no capability, no mount, and no security option beyond the probe's. If the browser's process sandbox cannot start inside those limits, the unit runs it without, records why in this file after running both, and relies on the container, which is the boundary every other out-of-reach client already relies on.
 - **Rejected:** a looser seccomp profile or an added capability to let the inner sandbox start. It weakens the boundary the line depends on to strengthen one it does not.
 - **Reverse:** amend the spec's acceptance criterion with the capability the unit showed it needs.
-- **Waits on** the maintainer's confirmation of this pull request.
+- **Confirmed** by the maintainer, 2026-11-25.
