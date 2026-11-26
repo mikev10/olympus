@@ -13685,6 +13685,144 @@ Confirmed by the maintainer on 2026-11-24, taking D-R28-08's recommendation (cod
 - **Assumptions, verified:** no v2 package is published (`npm view @olympus-ai/vault` is 404), so no store outside a developer's machine holds a `resolved` record, and the reader refusing one (I5) strands nothing released. A dev store written before this change is refused at read with the reader's cause, never read as open or addressed. The CLI's `findings` summary is the only user-facing text that says `resolved` (`packages/cli/src/cli.ts:94`).
 - **Reverse:** rename `addressed` back to `resolved` in the same files and ids.
 
+## Amendment: R5 splits, and drafting at `plan` gains its spec
+
+The maintainer ran `/start-unit R5` on 2026-11-25. The unit stopped before any code: the entry had no deliverables, out-of-scope list, conformance or acceptance criteria, and its neighbours disagreed with it about what R5 is. The maintainer took the session's recommendation to split it and to write this amendment. The split (D-A-GD-01) is confirmed. D-A-GD-02 to D-A-GD-07 are the session's proposals, each checked against the code on `v2` at 3566c06, and wait for the maintainer; merging the amendment is the confirmation. Docs only: no package, contract or gate path changes here.
+
+### D-A-GD-01: R5 becomes R5a (drafting at `plan`, M2) and R5b (goal decomposition, M3)
+
+- **Problem, verified:** the R5 entry described a goal that becomes several specs, each its own run. Four other places assigned R5 the step from one spec to its task graph: R19's entry ("a graph derived from the spec is R5's"), R20's ("R5's planner role"), `R4-parallel.md` ("R5 decomposes goals into graphs"), and `VISION-GAP.md` (step 2, "plan decomposition (pull R5 forward from M3)"). They are different units. The first needs a new artifact in the frozen vocabulary, runs that have a parent, and a status derived across runs; none of that exists (`packages/core/src/run/types.ts` holds `TriggerLineage` and no parent or goal). The second needs a seat at `plan`, where R19's machinery is one station short.
+- **Choice:** R5a is the second and gets its spec now, `docs/plan/R5-planning.md`. R5b keeps the entry's four binding rules verbatim, depends on R5a since each child run drafts its own graph, and stays M3 with no spec.
+- **Rejected: one unit for both.** Two contract changes that do not depend on each other in one review bundle, and the half the first release needs would wait on the half that needs `learn`.
+- **Reverse:** restore the R5 row and entry, delete `R5-planning.md`, and revert the cross-references in `DECOMPOSITION.md`, `R4-parallel.md`, `VISION-GAP.md` and `F1-spine.md`.
+
+### D-A-GD-02: the bound on a drafted graph is policy's, and admission approves the bound
+
+- **Problem, verified:** admission reads the graph four times before anything runs: the roles it names (`packages/api/src/run.ts:817`), a scope for each (`:1242`), the scopes a trigger admits and narrows (`:1256`, `:1263`), and the worst-case cost (`:1278`), which the approved figure must equal exactly (`:1419`). A drafted graph does not exist yet at any of them.
+- **Choice:** policy gains `planning: { maxBuildTasks, roles }`. Admission makes all four reads over that bound, the person approves the bound's worst case, and a draft outside the bound is sent back as a runtime problem. A policy without `planning` refuses a run that drafts its graph.
+- **Why policy:** the planner picks each task's role, and a role's scope is its tools, egress and budget. The set a model picks from is a grant, and grants are a person's edit to a Vault file, never a request field a trigger's template could carry (default deny: what policy does not grant is unavailable).
+- **Rejected: a bound on the request.** A person could set it per run, but so could whatever built the request, and the role list would be a grant made outside policy.
+- **Rejected: no bound, with the cost approved again at the `plan` gate.** It needs a second cost approval mid-run and lets a run be admitted whose price nobody has seen; at L2 with `plan` on `auto` nobody would see it at all.
+- **Reverse:** move `planning` from `PolicyDocument` to `RunRequest`; the checks do not change.
+
+### D-A-GD-03: the runtime derives a drafted graph's review task
+
+- **Verified:** `parseGraph` already derives the security seat beside each review task (`packages/api/src/validate.ts:665`) and one review task may cover several build tasks (`packages/api/src/line.ts:1967`).
+- **Choice:** a drafted graph holds build tasks only. The runtime adds one review task that depends on every build task. A draft naming a review task is sent back.
+- **Rejected: the planner writes review tasks, held to `parseGraph`'s coverage rule.** Coverage would hold, but the planner is on the author's side, and how the work is grouped for review would be its choice. One review over everything also has a fixed cost, which the admission bound needs.
+- **Reverse:** accept review tasks in a draft and count up to `maxBuildTasks` of them in the bound.
+
+### D-A-GD-04: a task states its objective
+
+- **Verified:** `Task` has no field saying what the task is for (`packages/core/src/run/types.ts:72`), and a builder is handed only `id`, `station`, `role` and `dependsOn` of every task (`line.ts:1553`). With one build task the locked spec is the task. With several, no builder can tell which part is its own.
+- **Choice:** `Task.objective: string | null`, required and size-capped on a drafted build task, null allowed on a supplied graph. It reaches the builder inside the `task-graph` grant, with its dependencies' objectives, and never a review seat, which is already refused the plan (`packages/core/src/station/contracts.ts:22`).
+- **Rejected: a separate plan document.** A second artifact to lock and approve, saying in prose what the graph must say per task anyway.
+- **Rejected: require it on supplied graphs too.** Every existing multi-task graph would be refused for a field a person writing the spec and the graph together does not need.
+- **Reverse:** drop the field; a drafted graph is then limited to one build task.
+
+### D-A-GD-05: `dependencySet` stays unenforced
+
+- **Verified:** the field is required by the parser (`validate.ts:621`), copied (`:659`), and read by nothing else in any package.
+- **Choice:** R5a does not enforce it and says so in its out-of-scope list. R4's conflict check is what stops two tasks overwriting one path.
+- **Rejected: fail a task whose change leaves its set.** A planner cannot know every file a change will touch (a lockfile, a generated file), so correct work would park on the planner's guess. It would also change the meaning of every supplied graph.
+- **Rejected: send back a draft whose unordered tasks have overlapping sets.** Without enforcement the sets say nothing about what the tasks will write, so the check would be on a guess.
+- **Owner of the field's reader:** the distributed scheduler (M4b), as the field's own comment says.
+
+### D-A-GD-06: the planner keeps the three grants `plan` already has
+
+- **Verified:** `STATION_CONTRACTS.plan` allows `repo-instructions`, `locked-spec` and `base-repo-readonly` (`contracts.ts:188`). The acceptance tests and the intent are not among them.
+- **Choice:** unchanged. The planner is not granted the tests as context or the intent. Files the base itself holds are in its tree as they are in any seat's.
+- **Rejected: grant the intent.** The locked spec is what the run is held to; a planner reading the intent could plan work the spec did not approve, and on a triggered run the intent is extracted from untrusted input.
+- **Reverse:** add the grant to the `plan` contract.
+
+### D-A-GD-07: "goal" is not added to the frozen vocabulary yet
+
+- **Choice:** the spine's M1 out list gains "drafting at plan (M2)" and "goal decomposition (M3)", and nothing else in the spine changes. The task graph is already an artifact "emitted by `plan`". "Goal" stays R5b's amendment to take first, as its entry says.
+- **Rejected: add the artifact now, as readiness was added before R1.** Readiness had a spec when its term was added. R5b has none, and a frozen term with no spec behind it would fix a meaning nobody has checked against the code.
+- **Order:** not changed by this amendment. `DECOMPOSITION.md`'s suggested order still starts at R58. R5a's dependencies have shipped, so where it goes in the order is the maintainer's call at confirmation.
+
+## Amendment: behavioral breadth, browser (R3)
+
+`/start-unit R3` on 2026-11-25 found that the entry had no deliverables, no
+out-of-scope list, and no acceptance criteria, and that its claim "the
+contract needs no amendment" holds for the adapter contract and not for the
+sandbox contract. Each row was checked against the code on `v2` at 3566c06 and
+is listed in `docs/plan/R3-browser.md`, which this amendment adds. No package
+changes: the contract amendments the spec names (A-R3-01, A-R3-02) land in
+R3's own pull request, where the adapter that uses them does. The maintainer
+took the four recommendations put to them on 2026-11-25 (D-A-BR-01 to
+D-A-BR-04). D-A-BR-05 to D-A-BR-08 were found while the spec was written and
+the maintainer confirmed them the same day, on pull request #246.
+
+### D-A-BR-01: the spec is written before the unit starts
+
+- **Ambiguous:** R3 had a one-paragraph entry, and issue #238 listed four questions its spec must answer.
+- **Chosen:** `docs/plan/R3-browser.md`, added by this amendment, as R4's was (D-A-PT-05).
+- **Rejected:** proposing the scope inside the unit. The missing parts decide what proves the unit done, and a unit does not write its own acceptance criteria.
+- **Reverse:** fold the spec back into the DECOMPOSITION entry.
+- **Confirmed** by the maintainer, 2026-11-25.
+
+### D-A-BR-02: the browser runs in its own container, behind a new optional `browse`
+
+- **Verified:** the only client out of the product's reach is `probe` (`packages/sandbox/src/types.ts:372`). `ProbeRequest` is a port, a wait, and HTTP exchanges (`types.ts:293-299`), and the probe runs `node --eval` in the proxy's image (`packages/sandbox/src/local/probe.ts:221-237`), which holds no browser.
+- **Options:** (a) a new optional `browse` on `SandboxProvider`, run from its own digest-pinned image in the sandbox's network namespace; (b) widen `ProbeRequest` to carry browser steps; (c) run the browser inside the product's container through `exec`.
+- **Chosen: (a)** (A-R3-01, A-R3-02). It keeps `probe`'s promise, "a port and never a URL", as written, and keeps a browser out of the image the proxy and relay run in.
+- **Rejected: (b).** One method would then mean two clients with two images, and a provider that can probe and cannot browse could not say so by omission, which is how D-P11-04 has a provider state what it lacks.
+- **Rejected: (c).** It needs no contract change, and the product could replace the browser. The agent would then be judged by something it can write, which is the failure P11 named for an HTTP client in the same place.
+- **Reverse:** delete `browse` and its types; every set names `behavioral:browser` again.
+- **Confirmed** by the maintainer, 2026-11-25.
+
+### D-A-BR-03: a browser scenario reaches the loopback and nothing else
+
+- **Ambiguous:** #238 asks how a signed-in criterion is exercised, what happens to a criterion that needs a real external service, whether policy may grant a browser scenario a host, and where the browser comes from.
+- **Chosen:** `BrowseRequest` names a port and never a host. A scenario signs in through the product's own form with credentials the locked scenario carries. A host the page could not reach fails the scenario, naming the scenario and the host. No policy grant applies, and the request has no field one could fill. The browser is one image pinned by digest, and its content ID and version are in every result.
+- **Rejected: a granted host for browser scenarios.** It would let a locked scenario reach a live service from beside the sandbox, with a credential to match, before anything records such a use. R30 names preview hosts as a later step; a grant belongs there, by amendment.
+- **Rejected: a seeded session or injected cookie.** The product would have to honour a value the scenario invents, which is a back door the spec would then be asking the agent to build.
+- **Reverse:** add a host field to `BrowseRequest` and a policy grant that fills it, with an enforcement-record cause for each use.
+- **Confirmed** by the maintainer, 2026-11-25.
+
+### D-A-BR-04: a scenario is steps as data, not a test script
+
+- **Options:** (a) a list of steps the runtime's own runner carries out, each naming its element by role and name, label, or text; (b) a locked test script the browser image runs.
+- **Chosen: (a).** The steps and the expectation are data the adapter can read and refuse by shape, as it does for HTTP (`packages/adapters/src/http.ts:144`), and the comparison stays on the host. `test-design` runs before `build` and is black-box, so a locked scenario can name what a person sees and cannot know the markup the agent will choose.
+- **Rejected: (b).** A script is code that runs beside the product and decides its own verdict inside the browser's container. It is more expressive, and it can follow if the step list proves too narrow.
+- **Rejected: CSS, XPath, and test ids as targets.** Each ties a locked scenario to markup written after the lock.
+- **Reverse:** add a target form or a step by amending `BrowseTarget` or `BrowseStep`.
+- **Confirmed** by the maintainer, 2026-11-25.
+
+### D-A-BR-05: a refused host fails the scenario unless the locked scenario lists it
+
+- **Ambiguous:** a page may ask another host for a font or a script while showing exactly what the scenario expects. Recording the refusal and passing would let a page that depends on an unreachable service pass unexercised; failing every such page would refuse pages that are correct without it.
+- **Chosen:** every refused host is reported. One the scenario's `mayBlock` lists does not fail it; any other does. A document navigation off the loopback always fails it, listed or not. The acknowledgement is in the locked scenario, so the agent cannot add one.
+- **Rejected:** record and pass. It is a warning that lets the check continue.
+- **Reverse:** drop `mayBlock`; every refused host fails.
+- **Confirmed** by the maintainer, 2026-11-25.
+
+### D-A-BR-06: `computerUse` stays `false`, and R3 depends on P11, not P5
+
+- **Verified:** `sandbox.computerUse` is asserted by looking for `DISPLAY`, an X11 socket, or a framebuffer in the sandbox's own container (`packages/conformance/src/registry/claims.ts:153-170`). A headless browser in a second container adds none. P5's entry says "a container with a display is R3"; this spec delivers none and names it out of scope. No unit owns computer use, and nothing claims it.
+- **Verified:** nothing R3 builds touches `packages/drivers`. It is built beside the probe, which is P11's.
+- **Chosen:** the table's `P8, P5` becomes `P8, P11`.
+- **Reverse:** restore `P5` in the table.
+- **Confirmed** by the maintainer, 2026-11-25.
+
+### D-A-BR-07: no real run uses a behavioral adapter, and that is a unit of its own (R76)
+
+- **Found, verified:** the line builds every adapter set with `provider: null` (`packages/api/src/run.ts:767`, `verification.ts:62,79,93`, `tamper.ts:163`, `property.ts:26`, `init.ts:182`), so no real run builds a behavioral adapter. A `behavioral` check is a pinned command (`packages/integrity/src/types.ts:138-141,163-176`), and the manifest has nowhere to put a scenario. `git grep -n "HttpBehavioralAdapter" -- packages/api packages/core packages/cli` prints nothing. P11 left the wiring to I1 (its out-of-scope list) and I1 did not take it; the assertion D-P11-07 says I1 owes is not in the registry.
+- **Options:** (a) R3 ships the adapter in isolation, as P8 and P11 did, and a new unit wires all three kinds; (b) R3 also wires scenarios into the line.
+- **Chosen: (a), as R76.** The wiring needs a contract amendment to `BehavioralCheckSpec`, changes admission and `verify`, and covers `cli` and `http` as much as `browser`. Inside R3 it would triple the unit and be reviewed as a side effect. R76 is placed in the backlog by this amendment so the gap has an owner.
+- **What this means for claims:** after R3, a browser scenario is proved by the conformance suite alone. Nothing may say the line judges a UI with a browser until R76 lands.
+- **Reverse:** fold R76 into R3 and take its contract amendment there.
+- **Confirmed** by the maintainer, 2026-11-25.
+
+### D-A-BR-08: the browser container never gets more than the probe's
+
+- **Not verified from here:** whether a headless browser's own process sandbox starts under `--cap-drop ALL`, `no-new-privileges`, an unprivileged user, and a read-only root. It needs a browser image and a daemon, which is the unit's first step.
+- **Chosen:** the spec binds the outcome and leaves the mechanism to the unit. The container adds no capability, no mount, and no security option beyond the probe's. If the browser's process sandbox cannot start inside those limits, the unit runs it without, records why in this file after running both, and relies on the container, which is the boundary every other out-of-reach client already relies on.
+- **Rejected:** a looser seccomp profile or an added capability to let the inner sandbox start. It weakens the boundary the line depends on to strengthen one it does not.
+- **Reverse:** amend the spec's acceptance criterion with the capability the unit showed it needs.
+- **Confirmed** by the maintainer, 2026-11-25.
+
 ---
 ## A-R58-01: a spent budget is a park cause, and a station refusal names the state it was made at
 
