@@ -412,12 +412,27 @@ export function parkRefusal(state: RunState, task: Task, limits: StepLimits, con
         + `past the ${String(limit)} rebuild(s) the policy allows; no side was picked`,
     };
   }
+  if (recorded === 'budget-spent') {
+    const spent = attempts?.budgetSpent;
+    // Written by the park itself, in the same commit as the cause. A state holding one without the other was not written by the line.
+    if (spent === undefined) throw new Error(`station machine: task ${task.id} is parked as budget-spent with no bound recorded; refused rather than guessed`);
+    const limit = spent.bound === 'tokens' ? `${String(spent.limit)} tokens (maxTokens)` : `${String(spent.limit)} USD (maxCostUsd)`;
+    return {
+      ok: false,
+      reason: 'parked',
+      task: task.id,
+      cause: 'budget-spent',
+      bound: spent.bound,
+      limit: spent.limit,
+      message: `task ${task.id} parked at ${state.station}: its relay refused it because its budget of ${limit} is spent; no retry is started under the same budget`,
+    };
+  }
   const at = contracts[state.station];
   const startLimit = maxStarts(at, attempts?.conflicts.length ?? 0);
   const retryLimit = at.retry.max;
   const byStarts = attempts !== undefined && attempts.starts >= startLimit && gatedIterations(attempts) < contracts[task.station].maxIterations;
   const byRetries = !byStarts && attempts !== undefined && attempts.retries > retryLimit;
-  const derived: Exclude<ParkCause, 'conflicts-exhausted' | 'drafts-rejected'> = byStarts ? 'starts-exhausted' : byRetries ? 'retries-exhausted' : 'iterations-exhausted';
+  const derived: Exclude<ParkCause, 'conflicts-exhausted' | 'drafts-rejected' | 'budget-spent'> = byStarts ? 'starts-exhausted' : byRetries ? 'retries-exhausted' : 'iterations-exhausted';
   // A task's park never records `drafts-rejected`, which parks a station, not a task.
   const cause = recorded === undefined || recorded === 'conflicts-exhausted' || recorded === 'drafts-rejected' ? derived : recorded;
   const limit = cause === 'starts-exhausted' ? startLimit : cause === 'retries-exhausted' ? retryLimit : contracts[task.station].maxIterations;

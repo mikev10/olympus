@@ -12,7 +12,7 @@ import { readIntegration } from './line.js';
 import { runStanding, type RunStanding, type StandingSource } from './run.js';
 
 /** Where a station's exit gate stands, derived from the run's position and standing. */
-export type GateOutcome = 'passed' | 'awaiting-approval' | 'stopped' | 'open' | 'not-reached';
+export type GateOutcome = 'passed' | 'awaiting-approval' | 'stopped' | 'refused' | 'open' | 'not-reached';
 
 export interface StationReport {
   readonly station: StationId;

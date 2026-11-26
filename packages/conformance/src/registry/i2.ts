@@ -25,6 +25,7 @@ import { R8A_REVIEW_I2 } from './observe-review.js';
 import { R13B_I2 } from './nightly-review.js';
 import { R25_ASSERTIONS } from './property.js';
 import { R28_ASSERTIONS } from './findings.js';
+import { R58_I2 } from './refusals.js';
 
 /** I2: The runtime derives status; the model never reports it. */
 export const I2: InvariantEntry = {
@@ -96,6 +97,8 @@ export const I2: InvariantEntry = {
     CALL_RECORDED_BEFORE_IT_IS_MADE,
     // P14: every enforcement decision, by cause, recorded by the runtime for the component that made it.
     ENFORCEMENT_DECISIONS_RECORDED,
+    // R58: a run a station refused reads refused, from the decision record.
+    ...R58_I2,
     // R14: the tier rises only from the failed gates run state counts, and the relay serves only the tier's model.
     ESCALATION_DECIDED_FROM_FAILED_GATES,
     // R9: every seat's identity, role, driver, and model, is the runtime's record.

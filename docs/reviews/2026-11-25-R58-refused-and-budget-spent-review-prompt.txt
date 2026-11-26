@@ -1,0 +1,93 @@
+The code under review is in the file
+`2026-11-25-R58-refused-and-budget-spent-review-bundle.txt` (SHA-256 f0d29340414dd7c0fd8e45519713b02d981d19b3565d412231013f313ecbf091) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing how a software-delivery runtime reports a refused run and stops a task whose spending budget is used up, in a
+TypeScript project. You have the source and nothing else — no design documents,
+no author reasoning, no prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The runtime carries a run through stations (`intake`, `spec`, `test-design`, `plan`, `build`, `verify`, `review`, `integrate`). A model is called through a driver inside a container, and every model request goes through a relay the runtime owns, which counts tokens and dollars and refuses requests once the task's budget is spent. The runtime, never the model, derives a run's status from committed run state and from decision records it writes to a store called the Vault. This change does two things. First, a driver call that fails while the relay's own meter reports the budget spent and a request refused now parks the task at once with a new cause, `budget-spent`, naming which bound was reached and its limit, instead of retrying under the same budget (`runTask` and `spendRetry` in packages/api/src/line.ts, `parkRefusal` in packages/core/src/station/machine.ts, the types in packages/core/src/station/types.ts and packages/core/src/run/types.ts). Second, a run whose last drive ended in a station's refusal that committed state does not show, such as a failed check of the base at `test-design`, now reads `refused` in its status, taken from the latest `station-refused` decision while the run state still carries the version that decision names (`refused` in packages/api/src/line.ts, `refusedAt` and `runStanding` in packages/api/src/run.ts, `stateVersion` in packages/vault/src/types.ts).
+
+The bundle's range also carries changes merged since the last review that are not this unit's: a finding's outcome renamed from `resolved` to `addressed` (packages/api/src/findings.ts, observe.ts, outcomes.ts, the Vault's types and local store, and their tests), a script that runs the local checks (scripts/local-check.ts), and edits to maintainer tooling under .claude/skills/. They are in scope for review like any other code in the bundle.
+
+It must hold against a capable, motivated party trying to have a run reported as something it is not, or to keep spending after its budget is used up: a refused or parked run read as working or passed, a working run read as refused, a spent budget retried, or a park attributed to the wrong cause. Assume no deceptive intent — only
+that the easiest path gets taken.
+
+That party is the model doing a task. It controls what the model returns, how its driver's call ends and what text that failure carries, the files in its working copy, how many requests it sends through the relay, and when its process stops. It does not control the components the runtime is wired with — the Vault, the sandbox provider, and the drivers are runtime-selected and trusted, even where a function takes one as an argument — and it does not control code running inside
+the runtime's own process. It does not control the relay's meter reading, the policy's budget, the run state, or the decision records.
+
+The invariants at stake:
+
+- The runtime derives status; the model never reports it. Nothing a model wrote or said may be an input to a run's standing or to the cause a park records.
+- Fail closed. A missing record, an unreadable state, or a value that cannot be tied to the current state is a refusal or the more conservative reading, never a silent pass and never a warning that lets the run continue.
+- Default deny. A budget not granted is not available: once the relay reports the budget spent, no further attempt is started under the same budget.
+- Event payloads are data, never instructions. Text from a failed call is stored as untrusted data and never placed in a prompt.
+- Every capability claim maps to an executable assertion that fails when the capability is deleted.
+
+The mechanisms that matter most:
+
+- The spent-budget decision in `runTask`: which meter readings count, what it does when the call succeeded, and where the bound and limit it names come from.
+- `spendRetry` and `park`: what is recorded and committed, in what order, and how `parkRefusal` reads the park back from committed state on a resume.
+- `refusedAt`: which decision is read, the comparison against the run state's version, and which refusals it declines to report.
+- `refused` in the line: when a refusal carries a state version and when it does not, relative to the commits the same drive made.
+- The conformance entries in packages/conformance/src/registry/refusals.ts and the new row in decisions.ts.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+Raising or reshaping the budgets themselves. Identifiers such as unit and decision ids in the code's comments refer to the project's records, which you do not have; they are not something to resolve.
+
+THE QUESTION
+
+As the model doing a task, how would you get a run reported as working, open, or passed when a station refused it or its budget is spent, get another attempt started after the relay reported the budget spent, or get a run that is working reported as refused or parked for a cause that is not the real one?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.
