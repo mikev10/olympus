@@ -13684,3 +13684,150 @@ Confirmed by the maintainer on 2026-11-24, taking D-R28-08's recommendation (cod
 - **Rejected: keep `resolved` and document its meaning.** The name is what R11 and every reader of the rates sees; a doc comment does not travel with a number.
 - **Assumptions, verified:** no v2 package is published (`npm view @olympus-ai/vault` is 404), so no store outside a developer's machine holds a `resolved` record, and the reader refusing one (I5) strands nothing released. A dev store written before this change is refused at read with the reader's cause, never read as open or addressed. The CLI's `findings` summary is the only user-facing text that says `resolved` (`packages/cli/src/cli.ts:94`).
 - **Reverse:** rename `addressed` back to `resolved` in the same files and ids.
+
+---
+## A-R58-01: a spent budget is a park cause, and a station refusal names the state it was made at
+
+Confirmed by the maintainer on 2026-11-25, in R58's session, each part taking
+the recommended answer. The first part is the amendment R58's entry declares;
+the second is one the entry does not declare, asked and confirmed with it.
+
+- **A spent budget parks (#193).** `ParkCause`
+  (`packages/core/src/station/types.ts`) gains `budget-spent`.
+  `StationRefusal` gains a `parked` arm for it:
+  `{ task, cause: 'budget-spent', bound: 'tokens' | 'cost', limit, message }`.
+  `bound` is which of the task's two relay bounds was reached and `limit` is
+  its value. `TaskAttempts` (`packages/core/src/run/types.ts`) gains an
+  optional `budgetSpent: { bound, limit }`, written in the commit that parks
+  the task. The station machine rebuilds a park from committed state on a
+  resume, and nothing else there says which bound was reached or what it was.
+  Rejected: two causes, `tokens-spent` and `cost-spent`, with no field. The
+  machine still could not state the limit, and the existing arm requires one.
+- **A station refusal names the state it was made at (#181).** The
+  `station-refused` cause (`packages/vault/src/types.ts`) gains an optional
+  `stateVersion: string`: the run state's version when the line returned the
+  refusal. A reader can then tell a refusal nothing has been committed since
+  from one a later drive, approval, or cancellation moved past. Optional
+  because records written before this carry none; a reader takes a refusal
+  with no version as not current, which is what `status` said before.
+  Rejected: no contract change, reading the latest decision at the state's
+  current station. A drive that got past the station's work and was killed
+  before its next decision would still read refused.
+
+Gate paths: `packages/core/src/station/types.ts`,
+`packages/core/src/run/types.ts`, `packages/vault/src/types.ts`,
+`packages/conformance/`. R58 builds it. Reverse by removing the cause, the
+arm, and the two fields: a spent budget is then retried as a driver failure,
+and a refused run reads `open`.
+
+## R58: A refused run says so, and a spent budget parks at once
+
+Started on `v2` at 3566c06, in a worktree of its own on `unit/r58`. Issues
+#181, #193. Builds A-R58-01.
+
+### D-R58-01: boundary, verified
+
+- **Deliverables:**
+  - `status` reports a run whose last drive a station refused as `refused`:
+    the station, the refusal with its reason and message, and when it was
+    decided. All of it is read from the run's decision record.
+  - A driver call that fails while the relay's meter reports the task's
+    budget spent parks the task at once as `budget-spent`, naming the bound
+    and its limit. No retry is spent or started.
+  - A-R58-01 in the three contract files.
+  - Conformance entries, each shown failing with the thing it guards
+    removed. Changesets for every package changed.
+- **Out of scope:** raising or reshaping the budgets themselves (verbatim
+  from the entry).
+- **Acceptance:** `node scripts/local-check.ts preflight <ids>` after each
+  change, then the full local check once: `pnpm -r typecheck`, `pnpm -r lint`,
+  `pnpm -r test`, `pnpm conformance`.
+- **Invariants:**
+  - The runtime derives status and the model never reports it (I2). The
+    refused standing is read from decisions the line recorded. The park
+    rests on the relay's meter, which the runtime reads at teardown, and
+    never on the text of the driver's error.
+  - Fail closed (I5). A spent budget stops the task. It is never retried in
+    the hope of a cheaper path, and a refusal whose record cannot be tied to
+    the current state is not reported as current.
+  - Every claim has an assertion that fails when the capability is deleted
+    (I8): one entry per deliverable, plus the decision table's row.
+  - No Greek names in code (I10).
+- **Pending registry entries owed:** none name R58
+  (`rg R58 packages/conformance/pending-baseline.json` finds nothing).
+
+### D-R58-02: assumptions, each verified
+
+- **The dependencies have shipped.** `reviewed/P4`, `reviewed/P9`,
+  `reviewed/P13`, `reviewed/P14`, `reviewed/R37` exist (`git tag -l`).
+- **The standing is derived from committed state alone.** `standingOf`
+  (`packages/api/src/run.ts`) reads the state and calls `nextStep`. A refusal
+  a station's work returned, such as `base-mismatch`, changes no state:
+  `refused` (`packages/api/src/line.ts`) records the decision and returns.
+  So the run reads `open`, which is #181.
+- **`refused` records last.** Every commit a drive makes precedes the
+  decision `refused` writes, so the state's version at that point is the
+  version the run is left at.
+- **A park is recorded before it is committed** (`park`, D-P14-07). Its
+  refusal is derived from state on every read, so it needs no version.
+- **Every failed driver call is retried alike.** `spendRetry`
+  (`packages/api/src/line.ts`) is the one path, called from `build`,
+  `review`, and both drafting seats (`packages/api/src/drafting.ts`).
+- **The runtime already holds the relay's reading.** `runTask` reads
+  `teardown.meter` after the sandbox is destroyed, and a metered reading
+  carries `exhausted: 'none' | 'tokens' | 'cost' | 'unreadable'` and
+  `refused` (`packages/sandbox/src/types.ts`, `MeterReading`). The relay sets
+  `exhausted` once and answers every later request 402
+  (`packages/sandbox/src/local/relay.ts`, `refuseSpent`).
+- **Each attempt gets a fresh relay with the same bounds.** `runTask`
+  provisions the sandbox per call with `scope.budget.maxTokens` and
+  `maxCostUsd`, so the limit the park names is the policy's own number.
+- **The machine reads a park back from `parkedFor`.** `parkRefusal`
+  (`packages/core/src/station/machine.ts`) has the state, the task, and the
+  step limits, and no route to the Vault or the role's budget.
+- **`cancelRun` refuses a `stopped` run as finished**
+  (`packages/api/src/run.ts`). The run in #181 was cancelled after its
+  refusal, which must stay possible.
+- **The decision table is total over `ParkCause`.** `DECISION_TABLE`
+  (`packages/conformance/src/registry/decisions.ts`) is a `Record<CauseKey,
+  Row>`, so the new cause does not compile without a row.
+- **The Vault does not validate a decision's payload fields.**
+  `decisionProblem` (`packages/vault/src/local/vault.ts`) checks the
+  envelope, the cause, and the decider, so an optional field needs no
+  validator change to be stored.
+
+### D-R58-03: where the code differs from the entry
+
+- The entry says `ParkCause` is the amendment. The parked refusal and
+  `TaskAttempts` change with it, and #181 needed a field on a Vault type the
+  entry does not name. Both are A-R58-01, confirmed before any code.
+- The entry says `status` reported `phase: working`. `phase` is the
+  station's phase in raw run state and stays as it is: the run is still in
+  its station's work. The standing is what says the run was refused.
+
+### D-R58-04: choices
+
+- **A new `refused` standing, not `stopped`.** `stopped` means the line
+  refuses to continue from committed state, and `cancelRun` treats it as
+  finished. A run refused by a station's work can be resumed and cancelled.
+  `RunStanding` (`packages/api/src/run.ts`, not a contract file) gains
+  `{ standing: 'refused', station, refusal, decidedAt }`. Reverse by removing
+  the arm.
+- **When a recorded refusal is current.** The state-derived standing is
+  `open`, and the run's latest `station-refused` decision carries the state's
+  current version. Anything state derives wins: a park, a cancellation, a
+  halt, a tamper, a wait for approval. `approval-required` is never read as
+  refused; it is a wait. Known limit: a later drive that has not yet
+  committed leaves the old refusal showing, and the server's `driving` flag
+  is what tells a client otherwise.
+- **What counts as a relay refusal for a spent budget.** The call failed,
+  and its meter reads `exhausted` as `tokens` or `cost` with `refused > 0`.
+  `unreadable` is not a spent budget and is retried as before. A call that
+  succeeded is judged as before, whatever its meter says. Rejected: reading
+  the driver's error for a 402, which is the driver's account and differs by
+  driver. Known limit: `refused` also counts an unpriced model's refusal, so
+  a call that was refused for that, then reached its bound on its last
+  answer, then failed for another reason parks as budget-spent.
+- **The failed attempt is still recorded, and no retry is counted.** The
+  `attempt-failed` decision is written with the retry count unchanged, so
+  the park's last failure shows in `status` as any other park's does.
