@@ -718,6 +718,9 @@ export async function startAttempt(ctx: LineContext, task: Task): Promise<Statio
   const contract = STATION_CONTRACTS[ctx.state.station];
   const spent = attemptsOf(ctx.state, task);
   const replay = statusOf(ctx.state, task) === 'running';
+  // The task's last call spent its budget and its result did not finish the task: a failed gate, a draft sent
+  // back, a conflict, or a stop that lost the result. Every attempt gets the same bounds, so none is started (#248, A-R58-02).
+  if (spent.budgetSpent !== undefined) return park(ctx, task, { attempts: { [task.id]: spent } }, 'budget-spent');
   const attempt: TaskAttempts = replay
     ? { ...spent, starts: spent.starts + 1 }
     : { iterations: spent.iterations + 1, retries: 0, starts: spent.starts + 1, conflicts: spent.conflicts };
@@ -1206,11 +1209,15 @@ export async function runTask(
   if (meter.kind === 'metered' && meter.refused > 0) {
     await recordDecision(site, { cause: 'relay-refused', decidedBy: 'model-relay', usage, refused: meter.refused, exhausted: meter.exhausted });
   }
-  // A failed call whose relay refused it for a spent budget: read from the relay's own meter, never from the
-  // driver's error, and named with the bound policy set, so the caller parks rather than retries (I2, #193, A-R58-01).
-  if (!outcome.ok && meter.kind === 'metered' && meter.refused > 0 && (meter.exhausted === 'tokens' || meter.exhausted === 'cost')) {
-    const limit = meter.exhausted === 'tokens' ? scope.budget.maxTokens : scope.budget.maxCostUsd;
-    return { ...outcome, budgetSpent: { bound: meter.exhausted, limit } };
+  // A call whose relay refused it for a spent budget: read from the relay's own meter, never from the driver's
+  // account, and named with the bound policy set (I2, #193, A-R58-01).
+  if (meter.kind === 'metered' && meter.refused > 0 && (meter.exhausted === 'tokens' || meter.exhausted === 'cost')) {
+    const budgetSpent: BudgetSpent = { bound: meter.exhausted, limit: meter.exhausted === 'tokens' ? scope.budget.maxTokens : scope.budget.maxCostUsd };
+    // A failed call parks at once, in `spendRetry`.
+    if (!outcome.ok) return { ...outcome, budgetSpent };
+    // A call that still returned a result is judged on it. The spent budget is committed with the attempt first,
+    // so no later attempt at the task starts under the same bounds, whoever returned the result (#248, A-R58-02).
+    await commit(ctx, { attempts: { [task.id]: { ...attemptsOf(ctx.state, task), budgetSpent } } });
   }
   return outcome;
 }

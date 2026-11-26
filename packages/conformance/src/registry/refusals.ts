@@ -7,7 +7,7 @@
  * the task without a retry, naming the bound (#193).
  */
 import { randomUUID } from 'node:crypto';
-import type { StationRefusal, TaskRequest, TaskResult } from '@olympus-ai/core';
+import type { RoleId, StationRefusal, TaskRequest, TaskResult } from '@olympus-ai/core';
 import type { MeterReading, SandboxProvider } from '@olympus-ai/sandbox';
 import type { EnforcementDecision, Vault } from '@olympus-ai/vault';
 import { runtime } from '../kit/assert.js';
@@ -180,6 +180,52 @@ export const SPENT_BUDGET_PARKS_AT_ONCE: LocalAssertion = runtime({
   },
 });
 
+/** A stub driver whose every call returns a result, remembering the sandbox each call was handed. */
+async function recordingDriver(): Promise<{ driver: ObservedDriver; handles: Set<TaskRequest['sandbox']> }> {
+  const handles = new Set<TaskRequest['sandbox']>();
+  const driver = await stubDriver({ during: (req: TaskRequest) => { handles.add(req.sandbox); return Promise.resolve(); } });
+  return { driver, handles };
+}
+
+const builds = (driver: ObservedDriver): number => driver.requests.filter((r) => r.role.role === ('builder' as RoleId)).length;
+
+export const SPENT_BUDGET_RESULT_IS_JUDGED_ONCE: LocalAssertion = runtime({
+  id: 'I5.spent-budget-result-is-judged-once',
+  title:
+    "a build call that returns a result after its relay's meter reports the budget spent and a request refused has that result judged: where its gate fails, the task parks as budget-spent with no second build, naming the bound and limit; where its gate passes, the run goes on to its approval (#248)",
+  run: async () => {
+    const { maxCostUsd } = lineScope(['build'], 'standard').budget;
+    const spent: MeterReading = { ...READING, exhausted: 'cost', refused: 1 };
+    // The builder writes nothing, so the fixture's check fails over its change.
+    await withLine('r58-result-fails-', async (rig) => {
+      const { driver, handles } = await recordingDriver();
+      const components = await rig.components({ driver, reviewer: driver, sandbox: await meteredProvider(handles, spent) }, { work: false });
+      const { startRun, resumeRun } = await api();
+      const { transition } = refusalOf(await startRun(await rig.request(components)), 'R58 result fails');
+      if (transition.reason !== 'parked' || transition.cause !== 'budget-spent' || transition.task !== HELLO_TASK || transition.bound !== 'cost' || transition.limit !== maxCostUsd) {
+        throw new Error(`I5: a result whose gate failed under a spent budget ended the run as ${JSON.stringify(transition)}`);
+      }
+      if (builds(driver) !== 1) throw new Error(`I5: the builder was invoked ${String(builds(driver))} times under a spent budget, not once`);
+      const gates = (await stationRefusals(components.vault, rig)).filter((d) => d.decision.cause === 'station-refused' && d.decision.refusal.reason === 'gate-failed');
+      if (gates.length !== 1) throw new Error(`R58 control: ${String(gates.length)} failed gates were recorded, so the result was not judged exactly once`);
+      const resumed = refusalOf(await resumeRun({ runId: rig.runId, components }), 'R58 result fails, resumed');
+      if (JSON.stringify(resumed.transition) !== JSON.stringify(transition) || builds(driver) !== 1) {
+        throw new Error(`I5: a resume read the park as ${JSON.stringify(resumed.transition)} after ${String(builds(driver))} builds`);
+      }
+    });
+    // The builder does the work: the result passes its gate, and a spent budget alone parks nothing.
+    await withLine('r58-result-passes-', async (rig) => {
+      const { driver, handles } = await recordingDriver();
+      const components = await rig.components({ driver, reviewer: driver, sandbox: await meteredProvider(handles, spent) });
+      const { startRun } = await api();
+      const { transition } = refusalOf(await startRun(await rig.request(components)), 'R58 result passes');
+      if (transition.reason !== 'approval-required') throw new Error(`I5: a result that passed its gate under a spent budget ended the run as ${JSON.stringify(transition)}`);
+      const attempts = (await rig.state()).attempts[HELLO_TASK];
+      if (attempts?.budgetSpent?.bound !== 'cost' || attempts.parkedFor !== undefined) throw new Error(`I5: the passed task's attempts are ${JSON.stringify(attempts)}`);
+    });
+  },
+});
+
 /** The decision table's row: a spent budget's park is recorded by the line over the task, at build. */
 export async function budgetSpentPark(expect: (rig: LineRig, vault: Vault) => Promise<EnforcementDecision>): Promise<void> {
   await withLine('r58-park-budget-spent-', async (rig) => {
@@ -195,4 +241,4 @@ export async function budgetSpentPark(expect: (rig: LineRig, vault: Vault) => Pr
 }
 
 export const R58_I2: readonly LocalAssertion[] = [REFUSED_RUN_READS_REFUSED];
-export const R58_I5: readonly LocalAssertion[] = [SPENT_BUDGET_PARKS_AT_ONCE];
+export const R58_I5: readonly LocalAssertion[] = [SPENT_BUDGET_PARKS_AT_ONCE, SPENT_BUDGET_RESULT_IS_JUDGED_ONCE];

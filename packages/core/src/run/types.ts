@@ -143,9 +143,12 @@ export interface TaskAttempts {
    */
   readonly parkedFor?: ParkCause;
   /**
-   * The relay bound a `budget-spent` park reached and its value in policy,
-   * written with `parkedFor` in the commit that parks the task: a resume
-   * reads the park back from here (A-R58-01). Absent on every other task.
+   * The relay bound the task's last call reached and its value in policy,
+   * from the relay's meter. Written in the commit that parks a task whose
+   * call failed, and, for a call that returned a result, committed before
+   * that result is judged: the next attempt is then refused as a
+   * `budget-spent` park, and a resume reads the park back from here
+   * (A-R58-01, A-R58-02). Absent on a task whose last call's budget held.
    */
   readonly budgetSpent?: { readonly bound: BudgetBound; readonly limit: number };
 }

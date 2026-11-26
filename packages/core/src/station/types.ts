@@ -209,8 +209,9 @@ export interface TamperedPath { path: string; expected: string; actual: string; 
  * policy's `concurrency.maxConflictRetries` allows (A-R4-02).
  * `drafts-rejected`: a person rejected a drafting station's last allowed
  * draft, which parks the run terminally (R19, D-A-DS-02). `budget-spent`:
- * a driver call failed after its relay refused it for a spent budget; every
- * retry would start under the same bounds, so none is started (A-R58-01).
+ * a driver call's relay refused it for a spent budget, and the call failed
+ * or its result did not finish the task; every further attempt would start
+ * under the same bounds, so none is started (A-R58-01, A-R58-02).
  */
 export type ParkCause = 'iterations-exhausted' | 'retries-exhausted' | 'starts-exhausted' | 'conflicts-exhausted' | 'drafts-rejected' | 'budget-spent';
 
