@@ -13831,3 +13831,19 @@ Started on `v2` at 3566c06, in a worktree of its own on `unit/r58`. Issues
 - **The failed attempt is still recorded, and no retry is counted.** The
   `attempt-failed` decision is written with the retry count unchanged, so
   the park's last failure shows in `status` as any other park's does.
+
+### D-R58-05: what proves it, each shown failing
+
+- **`I5.spent-budget-parks-at-once`.** With `spendRetry` ignoring the
+  meter's reading, the run ends as `retries-exhausted` after three calls and
+  the entry fails. The decision table's `station:parked:budget-spent` row
+  fails with it. Three controls hold the rule's edges: a reading with
+  nothing spent, one stopped for an unreadable answer, and one spent with no
+  request refused are each retried as before.
+- **`I2.refused-run-reads-refused`.** With `refused` writing no
+  `stateVersion`, the entry fails on the record. With the version read but
+  not compared, a refusal naming another version reads `refused` and the
+  entry fails. The run in the entry is cancelled after its refusal, which
+  holds D-R58-04's reason for a standing of its own.
+- **The work ran in a worktree, `olympus-r58`.** The main checkout was moved
+  to another branch by another session while this one was reading it.
