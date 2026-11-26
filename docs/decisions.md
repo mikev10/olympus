@@ -13740,6 +13740,7 @@ The maintainer ran `/start-unit R5` on 2026-11-25. The unit stopped before any c
 - **Choice:** the spine's M1 out list gains "drafting at plan (M2)" and "goal decomposition (M3)", and nothing else in the spine changes. The task graph is already an artifact "emitted by `plan`". "Goal" stays R5b's amendment to take first, as its entry says.
 - **Rejected: add the artifact now, as readiness was added before R1.** Readiness had a spec when its term was added. R5b has none, and a frozen term with no spec behind it would fix a meaning nobody has checked against the code.
 - **Order:** not changed by this amendment. `DECOMPOSITION.md`'s suggested order still starts at R58. R5a's dependencies have shipped, so where it goes in the order is the maintainer's call at confirmation.
+
 ## Amendment: behavioral breadth, browser (R3)
 
 `/start-unit R3` on 2026-11-25 found that the entry had no deliverables, no
