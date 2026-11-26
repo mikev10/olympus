@@ -596,7 +596,7 @@ order between them is settled before any of them is picked up.
 |---|---|---|---|---|
 | R1 | Readiness | M2 | P2, P8, P3 | `docs/plan/R1-readiness.md` |
 | R2 | Outcome measurement | M2 | P4, P6, P9, P14 | `docs/plan/R2-outcomes.md` |
-| R3 | Behavioral breadth (browser) | M3 | P8, P5 | — |
+| R3 | Behavioral breadth (browser) (opens with a contract amendment) | M3 | P8, P11 | `docs/plan/R3-browser.md` |
 | R4 | Parallel task execution | M2 | P4, P6, I1 | `docs/plan/R4-parallel.md` |
 | R5a | Drafting at `plan` | M2 | R4, R19, R20 | `docs/plan/R5-planning.md` |
 | R5b | Goal decomposition | M3 | R5a, R4, R20 | — |
@@ -672,6 +672,7 @@ order between them is settled before any of them is picked up.
 | R73 | Review depth set by policy risk class ([#237](https://github.com/mikev10/olympus/issues/237)) (opens with a contract amendment) | M3 | P3, P14, R14 | — |
 | R74 | A run can start from a spec a person already approved ([#182](https://github.com/mikev10/olympus/issues/182)) | M3 | R11, R19 | — |
 | R75 | A spec for a UI change carries a mockup ([#191](https://github.com/mikev10/olympus/issues/191)) | M3 | R3, R19 | — |
+| R76 | The line runs behavioral scenarios from the locked manifest (opens with a contract amendment) | M3 | P6, P11, R3 | — |
 
 ### R1 — Readiness
 
@@ -746,12 +747,32 @@ reports it.
 
 ### R3 — Behavioral breadth (browser)
 
+**Spec:** `docs/plan/R3-browser.md`, written by the amendment that settled its
+open questions (D-A-BR-01 to D-A-BR-08). Where this entry and the spec differ,
+the spec is the one verified against the code.
+
 `BehavioralAdapter.kind` already admits `'browser'` and P8 ships only `'cli'`
-and `'http'`, so the contract needs no amendment and `unavailableControls()`
-already names the gap correctly today. This unit implements the browser case:
-a scenario drives the running product and its expectation comes from locked
-acceptance criteria, never from the implementation. M3, with the rest of the
-QA surface.
+and `'http'`, so the adapter contract needs no amendment and
+`unavailableControls()` names the gap correctly today. The sandbox contract
+does need one: the only client out of the product's reach is the HTTP probe,
+and its request cannot carry a browser scenario. This unit adds an optional
+`browse` to `SandboxProvider` (A-R3-01, A-R3-02, landed in its pull request)
+and implements the browser kind over it. M3, with the rest of the QA surface.
+Binding:
+
+- the browser runs in its own container, pinned by digest, in the sandbox's
+  network namespace and outside its filesystem and process tree
+- it reaches the sandbox's loopback and no other host. No policy grant widens
+  that. A host the page could not reach fails the scenario, naming it, unless
+  the locked scenario lists it as expected
+- a scenario is steps and expected observations, both data from locked
+  acceptance criteria, never from the implementation. The browser observes;
+  the runtime compares, on the host
+- the image's content ID and the browser's version are in every result
+
+It depends on P11, whose probe it is built beside, and not on P5: nothing in
+it touches a driver. It does not run a scenario on the real line. No kind does
+today, and that is R76.
 
 ### R4 — Parallel task execution
 
@@ -3880,6 +3901,31 @@ gets built, and for a UI change it approves layout from text alone.
 
 **Why M3:** it belongs with R3, which gives the line a browser to judge a
 UI by.
+
+### R76 — The line runs behavioral scenarios from the locked manifest
+
+Found while R3's spec was written (D-A-BR-07). P8, P11, and R3 each ship a
+behavioral adapter proved in isolation, and no real run uses one: the line
+builds every adapter set with `provider: null`, and a `behavioral` check in
+the manifest is a pinned command run inside the product's container, so its
+verdict is the exit code of a process the product runs beside. P11 left "executing HTTP scenarios from a
+`VerificationManifest`, and provisioning the fresh sandbox a scenario runs in"
+to I1, and I1 did not take it.
+
+- **Contract amendment first.** A `behavioral` check can carry a scenario and
+  its kind in place of a command. The scenario is locked with the manifest.
+- The line builds the adapter set with its sandbox provider, hands each
+  scenario to the adapter of its kind in a fresh sandbox, and records the
+  adapter's result. A kind the set does not carry refuses the run at
+  admission, naming it.
+- Locked files a scenario's `serve` starts, an identity stand-in among them,
+  reach the sandbox from the Vault and never from the tree the agent wrote.
+- It pays the assertion D-P11-07 left owed: two scenarios never share a
+  handle.
+
+**Why M3:** until it lands, `behavioral:cli`, `behavioral:http`, and
+`behavioral:browser` are unavailable on every real run, which is one of the
+things that keeps L3 refused.
 
 ## Working Rules
 
