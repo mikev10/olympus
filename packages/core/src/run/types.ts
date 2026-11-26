@@ -9,7 +9,7 @@
  * implementation.
  */
 import type { ApprovalKey } from '../policy/types.js';
-import type { DraftCondition, DraftStation, ParkCause, RejectionReason, ReviewSeat } from '../station/types.js';
+import type { BudgetBound, DraftCondition, DraftStation, ParkCause, RejectionReason, ReviewSeat } from '../station/types.js';
 
 export type RunId = string & { readonly __brand: 'RunId' };
 export type TaskId = string & { readonly __brand: 'TaskId' };
@@ -142,6 +142,12 @@ export interface TaskAttempts {
    * committed before the cause was recorded, which is read from its counts.
    */
   readonly parkedFor?: ParkCause;
+  /**
+   * The relay bound a `budget-spent` park reached and its value in policy,
+   * written with `parkedFor` in the commit that parks the task: a resume
+   * reads the park back from here (A-R58-01). Absent on every other task.
+   */
+  readonly budgetSpent?: { readonly bound: BudgetBound; readonly limit: number };
 }
 
 /**

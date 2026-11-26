@@ -208,9 +208,14 @@ export interface TamperedPath { path: string; expected: string; actual: string; 
  * a sibling's accepted change collided with the task's own more times than the
  * policy's `concurrency.maxConflictRetries` allows (A-R4-02).
  * `drafts-rejected`: a person rejected a drafting station's last allowed
- * draft, which parks the run terminally (R19, D-A-DS-02).
+ * draft, which parks the run terminally (R19, D-A-DS-02). `budget-spent`:
+ * a driver call failed after its relay refused it for a spent budget; every
+ * retry would start under the same bounds, so none is started (A-R58-01).
  */
-export type ParkCause = 'iterations-exhausted' | 'retries-exhausted' | 'starts-exhausted' | 'conflicts-exhausted' | 'drafts-rejected';
+export type ParkCause = 'iterations-exhausted' | 'retries-exhausted' | 'starts-exhausted' | 'conflicts-exhausted' | 'drafts-rejected' | 'budget-spent';
+
+/** Which of a task's two relay bounds was reached: `maxTokens` or `maxCostUsd` (A-R58-01). */
+export type BudgetBound = 'tokens' | 'cost';
 
 /**
  * A refusal to advance. `reason` is a closed set and selects the payload a
@@ -255,7 +260,13 @@ export type StationRefusal =
   | { ok: false; reason: 'same-family-reviewer'; task: TaskId; family: ModelFamily; message: string }
   /** At L3, a test drafter of a family the build driver can resolve: refused as a same-family reviewer is (R19, R9). */
   | { ok: false; reason: 'same-family-drafter'; station: 'test-design'; family: ModelFamily; message: string }
-  | { ok: false; reason: 'parked'; task: TaskId; cause: Exclude<ParkCause, 'conflicts-exhausted' | 'drafts-rejected'>; limit: number; message: string }
+  | { ok: false; reason: 'parked'; task: TaskId; cause: Exclude<ParkCause, 'conflicts-exhausted' | 'drafts-rejected' | 'budget-spent'>; limit: number; message: string }
+  /**
+   * A task whose relay refused it for a spent budget. `bound` is the bound
+   * the relay's meter reported reached and `limit` its value in policy, in
+   * tokens or US dollars; neither is the driver's account (I2, A-R58-01).
+   */
+  | { ok: false; reason: 'parked'; task: TaskId; cause: 'budget-spent'; bound: BudgetBound; limit: number; message: string }
   /**
    * A drafting station's last allowed draft rejected by a person. A draft has
    * no graph task, so the arm names the station (R19).

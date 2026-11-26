@@ -343,7 +343,19 @@ export type DecisionCause =
   | { readonly cause: 'admission-refused'; readonly decidedBy: 'admission'; readonly refusal: AdmissionRefusal }
   | { readonly cause: 'resume-refused'; readonly decidedBy: 'admission'; readonly refusal: ResumeRefusal }
   /** `station-machine` for a refusal `nextStep` or a capability check returned, `line` for one the line made itself. */
-  | { readonly cause: 'station-refused'; readonly decidedBy: 'station-machine' | 'line'; readonly refusal: StationRefusal }
+  | {
+      readonly cause: 'station-refused';
+      readonly decidedBy: 'station-machine' | 'line';
+      readonly refusal: StationRefusal;
+      /**
+       * The run state's version when the line returned the refusal, so a
+       * reader can tell a refusal nothing was committed after from one the
+       * run has moved past (A-R58-01). Absent on a park, which is read from
+       * committed state, and on a record written before this field; a
+       * refusal with none is never read as current.
+       */
+      readonly stateVersion?: string;
+    }
   /** `principal` is what the caller authenticated, as `ApprovalGrant.approvedBy` records it; `draft` the draft it approved, or null (R19). */
   | { readonly cause: 'approval-granted'; readonly decidedBy: 'approval'; readonly key: ApprovalKey; readonly principal: string; readonly draft: DraftRef | null }
   /** `key` is null when what the caller sent was not an approval key; it is not stored, since it is the caller's text. */

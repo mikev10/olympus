@@ -364,7 +364,9 @@ async function refused(ctx: LineContext, at: StationId, transition: StationRefus
   if (transition.reason === 'parked' && (transition.task === null || parksRecorded(ctx).has(transition.task))) return { ok: false, reason: 'refused', at, transition, state: ctx.state };
   await recordDecision(
     { vault: ctx.components.vault, runId: ctx.run.id, taskId: transition.reason === 'parked' ? transition.task : task, station: at },
-    { cause: 'station-refused', decidedBy: stationDecider(transition), refusal: transition },
+    // Every commit this drive made precedes this record, so the version is the one the run is left at: `status` reads the
+    // refusal as current only while the state still carries it (A-R58-01). A park is read from committed state and names none.
+    { cause: 'station-refused', decidedBy: stationDecider(transition), refusal: transition, ...(transition.reason === 'parked' ? {} : { stateVersion: ctx.state.version }) },
   );
   return { ok: false, reason: 'refused', at, transition, state: ctx.state };
 }
@@ -739,6 +741,9 @@ export async function startAttempt(ctx: LineContext, task: Task): Promise<Statio
   return undefined;
 }
 
+/** The relay bound a failed call's meter reported reached, and its value in the task's scope (A-R58-01). */
+export type BudgetSpent = NonNullable<TaskAttempts['budgetSpent']>;
+
 /** The most of a failure's own text a record keeps: enough for a CLI's or a container's first error, and no transcript. */
 export const FAILURE_DETAIL_LIMIT = 400;
 
@@ -761,10 +766,23 @@ export function attemptFailure(error: unknown, retries: number): AttemptFailure 
  * attempt. Past the station's `retry.max` the task parks and the run stops.
  * Why it failed is recorded first, so the retry or the park it leads to has
  * a cause the record can show (#149, D-R36a-05).
+ *
+ * A call the relay refused for a spent budget spends no retry: each retry
+ * gets a fresh relay with the same bounds, so the task parks at once, naming
+ * the bound (#193, A-R58-01). The failed attempt is recorded all the same.
  */
-export async function spendRetry(ctx: LineContext, task: Task, error: unknown): Promise<StationRefusal | undefined> {
+export async function spendRetry(ctx: LineContext, task: Task, error: unknown, budgetSpent?: BudgetSpent): Promise<StationRefusal | undefined> {
   const contract = STATION_CONTRACTS[ctx.state.station];
   const spent = attemptsOf(ctx.state, task);
+  if (budgetSpent !== undefined) {
+    const failure = attemptFailure(error, spent.retries);
+    await recordDecision(
+      { vault: ctx.components.vault, runId: ctx.run.id, taskId: task.id, station: ctx.state.station },
+      { cause: 'attempt-failed', decidedBy: 'line', failure },
+    );
+    ctx.onAttemptFailed?.(task.id, failure);
+    return park(ctx, task, { attempts: { [task.id]: { ...spent, budgetSpent } } }, 'budget-spent');
+  }
   const attempts = { [task.id]: { ...spent, retries: spent.retries + 1 } };
   const failure = attemptFailure(error, spent.retries + 1);
   await recordDecision(
@@ -1096,7 +1114,7 @@ export function withInstructions(offered: Partial<Record<ContextGrant, string>>,
 export async function runTask(
   ctx: LineContext, task: Task, driver: Driver, role: CompiledRole, context: string, workspace: string,
   options: { readonly mode?: 'ro' | 'rw'; readonly suffix?: string; readonly inputs?: readonly WithheldInput[] } = {},
-): Promise<{ ok: true; result: TaskResult; model: ModelIdentity } | { ok: false; error: unknown }> {
+): Promise<{ ok: true; result: TaskResult; model: ModelIdentity } | { ok: false; error: unknown; budgetSpent?: BudgetSpent }> {
   const { sandbox } = ctx.components;
   // Input that narrows a run is placed only once `narrowRun` released it into a narrowed run, so the scope read
   // below, and the sandbox built from it, are the narrowed ones (D-A-TR-03). Anything else is withheld (I5).
@@ -1187,6 +1205,12 @@ export async function runTask(
   // A call whose relay refused anything is a decision the relay made, recorded as a count against its usage record (D-P14-05).
   if (meter.kind === 'metered' && meter.refused > 0) {
     await recordDecision(site, { cause: 'relay-refused', decidedBy: 'model-relay', usage, refused: meter.refused, exhausted: meter.exhausted });
+  }
+  // A failed call whose relay refused it for a spent budget: read from the relay's own meter, never from the
+  // driver's error, and named with the bound policy set, so the caller parks rather than retries (I2, #193, A-R58-01).
+  if (!outcome.ok && meter.kind === 'metered' && meter.refused > 0 && (meter.exhausted === 'tokens' || meter.exhausted === 'cost')) {
+    const limit = meter.exhausted === 'tokens' ? scope.budget.maxTokens : scope.budget.maxCostUsd;
+    return { ...outcome, budgetSpent: { bound: meter.exhausted, limit } };
   }
   return outcome;
 }
@@ -1555,7 +1579,7 @@ async function build(ctx: LineContext, task: Task): Promise<StationRefusal | und
   // The checks a failed gate named, by id and cause, in the suffix and never the prefix or the role; never their output (I7, R37).
   const suffix = gatedBefore ? await gateRetry(ctx, task) : undefined;
   const ran = await runTask(ctx, task, driver, pinnedRole(ctx, task.role), joinParts(grantedContext(STATION_CONTRACTS.build, withInstructions(offered, instructions))), work, { inputs, ...(suffix === undefined ? {} : { suffix }) });
-  if (!ran.ok) return spendRetry(ctx, task, ran.error);
+  if (!ran.ok) return spendRetry(ctx, task, ran.error, ran.budgetSpent);
   // I2: a result is recorded only as the contract shapes it. A key it does not name, `status`
   // among them, is a driver speaking outside the contract; it is not recorded, and the run stops.
   const problems = taskResultProblems(ran.result);
@@ -1996,7 +2020,7 @@ async function review(ctx: LineContext, task: Task): Promise<StationRefusal | un
   const instructions = await repoInstructionsFor(ctx, task, contract, task.role);
   const inputs = instructions.input === undefined ? [] : [instructions.input];
   const ran = await runTask(ctx, task, reviewer, role, joinParts(grantedContext(contract, withInstructions(offered, instructions))), await reviewView(ctx, task, contract), { inputs });
-  if (!ran.ok) return spendRetry(ctx, task, ran.error);
+  if (!ran.ok) return spendRetry(ctx, task, ran.error, ran.budgetSpent);
   // I2: the line receives a result here too, and holds it to the contract exactly as build does (codex-6).
   const problems = taskResultProblems(ran.result);
   if (problems.length > 0) {

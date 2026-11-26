@@ -445,7 +445,7 @@ async function draft(ctx: LineContext, station: DraftStation, current: DraftAtte
 
   const role = pinnedRole(ctx, DRAFT_ROLES[station].drafter);
   const ran = await runTask(ctx, seat, driver, role, context, work, { suffix, inputs: instructions.input === undefined ? [] : [instructions.input] });
-  if (!ran.ok) return spendRetry(ctx, seat, ran.error);
+  if (!ran.ok) return spendRetry(ctx, seat, ran.error, ran.budgetSpent);
   const problems = taskResultProblems(ran.result);
   if (problems.length > 0) {
     throw new Error(`line: the drafter's result at ${station} does not match the TaskResult contract, so it was not recorded: ${problems.join('; ')}`);
@@ -820,7 +820,7 @@ async function critique(ctx: LineContext, station: DraftStation, current: DraftA
   const role = pinnedRole(ctx, DRAFT_ROLES[station].critic);
   // Which attempt's draft it reads, and nothing else of the drafter's history.
   const ran = await runTask(ctx, seat, driver, role, context, work, { mode: 'ro', suffix: retrySuffix(station, current.attempt, []), inputs: instructions.input === undefined ? [] : [instructions.input] });
-  if (!ran.ok) return spendRetry(ctx, seat, ran.error);
+  if (!ran.ok) return spendRetry(ctx, seat, ran.error, ran.budgetSpent);
   const problems = taskResultProblems(ran.result);
   if (problems.length > 0) {
     throw new Error(`line: the critic's result at ${station} does not match the TaskResult contract, so it was not recorded: ${problems.join('; ')}`);

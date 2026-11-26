@@ -1968,6 +1968,10 @@ export interface DraftStanding {
  * - `awaiting-approval`: the next exit needs a human's approval of `key`;
  *   `escalations` says what raised it beyond its floor, if anything (A-I1a-07),
  *   and `draft` what is being decided at a drafted exit (R19).
+ * - `refused`: the last drive ended in a refusal a station made, and nothing
+ *   has been committed since. Read from the decision record: the station,
+ *   the refusal, and when it was decided (#181, A-R58-01). A resume tries the
+ *   station again, and the run can still be cancelled.
  * - `open`: there is work left, and a drive would do it.
  */
 export type RunStanding =
@@ -1978,6 +1982,7 @@ export type RunStanding =
    */
   | { readonly standing: 'stopped'; readonly refusal: StationRefusal; readonly lastFailure: LastFailure | null }
   | { readonly standing: 'awaiting-approval'; readonly key: ApprovalKey; readonly escalations: readonly string[]; readonly draft: DraftStanding | null }
+  | { readonly standing: 'refused'; readonly station: StationId; readonly refusal: StationRefusal; readonly decidedAt: string }
   | { readonly standing: 'open' };
 
 /**
@@ -2047,8 +2052,34 @@ async function lastFailureOf(vault: Vault, state: RunState, refusal: StationRefu
 
 export async function runStanding(vault: Vault, runId: RunId): Promise<{ state: RunState; standing: RunStanding; source: StandingSource }> {
   const read = await standingOf(vault, runId);
+  // Whatever committed state derives wins: a park, a cancellation, a halt, a tamper, a wait. Only a run it reads as open is asked of the record.
+  if (read.standing.standing === 'open') return { ...read, standing: (await refusedAt(vault, read.state)) ?? read.standing };
   if (read.standing.standing !== 'stopped') return { ...read, standing: read.standing };
   return { ...read, standing: { ...read.standing, lastFailure: await lastFailureOf(vault, read.state, read.standing.refusal) } };
+}
+
+/**
+ * The refusal the run's last drive ended in, where the run is still at the
+ * state that refusal was made at (#181, A-R58-01). The latest
+ * `station-refused` decision is the one read, and it counts only when it
+ * names the state's current version: any commit since, by a drive, an
+ * approval, or a cancellation, means the run moved past it. A record with no
+ * version, written before the field or for a failed gate that did not end
+ * its drive, is never current (I5). I2: every field is the line's record.
+ */
+async function refusedAt(vault: Vault, state: RunState): Promise<Extract<RunStanding, { standing: 'refused' }> | null> {
+  let last: EnforcementDecision | null = null;
+  for (const ref of await vault.readDecisions(state.runId)) {
+    const d = JSON.parse(new TextDecoder().decode(await vault.read(ref))) as EnforcementDecision;
+    if (d.decision.cause !== 'station-refused') continue;
+    if (last === null || d.decidedAt >= last.decidedAt) last = d;
+  }
+  if (last?.decision.cause !== 'station-refused' || last.station === null) return null;
+  const { refusal, stateVersion } = last.decision;
+  if (stateVersion === undefined || stateVersion !== state.version) return null;
+  // A wait for approval and a park are read from committed state, as what they are.
+  if (refusal.reason === 'approval-required' || refusal.reason === 'parked') return null;
+  return { standing: 'refused', station: last.station, refusal, decidedAt: last.decidedAt };
 }
 
 type BareStanding = Exclude<RunStanding, { standing: 'stopped' }> | { readonly standing: 'stopped'; readonly refusal: StationRefusal };

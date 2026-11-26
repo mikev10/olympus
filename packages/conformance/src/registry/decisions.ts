@@ -31,6 +31,7 @@ import { conflictScenario } from './parallel.js';
 import { authorTrustNarrowing, grantNarrowing, inputNarrowing } from './ratchet.js';
 import { draftingDecision, draftsRejectedPark } from './drafting.js';
 import { inTask, runHello, writes } from './verification.js';
+import { budgetSpentPark } from './refusals.js';
 import { ARTIFACTS, HELLO_TASK, lineScope, linePolicy, readRecord, refusalOf, stubDriver, withLine, writeManifest, type LineRig } from './line.js';
 
 const api = async () => import('@olympus-ai/api');
@@ -277,7 +278,7 @@ async function claimMismatchScenario(): Promise<void> {
   });
 }
 
-async function parkScenario(cause: ParkCause): Promise<void> {
+async function parkScenario(cause: Exclude<ParkCause, 'conflicts-exhausted' | 'drafts-rejected' | 'budget-spent'>): Promise<void> {
   const { STATION_CONTRACTS } = await import('@olympus-ai/core');
   const { maxIterations, retry } = STATION_CONTRACTS.build;
   await withLine(`p14-park-${cause}-`, async (rig) => {
@@ -648,6 +649,11 @@ export const DECISION_TABLE: Readonly<Record<CauseKey, Row>> = {
   'station:parked:iterations-exhausted': { kind: 'scenario', run: () => parkScenario('iterations-exhausted') },
   'station:parked:retries-exhausted': { kind: 'scenario', run: () => parkScenario('retries-exhausted') },
   'station:parked:starts-exhausted': { kind: 'scenario', run: () => parkScenario('starts-exhausted') },
+  // R58: a call the relay refused for a spent budget parks its task at build, recorded by the line over that task.
+  'station:parked:budget-spent': {
+    kind: 'scenario',
+    run: () => budgetSpentPark((rig, vault) => expectDecision(rig, vault, 'station:parked:budget-spent', { decidedBy: 'line', taskId: HELLO_TASK, station: 'build' })),
+  },
   // R4: a conflict past maxConflictRetries 0 parks the task that met it, recorded by the line over that task at verify.
   'station:parked:conflicts-exhausted': {
     kind: 'scenario',

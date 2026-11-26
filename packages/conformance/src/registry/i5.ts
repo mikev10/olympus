@@ -40,6 +40,7 @@ import { R34_I5 } from './install.js';
 import { R36A_I5 } from './first-run.js';
 import { R40_I5 } from './admission-readiness.js';
 import { R37_I5 } from './gate-retry.js';
+import { R58_I5 } from './refusals.js';
 import { R36B_I5 } from './init.js';
 import { R55_I5 } from './startup-key.js';
 import { R29_I5 } from './stacks.js';
@@ -86,6 +87,8 @@ export const I5: InvariantEntry = {
     ...R36A_I5,
     // R37: a run parked on its gate says which check failed.
     ...R37_I5,
+    // R58: a call the relay refused for a spent budget parks its task without a retry.
+    ...R58_I5,
     ...R36B_I5,
     ...R55_I5,
     ...R16_ASSERTIONS.I5,
