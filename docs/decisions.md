@@ -13847,3 +13847,27 @@ Started on `v2` at 3566c06, in a worktree of its own on `unit/r58`. Issues
   holds D-R58-04's reason for a standing of its own.
 - **The work ran in a worktree, `olympus-r58`.** The main checkout was moved
   to another branch by another session while this one was reading it.
+
+### D-R58-06: external review, what stays a limit and what was filed
+
+Both families counted. Five findings from Codex and one from Gemini, all
+accurate about the code, none fixed in this unit
+(`docs/reviews/2026-11-25-R58-refused-and-budget-spent-triage.md`).
+
+- **Known limit, raised by both families.** A call that returns a valid
+  result after its relay refused it for a spent budget is not parked. Its
+  result is judged, and a failed gate starts another iteration with a fresh
+  relay under the same bounds. The budget is per driver call, and a task's
+  total is bounded by the station's invocation bound times that budget, as
+  before the unit. Parking whatever the driver returned was rejected: it
+  discards a result the gate might pass. Parking only once that result's
+  gate fails is the stronger rule, and it is not taken here because it
+  changes what `budgetSpent` means in A-R58-01 and decides whether a budget
+  is a call's or a task's, which the unit leaves out of scope. Owner: #248,
+  a maintainer decision.
+- **Rejected.** A failed call whose meter reads spent with no request
+  refused is retried (D-R58-04). A refusal recorded with no state version
+  reads `open` (A-R58-01).
+- **Filed, not this unit's.** `scripts/local-check.ts` does not check the
+  runner's exit status in `preflight`, excuses it in `full` whenever a paid
+  entry is listed, and does not require that any test ran: #249, under #197.

@@ -1,3 +1,38 @@
+# External review of R58, codex, 2026-11-25
+
+R58 (a refused run says so, and a spent budget parks at once), reviewed from the
+bundle alone. The triage of this reply and Gemini's is
+`2026-11-25-R58-refused-and-budget-spent-triage.md`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex. A headless `codex exec` run under a
+  read-only sandbox, with recorded approval policy `never`, in an empty scratch
+  working directory and a scratch config home holding only `auth.json`, with an
+  environment of `CODEX_HOME` alone. The pre-run listing of both is the manifest's
+  `cleanRoom`.
+- **Cross-family agreement:** the first construction of finding 1 (a call that
+  succeeds after its budget is spent is not parked) is Gemini's only finding too.
+  The second construction of finding 1, and findings 2, 3 and 4, Codex raised alone.
+- **Date:** 2026-11-25
+- **Bundle:** `2026-11-25-R58-refused-and-budget-spent-review-bundle.txt`, SHA-256
+  `f0d29340414dd7c0fd8e45519713b02d981d19b3565d412231013f313ecbf091`, base `df9a614`
+  (`reviewed/R57`), head `d6eb183` (R58's tip before the review files). It held 30
+  changed files: R58's, and the changes merged since R57's review (A-R28-02 and the
+  local-check tooling). `docs/decisions.md`, `docs/reviews/`, `docs/plan/` and
+  `pnpm-lock.yaml` were excluded. Prompt:
+  `2026-11-25-R58-refused-and-budget-spent-review-prompt.txt`.
+- **Prior context and lookups:** it said it had no prior project context and made
+  no external lookups, and that a local directory read was blocked. A self-report,
+  not independently verifiable.
+- **Coverage, and any gap:** items 1, 3, 6 and 7 were answered. Item 2 was answered
+  in the negative (the new tests are not tautologies), item 4 in the negative, and
+  item 5 through findings 2 and 3. Nothing was left empty.
+- **Citations:** line numbers refer to positions in the bundle's diffs, not located
+  in the repository; each finding was checked against the construct it names.
+
+---
+
 BASE: reviewed/R57  
 HEAD: d6eb183  
 scripts/test/local-check.test.ts  
