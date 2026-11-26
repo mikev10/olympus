@@ -14205,3 +14205,23 @@ both readings need. Options:
 2. Amend `ModelPrice` with `perCallUsd`, charged on every successful call,
    and accept it in the openai-compatible driver's configuration. Needs a
    confirmed amendment before it is built.
+
+### D-R66-05: where it was built, and what was run
+
+- **Built in `../olympus-r66` on `unit/r66-relay`.** The session opened in a
+  checkout another session (R3) was also using. A branch made there moved
+  that session onto it, and one of its commits took in this unit's
+  uncommitted sandbox files. The unit was rebuilt from its boundary commit in
+  a worktree of its own, file by file, with nothing of R3's in it. The other
+  checkout's history was left as that session made it.
+- **Shown failing with the guard removed, then restored:** the Responses
+  tier read (`meter.test.ts`, "#208"); the provisioning refusal for a search
+  model (two cases in `meter.test.ts`); the relay's own start check
+  (`relay.test.ts`, "refuses to start"); the source put back in the argument
+  list (`relay.test.ts`, "no argument holds any of it").
+- **Preflight:** typecheck, lint, and both drivers' unpaid suites passed.
+  The sandbox suite failed one test of 225 on the first run, while the other
+  session's Docker suites ran beside it, and passed 223 with 2 skipped on the
+  rerun. The run's report did not keep the failing test's name. The four
+  registry entries this unit touches passed.
+- **Not yet run:** `node scripts/local-check.ts full`. It waits on D-R66-04.
