@@ -11,6 +11,7 @@
 import { readFile } from 'node:fs/promises';
 import { parseArgs, parseEnv } from 'node:util';
 import type { ApproveBody, CreateRunBody, DismissBody, ErrorBody, RejectBody, TelemetryExport } from '@olympus-ai/api';
+import { draftLines, isDraftView } from './draft.js';
 
 export interface CliIo {
   readonly env: Readonly<Record<string, string | undefined>>;
@@ -69,9 +70,10 @@ export const COMMANDS: readonly Command[] = [
     },
   },
   { name: 'status', args: '<run id>', summary: 'the run\'s station, tasks, and gates', flags: {} },
+  { name: 'draft', args: '<run id> <station>', summary: 'print a draft\'s files and questions, to read before deciding it; <station> is spec or test-design', flags: {} },
   {
     name: 'approve', args: '<run id> <station:level>', summary: 'pass a gate the policy holds for a person',
-    flags: { draft: { type: 'string', value: '<hash>', help: 'the draft approved, as status names it, at a drafting station' } },
+    flags: { draft: { type: 'string', value: '<hash>', help: 'the draft approved, as status and draft name it, at a drafting station' } },
   },
   {
     name: 'reject', args: '<run id> <station:level>', summary: 'send a draft back',
@@ -526,6 +528,18 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<ExitCo
       case 'status': {
         const [runId = ''] = one(parseOwn(command, own).positionals, ['<run id>']);
         return report(io, await call(io, t, 'GET', runPath(runId)));
+      }
+      case 'draft': {
+        // One request; the draft comes from the API, never from the store (I9, R55).
+        const [runId = '', station = ''] = one(parseOwn(command, own).positionals, ['<run id>', '<station>']);
+        const res = await call(io, t, 'GET', `${runPath(runId, 'draft')}?${new URLSearchParams({ station }).toString()}`);
+        if (res.status < 200 || res.status >= 300) return report(io, res);
+        if (!isDraftView(res.body)) {
+          io.err('the API answered something that is not a draft');
+          return 1;
+        }
+        for (const line of draftLines(res.body, COMMAND)) io.out(line);
+        return 0;
       }
       case 'approve': {
         const { values: flags, positionals: named } = parseOwn(command, own);

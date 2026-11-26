@@ -447,11 +447,12 @@ export const DEPENDENCY_TREES_ARE_THE_BASES: LocalAssertion = runtime({
       const { startRun } = await api();
       const { StubSandboxProvider } = await import('@olympus-ai/sandbox');
       const sandbox = new StubSandboxProvider();
-      const driver = await writingDependency('node_modules/.vite/vitest/results.json', '{}', sandbox);
+      // Not Vite's cache, which a builder running its tests writes on every build and which is not recorded (D-R57-03).
+      const driver = await writingDependency('node_modules/left-pad/index.js', 'module.exports = 0;', sandbox);
       const components = await rig.components({ sandbox, driver });
       const refusal = refusalOf(await startRun(await rig.request(components)), 'I3 cache');
       const escalations = refusal.transition.reason === 'approval-required' ? refusal.transition.escalations : [];
-      if (refusal.at !== 'integrate' || !escalations.some((e) => e.endsWith(': node_modules/.vite'))) {
+      if (refusal.at !== 'integrate' || !escalations.some((e) => e.endsWith(': node_modules/left-pad'))) {
         throw new Error(`I3: a passing task's write under node_modules stopped the run at ${refusal.at} escalated by ${JSON.stringify(escalations)}`);
       }
     });

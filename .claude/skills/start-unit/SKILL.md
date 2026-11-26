@@ -67,6 +67,10 @@ proposal as the recommended answer.
 ## 5. Work the unit
 
 - Conformance suite first. It is the acceptance criteria in executable form.
+- After every change, run `node scripts/local-check.ts preflight <registry id>...`
+  naming the entries the change touches. It takes minutes. The full run takes
+  about half an hour, so it runs once, on code the preflight passed
+  (D-TOOLING-13).
 - Stay inside scope. Adjacent work becomes a note in the PR body, not a commit.
 - Record every judgment call in `docs/decisions.md`: what was ambiguous, what
   was chosen, why, how to reverse it.

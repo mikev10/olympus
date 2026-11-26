@@ -5,6 +5,7 @@ import ts from 'typescript';
 import { workspacePackages, workspaceRelative } from '../kit/workspace.js';
 import { assertApiRunsHeadless } from './headless.js';
 import { assertPackagedHostRuns } from './release.js';
+import { R55_I9 } from './draft-read.js';
 import { SANDBOX_OUTPUT_IS_BOUNDED } from './output.js';
 
 /**
@@ -146,11 +147,12 @@ export const I9: InvariantEntry = {
     }),
     runtime({
       id: 'I9.packaged-host-runs',
-      title: 'the packed packages install into an empty directory; factory-host, started from its installed bin, refuses an empty environment with every required variable in one list and no stack frame, and configured from the shipped examples listens headless; the CLI, from its own installed bin, reaches it over HTTP (R35)',
+      title: 'the packed packages install into an empty directory; factory-host, started from its installed bin, refuses an empty environment with every required variable in one list and no stack frame, and configured from the shipped examples refuses a model key the provider rejects (R55) and otherwise listens headless; the CLI, from its own installed bin, reaches it over HTTP (R35)',
       run: assertPackagedHostRuns,
       // Builds, packs, installs, and composes the host, which builds the driver image on a cold Docker cache.
       timeoutMs: 1_200_000,
     }),
+    ...R55_I9,
     compileError({
       id: 'I9.no-dom-in-lib',
       title: 'the compiler lib has no DOM: document, window, navigator, localStorage, and addEventListener are unknown names',

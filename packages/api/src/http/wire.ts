@@ -14,6 +14,9 @@ import type { GateFailure } from '../line.js';
 import type { WorstCaseCost } from '../cost.js';
 import type { RequestedArtifacts, RunOutcome, RunStanding } from '../run.js';
 
+/** `GET /runs/:id/draft`: a draft for a person to read before deciding it (R55). */
+export type { DraftQuestions, DraftView } from '../draft-view.js';
+
 /** `POST /runs`. The components and the policy are the server's own; a request names neither (D-P9-01). */
 export interface CreateRunBody {
   /** Absolute, on the server's host. */

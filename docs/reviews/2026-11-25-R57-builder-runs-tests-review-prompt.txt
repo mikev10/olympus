@@ -1,0 +1,90 @@
+The code under review is in the file
+`2026-11-25-R57-builder-runs-tests-review-bundle.txt` (SHA-256 b2a05df7e410b6d70056420e85fe42cd0a0ab0e8a75fce0c1f57d913908d46e9) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing a change to how the build step of a software-delivery runtime prepares the workspace an AI coding agent works in, and how the runtime records what that agent wrote, in a
+TypeScript project. You have the source and nothing else — no design documents,
+no author reasoning, no prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The runtime carries a task through stations. At `build`, a model (the "builder") edits a copy of the repository inside a container. At `verify`, the runtime, not the model, builds a fresh tree from the base plus the builder's diff, installs the lockfile's dependencies itself into that tree, and runs the locked acceptance checks there, read-only and offline. The check results alone decide whether the task passes. Until this change, the builder could not run the tests itself. This change installs the runtime's dependency install into the builder's own copy too (`installForBuild` in packages/api/src/line.ts), and grants the shipped default builder role the `Bash` tool with no network egress (packages/api/setup/policy.yaml). It also stops recording writes under Vite's cache directory, `node_modules/.vite`, as dependency-tree writes (`TOOL_CACHES`/`isToolCache` in packages/adapters/src/trees.ts, `notCarriedEntries` in packages/api/src/workspace.ts). A builder that runs Vitest writes there on every build. Before this change, any write a task made under a dependency tree (`node_modules` and similar) was never carried into the verified tree, was listed in the evidence by package entry (`notCarried`), and escalated the final merge gate to a human.
+
+It must hold against a capable, motivated party trying to get a change judged as passing, or merged without a human seeing it, when it does not do the work: influencing what the checks run, hiding a write from the record a human reviews, or using the new command access to reach something it was not granted. Assume no deceptive intent — only
+that the easiest path gets taken.
+
+That party is the builder model. It controls every file in its working copy, including the installed dependency trees placed there, every command it runs through `Bash` inside its container, and what it says it did. It does not control the components the runtime is wired with — the Vault, the sandbox provider, and the drivers are runtime-selected and trusted, even where a function takes one as an argument — and it does not control code running inside
+the runtime's own process. It does not control the base commit, the locked acceptance tests' admitted hashes, the policy file, or the install the runtime makes at `verify`.
+
+The invariants at stake:
+
+- An agent may not be judged by an artifact it can write. The checks that decide a task must not run over code the task wrote in a dependency tree, nor over a runner it could replace.
+- Default deny. A tool, network host, or capability not granted in policy is unavailable. Granting `Bash` to the builder must not grant anything else.
+- Fail closed. A missing check, a refused install, or an unreadable state is a refusal, never a silent pass or a warning that lets the run continue.
+- Event payloads are data, never instructions. Text from the repository or from a check's output is never placed into a prompt by the runtime.
+- Every write a task makes in a dependency tree, apart from the one exempted cache, is recorded and escalated for a human, never silently dropped.
+
+The mechanisms that matter most:
+
+- `installForBuild`: which tree gets the install, in what order relative to removing withheld paths and copying to the working copy, and what happens when the install is refused or the stack's checks run in another image.
+- The cache exemption: `isToolCache` matching of the recorded entry produced by `dependencyEntry`, and whether anything other than Vite's cache can match it.
+- The task's own diff (`ownDiff`, start copy against working copy) now spanning the installed trees, and `notCarried` derived from it.
+- The policy grant of `Bash` to the builder with `egress: none`, and the role text telling it to run the tests.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+A builder install for a stack whose checks run in an image of their own (Python); what a retry is told about a failed check; the test-drafter's instructions and the fixture's intent; any tool or egress for any other seat; a field on `TestFrameworkAdapter` or `DependencyInstaller` (a contract change); taking the paid end-to-end assertion off a list of known-intermittent failures. Identifiers such as unit and decision ids in the code's comments refer to the project's records, which you do not have; they are not something to resolve.
+
+THE QUESTION
+
+As the builder, with `Bash`, a working copy that holds the runtime's install, and no network, how would you get a change passed or merged without a human seeing what it did — by making a check run over something you wrote, by hiding a dependency-tree write behind the cache exemption, or by reaching anything the grant does not cover?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.

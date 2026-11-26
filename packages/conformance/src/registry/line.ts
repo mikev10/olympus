@@ -167,7 +167,7 @@ export async function stubDriver(options: DriverOptions = {}): Promise<ObservedD
     capabilities: () => ({ ...inner.capabilities(), ...options.capabilities }),
     declaredTools: () => options.declaredTools ?? RIG_TOOLS,
     resolveModel,
-    relayRequest: () => inner.relayRequest(),
+    relayRequest: (tools) => inner.relayRequest(tools),
     runTask: async (req: TaskRequest): Promise<TaskResult> => {
       requests.push(req);
       if (options.failWith !== undefined) throw options.failWith;

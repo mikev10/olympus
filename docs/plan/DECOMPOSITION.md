@@ -3400,6 +3400,20 @@ and every attempt fails 401 until it parks.
   to listen when the provider rejects the key, beside the other start-up
   refusals. Missing or rejected, the host fails closed
 
+**Out of scope:** approving, rejecting, or editing a draft from the new
+command, which `approve` and `reject` already do; reading any attempt but a
+station's latest; probing `FACTORY_CODEX_KEY` or `FACTORY_ENDPOINT_KEY`,
+neither of which has a request known to spend nothing and to be open to every
+valid key.
+
+**Done when:** `pnpm typecheck`, `pnpm lint`, `pnpm test`, and
+`pnpm conformance` pass, with an assertion for each bullet above that fails
+when its behaviour is deleted (I8).
+
+**Gate paths:** `packages/conformance/`, for those assertions. The pull
+request carries `gate-change`, and the squash body carries
+`Gate-Change: acknowledged`.
+
 **Why after R36b:** both touch `packages/api` and `packages/cli`, which
 R36b is changing.
 
@@ -3425,6 +3439,10 @@ they are an ungranted capability (I4).
 **Contract amendment first:** the relay's grant carries paths and no tools
 (`packages/sandbox/src/types.ts:60`), so telling the relay which server tools
 a task may use is a change to that type. It is confirmed before the build.
+
+**Out of scope:** granting any init seat `Bash` (R57), metering any server
+tool other than web search, and the CLI's pin and Code Mode switch (R52).
+Confirmed as A-R56-01 on 2026-11-24 (D-A-ST-01).
 
 **Why M2:** default deny at the one boundary a granted command tool can reach
 on its own, and the relay controls P12 and P13 built are the place that
@@ -3458,6 +3476,17 @@ against the code on 2026-11-23:
 and for the Anthropic dialect the relay forwards the body unchanged, so that
 request can name a server-side tool nothing granted. No init seat holds `Bash`
 today. Granting it before R56 would open that path on every init install.
+
+**Out of scope:** a builder install for a stack whose checks run in an image
+of their own (Python); what a retry is told (D-R37-03); the drafter's
+instructions and the fixture's intent; any tool or egress for any other seat;
+a field on `TestFrameworkAdapter` or `DependencyInstaller`; taking the paid
+init assertion off the intermittent list.
+
+**Acceptance:** `pnpm -r typecheck`, `pnpm -r lint`, `pnpm -r test`, and
+`pnpm conformance` pass, each new entry shown failing with its guard removed;
+the paid suites, `I5.init-setup-merges-on-the-real-driver` among them, run
+under `run-driver` at merge (D-R57-01).
 
 ## Working Rules
 

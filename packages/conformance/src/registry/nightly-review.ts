@@ -86,7 +86,7 @@ class ScriptedDriver implements Driver {
     const price = { inputPerMTok: 1, outputPerMTok: 10, cacheReadPerMTok: 0.1, cacheWritePerMTok: 1.25, cacheWrite1hPerMTok: 2 };
     return {
       upstream: 'https://api.example.invalid', paths: ['/v1/messages'], header: 'x-api-key', scheme: 'raw', credential: 'k', urlVariable: 'MODEL_BASE_URL',
-      meter: { dialect: 'anthropic-messages', prices: { [model(this.family).model]: price } },
+      meter: { dialect: 'anthropic-messages', prices: { [model(this.family).model]: price } }, serverTools: [],
     };
   }
   runTask(req: TaskRequest): Promise<TaskResult> {

@@ -41,6 +41,7 @@ import { R36A_I5 } from './first-run.js';
 import { R40_I5 } from './admission-readiness.js';
 import { R37_I5 } from './gate-retry.js';
 import { R36B_I5 } from './init.js';
+import { R55_I5 } from './startup-key.js';
 import { R29_I5 } from './stacks.js';
 import { R25_ASSERTIONS } from './property.js';
 import { R28_ASSERTIONS } from './findings.js';
@@ -86,6 +87,7 @@ export const I5: InvariantEntry = {
     // R37: a run parked on its gate says which check failed.
     ...R37_I5,
     ...R36B_I5,
+    ...R55_I5,
     ...R16_ASSERTIONS.I5,
     ...R20_I5,
     // R22: the trigger framework.

@@ -40,6 +40,8 @@ export { DRAFT_DIR, defectBytes, defectIntentText, isDraftableDirectory, parseQu
 export * from './http/server.js';
 export * from './host/compose.js';
 export { checkStartup, HOST_VARIABLES, hostFacts, mergeEnvFile, readHostConfig, type HostFacts, type HostVariable } from './host/config.js';
+export { MODEL_KEY_PROBE_URL, probeModelKey, type KeyProbe } from './host/key-probe.js';
+export { awaitingKey, readDraft, type DraftRead } from './draft-view.js';
 export { CONFIG_DIRECTORY_NAME, DEFAULT_PORT, githubRepository, HOST_ENV_FILE, INIT_GRAPH, initReport, initSetup, NO_UID_CONTAINER_USER, RUN_FILES_DIRECTORY, SETUP_DIRECTORY, stackManifest, stackPolicy, type InitOutcome, type InitRefusal, type InitRequest } from './init.js';
 export type * from './http/wire.js';
 export { SCAN_CONFIG, scanTree, type ScanOptions, type ScanOutcome } from './scan.js';

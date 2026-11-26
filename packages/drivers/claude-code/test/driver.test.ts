@@ -204,6 +204,7 @@ describe('the invocation', () => {
       credential: 'anthropic',
       urlVariable: 'ANTHROPIC_BASE_URL',
       meter: MODEL_METER,
+      serverTools: [],
     });
   });
 

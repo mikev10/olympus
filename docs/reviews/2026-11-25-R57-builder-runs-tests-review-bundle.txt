@@ -1,0 +1,1811 @@
+BASE: c53f09a
+HEAD: 194f06a
+
+=== COMMITS ===
+194f06a R57: the undeclared-tool entry lowers the builder's grant, now with Bash (D-R57-04)
+797a96e R57: the builder runs the locked acceptance tests in its own sandbox
+728ed1f R57: the boundary, the assumptions, and the choices (D-R57-01 to D-R57-03)
+
+=== CHANGED ===
+ .changeset/r57-builder-runs-tests.md             |   7 +
+ docs/decisions.md                                | 176 +++++++++++++++++++++++
+ docs/plan/DECOMPOSITION.md                       |  11 ++
+ examples/policy.yaml                             |   6 +-
+ examples/roles/builder.md                        |   9 ++
+ packages/adapters/src/index.ts                   |   2 +-
+ packages/adapters/src/trees.ts                   |  17 +++
+ packages/api/setup/policy.yaml                   |   6 +-
+ packages/api/setup/roles/builder.md              |   9 ++
+ packages/api/src/line.ts                         |  28 +++-
+ packages/api/src/workspace.ts                    |  12 +-
+ packages/api/test/harness.ts                     |   6 +-
+ packages/api/test/line.test.ts                   |   5 +-
+ packages/api/test/verification.test.ts           |  18 ++-
+ packages/conformance/src/registry/base-run.ts    |   5 +-
+ packages/conformance/src/registry/builder-run.ts | 138 ++++++++++++++++++
+ packages/conformance/src/registry/first-run.ts   |   4 +-
+ packages/conformance/src/registry/i3.ts          |   2 +
+ packages/conformance/src/registry/i4.ts          |   2 +
+ packages/conformance/src/registry/init.ts        |   2 +-
+ packages/conformance/src/registry/install.ts     |   8 +-
+ 21 files changed, 453 insertions(+), 20 deletions(-)
+
+
+===== .changeset/r57-builder-runs-tests.md =====
+---
+"@olympus-ai/adapters": minor
+"@olympus-ai/api": minor
+"@olympus-ai/conformance": minor
+---
+
+A build runs the locked acceptance tests in its own sandbox (R57, #220). The tree the builder is handed now holds the runtime's install of its lockfile, so the builder can run the tests offline. `verify` still judges over an install of its own. A write under Vite's cache, `node_modules/.vite` (`TOOL_CACHES`, `isToolCache`), is no longer recorded as a dependency-tree write. Every other write there still is. init's builder is granted `Bash`, and its role tells it to run the tests before it finishes. Three conformance entries hold these changes.
+
+===== examples/policy.yaml =====
+diff --git a/examples/policy.yaml b/examples/policy.yaml
+index d30ae38..19fa8c6 100644
+--- a/examples/policy.yaml
++++ b/examples/policy.yaml
+@@ -30,105 +30,109 @@ approvals:
+ # The seats a run fills, each a role file in the roles directory
+ # (FACTORY_ROLES_DIR). A role acts only at its stations, writes
+ # only its globs, uses only its tools, and spends only its budget. Tool names
+ # are the driver's own, case and all: the Claude Code driver declares Read,
+ # Write, Edit, Bash, and the rest of its CLI's tools, and a run granting a
+ # tool its seat's driver does not declare is refused at create.
+ roles:
+   builder:
+     stations: [build, verify]
+     writableGlobs: ["**"]          # narrow to the paths a change may touch, e.g. ["src/**", "test/**"]
+-    tools: [Read, Write]
++    # Bash runs the acceptance tests in the builder's own sandbox before it
++    # finishes, over the runtime's install of the lockfile, with no network.
++    # What it runs decides nothing: the runtime's checks do, over a tree with
++    # its own install, where the builder never ran.
++    tools: [Read, Write, Bash]
+     network: { egress: none }      # or a list of hosts, e.g. [registry.npmjs.org]
+     tier: standard                 # fast, standard, or deep: the model size this seat asks for
+     tierByStation: {}
+     escalation: none
+     autonomyCeiling: 1
+     triggerKinds: [human]
+     # Per task. The worst-case cost a run must approve is summed from these.
+     # Cache reads count against maxTokens: a model reading the repository
+     # spends most of its tokens there, so a seat that reads it gets room
+     # to read a small repository and still write its change (200000 ended
+     # a real build before it wrote anything). A cache read costs little,
+     # so on read-heavy work this bound is still met before maxCostUsd.
+     budget: { maxTokens: 1000000, maxCostUsd: 1, maxWallClockMs: 600000 }
+     sensitiveGrants: []
+     narrowed: null
+     repoInstructions: false
+   reviewer:
+     stations: [review]
+     writableGlobs: ["**"]
+     tools: [Read, Write]
+     network: { egress: none }
+     tier: deep
+     tierByStation: {}
+     escalation: none
+     autonomyCeiling: 1
+     triggerKinds: [human]
+     budget: { maxTokens: 1000000, maxCostUsd: 1, maxWallClockMs: 600000 }
+     sensitiveGrants: []
+     narrowed: null
+     repoInstructions: false
+   # The four drafting seats, used only by a run that drafts its spec
+   # (create --draft-spec) or its tests (--draft-tests). Delete them if no run
+   # drafts. A drafting run also needs FACTORY_RUBRICS_DIR.
+   # A drafter reads the repository before it writes its draft, so it gets
+   # the builder's tokens; a critic reads only the draft.
+   spec-drafter:
+     stations: [spec]
+     writableGlobs: ["**"]
+     tools: [Read, Write]
+     network: { egress: none }
+     tier: standard
+     tierByStation: {}
+     escalation: none
+     autonomyCeiling: 1
+     triggerKinds: [human]
+     budget: { maxTokens: 1000000, maxCostUsd: 1, maxWallClockMs: 600000 }
+     sensitiveGrants: []
+     narrowed: null
+     repoInstructions: false
+   spec-critic:
+     stations: [spec]
+     writableGlobs: ["**"]
+     tools: [Read, Write]
+     network: { egress: none }
+     tier: standard
+     tierByStation: {}
+     escalation: none
+     autonomyCeiling: 1
+     triggerKinds: [human]
+     budget: { maxTokens: 200000, maxCostUsd: 0.5, maxWallClockMs: 600000 }
+     sensitiveGrants: []
+     narrowed: null
+     repoInstructions: false
+   test-drafter:
+     stations: [test-design]
+     writableGlobs: ["**"]
+     tools: [Read, Write]
+     network: { egress: none }
+     tier: standard
+     tierByStation: {}
+     escalation: none
+     autonomyCeiling: 1
+     triggerKinds: [human]
+     budget: { maxTokens: 1000000, maxCostUsd: 1, maxWallClockMs: 600000 }
+     sensitiveGrants: []
+     narrowed: null
+     repoInstructions: false
+   test-critic:
+     stations: [test-design]
+     writableGlobs: ["**"]
+     tools: [Read, Write]
+     network: { egress: none }
+     tier: standard
+     tierByStation: {}
+     escalation: none
+     autonomyCeiling: 1
+     triggerKinds: [human]
+     budget: { maxTokens: 200000, maxCostUsd: 0.5, maxWallClockMs: 600000 }
+     sensitiveGrants: []
+     narrowed: null
+     repoInstructions: false
+ 
+ # Paths a change may touch only with a person's approval: CI, test
+ # configuration, package scripts. A change touching one is escalated.
+
+===== examples/roles/builder.md =====
+diff --git a/examples/roles/builder.md b/examples/roles/builder.md
+index 2a19ddc..11837f8 100644
+--- a/examples/roles/builder.md
++++ b/examples/roles/builder.md
+@@ -14,17 +14,26 @@ acceptance tests exactly as they are written: they decide the task.
+ 
+ The repository is in your working directory. Make the change there.
+ 
++## Run the acceptance tests before you finish
++
++The repository's dependencies are installed in your working directory, and
++you can run commands there. There is no network, so nothing more can be
++installed. Before you finish, run the acceptance tests with the repository's
++own test runner, for example `npx vitest run` in a repository that uses
++vitest. If a test fails, read why, fix your change, and run the tests again.
++Do not stop while a test fails that your change can make pass.
++
+ ## What you must not do
+ 
+ - Do not edit the spec, the acceptance tests, the verification manifest, or
+   the task graph, wherever they sit in the tree. A change to any of them is
+   recorded as tampering and the task fails.
+ - Do not weaken, skip, delete, or regenerate a test to make it pass. Each of
+   those is recorded as a finding and put in front of the person who approves
+   the change.
+ - Do not change files outside what your task needs. A change outside the paths
+   your role is granted is recorded as a violation and the run stops.
+ - Do not try to reach anything the session does not offer you. Tools and
+   network access you were not given are unavailable by design.
+ 
+ ## How you are judged
+
+===== packages/adapters/src/index.ts =====
+diff --git a/packages/adapters/src/index.ts b/packages/adapters/src/index.ts
+index 6ea9597..6a5640b 100644
+--- a/packages/adapters/src/index.ts
++++ b/packages/adapters/src/index.ts
+@@ -64,7 +64,7 @@ export {
+ } from './stand-in.js';
+ export { AUDITORS, DEPENDENCY_AUDIT_IMAGE, NPM_AUDITOR, PNPM_AUDITOR, PNPM_AUDIT_VERSION, UNSUPPORTED_LOCKFILES } from './audit.js';
+ export { INSTALLERS, NPM_INSTALLER, PNPM_INSTALLER } from './install.js';
+-export { DEPENDENCY_TREES, isDependencyTree, NODE_DEPENDENCY_TREES, PYTHON_DEPENDENCY_TREES } from './trees.js';
++export { DEPENDENCY_TREES, isDependencyTree, isToolCache, NODE_DEPENDENCY_TREES, PYTHON_DEPENDENCY_TREES, TOOL_CACHES } from './trees.js';
+ export { PIP_INSTALLER, PYPI_REGISTRIES, PYTHON_IMAGE, UV_INSTALLER } from './python/install.js';
+ export { PYTEST_BOOTSTRAP, PytestAdapter } from './python/framework.js';
+ export { CoveragePyAdapter, type CoveragePyOptions } from './python/coverage.js';
+
+===== packages/adapters/src/trees.ts =====
+diff --git a/packages/adapters/src/trees.ts b/packages/adapters/src/trees.ts
+index 77d7225..6c609fc 100644
+--- a/packages/adapters/src/trees.ts
++++ b/packages/adapters/src/trees.ts
+@@ -17,3 +17,20 @@ const LOWER = new Set(DEPENDENCY_TREES.map((t) => t.toLowerCase()));
+ export function isDependencyTree(name: string): boolean {
+   return LOWER.has(name.toLowerCase());
+ }
++
++/**
++ * The caches a stack's own tools write inside a dependency tree when they run
++ * over a writable one, each as the entry a dependency-tree write is recorded
++ * under: Vite's default `cacheDir`, where Vitest keeps its results
++ * (D-R57-03). A builder that runs its tests writes there on every build. A
++ * write under one is never carried, as no dependency-tree write is, and is not
++ * recorded as one: the tree a check runs over has every dependency tree
++ * replaced by the runtime's install first, so nothing in a cache reaches a
++ * check. Matched exactly, case and all, so a variant is recorded as before.
++ */
++export const TOOL_CACHES: readonly string[] = Object.freeze(['node_modules/.vite']);
++
++/** Whether a recorded dependency-tree entry is one of `TOOL_CACHES`, at the tree's root or below a directory of it. */
++export function isToolCache(entry: string): boolean {
++  return TOOL_CACHES.some((cache) => entry === cache || entry.endsWith(`/${cache}`));
++}
+
+===== packages/api/setup/policy.yaml =====
+diff --git a/packages/api/setup/policy.yaml b/packages/api/setup/policy.yaml
+index d30ae38..19fa8c6 100644
+--- a/packages/api/setup/policy.yaml
++++ b/packages/api/setup/policy.yaml
+@@ -30,105 +30,109 @@ approvals:
+ # The seats a run fills, each a role file in the roles directory
+ # (FACTORY_ROLES_DIR). A role acts only at its stations, writes
+ # only its globs, uses only its tools, and spends only its budget. Tool names
+ # are the driver's own, case and all: the Claude Code driver declares Read,
+ # Write, Edit, Bash, and the rest of its CLI's tools, and a run granting a
+ # tool its seat's driver does not declare is refused at create.
+ roles:
+   builder:
+     stations: [build, verify]
+     writableGlobs: ["**"]          # narrow to the paths a change may touch, e.g. ["src/**", "test/**"]
+-    tools: [Read, Write]
++    # Bash runs the acceptance tests in the builder's own sandbox before it
++    # finishes, over the runtime's install of the lockfile, with no network.
++    # What it runs decides nothing: the runtime's checks do, over a tree with
++    # its own install, where the builder never ran.
++    tools: [Read, Write, Bash]
+     network: { egress: none }      # or a list of hosts, e.g. [registry.npmjs.org]
+     tier: standard                 # fast, standard, or deep: the model size this seat asks for
+     tierByStation: {}
+     escalation: none
+     autonomyCeiling: 1
+     triggerKinds: [human]
+     # Per task. The worst-case cost a run must approve is summed from these.
+     # Cache reads count against maxTokens: a model reading the repository
+     # spends most of its tokens there, so a seat that reads it gets room
+     # to read a small repository and still write its change (200000 ended
+     # a real build before it wrote anything). A cache read costs little,
+     # so on read-heavy work this bound is still met before maxCostUsd.
+     budget: { maxTokens: 1000000, maxCostUsd: 1, maxWallClockMs: 600000 }
+     sensitiveGrants: []
+     narrowed: null
+     repoInstructions: false
+   reviewer:
+     stations: [review]
+     writableGlobs: ["**"]
+     tools: [Read, Write]
+     network: { egress: none }
+     tier: deep
+     tierByStation: {}
+     escalation: none
+     autonomyCeiling: 1
+     triggerKinds: [human]
+     budget: { maxTokens: 1000000, maxCostUsd: 1, maxWallClockMs: 600000 }
+     sensitiveGrants: []
+     narrowed: null
+     repoInstructions: false
+   # The four drafting seats, used only by a run that drafts its spec
+   # (create --draft-spec) or its tests (--draft-tests). Delete them if no run
+   # drafts. A drafting run also needs FACTORY_RUBRICS_DIR.
+   # A drafter reads the repository before it writes its draft, so it gets
+   # the builder's tokens; a critic reads only the draft.
+   spec-drafter:
+     stations: [spec]
+     writableGlobs: ["**"]
+     tools: [Read, Write]
+     network: { egress: none }
+     tier: standard
+     tierByStation: {}
+     escalation: none
+     autonomyCeiling: 1
+     triggerKinds: [human]
+     budget: { maxTokens: 1000000, maxCostUsd: 1, maxWallClockMs: 600000 }
+     sensitiveGrants: []
+     narrowed: null
+     repoInstructions: false
+   spec-critic:
+     stations: [spec]
+     writableGlobs: ["**"]
+     tools: [Read, Write]
+     network: { egress: none }
+     tier: standard
+     tierByStation: {}
+     escalation: none
+     autonomyCeiling: 1
+     triggerKinds: [human]
+     budget: { maxTokens: 200000, maxCostUsd: 0.5, maxWallClockMs: 600000 }
+     sensitiveGrants: []
+     narrowed: null
+     repoInstructions: false
+   test-drafter:
+     stations: [test-design]
+     writableGlobs: ["**"]
+     tools: [Read, Write]
+     network: { egress: none }
+     tier: standard
+     tierByStation: {}
+     escalation: none
+     autonomyCeiling: 1
+     triggerKinds: [human]
+     budget: { maxTokens: 1000000, maxCostUsd: 1, maxWallClockMs: 600000 }
+     sensitiveGrants: []
+     narrowed: null
+     repoInstructions: false
+   test-critic:
+     stations: [test-design]
+     writableGlobs: ["**"]
+     tools: [Read, Write]
+     network: { egress: none }
+     tier: standard
+     tierByStation: {}
+     escalation: none
+     autonomyCeiling: 1
+     triggerKinds: [human]
+     budget: { maxTokens: 200000, maxCostUsd: 0.5, maxWallClockMs: 600000 }
+     sensitiveGrants: []
+     narrowed: null
+     repoInstructions: false
+ 
+ # Paths a change may touch only with a person's approval: CI, test
+ # configuration, package scripts. A change touching one is escalated.
+
+===== packages/api/setup/roles/builder.md =====
+diff --git a/packages/api/setup/roles/builder.md b/packages/api/setup/roles/builder.md
+index 2a19ddc..11837f8 100644
+--- a/packages/api/setup/roles/builder.md
++++ b/packages/api/setup/roles/builder.md
+@@ -14,17 +14,26 @@ acceptance tests exactly as they are written: they decide the task.
+ 
+ The repository is in your working directory. Make the change there.
+ 
++## Run the acceptance tests before you finish
++
++The repository's dependencies are installed in your working directory, and
++you can run commands there. There is no network, so nothing more can be
++installed. Before you finish, run the acceptance tests with the repository's
++own test runner, for example `npx vitest run` in a repository that uses
++vitest. If a test fails, read why, fix your change, and run the tests again.
++Do not stop while a test fails that your change can make pass.
++
+ ## What you must not do
+ 
+ - Do not edit the spec, the acceptance tests, the verification manifest, or
+   the task graph, wherever they sit in the tree. A change to any of them is
+   recorded as tampering and the task fails.
+ - Do not weaken, skip, delete, or regenerate a test to make it pass. Each of
+   those is recorded as a finding and put in front of the person who approves
+   the change.
+ - Do not change files outside what your task needs. A change outside the paths
+   your role is granted is recorded as a violation and the run stops.
+ - Do not try to reach anything the session does not offer you. Tools and
+   network access you were not given are unavailable by design.
+ 
+ ## How you are judged
+
+===== packages/api/src/line.ts =====
+diff --git a/packages/api/src/line.ts b/packages/api/src/line.ts
+index 4c5a8e9..0b915ed 100644
+--- a/packages/api/src/line.ts
++++ b/packages/api/src/line.ts
+@@ -140,26 +140,26 @@ import { checkImageOf, claimEvidenceDiff, commandOf, runnerMissing, suiteRunner,
+ import {
+   attemptPaths,
+   propertyPaths,
+   basePath,
+   baseRunPath,
+   composeDiff,
+   copyOnly,
+   omitPaths,
+   copyTree,
+-  dependencyEntry,
++  notCarriedEntries,
+   diffDigest,
+   hashAt,
+   inDependencyTree,
+   materialize,
+   ownDiff,
+   reviewPath,
+   scanPaths,
+   treePath,
+ } from './workspace.js';
+ 
+ /**
+  * The artifacts the line reads, as they stand: those the run was admitted
+  * with, and each drafted one once its draft was approved and locked (R19).
+  * A drafted artifact not yet locked is an empty list, and nothing reads it
+  * before its station's exit.
+  */
+@@ -1514,56 +1514,80 @@ async function recordConflict(ctx: LineContext, task: Task, conflict: TaskConfli
+ /** `build`: one attempt at one task. The result is recorded in the Vault before the task is handed to `verify`. */
+ async function build(ctx: LineContext, task: Task): Promise<StationRefusal | undefined> {
+   const { driver, vault, workspaces } = ctx.components;
+   const capability = capabilityRefusal(STATION_CONTRACTS.build, driver.capabilities());
+   if (capability !== undefined) return capability;
+   const tampered = await tamperedPaths(ctx);
+   // The task has not run, so the mismatch is not its role's doing.
+   if (tampered.length > 0) return recordTamper(ctx, 'build', task, tampered, { phase: 'before-build' }, null);
+ 
+   const spec = await readText(ctx, specArtifacts(ctx));
+   const tests = await readText(ctx, ctx.artifacts.acceptanceTests);
+   const drifted = [...spec.tampered, ...tests.tampered];
+   // Read before the iteration is spent: context that changed under the check costs no budget.
+   if (drifted.length > 0) return recordTamper(ctx, 'build', task, drifted, { phase: 'context' }, null);
+ 
+   // Read before the attempt is counted: a gated iteration behind this one is one a gate may have failed (R37).
+   const gatedBefore = gatedIterations(attemptsOf(ctx.state, task)) > 0;
+   const started = await startAttempt(ctx, task);
+   if (started !== undefined) return started;
+   // A fresh pair for every invocation, a replayed one included: the tree the task is handed is
+   // exactly base and what was accepted, never what an earlier attempt left behind.
+   const { start, work } = attemptPaths(workspaces, ctx.run.id, task.id, attemptsOf(ctx.state, task).iterations);
+   const base = await accepted(ctx);
+   await materialize(workspaces, ctx.run.id, start, base.diff, () => base.tree);
++  // R57: the builder can run the locked tests, so its tree holds the runtime's install of its lockfile.
++  const prepared = await installForBuild(ctx, task, start);
++  if (prepared !== undefined) return prepared;
+   // What the role is not given is left out of both copies, so the model never has it and its diff never shows it (D-A-TR-04).
+   await omitWithheld(ctx, task.role, start);
+   await copyTree(start, work);
+   // Input a declared source brought for this task narrows the run before it is placed, and is placed only after (D-A-TR-03).
+   const brought = ctx.inputFor?.(task) ?? null;
+   const input = brought === null ? undefined : await narrowRun(ctx, brought.source, brought.text, task.id);
+   // The target's instructions, where this task is granted them, from the admission record alone (R24).
+   const instructions = await repoInstructionsFor(ctx, task, STATION_CONTRACTS.build, task.role);
+   const inputs = [input, instructions.input].filter((i): i is WithheldInput => i !== undefined);
+   const offered: Partial<Record<ContextGrant, string>> = {
+     'locked-spec': spec.text,
+     'acceptance-tests': tests.text,
+     'task-graph': JSON.stringify(ctx.graph.tasks.map(({ id, station, role, dependsOn }) => ({ id, station, role, dependsOn }))),
+   };
+   // The checks a failed gate named, by id and cause, in the suffix and never the prefix or the role; never their output (I7, R37).
+   const suffix = gatedBefore ? await gateRetry(ctx, task) : undefined;
+   const ran = await runTask(ctx, task, driver, pinnedRole(ctx, task.role), joinParts(grantedContext(STATION_CONTRACTS.build, withInstructions(offered, instructions))), work, { inputs, ...(suffix === undefined ? {} : { suffix }) });
+   if (!ran.ok) return spendRetry(ctx, task, ran.error);
+   // I2: a result is recorded only as the contract shapes it. A key it does not name, `status`
+   // among them, is a driver speaking outside the contract; it is not recorded, and the run stops.
+   const problems = taskResultProblems(ran.result);
+   if (problems.length > 0) {
+     throw new Error(`line: the driver's result for task ${task.id} does not match the TaskResult contract, so it was not recorded: ${problems.join('; ')}`);
+   }
+   const ref = await vault.recordTaskResult(ctx.run.id, ran.result);
+   await commit(ctx, { tasks: { [task.id]: 'verifying' }, results: { [task.id]: ref } });
+   return undefined;
+ }
+ 
++/**
++ * Puts the runtime's install of `start`'s lockfile in it before it is copied
++ * to the builder's working copy, so the builder can run the locked tests in its
++ * own sandbox, offline (R57). It goes in both copies, so a package the task
++ * changes is still in its own diff and recorded (D-R15-05). It is a tool the
++ * builder uses, never evidence: `verify` replaces every dependency tree with
++ * its own install before any check (I3). Made only where the stack's checks
++ * run in the profile's image, the one the driver's is built on; an install for
++ * an image of its own would not run in the builder's container (D-R57-01).
++ * An install refused or failed here leaves no dependency tree, and `verify`
++ * judges the same refusal (D-R57-03); a sandbox that cannot be provisioned
++ * spends a retry, as at `verify`.
++ */
++async function installForBuild(ctx: LineContext, task: Task, start: string): Promise<StationRefusal | undefined> {
++  const base = basePath(ctx.components.workspaces, ctx.run.id);
++  if ((await checkImageOf(base)) !== null) return undefined;
++  const installed = await installInto(ctx, start, base, task.id, ctx.state.station);
++  if (!installed.ok && installed.at === 'provision') return spendRetry(ctx, task, installed.reason);
++  return undefined;
++}
++
+ /** Locked artifacts whose content in `tree` is not what was admitted. */
+ export async function tamperedIn(ctx: LineContext, tree: string): Promise<TamperedPath[]> {
+   const tampered: TamperedPath[] = [];
+@@ -1648,214 +1672,214 @@ async function recordFindings(ctx: LineContext, task: Task, report: TamperReport
+ /**
+  * `verify`: the task's own diff, held to the locks and the grant; then the
+  * checks, run over a tree built from base and the cumulative diff, where the
+  * agent never ran, mounted read-only with no egress. The verdict follows the
+  * check results and nothing else (I2).
+  */
+ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | undefined> {
+   const { sandbox, vault, driver, workspaces } = ctx.components;
+   const before = await tamperedPaths(ctx);
+   if (before.length > 0) return recordTamper(ctx, 'verify', task, before, { phase: 'before-checks' });
+   const result = await readResult(ctx, task);
+ 
+   const { start, work } = attemptPaths(workspaces, ctx.run.id, task.id, attemptsOf(ctx.state, task).iterations);
+   const written = await ownDiff(start, work);
+   // A path the role is not given, written or created, is refused: an omitted file is never replaced unseen (D-R10-05).
+   const sensitive = withheldOf(withheldGlobs(ctx, task.role), written.map((entry) => entry.path));
+   if (sensitive.length > 0) return recordEscape(ctx, task, sensitive);
+   // D-R15-05: what the task wrote in a dependency tree is recorded and escalated, never carried. Every
+   // check, and the runner a suite check starts, runs over the runtime's install of the tree's lockfile (R34).
+   const own = written.filter((entry) => !inDependencyTree(entry.path));
+-  const notCarried = [...new Set(written.filter((entry) => inDependencyTree(entry.path)).map((entry) => dependencyEntry(entry.path)))].sort();
++  const notCarried = notCarriedEntries(written.map((entry) => entry.path));
+ 
+   // I3: the task's copy is not where the Vault checks the locks, so its diff is checked instead.
+   // A locked path in it is the tamper the Vault's own check can no longer see.
+   const admitted = new Map(admittedArtifacts(ctx).map((a) => [a.path, a.sha256]));
+   const locked = own.filter((entry) => admitted.has(entry.path));
+   if (locked.length > 0) {
+     const tampered = locked.map((entry) => ({ path: entry.path, expected: admitted.get(entry.path) ?? 'missing', actual: entry.sha256 ?? 'missing' }));
+     return recordTamper(ctx, 'verify', task, tampered, { phase: 'diff' });
+   }
+   const scope = scopeFor(ctx, task);
+   const outside = writesOutsideGrant(own, scope.writableGlobs, STATION_CONTRACTS.build.writeBoundary.workspaceGlobs);
+   if (outside.length > 0) return recordEscape(ctx, task, outside);
+ 
+   const prior = await accepted(ctx);
+   // I5: a path a sibling's accepted change touched after this task started would be overwritten by
+   // composing; the task is rebuilt over the accepted tree instead, and no side is picked (R4).
+   const conflict = await conflictOf(ctx, task, start, own, prior);
+   if (conflict !== null) return recordConflict(ctx, task, conflict);
+   const diff = await composeDiff(basePath(workspaces, ctx.run.id), prior.diff, own);
+   const diffSha256 = diffDigest(diff);
+   const tree = treePath(workspaces, ctx.run.id, diffSha256);
+   const fromTask = new Set(own.map((entry) => entry.path));
+   await materialize(workspaces, ctx.run.id, tree, diff, (path) => (fromTask.has(path) ? work : prior.tree));
+   const built = await tamperedIn(ctx, tree);
+   if (built.length > 0) return recordTamper(ctx, 'verify', task, built, { phase: 'tree' });
+   // R34: the tree's lockfile, the change's included, is installed by the runtime, and every
+   // dependency tree base or task left is replaced by that install before any check runs.
+   const installed = await installInto(ctx, tree, basePath(workspaces, ctx.run.id), task.id, ctx.state.station);
+   if (!installed.ok && installed.at === 'provision') return spendRetry(ctx, task, installed.reason);
+   const runner = await suiteRunner(basePath(workspaces, ctx.run.id));
+   const stackImage = await checkImageOf(basePath(workspaces, ctx.run.id));
+   const security = ctx.checks.filter(isSecurityCheck);
+   const tamper = await analyzeTamper(prior.tree, tree, {
+     protectedPaths: ctx.policy.protectedPaths,
+     coverage: coverageReport(ctx),
+     // A security check pins no command: its scanner's arguments are the runtime's, and name no file in the tree.
+     commands: ctx.checks.filter((c) => !isSecurityCheck(c)).map((c) => commandOf(c, runner)),
+     markers: [...new Set(security.map((c) => c.kind))].map((kind) => ({ kind, markers: scannerFor(kind, ctx.components.scanners).markers })),
+   });
+ 
+   // Results stay aligned with the specs by position, never matched up by id afterwards.
+   const specs = ctx.checks;
+   const results: Array<CheckResult | undefined> = [];
+   const unstarted: UnstartedCheck[] = [];
+   // Each check gets a sandbox of its own, whose wall clock is the check's pinned timeout. A check
+   // shares no container with the one before it, so nothing an earlier check did to the container
+   // can change what a later one runs (codex-2); and a check that outruns its timeout is ended by
+   // the provider and produces no result, recorded in `unstarted` like any other (codex-7).
+   for (const [index, check] of specs.entries()) {
+     if (isSecurityCheck(check)) {
+       const scanned = await runSecurity(ctx, tree, installed.ok ? installed.trees : [], diffSha256, index, check, task.id);
+       if (scanned.ok) results.push(scanned.result);
+       else if (scanned.at === 'provision') return spendRetry(ctx, task, scanned.reason);
+       else {
+         results.push(undefined);
+         unstarted.push({ checkId: check.id, reason: scanned.reason });
+       }
+       continue;
+     }
+     // With the install refused or failed, the tree holds no dependency tree at all, so no check runs over it as if it did (I5).
+     if (!installed.ok) {
+       results.push(undefined);
+       unstarted.push({ checkId: check.id, reason: installed.reason });
+       continue;
+     }
+     const missing = await runnerMissing(check, runner, tree);
+     if (missing !== undefined) {
+       results.push(undefined);
+       unstarted.push({ checkId: check.id, reason: missing });
+       continue;
+     }
+     const property = await propertyRun(ctx, tree, check, diffSha256, index);
+     if (!property.ok) {
+       results.push(undefined);
+       unstarted.push({ checkId: check.id, reason: property.reason });
+       continue;
+     }
+     let handle: SandboxHandle;
+     try {
+       handle = await sandbox.provision(checkSandbox(ctx, tree, check, stackImage, property.prepared));
+     } catch (error) {
+       return spendRetry(ctx, task, error);
+     }
+     try {
+       const startedAt = new Date().toISOString();
+       try {
+         // The pinned argument vector, or a suite check's runner, exactly: no shell, no splitting (A-P6-01, D-R15-04).
+         const exec = await sandbox.exec(handle, [...commandOf(check, runner)], property.prepared === null ? undefined : { env: property.prepared.env });
+         results.push({
+           checkId: check.id,
+           exitCode: exec.exitCode,
+           stdout: exec.stdout,
+           stderr: exec.stderr,
+           suiteCount: await suitesRun(check, runner, tree),
+           ...judged(property.prepared, exec),
+           findings: null,
+           durationMs: exec.durationMs,
+           startedAt,
+         });
+       } catch (error) {
+         // There is no exit code to record and none is invented; the bundle says why (A-P6-02).
+         results.push(undefined);
+         unstarted.push({ checkId: check.id, reason: describe(error) });
+       }
+     } finally {
+       // A check's sandbox has no route out today, and whatever its proxy decided is recorded all the same (D-P14-04).
+       const { egress } = await sandbox.destroy(handle);
+       await recordEgress({ vault: ctx.components.vault, runId: ctx.run.id, taskId: task.id, station: ctx.state.station }, egress);
+     }
+   }
+   const checks = results.filter((r): r is CheckResult => r !== undefined);
+ 
+   // Evidence collected over a changed artifact is not evidence, whatever the provider claims about ro.
+   const after = [...(await tamperedPaths(ctx)), ...(await tamperedIn(ctx, tree))];
+   if (after.length > 0) return recordTamper(ctx, 'verify', task, after, { phase: 'after-checks', checks });
+ 
+   // The `test-design` exit is not crossed without a base record, so a task at verify has one (D-A-BF-01).
+   const baseRun = await vault.readBaseRun(ctx.run.id, testDraftOf(ctx));
+   if (baseRun === null) throw new Error(`line: run ${ctx.run.id} reached verify with no base record`);
+   const baseRecord = await readRecord<BaseRunRecord>(ctx, baseRun);
+   const failed: FailedCheck[] = [];
+   specs.forEach((check, i) => {
+     // A security check is judged by its findings against the base's, never by its exit code alone (D-A-SC-02).
+     const shortfall = isSecurityCheck(check)
+       ? securityShortfall(check, results[i], baseRecord.checks.find((r) => r.checkId === check.id)?.findings ?? [], scannerFor(check.kind, ctx.components.scanners), tamper)
+       : requiredShortfall(check, results[i]);
+     if (shortfall !== undefined) failed.push(shortfall);
+   });
+   const differences = claimEvidenceDiff(result.claim, own);
+   if (differences.length > 0) {
+     // Recorded, and deliberately not entered in run state: every entry there halts the run, and a
+     // halt the claim could trigger would let the model's story decide the outcome (D-P6-03).
+     await recordViolation(ctx, {
+       runId: ctx.run.id,
+       taskId: task.id,
+       kind: 'claim-mismatch',
+       role: task.role,
+       driverProvenanceId: driver.provenanceId(),
+       contractVersion: driver.contractVersion,
+       detectedAt: new Date().toISOString(),
+       detail: { station: 'verify', claimEvidenceDiff: differences },
+     });
+   }
+   await recordFindings(ctx, task, tamper);
+   const evidence: EvidenceBundle = {
+     runId: ctx.run.id,
+     taskId: task.id,
+     baseCommit: ctx.run.baseCommit,
+     baseTreeSha256: ctx.baseTreeSha256,
+     baseRun,
+     diff,
+     diffSha256,
+     checks,
+     unstarted,
+     claim: result.claim,
+     claimEvidenceDiff: differences,
+     tamper,
+     notCarried,
+     install: installed.ok ? installed.install : null,
+     collectedBy: 'runtime',
+     driverProvenanceId: driver.provenanceId(),
+     // Beside the provenance, which names a version, the bytes the build ran in (A-R53-01).
+     harnessImage: await buildCallImage(ctx, task),
+     contractVersion: driver.contractVersion,
+   };
+   const ref = await vault.writeEvidence(evidence);
+   // The status follows the verdict and nothing else (I2). A failure with no iteration left parks the task;
+   // an iteration a conflict sent back was judged by no gate and spends none of them (D-R4-03).
+   const spent = gatedIterations(attemptsOf(ctx.state, task));
+   const status: TaskStatus = failed.length === 0 ? 'passed' : spent >= STATION_CONTRACTS[task.station].maxIterations ? 'parked' : 'failed';
+   // A failed gate is a decision, recorded before the status it sets is committed, at every iteration, so each failure is counted by its cause (R17, D-R17-06).
+   if (failed.length > 0) {
+     await recordDecision(
+       { vault, runId: ctx.run.id, taskId: task.id, station: 'verify' },
+       { cause: 'station-refused', decidedBy: 'line', refusal: { ok: false, reason: 'gate-failed', failed, message: `the gate failed on ${failed.map((f) => `${f.checkId} (${f.cause})`).join(', ')}` } },
+     );
+     ctx.onGateFailed?.(task.id, gateFailure(failed, unstarted));
+   }
+   // The station machine returns this park to the line on its next step; it is recorded here, first.
+   if (status === 'parked') await park(ctx, task, { evidence: ref }, 'iterations-exhausted');
+   else await commit(ctx, { tasks: { [task.id]: status }, evidence: ref });
+   return undefined;
+ }
+ 
+ /**
+  * A review seat's tree: the files its contract's grants cover and nothing
+  * else. The review contract grants the locked spec, the acceptance tests, and
+  * the diff, so the view holds those files as the accepted tree has them; the
+  * security seat's contract does not grant the acceptance tests, so its view
+  * holds none (R9, codex-3). The task graph, the manifest, and every file the
+  * diff does not carry are absent, so a reviewer with a read tool cannot open
+  * what its contract denies it (I6).
+  */
+
+===== packages/api/src/workspace.ts =====
+diff --git a/packages/api/src/workspace.ts b/packages/api/src/workspace.ts
+index 4e8c293..18f3c24 100644
+--- a/packages/api/src/workspace.ts
++++ b/packages/api/src/workspace.ts
+@@ -28,7 +28,7 @@
+ import { createHash } from 'node:crypto';
+ import { copyFile, cp, lstat, mkdir, readlink, rename, rm, symlink, writeFile } from 'node:fs/promises';
+ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+-import { diffTrees, hashRegularFile, isDependencyTree, walkTree, type WalkOptions } from '@olympus-ai/adapters';
++import { diffTrees, hashRegularFile, isDependencyTree, isToolCache, walkTree, type WalkOptions } from '@olympus-ai/adapters';
+ import type { DraftSeat, DraftStation, RunId, TaskId } from '@olympus-ai/core';
+ import { materialize as materializeCommit, resolveCommit } from '@olympus-ai/readiness';
+ import type { DiffEntry } from '@olympus-ai/vault';
+@@ -311,18 +311,28 @@ function dependencyIndex(parts: readonly string[]): number {
+ /**
+  * The entry a dependency-tree path is recorded under: the package directory
+  * it belongs to, `node_modules/vitest` or `node_modules/@scope/pkg`, or the
+  * file itself when it sits directly in `node_modules`. One install writes
+  * thousands of files; the package is what a person reading the escalation
+  * can act on.
+  */
+ export function dependencyEntry(path: string): string {
+   const parts = path.split('/');
+   const at = dependencyIndex(parts);
+   const name = parts[at + 1];
+   const scoped = name?.startsWith('@') === true && parts.length > at + 3;
+   return parts.slice(0, Math.min(parts.length, at + (scoped ? 3 : 2))).join('/');
+ }
+ 
++/**
++ * The entries a task's writes in a dependency tree are recorded under
++ * (D-R15-05), sorted and each once, leaving out a tool's own cache: a builder
++ * that runs its tests writes one on every build, and nothing in it reaches a
++ * check (D-R57-03).
++ */
++export function notCarriedEntries(paths: readonly string[]): string[] {
++  return [...new Set(paths.filter(inDependencyTree).map(dependencyEntry))].filter((entry) => !isToolCache(entry)).sort();
++}
++
+ /** A task's own diff: every path outside `.git` whose content differs between the tree it was handed and the tree it left. */
+ export async function ownDiff(start: string, work: string): Promise<DiffEntry[]> {
+   const changes = await diffTrees(start, work, (path) => !excluded(path), DIFF_WALK);
+
+===== packages/api/test/harness.ts =====
+diff --git a/packages/api/test/harness.ts b/packages/api/test/harness.ts
+index e198335..3d97dc1 100644
+--- a/packages/api/test/harness.ts
++++ b/packages/api/test/harness.ts
+@@ -65,6 +65,8 @@ export const BASE_COMMIT = '0'.repeat(40);
+  * admission's tool check (D-R36a-07) passes over a stub that runs no tool.
+  */
+ export const TEST_TOOLS: readonly string[] = ['Read', 'Write'];
++/** What a wrapped stub declares: the fixture's grant, and `Bash`, which the shipped examples grant the builder (R57). */
++export const DECLARED_TEST_TOOLS: readonly string[] = [...TEST_TOOLS, 'Bash'];
+ export const BUILDER = 'builder' as RoleId;
+ export const REVIEWER = 'reviewer' as RoleId;
+ 
+@@ -343,19 +345,19 @@ const DECLARING = new WeakMap<Driver, Driver>();
+ /** Each declaring wrapper, back to the driver it wraps, so wrapping again starts from the driver itself. */
+ const UNDECLARED = new WeakMap<Driver, Driver>();
+ 
+-/** `driver`, declaring `TEST_TOOLS` when it declares no tool itself; every other member is its own. */
++/** `driver`, declaring `DECLARED_TEST_TOOLS` when it declares no tool itself; every other member is its own. */
+ export function declaring<D extends Driver>(driver: D): D {
+   if (driver.declaredTools().length > 0) return driver;
+   const known = DECLARING.get(driver);
+   if (known !== undefined) return known as D;
+   const wrapped = new Proxy(driver, {
+     get(target, key, receiver) {
+-      if (key === 'declaredTools') return () => TEST_TOOLS;
++      if (key === 'declaredTools') return () => DECLARED_TEST_TOOLS;
+       const value = Reflect.get(target, key, receiver) as unknown;
+       return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+     },
+   });
+   DECLARING.set(driver, wrapped);
+   UNDECLARED.set(wrapped, driver);
+   return wrapped;
+ }
+
+===== packages/api/test/line.test.ts =====
+diff --git a/packages/api/test/line.test.ts b/packages/api/test/line.test.ts
+index b7e7eeb..009bfa9 100644
+--- a/packages/api/test/line.test.ts
++++ b/packages/api/test/line.test.ts
+@@ -1010,30 +1010,31 @@ class DependencyWriter extends DelegatingDriver {
+ describe('the change cannot replace its judge (D-R15-05)', () => {
+   // Found in the R15 triage: the diff carried node_modules into the verified tree, and tamper analysis skips it,
+   // so a builder that rewrote the script a check runs turned a failing check green with nothing escalated.
+   test('a check runs the base\'s node_modules: a builder that rewrites the script it runs is recorded, and not carried', async () => {
+     await mkdir(join(workspace, 'node_modules', 'judge'), { recursive: true });
+     await writeFile(join(workspace, 'node_modules', 'judge', 'index.js'), 'process.exit(1)\n');
+     await writeChecks(workspace, [{ id: 'judge', kind: 'behavioral', onBase: 'fails', command: ['node', 'node_modules/judge/index.js'], required: true, timeoutMs: 10_000 }]);
+     const sandbox = new StubSandboxProvider();
+     const driver = new DependencyWriter(sandbox, 'node_modules/judge/index.js', 'process.exit(0)\n');
+     const parts = stubComponents(workspace, { sandbox, driver });
+     const state = refusedState(await startRun(runRequest(runId, workspace, parts)));
+     expect(state.tasks[hello]).toBe('parked');
+     const [ref] = state.evidenceRefs;
+     if (ref === undefined) throw new Error('no evidence');
+     const bundle = await read<EvidenceBundle>(parts.vault, ref);
+     expect(bundle.checks.find((c) => c.checkId === 'judge')?.exitCode).toBe(1);
+     expect(bundle.notCarried).toEqual(['node_modules/judge']);
+     expect(bundle.diff.map((e) => e.path)).toEqual(['hello.txt']);
+   });
+ 
+   test('what a passing task wrote under node_modules escalates the integrate exit, by package', async () => {
+     const sandbox = new StubSandboxProvider();
+-    const driver = new DependencyWriter(sandbox, 'node_modules/.vite/vitest/results.json', '{}');
++    // Not Vite's cache, which a builder running its tests writes on every build and which is not recorded (D-R57-03).
++    const driver = new DependencyWriter(sandbox, 'node_modules/left-pad/index.js', 'module.exports = 0;');
+     const parts = stubComponents(workspace, { sandbox, driver });
+     const state = refusedState(await startRun(runRequest(runId, workspace, parts)));
+     expect(state.tasks[hello]).toBe('passed');
+     const escalations = await integrateEscalations(parts.vault, state, (r) => read<EvidenceBundle>(parts.vault, r));
+-    expect(escalations.tamperFindings).toContain("written but not carried, since checks run over the base's dependencies: node_modules/.vite");
++    expect(escalations.tamperFindings).toContain("written but not carried, since checks run over the base's dependencies: node_modules/left-pad");
+   });
+ });
+
+===== packages/api/test/verification.test.ts =====
+diff --git a/packages/api/test/verification.test.ts b/packages/api/test/verification.test.ts
+index 9b4832b..748d081 100644
+--- a/packages/api/test/verification.test.ts
++++ b/packages/api/test/verification.test.ts
+@@ -13,19 +13,19 @@ import {
+   claimEvidenceDiff,
+   composeDiff,
+   countSuites,
+   diffDigest,
+   ownDiff,
+   commandOf,
+   requiredSuites,
+   runnerMissing,
+   suiteBindingProblems,
+   suiteRunner,
+   suitesRun,
+   taskResultProblems,
+   treeDigest,
+   writesOutsideGrant,
+ } from '../src/index.js';
+-import { basePath, copyOnly, copyTree, dependencyEntry, hashAt, inDependencyTree, localWorkspaceStore, materialize, treePath } from '../src/workspace.js';
++import { basePath, copyOnly, copyTree, dependencyEntry, hashAt, inDependencyTree, localWorkspaceStore, materialize, notCarriedEntries, treePath } from '../src/workspace.js';
+ 
+ let base: string;
+ 
+@@ -301,6 +301,22 @@ describe('a dependency tree is one whatever its spelling (D-R15-05)', () => {
+   });
+ });
+ 
++// R57: a builder that runs vitest writes its results under node_modules/.vite on every build.
++describe("a tool's own cache is not a recorded dependency write, and nothing else is spared (D-R57-03)", () => {
++  test("Vite's cache, at the root or in a nested package, is left out; every other write is recorded, a case variant included", () => {
++    expect(notCarriedEntries([
++      'node_modules/.vite/vitest/0000/results.json',
++      'packages/a/node_modules/.vite/vitest/0000/results.json',
++      'node_modules/vitest/vitest.mjs',
++      'node_modules/.VITE/vitest/0000/results.json',
++      'node_modules/.pnpm/vitest@4.1.11/node_modules/vitest/vitest.mjs',
++      'node_modules/extra/node_modules/.vite/x.json',
++      'node_modules/.vite-cache/x.json',
++      'src/index.ts',
++    ])).toEqual(['node_modules/.VITE', 'node_modules/.pnpm', 'node_modules/.vite-cache', 'node_modules/extra', 'node_modules/vitest']);
++  });
++});
++
+ describe("a driver's result is held to the contract's exact keys", () => {
+   const result = {
+     taskId: 't',
+
+===== packages/conformance/src/registry/base-run.ts =====
+diff --git a/packages/conformance/src/registry/base-run.ts b/packages/conformance/src/registry/base-run.ts
+index 68892c7..0ceef6d 100644
+--- a/packages/conformance/src/registry/base-run.ts
++++ b/packages/conformance/src/registry/base-run.ts
+@@ -423,37 +423,38 @@ async function writingDependency(path: string, text: string, sandbox: SandboxPro
+ export const DEPENDENCY_TREES_ARE_THE_BASES: LocalAssertion = runtime({
+   id: 'I3.dependency-trees-are-the-bases',
+   title:
+     "every check runs over dependency trees no task wrote, the runtime's install of the tree's lockfile since R34, so the change cannot replace the runner that judges it: what a task writes under node_modules is never carried into the tree the checks run over, is recorded in its evidence by package, and escalates the integrate exit; a builder that rewrites the test runner an acceptance check starts, and does nothing else, is judged by the installed runner and parks (D-R15-05, R34)",
+   run: async () => {
+     await withLine('r15-i3-judge-', async (rig) => {
+       const { startRun } = await api();
+       const { StubSandboxProvider } = await import('@olympus-ai/sandbox');
+       await withSuite(rig);
+       await writeManifest(rig.dirs, [COMPILES, REPRODUCES]);
+       const sandbox = new StubSandboxProvider();
+       const driver = await writingDependency(VITEST_RUNNER, 'process.exit(0)\n', sandbox);
+       const components = await rig.components({ sandbox, driver, reviewer: driver }, { work: false });
+       const refusal = refusalOf(await startRun(await rig.request(components, { artifacts: SUITE_ARTIFACTS })), 'I3 judge');
+       const state = refusal.state;
+       if (state?.tasks[HELLO_TASK] !== 'parked') throw new Error(`I3: a builder that only rewrote the runner left the task ${String(state?.tasks[HELLO_TASK])}, not parked`);
+       const bundles = await Promise.all(state.evidenceRefs.map((r) => readRecord<EvidenceBundle>(components.vault, r)));
+       const bundle = bundles.at(-1);
+       const judged = bundle?.checks.find((c) => c.checkId === REPRODUCES.id);
+       if (judged?.exitCode !== 1 || JSON.stringify(bundle?.notCarried) !== '["node_modules/vitest"]' || bundle?.diff.length !== 0) {
+         throw new Error(`I3: the rewritten runner's evidence was ${JSON.stringify({ judged, notCarried: bundle?.notCarried, diff: bundle?.diff })}`);
+       }
+     });
+     await withLine('r15-i3-cache-', async (rig) => {
+       const { startRun } = await api();
+       const { StubSandboxProvider } = await import('@olympus-ai/sandbox');
+       const sandbox = new StubSandboxProvider();
+-      const driver = await writingDependency('node_modules/.vite/vitest/results.json', '{}', sandbox);
++      // Not Vite's cache, which a builder running its tests writes on every build and which is not recorded (D-R57-03).
++      const driver = await writingDependency('node_modules/left-pad/index.js', 'module.exports = 0;', sandbox);
+       const components = await rig.components({ sandbox, driver });
+       const refusal = refusalOf(await startRun(await rig.request(components)), 'I3 cache');
+       const escalations = refusal.transition.reason === 'approval-required' ? refusal.transition.escalations : [];
+-      if (refusal.at !== 'integrate' || !escalations.some((e) => e.endsWith(': node_modules/.vite'))) {
++      if (refusal.at !== 'integrate' || !escalations.some((e) => e.endsWith(': node_modules/left-pad'))) {
+         throw new Error(`I3: a passing task's write under node_modules stopped the run at ${refusal.at} escalated by ${JSON.stringify(escalations)}`);
+       }
+     });
+   },
+ });
+
+===== packages/conformance/src/registry/builder-run.ts =====
+/**
+ * R57: the builder runs the locked acceptance tests in its own sandbox before
+ * it finishes. Its tree holds the runtime's install of its lockfile, never the
+ * base's own dependency trees; the cache its test runner writes there is not
+ * recorded as a write in a dependency tree, while any other write still is
+ * (D-R15-05); and init grants `Bash` to the builder alone, with no egress.
+ * Each assertion fails with the thing it guards removed (I8).
+ */
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import type { RoleId, TaskRequest } from '@olympus-ai/core';
+import type { EvidenceBundle } from '@olympus-ai/vault';
+import { runtime } from '../kit/assert.js';
+import type { LocalAssertion } from '../kit/types.js';
+import { withVaultDirs } from './local-vault.js';
+import { asClone, vitestRepository } from './init.js';
+import { EXTRA, recording, withDependencies } from './install.js';
+import { HELLO_REPRODUCTION, readRecord, stubDriver, withLine, writeManifest, type LineRig } from './line.js';
+
+const api = async () => import('@olympus-ai/api');
+const adapters = async () => import('@olympus-ai/adapters');
+
+/** A package the base's own tree holds and its lockfile does not pin: an install never places it. */
+const STALE = 'node_modules/stale';
+/** Where Vitest keeps its results under Vite's default cache directory. */
+const CACHE_FILE = 'node_modules/.vite/vitest/0000/results.json';
+
+/** A base whose lockfile pins `extra` and whose own tree also holds `stale`, with `hello-written` its one check. */
+async function installedBase(rig: LineRig): Promise<void> {
+  const { hashedLockfile } = await adapters();
+  await withDependencies(rig, hashedLockfile('hello', [EXTRA]));
+  await mkdir(join(rig.dirs.artifacts, STALE), { recursive: true });
+  await writeFile(join(rig.dirs.artifacts, STALE, 'index.js'), "module.exports = 'stale';\n");
+  await writeManifest(rig.dirs, [HELLO_REPRODUCTION]);
+}
+
+/** A builder that runs `script` with node in its own tree, then writes the change `hello-written` passes on. */
+async function building(script: string, sandbox: Awaited<ReturnType<typeof recording>>): Promise<{ driver: Awaited<ReturnType<typeof stubDriver>>; seen: string[] }> {
+  const seen: string[] = [];
+  const driver = await stubDriver({
+    during: async (req: TaskRequest) => {
+      if (req.role.role !== ('builder' as RoleId)) return;
+      const ran = await sandbox.exec(req.sandbox, ['node', '-e', `const fs = require('node:fs'); ${script}; fs.writeFileSync(['hello', 'txt'].join('.'), 'hello')`]);
+      if (ran.exitCode !== 0) throw new Error(`R57 control: the builder's command did not run: ${ran.stderr}`);
+      seen.push(ran.stdout.trim());
+    },
+  });
+  return { driver, seen };
+}
+
+async function lastBundle(rig: LineRig, components: Awaited<ReturnType<LineRig['components']>>): Promise<EvidenceBundle | undefined> {
+  const state = await rig.state();
+  return (await Promise.all(state.evidenceRefs.map((r) => readRecord<EvidenceBundle>(components.vault, r)))).at(-1);
+}
+
+export const BUILD_TREE_HOLDS_THE_INSTALL: LocalAssertion = runtime({
+  id: 'I3.build-tree-holds-the-runtime-install',
+  title:
+    "the tree a builder is handed holds the runtime's install of its lockfile, so the builder can run the locked tests in its own sandbox with no network: a package the lockfile pins is there, and one only the base's own tree held is not, so the base's dependency trees never reach the builder; verify still judges over an install of its own (R57)",
+  run: async () => {
+    await withLine('r57-install-', async (rig) => {
+      await installedBase(rig);
+      const sandbox = await recording();
+      const { driver, seen } = await building(
+        `console.log(JSON.stringify({ extra: fs.existsSync(${JSON.stringify(`${EXTRA}/index.js`)}), stale: fs.existsSync(${JSON.stringify(STALE)}) }))`,
+        sandbox,
+      );
+      const components = await rig.components({ sandbox, driver, reviewer: driver }, { work: false });
+      const { startRun } = await api();
+      await startRun(await rig.request(components));
+      const [first] = seen;
+      if (first === undefined) throw new Error('R57 control: the builder never ran');
+      const tree = JSON.parse(first) as { extra: boolean; stale: boolean };
+      if (!tree.extra) throw new Error(`R57: the builder's tree does not hold ${EXTRA}, which its lockfile pins: it was handed no install`);
+      if (tree.stale) throw new Error(`R57: the builder's tree holds ${STALE}, which only the base's own tree held`);
+      const bundle = await lastBundle(rig, components);
+      if (bundle?.install === null || bundle?.install === undefined) throw new Error(`R57: verify recorded no install of its own: ${JSON.stringify(bundle?.install)}`);
+    });
+  },
+});
+
+export const BUILDER_CACHE_IS_NOT_RECORDED: LocalAssertion = runtime({
+  id: 'I3.builder-tool-cache-is-not-a-dependency-write',
+  title:
+    "a builder that writes under node_modules/.vite, where Vitest keeps its results, and also changes an installed package, has the package recorded as written in a dependency tree and not carried (D-R15-05), and the cache neither recorded nor carried: running the tests raises no finding, and a write anywhere else in a dependency tree still does (R57)",
+  run: async () => {
+    await withLine('r57-cache-', async (rig) => {
+      await installedBase(rig);
+      const sandbox = await recording();
+      const { driver } = await building(
+        [
+          `fs.mkdirSync(${JSON.stringify(CACHE_FILE.slice(0, CACHE_FILE.lastIndexOf('/')))}, { recursive: true })`,
+          `fs.writeFileSync(${JSON.stringify(CACHE_FILE)}, '{}')`,
+          `fs.writeFileSync(${JSON.stringify(`${EXTRA}/index.js`)}, "module.exports = 'changed';")`,
+        ].join('; '),
+        sandbox,
+      );
+      const components = await rig.components({ sandbox, driver, reviewer: driver }, { work: false });
+      const { startRun } = await api();
+      await startRun(await rig.request(components));
+      const bundle = await lastBundle(rig, components);
+      if (bundle === undefined) throw new Error('R57 control: the task left no evidence');
+      if (JSON.stringify(bundle.notCarried) !== JSON.stringify([EXTRA])) {
+        throw new Error(`R57: the writes recorded in a dependency tree were ${JSON.stringify(bundle.notCarried)}, not exactly ${EXTRA}`);
+      }
+    });
+  },
+});
+
+export const INIT_GRANTS_BASH_TO_THE_BUILDER: LocalAssertion = runtime({
+  id: 'I4.init-grants-bash-to-the-builder-alone',
+  title:
+    "init's policy grants Bash to the builder, with no egress, so it can run the locked tests in its own sandbox, and to no other seat: no drafter, critic, or reviewer runs a command (R57)",
+  run: async () => {
+    const { initSetup, loadPolicyFile } = await api();
+    await withVaultDirs('r57-init-', async (dirs, base) => {
+      await vitestRepository(dirs.artifacts);
+      asClone(dirs.artifacts);
+      const config = join(base, 'config');
+      const outcome = await initSetup({ repository: dirs.artifacts, configDirectory: config, baseBranch: 'trial', hostHasUids: false });
+      if (!outcome.ok) throw new Error(`R57 control: init refused a vitest repository: ${JSON.stringify(outcome)}`);
+      const loaded = await loadPolicyFile(join(config, 'policy.yaml'));
+      if (!loaded.ok) throw new Error(`R57 control: init's policy does not load: ${JSON.stringify(loaded)}`);
+      const roles = Object.entries(loaded.policy.roles);
+      const builder = loaded.policy.roles['builder' as RoleId];
+      if (builder?.tools.includes('Bash') !== true) throw new Error(`R57: init's builder is granted ${JSON.stringify(builder?.tools)}, not Bash`);
+      if (builder.network.egress !== 'none') throw new Error(`R57: init's builder, granted Bash, has egress ${JSON.stringify(builder.network.egress)}`);
+      const others = roles.filter(([id, role]) => id !== 'builder' && role.tools.includes('Bash')).map(([id]) => id);
+      if (others.length > 0) throw new Error(`R57: init grants Bash to ${others.join(', ')} as well as the builder`);
+      const instructions = await readFile(join(config, 'roles', 'builder.md'), 'utf8');
+      if (!instructions.includes('run the acceptance tests')) throw new Error("R57: init's builder role does not tell it to run the acceptance tests");
+    });
+  },
+});
+
+/** R57's assertions, by the invariant each holds. */
+export const R57_I3: readonly LocalAssertion[] = [BUILD_TREE_HOLDS_THE_INSTALL, BUILDER_CACHE_IS_NOT_RECORDED];
+export const R57_I4: readonly LocalAssertion[] = [INIT_GRANTS_BASH_TO_THE_BUILDER];
+
+===== packages/conformance/src/registry/first-run.ts =====
+diff --git a/packages/conformance/src/registry/first-run.ts b/packages/conformance/src/registry/first-run.ts
+index 7fdde18..51c41e1 100644
+--- a/packages/conformance/src/registry/first-run.ts
++++ b/packages/conformance/src/registry/first-run.ts
+@@ -112,22 +112,22 @@ export const EXAMPLE_TOOLS_DECLARED: LocalAssertion = runtime({
+ export const UNDECLARED_TOOL_REFUSED_BEFORE_THE_ESTIMATE: LocalAssertion = runtime({
+   id: 'I4.tool-grant-undeclared-by-the-seat-driver-refused',
+   title:
+     "a run whose policy grants a seat a tool its driver does not declare — the example's builder granted 'read' where the Claude Code driver declares 'Read' — is refused at admission, naming the role, the station, and the tool, before the worst-case cost is offered, so no spend is approved for a run whose every call would be refused (I4, I5, #150)",
+   run: async () => {
+     await withVaultDirs('r36a-undeclared-', async (_dirs, base) => {
+       const policyFile = join(base, 'policy.yaml');
+       const text = await readFile(join(examples(), 'policy.yaml'), 'utf8');
+-      const lowered = text.replace('tools: [Read, Write]', 'tools: [read, Write]');
+-      if (lowered === text) throw new Error('R36a control: the example policy grants no [Read, Write] to lower');
++      const lowered = text.replace('tools: [Read, Write, Bash]', 'tools: [read, Write, Bash]');
++      if (lowered === text) throw new Error("R36a control: the example policy grants the builder no [Read, Write, Bash] to lower");
+       await writeFile(policyFile, lowered);
+       await exampleCreate(policyFile, false, (outcome) => {
+         if (outcome.ok || outcome.reason !== 'policy-refused' || outcome.refusal.reason !== 'capability-missing' || outcome.role !== 'builder' || outcome.station !== 'build'
+           || !outcome.refusal.detail.includes("'read'")) {
+           throw new Error(`R36a: a grant of 'read' to the builder was answered ${JSON.stringify(outcome)}, not refused at admission before the estimate`);
+         }
+       });
+     });
+   },
+ });
+ 
+ /** Product code a checkout holds, with more than one line, so its line endings are what a checkout rewrites. */
+
+===== packages/conformance/src/registry/i3.ts =====
+diff --git a/packages/conformance/src/registry/i3.ts b/packages/conformance/src/registry/i3.ts
+index 83e6198..b99f4b9 100644
+--- a/packages/conformance/src/registry/i3.ts
++++ b/packages/conformance/src/registry/i3.ts
+@@ -19,6 +19,7 @@ import { LOCKED_PATH_IN_DIFF_IS_TAMPER } from './verification.js';
+ import { COMPOSED_HOST_LOCKED_TEST_CHANGE_FAILS } from './composition.js';
+ import { DEPENDENCY_TREES_ARE_THE_BASES, PASSING_ON_THE_BASE_REFUSES } from './base-run.js';
+ import { R34_I3 } from './install.js';
++import { R57_I3 } from './builder-run.js';
+ import { R29_I3 } from './stacks.js';
+ import { R20_I3 } from './roles.js';
+ import { R23_I3 } from './workspace-instructions.js';
+@@ -50,258 +51,259 @@ function soleTampered(verdict: LockVerdict, context: string): { path: string; ex
+ /** I3: An agent may not be judged by an artifact it can write. */
+ export const I3: InvariantEntry = {
+   title: INVARIANTS.I3,
+   assertions: [
+     // R24: the target repository's instructions as granted context.
+     ...R24_I3,
+     // R20: the role compiler.
+     // R19: drafting at spec and test-design.
+     ...R19_ASSERTIONS.I3,
+     ...R16_ASSERTIONS.I3,
+     ...R8B_I3,
+     ...R25_ASSERTIONS.I3,
+     ...R20_I3,
+     // R23: workspace instructions, per driver.
+     ...R23_I3,
+     // R17: security at the gate.
+     ...R17_I3,
+     // R4: parallel task execution.
+     ...R4_I3,
+     compileError({
+       id: 'I3.context-grants-name-locked-artifacts',
+       title: 'ContextGrant names the locked spec and acceptance tests; there is no grant for a mutable spec',
+       fixture: 'i3/context-grants-name-locked-artifacts.ts',
+     }),
+     compileError({
+       id: 'I3.test-design-context-is-the-locked-spec',
+       title: 'the station contract table grants test-design exactly the locked spec: adding acceptance tests, the plan, or the repository, or granting nothing, does not compile',
+       fixture: 'i3/test-design-context-is-the-locked-spec.ts',
+     }),
+     compileError({
+       id: 'I3.lock-verdict-names-tampered-paths',
+       title: 'a failed LockVerdict must list the tampered paths, and a passing one cannot carry a warning',
+       fixture: 'i3/lock-verdict-names-tampered-paths.ts',
+     }),
+     runtime({
+       id: 'I3.lock-verification-detects-change',
+       title:
+         'a locked artifact whose bytes change verifies as tampered, naming the path with the hash the manifest holds and the hash on disk; a deleted one is reported the same way rather than throwing; an untouched one verifies clean',
+       run: async () => {
+         await withVault('p1-i3-change-', async (vault, dirs) => {
+           const runId = 'i3-change' as RunId;
+           const spec = join(dirs.artifacts, 'spec.md');
+           await writeFile(spec, '# hello\n\nThe capability, as locked.\n');
+ 
+           const manifest = await vault.lock(runId, ['spec.md'], 'spec');
+           const locked = entryFor(manifest.entries, 'spec.md');
+ 
+           const intact = await vault.verifyLocks(runId);
+           if (!intact.ok) {
+             throw new Error(`I3: an untouched locked artifact verified as tampered (${JSON.stringify(intact.tampered)})`);
+           }
+ 
+           // The failure this invariant exists for: the artifact an agent is
+           // judged by is edited after it was locked.
+           await writeFile(spec, '# hello\n\nThe capability, quietly widened.\n');
+           const changed = soleTampered(await vault.verifyLocks(runId), 'a rewritten locked artifact');
+           if (changed.path !== 'spec.md') throw new Error(`I3: the tampered record named ${changed.path}, expected spec.md`);
+           if (changed.expected !== locked.sha256) {
+             throw new Error(`I3: the tampered record's expected hash is ${changed.expected}, not the ${locked.sha256} the manifest locked`);
+           }
+           if (changed.actual === changed.expected) {
+             throw new Error('I3: the tampered record reports the same hash for expected and actual, so nothing was re-read from disk');
+           }
+ 
+           // A deleted artifact is a mismatch, not an exception: the line must
+           // record the violation and refuse, exactly as it does for an edit.
+           await rm(spec);
+           const deleted = soleTampered(await vault.verifyLocks(runId), 'a deleted locked artifact');
+           if (deleted.actual === changed.actual) {
+             throw new Error('I3: a deleted locked artifact reports the same actual hash as an edited one; a deletion must be distinguishable');
+           }
+           if (deleted.expected !== locked.sha256) {
+             throw new Error(`I3: the deleted artifact's expected hash is ${deleted.expected}, not the ${locked.sha256} the manifest locked`);
+           }
+         });
+       },
+     }),
+     runtime({
+       id: 'I3.lock-preserves-earlier-entries',
+       title:
+         'a later lock preserves every earlier entry, so a spec locked at `spec` is still verified after `test-design` locks the acceptance tests, and a re-lock cannot rebase an already-locked artifact\'s hash',
+       run: async () => {
+         await withVault('p1-i3-preserve-', async (vault, dirs) => {
+           const runId = 'i3-preserve' as RunId;
+           const spec = join(dirs.artifacts, 'spec.md');
+           await writeFile(spec, '# hello\n\nThe capability, as locked.\n');
+           await writeFile(join(dirs.artifacts, 'acceptance.test.ts'), "test('hello', () => { expect(run()).toBe(0); });\n");
+ 
+           const first = await vault.lock(runId, ['spec.md'], 'spec');
+           const lockedSpec = entryFor(first.entries, 'spec.md');
+ 
+           // The second station locks its own artifact. Replace semantics would
+           // drop the spec here, and I3 requires both locked and re-verified at
+           // every transition.
+           const second = await vault.lock(runId, ['acceptance.test.ts'], 'test-design');
+           const preserved = entryFor(second.entries, 'spec.md');
+           entryFor(second.entries, 'acceptance.test.ts');
+           if (preserved.sha256 !== lockedSpec.sha256) {
+             throw new Error(`I3: the second lock changed the spec's hash from ${lockedSpec.sha256} to ${preserved.sha256}`);
+           }
+           if (preserved.lockedBy !== 'spec') {
+             throw new Error(`I3: the second lock rewrote the spec's station to ${preserved.lockedBy}; the station that locked an artifact is the audit record`);
+           }
+ 
+           // Verification after the second lock must still cover the first's entries.
+           await writeFile(spec, '# hello\n\nThe capability, quietly widened.\n');
+           const tampered = soleTampered(await vault.verifyLocks(runId), 'a spec edited after a later station locked its own artifact');
+           if (tampered.path !== 'spec.md') {
+             throw new Error(`I3: after the second lock, verification named ${tampered.path}; the spec locked at \`spec\` is no longer covered`);
+           }
+ 
+           // Re-locking is how a tamper would launder itself: lock the edited
+           // file again and the manifest agrees with the disk.
+           let rebased = true;
+           try {
+             await vault.lock(runId, ['spec.md'], 'test-design');
+           } catch {
+             rebased = false;
+           }
+           if (rebased) throw new Error('I3: an already-locked artifact was locked again, which rebases its hash onto the edited bytes');
+           const after = soleTampered(await vault.verifyLocks(runId), 'a locked artifact after a refused re-lock');
+           if (after.expected !== lockedSpec.sha256) {
+             throw new Error(`I3: the refused re-lock still moved the manifest's hash to ${after.expected}`);
+           }
+         });
+       },
+     }),
+     runtime({
+       id: 'I3.locked-artifact-cannot-be-substituted',
+       title:
+         `a locked artifact replaced by a ${ESCAPE_MECHANISM} to identical bytes outside the artifact root verifies as tampered ` +
+         `rather than being followed and hashed clean (exercised on ${process.platform} via ${ESCAPE_MECHANISM})`,
+       run: async () => {
+         await withVault('p1-i3-escape-', async (vault, dirs, base) => {
+           const runId = 'i3-escape' as RunId;
+           const inside = join(dirs.artifacts, 'sub');
+           const locked = join('sub', 'spec.md');
+           await mkdir(inside, { recursive: true });
+           await writeFile(join(inside, 'spec.md'), '# hello\n\nThe capability, as locked.\n');
+ 
+           const manifest = await vault.lock(runId, [locked], 'spec');
+           const entry = entryFor(manifest.entries, locked);
+           const before = await vault.verifyLocks(runId);
+           if (!before.ok) throw new Error(`I3: the artifact verified as tampered before anything was substituted (${JSON.stringify(before.tampered)})`);
+ 
+           // Identical bytes at the far end. Nothing but the escape
+           // distinguishes this from an intact file, which is the whole point:
+           // a check that compares content alone cannot see this.
+           const elsewhere = join(base, 'elsewhere');
+           await mkdir(elsewhere, { recursive: true });
+           await writeFile(join(elsewhere, 'spec.md'), '# hello\n\nThe capability, as locked.\n');
+ 
+           // No try/catch: a platform whose mechanism will not build fails here.
+           if (ESCAPE_MECHANISM === 'junction') {
+             await rm(inside, { recursive: true });
+             await symlink(elsewhere, inside, 'junction');
+           } else {
+             await rm(join(inside, 'spec.md'));
+             await symlink(join(elsewhere, 'spec.md'), join(inside, 'spec.md'));
+           }
+ 
+           // The escape is real before the Vault is asked about it, so the
+           // verdict below cannot pass for the wrong reason.
+           const reached = await realpath(join(dirs.artifacts, locked));
+           const target = await realpath(join(elsewhere, 'spec.md'));
+           if (reached !== target) {
+             throw new Error(`I3: the ${ESCAPE_MECHANISM} did not take effect on ${process.platform}: ${locked} still resolves to ${reached}`);
+           }
+ 
+           const escaped = soleTampered(await vault.verifyLocks(runId), `a locked artifact substituted via a ${ESCAPE_MECHANISM}`);
+           if (escaped.path !== entry.path) throw new Error(`I3: the tampered record named ${escaped.path}, expected ${entry.path}`);
+           if (escaped.expected !== entry.sha256) {
+             throw new Error(`I3: the tampered record's expected hash is ${escaped.expected}, not the ${entry.sha256} the manifest locked`);
+           }
+           if (escaped.actual !== 'escaped') {
+             throw new Error(
+               `I3: a locked artifact that resolves outside the artifact root reported actual '${escaped.actual}'. ` +
+                 "The bytes are identical, so anything but 'escaped' means the link was followed and the substitution was hashed clean.",
+             );
+           }
+         });
+       },
+     }),
+     TRANSITION_REVERIFIES_LOCKS,
+     STATION_LOCKS_THE_ADMITTED_ARTIFACT,
+     LOCKED_PATH_IN_DIFF_IS_TAMPER,
+     // P7: tamper analysis over the trees a task was handed and verified in.
+     CASE_SET_REDUCTION_IS_A_DELETION,
+     TAMPER_FINDING_ESCALATES_INTEGRATE,
+     SKIP_MARKER_IS_A_FINDING,
+     CHECK_DISPATCH_NOT_WRITABLE_BY_THE_TASK,
+     // I1a: on the composed line, a task that rewrites a locked test fails the run.
+     COMPOSED_HOST_LOCKED_TEST_CHANGE_FAILS,
+     // R15: an acceptance check that passes on the base is a gate the change could not fail.
+     PASSING_ON_THE_BASE_REFUSES,
+     DEPENDENCY_TREES_ARE_THE_BASES,
+     // R29: every supported stack's tamper, coverage, and install controls, and a Python run to integrate.
+     ...R29_I3,
+     // R34: every check runs over the runtime's install of the verified tree's lockfile.
+     ...R34_I3,
++    ...R57_I3,
+   ],
+   pending: [
+     pending({
+       id: 'I3.coverage-report-is-not-writable-by-the-suite',
+       owner: 'M3',
+       reason:
+         'Changed-line coverage is read from the istanbul report a check run writes, and that run executes the '
+         + "repository's own code: its tests, and whatever its package scripts do around them. So the artifact the "
+         + 'coverage number is derived from is one the agent being judged can write. P8 closed the half of this that '
+         + 'parsing can close — the report can no longer decide which lines count, only which of them ran, because '
+         + "the denominator is now the union of the report's statements and the executable lines read from the head "
+         + 'tree on the host (external review, codex-2 and gemini-2). The other half cannot be closed by reading the '
+         + 'report more carefully: a hit count claiming a line ran cannot be told apart from one that did, by anyone '
+         + 'who was not there when it ran. Closing it means the run that produces the report: coverage '
+         + 'collected where the suite cannot rewrite it afterwards, or counted from an instrumentation the repository '
+         + 'does not supply, with an assertion that a forged report does not raise the number. Until then a coverage '
+         + 'figure is evidence about a suite that cooperated, not proof against one that did not. Recorded by P8 as '
+         + 'D-P8-14. Owned by M3, beside mutation testing: the suite and the coverage writer share a process, so no '
+         + 'location for the report decides whether its hit counts are true (D-P6-05).',
+     }),
+     pending({
+       id: 'I3.unchanged-assertion-still-judges',
+       owner: 'M3',
+       reason:
+         'Tamper analysis reads the test files that changed and compares what they say. An assertion it reads as '
+         + 'unchanged can stop judging without its file changing, or while the change reads as nothing: a helper, fixture, '
+         + 'custom matcher, setup file, or type the test imports is rewritten to pass everything; the assertion is moved '
+         + 'into a branch that never runs or a function never called; a script the pinned command runs imports a module '
+         + 'that now does nothing. None of those is a test file, and reachability is not decidable by parsing. The '
+         + "policy's protected paths can name the files a repository knows to be load-bearing, and a pinned command's "
+         + 'own script is protected (D-P7-10), but no reading of the diff decides what an unchanged assertion now '
+         + 'executes. Closing it means running the suite against mutants of the code under test and requiring the '
+         + 'suite that passed at the base to kill the ones it killed there, with an assertion that a helper rewritten to '
+         + 'return early, and an assertion made unreachable, each lower the kill rate and escalate. Raised by the P7 '
+         + 'external review (codex-1, gemini-4, gemini-5) and recorded as D-P7-11. Owned by M3, beside mutation testing.',
+     }),
+     pending({
+       id: 'I3.runner-process-loads-only-base-code',
+       owner: 'M3',
+       reason:
+         "A suite check runs the base's installed test framework, and nothing a task writes under node_modules is "
+         + "carried (D-R15-05), but the runner's own process can still run code the change can reach. The installed "
+         + 'runner is not authenticated: admission checks only that its file exists, and the suite count comes from '
+         + "the adapter's static selection model, not from the process that exited, so a fabricated launcher that "
+         + 'exits on a flag file fails on the base and passes at verify with no test run (codex-1). And an honest '
+         + "vitest loads files outside node_modules into its own process: a globalSetup file the base's config "
+         + 'already names, rewritten to call process.exit(0), makes vitest 4.1.11 exit 0 with no test run, and it is '
+         + 'carried unflagged unless policy protects it (codex-2). Both were raised by the external review of the R15 '
+         + 'fixes and recorded as D-R15-08. pytest widens the second route: it runs every module a test imports in '
+         + 'its own process, product modules included, so os._exit(0) or a pytest monkeypatch in any of them ends '
+         + 'the run with exit 0. A plainly spelled skip or exit there is reported as a marker (R29 gemini-1), which '
+         + 'is a tripwire for the easy path and not a closure (D-R29-15). Closing it means a runner, and every input its process loads, that the '
+         + 'change cannot write: provisioned by the runtime outside the tree, or authenticated and held to the base. '
+         + 'That needs an assertion that each route fails the check. Tracked as issue #42. Owned by M3, beside the '
+         + 'L3 canary, which needs the same trusted runner.',
+     }),
+   ],
+ };
+
+===== packages/conformance/src/registry/i4.ts =====
+diff --git a/packages/conformance/src/registry/i4.ts b/packages/conformance/src/registry/i4.ts
+index f32e777..ecbff66 100644
+--- a/packages/conformance/src/registry/i4.ts
++++ b/packages/conformance/src/registry/i4.ts
+@@ -23,6 +23,7 @@ import { READINESS_NEVER_RAISES_A_CAP, ABSENT_SCAN_IS_NOT_A_PASS } from './readi
+ import { R20_I4 } from './roles.js';
+ import { R13A_I4 } from './nightly.js';
+ import { R34_I4 } from './install.js';
++import { R57_I4 } from './builder-run.js';
+ import { R40_I4 } from './admission-readiness.js';
+ import { R36A_I4 } from './first-run.js';
+ import { R13B_I4 } from './nightly-review.js';
+@@ -36,331 +37,332 @@ import { R24_I4 } from './repo-instructions.js';
+ /** I4: Default deny. */
+ export const I4: InvariantEntry = {
+   title: INVARIANTS.I4,
+   assertions: [
+     // R24: the target repository's instructions as granted context.
+     ...R24_I4,
+     // R20: the role compiler.
+     // R19: drafting at spec and test-design.
+     ...R19_ASSERTIONS.I4,
+     ...R16_ASSERTIONS.I4,
+     ...R20_I4,
+     // R22: the trigger framework.
+     ...R22_I4,
+     // R10: the trust ratchet.
+     ...R10_I4,
+     // R13a: the nightly checks that call no model.
+     ...R13A_I4,
+     // R34: the install's egress is the granted registries alone, and none is granted unless policy says so.
+     ...R34_I4,
++    ...R57_I4,
+     ...R36A_I4,
+     ...R40_I4,
+     // R13b: the nightly reviewers.
+     ...R13B_I4,
+     // R4: parallel task execution.
+     ...R4_I4,
+     READINESS_NEVER_RAISES_A_CAP,
+     ABSENT_SCAN_IS_NOT_A_PASS,
+     MERGE_TOKEN_REACHES_NO_SANDBOX,
+     // R9: the approval's token stays the server's, and the security seat holds its grants alone.
+     LOCAL_TOKEN_REACHES_NO_SANDBOX,
+     SECURITY_SEAT_READS_ONLY_ITS_GRANTS,
+     GIT_REMOTE_UNREACHABLE_FROM_EVERY_SANDBOX,
+     compileError({
+       id: 'I4.capability-scope-is-explicit',
+       title: 'CapabilityScope requires every grant to be stated, and egress is none or an explicit list',
+       fixture: 'i4/capability-scope-is-explicit.ts',
+     }),
+     compileError({
+       id: 'I4.task-request-tools-are-required',
+       title: 'TaskRequest cannot be built without the policy-granted tool list or the sandbox',
+       fixture: 'i4/task-request-tools-are-required.ts',
+     }),
+     compileError({
+       id: 'I4.compiled-role-carries-no-grants',
+       title: 'CompiledRole has no field for tools, network, globs, or autonomy; policy is the only source of grants',
+       fixture: 'i4/compiled-role-carries-no-grants.ts',
+     }),
+     compileError({
+       id: 'I4.resolved-policy-is-total',
+       title: 'Policy.approvals requires all forty station:level keys; only PolicyDocument may be sparse',
+       fixture: 'i4/resolved-policy-is-total.ts',
+     }),
+     compileError({
+       id: 'I4.tool-grant-requires-an-inventory',
+       title:
+         'validateToolGrants cannot be called without the driver tool inventory: the parameter has no default and is not optional, so there is no path that validates nothing',
+       fixture: 'i4/tool-grant-requires-an-inventory.ts',
+     }),
+     runtime({
+       id: 'I4.unlisted-capability-refused',
+       title:
+         'the real engine refuses a role the policy does not define (capability-missing) and a station outside a defined role scope (station-forbidden); a granted station returns exactly the stated scope, so the refusals are rules rather than an empty policy',
+       run: async () => {
+         const { StrictPolicyEngine } = await import('@olympus-ai/core');
+         const engine = new StrictPolicyEngine();
+         const policy = engine.resolvePolicy(grantingDocument());
+ 
+         const undefinedRole = engine.resolveCapabilities(UNDEFINED_ROLE, 'build', policy);
+         if (undefinedRole.ok) {
+           throw new Error('I4: a role the policy does not define resolved to a capability scope');
+         }
+         if (undefinedRole.reason !== 'capability-missing') {
+           throw new Error(`I4: an undefined role was refused as '${undefinedRole.reason}'; expected 'capability-missing'`);
+         }
+ 
+         const forbidden = engine.resolveCapabilities(GRANTED_ROLE, FORBIDDEN_STATION, policy);
+         if (forbidden.ok) {
+           throw new Error(`I4: role '${GRANTED_ROLE}' resolved a scope at '${FORBIDDEN_STATION}', which its policy does not list`);
+         }
+         if (forbidden.reason !== 'station-forbidden') {
+           throw new Error(`I4: a station outside the role scope was refused as '${forbidden.reason}'; expected 'station-forbidden'`);
+         }
+ 
+         // The control: an engine that refuses everything would satisfy both
+         // checks above while granting nothing, so a granted station must
+         // resolve, and to exactly what the document states.
+         for (const station of GRANTED_STATIONS) {
+           const granted = engine.resolveCapabilities(GRANTED_ROLE, station, policy);
+           if (!granted.ok) {
+             throw new Error(`I4: role '${GRANTED_ROLE}' was refused at '${station}', which its policy grants (${granted.reason})`);
+           }
+           if (granted.scope.tools.join(',') !== GRANTED_TOOLS.join(',')) {
+             throw new Error(`I4: the resolved scope at '${station}' carries tools [${granted.scope.tools.join(', ')}]; expected [${GRANTED_TOOLS.join(', ')}]`);
+           }
+           if (granted.scope.tools.includes(UNGRANTED_TOOL)) {
+             throw new Error(`I4: the resolved scope carries '${UNGRANTED_TOOL}', which no role in the document grants`);
+           }
+           if (granted.scope.network.egress !== 'none') {
+             throw new Error('I4: the resolved scope widened egress beyond what the document granted');
+           }
+         }
+ 
+         // A grant is not a handle on the policy: widening what came back must
+         // not widen what the next caller receives.
+         const held = engine.resolveCapabilities(GRANTED_ROLE, 'build', policy);
+         if (!held.ok) throw new Error('I4: the control resolution was refused');
+         try {
+           held.scope.tools.push(UNGRANTED_TOOL);
+         } catch {
+           // Frozen, which is the intended arrangement.
+         }
+         const next = engine.resolveCapabilities(GRANTED_ROLE, 'build', policy);
+         if (!next.ok) throw new Error('I4: the second resolution was refused');
+         if (next.scope.tools.includes(UNGRANTED_TOOL)) {
+           throw new Error(`I4: mutating a resolved scope added '${UNGRANTED_TOOL}' to what the policy grants`);
+         }
+       },
+     }),
+     runtime({
+       id: 'I4.omitted-approval-is-human-required',
+       title:
+         'resolvePolicy fills every approval the document omits with human-required and never auto, while carrying a stated approval through unchanged, so the filling is a default rather than a rewrite',
+       run: async () => {
+         const { APPROVAL_KEYS, AUTONOMY_LEVELS, STATION_IDS, StrictPolicyEngine } = await import('@olympus-ai/core');
+         const engine = new StrictPolicyEngine();
+         const document = grantingDocument();
+         const stated = APPROVAL_KEYS.filter((key) => document.approvals[key] !== undefined);
+         if (stated.length !== 1) {
+           throw new Error(`I4: the fixture document must state exactly one approval for this assertion to mean anything; it states ${String(stated.length)}`);
+         }
+         const policy = engine.resolvePolicy(document);
+ 
+         const expected = STATION_IDS.length * AUTONOMY_LEVELS.length;
+         const keys = Object.keys(policy.approvals);
+         if (keys.length !== expected) {
+           throw new Error(`I4: the resolved policy carries ${String(keys.length)} approvals; the table must be total at ${String(expected)}`);
+         }
+         // Totality is proved by the count above; this loop is about what the
+         // omitted keys were filled with.
+         for (const key of APPROVAL_KEYS) {
+           if (stated.includes(key)) continue;
+           const outcome = policy.approvals[key];
+           if (outcome !== 'human-required') {
+             throw new Error(`I4: '${key}' was omitted by the document and resolved to '${outcome}'; an unconfigured approval must be human-required`);
+           }
+         }
+         // The stated entry survives: a resolver that overwrote everything with
+         // human-required would pass the loop above and be wrong.
+         const [statedKey] = stated;
+         if (statedKey === undefined) throw new Error('I4: the stated approval list has one entry and no entry in it');
+         if (policy.approvals[statedKey] !== document.approvals[statedKey]) {
+           throw new Error(`I4: the document stated '${statedKey}' and the resolved policy reports '${policy.approvals[statedKey]}'`);
+         }
+       },
+     }),
+     runtime({
+       id: 'I4.empty-inventory-refuses-every-grant',
+       title:
+         'validateToolGrants against an empty inventory refuses every tool the policy grants, naming each with its role; an empty inventory is never read as allow-all',
+       run: async () => {
+         const { StrictPolicyEngine, validateToolGrants } = await import('@olympus-ai/core');
+         const engine = new StrictPolicyEngine();
+         const policy = engine.resolvePolicy(grantingDocument());
+ 
+         const empty = validateToolGrants(policy, []);
+         if (empty.ok) {
+           throw new Error(`I4: an empty inventory admitted ${String(GRANTED_TOOLS.length)} granted tool(s); an inventory offering nothing grants nothing`);
+         }
+         if (empty.ungranted.length !== GRANTED_TOOLS.length) {
+           throw new Error(`I4: an empty inventory named ${String(empty.ungranted.length)} ungranted tool(s); expected all ${String(GRANTED_TOOLS.length)}`);
+         }
+         for (const tool of GRANTED_TOOLS) {
+           if (!empty.ungranted.some((u) => u.tool === tool && u.role === GRANTED_ROLE)) {
+             throw new Error(`I4: '${tool}' was granted to '${GRANTED_ROLE}' and the refusal does not name the pair`);
+           }
+         }
+ 
+         // The control: a full inventory passes, so the refusal above is the
+         // inventory doing work rather than the function refusing always.
+         const full = validateToolGrants(policy, [...GRANTED_TOOLS]);
+         if (!full.ok) {
+           throw new Error(`I4: an inventory covering every grant was still refused (${full.detail})`);
+         }
+         // And one short of the grants refuses exactly the missing one.
+         const [first] = GRANTED_TOOLS;
+         if (first === undefined) throw new Error('I4: the granted tool list is empty');
+         const partial = validateToolGrants(policy, [first]);
+         if (partial.ok) throw new Error('I4: an inventory missing a granted tool was accepted');
+         if (partial.ungranted.length !== GRANTED_TOOLS.length - 1) {
+           throw new Error(`I4: a partial inventory named ${String(partial.ungranted.length)} ungranted tool(s); expected ${String(GRANTED_TOOLS.length - 1)}`);
+         }
+       },
+     }),
+     runtime({
+       id: 'I4.egress-entry-names-one-host',
+       title:
+         'an egress host list carrying a wildcard, a path, a prefix length, or whitespace is refused; a list of literal hosts is accepted, so the refusal is the entry being read and not the list being rejected',
+       run: async () => {
+         const { validatePolicyDocument } = await import('@olympus-ai/core');
+         const document = grantingDocument();
+         const scope = document.roles[GRANTED_ROLE];
+         if (scope === undefined) throw new Error('I4: the fixture document defines no granted role');
+ 
+         // Refusing the bare string 'all' while accepting ['*'] would leave the
+         // authored form reading as an explicit allowlist while denoting every
+         // host. Each of these denotes a set, or is not a host at all.
+         for (const entry of ['*', '*.example.com', '0.0.0.0/0', '::/0', 'https://example.com', 'exa mple.com']) {
+           const widened = { ...document, roles: { [GRANTED_ROLE]: { ...scope, network: { egress: [entry] } } } };
+           const outcome = validatePolicyDocument(widened);
+           if (outcome.ok) {
+             throw new Error(
+               `I4: a policy granting egress to ${JSON.stringify(entry)} was accepted. An egress list admits no ` +
+                 'wildcard, so an entry that denotes a set makes a restrictive-looking policy unrestricted.',
+             );
+           }
+         }
+ 
+         // The control: literal hosts are accepted, so the check above is the
+         // entry being read rather than every list being refused.
+         const literal = { ...document, roles: { [GRANTED_ROLE]: { ...scope, network: { egress: ['registry.npmjs.org', '192.0.2.10'] } } } };
+         const accepted = validatePolicyDocument(literal);
+         if (!accepted.ok) {
+           throw new Error(`I4: a list of literal hosts was refused: ${accepted.defects.map((d) => d.problem).join('; ')}`);
+         }
+       },
+     }),
+     runtime({
+       id: 'I4.role-lookup-ignores-the-prototype-chain',
+       title:
+         'a role the policy does not define is refused with capability-missing even when Object.prototype carries a scope-shaped value under that name, and a role named for a prototype member refuses rather than throwing; the resolved role map has no prototype',
+       run: async () => {
+         const { StrictPolicyEngine } = await import('@olympus-ai/core');
+         const engine = new StrictPolicyEngine();
+         const policy = engine.resolvePolicy(grantingDocument());
+         const prototype = Object.prototype as Record<string, unknown>;
+ 
+         if (Object.getPrototypeOf(policy.roles) !== null) {
+           throw new Error('I4: the resolved role map has a prototype, so an undefined role can be answered by it');
+         }
+ 
+         // Pollution somewhere else in the process must not become a grant here.
+         prototype[UNDEFINED_ROLE] = { stations: ['build'], tools: ['read'] };
+         try {
+           const outcome = engine.resolveCapabilities(UNDEFINED_ROLE, 'build', policy);
+           if (outcome.ok) {
+             throw new Error(
+               `I4: role '${UNDEFINED_ROLE}' is defined nowhere in the policy and resolved to a grant because ` +
+                 'Object.prototype carried that name. Default deny has to be total, and a lookup that reads the ' +
+                 'prototype chain is not.',
+             );
+           }
+           if (outcome.reason !== 'capability-missing') {
+             throw new Error(`I4: the polluted role was refused as '${outcome.reason}'; expected 'capability-missing'`);
+           }
+           if (engine.resolveAutonomy(1, 'build', UNDEFINED_ROLE, policy).ok) {
+             throw new Error('I4: resolveAutonomy granted a level to a role that exists only on Object.prototype');
+           }
+         } finally {
+           Reflect.deleteProperty(prototype, UNDEFINED_ROLE);
+         }
+ 
+         // A role named for a prototype member must refuse, not throw: an
+         // exception is not the refusal the contract promises, and a caller that
+         // catches it has no reason recorded.
+         for (const name of ['__proto__', 'constructor', 'toString', 'valueOf']) {
+           const role = name as typeof UNDEFINED_ROLE;
+           let refused: string;
+           try {
+             const outcome = engine.resolveCapabilities(role, 'build', policy);
+             refused = outcome.ok ? 'granted' : outcome.reason;
+           } catch {
+             throw new Error(`I4: an ungranted role named '${name}' threw instead of refusing with capability-missing`);
+           }
+           if (refused !== 'capability-missing') {
+             throw new Error(`I4: an ungranted role named '${name}' resolved as '${refused}'`);
+           }
+         }
+ 
+         // The control: a real grant still resolves.
+         if (!engine.resolveCapabilities(GRANTED_ROLE, 'build', policy).ok) {
+           throw new Error('I4: the granted role was refused, so the guard is refusing everything');
+         }
+       },
+     }),
+     APPROVAL_OUTCOME_GATES_THE_STATION,
+     external({
+       id: 'I4.driver-tool-inventory-validated',
+       title:
+         'the CLI session offers exactly the tools the task granted and no wider set, every declared tool is one the CLI really has, '
+         + 'and a grant outside the declaration is refused before the task starts',
+       level: 'runtime',
+       package: '@olympus-ai/driver-claude-code',
+       file: 'test/invariants.test.ts',
+     }),
+     TASK_CAPABILITIES_DO_NOT_OUTLIVE_THE_TASK,
+     WRITABLE_GLOBS_ENFORCED_ON_THE_DIFF,
+     // Paid by P12. Surfaced by P5's external review, which read the credential out of a child of
+     // the CLI and, through /proc, out of a later exec given none (D-P5-20). The credential now
+     // lives in a relay the provider owns, and the assertion replays that exploit and finds nothing.
+     external({
+       id: 'I4.model-credential-not-readable-by-the-task',
+       title:
+         'the model credential never enters the sandbox: a child of the CLI, a later exec, a process left running, every file of the container, '
+         + 'its docker inspect, and the workspace hold no trace of it, while the task reaches the model through the relay that holds it; '
+         + 'the same search finds a value an exec was given, so it is not blind',
+       level: 'runtime',
+       package: '@olympus-ai/driver-claude-code',
+       file: 'test/invariants.test.ts',
+     }),
+     MODEL_RELAY_FORWARDS_ONLY_ITS_GRANT,
+     // P13: spending is a capability, bounded where the task cannot reach it.
+     MODEL_RELAY_ENFORCES_BUDGET,
+     // R6: the second dialect and the second driver, under the same controls (A-R6-01, A-R6-02).
+     MODEL_RELAY_ENFORCES_BUDGET_OPENAI_CHAT,
+     // R26: the third dialect, for the Codex CLI (A-R26-01).
+     MODEL_RELAY_ENFORCES_BUDGET_OPENAI_RESPONSES,
+     // R56: a tool the API runs itself is a capability too, forwarded and charged only when granted (A-R56-01).
+     MODEL_RELAY_FORWARDS_ONLY_GRANTED_SERVER_TOOLS,
+     OPENAI_COMPATIBLE_TOOL_INVENTORY_VALIDATED,
+     OPENAI_COMPATIBLE_CREDENTIAL_NOT_READABLE,
+     // R26: the Codex driver, under the same controls.
+     CODEX_TOOL_INVENTORY_VALIDATED,
+     CODEX_CREDENTIAL_NOT_READABLE,
+     // R21: a route to the Docker host is the provider's to grant, and the relay's alone (A-R21-01..03).
+     MODEL_RELAY_REACHES_THE_DOCKER_HOST_ONLY_AS_DECLARED,
+     // R14: the tier a call runs at is policy's, per station, and escalation is a grant (A-R14-01).
+     TIER_PER_STATION_FOLLOWS_POLICY,
+     ESCALATION_ONLY_UNDER_A_GRANT,
+   ],
+   pending: [],
+ };
+
+===== packages/conformance/src/registry/init.ts =====
+diff --git a/packages/conformance/src/registry/init.ts b/packages/conformance/src/registry/init.ts
+index 5b6758d..d6a307d 100644
+--- a/packages/conformance/src/registry/init.ts
++++ b/packages/conformance/src/registry/init.ts
+@@ -30,8 +30,8 @@ export async function vitestRepository(dir: string): Promise<void> {
+ }
+ 
+ /** The repository as a user's clone: committed, with a GitHub origin. */
+-function asClone(dir: string): string {
++export function asClone(dir: string): string {
+   const commit = commitFixture(dir);
+   execFileSync('git', ['-C', dir, 'remote', 'add', 'origin', 'https://github.com/example/calc.git'], { stdio: 'ignore' });
+   return commit;
+ }
+
+===== packages/conformance/src/registry/install.ts =====
+diff --git a/packages/conformance/src/registry/install.ts b/packages/conformance/src/registry/install.ts
+index 88a5241..a969327 100644
+--- a/packages/conformance/src/registry/install.ts
++++ b/packages/conformance/src/registry/install.ts
+@@ -26,7 +26,7 @@ const docker = promisify(execFile);
+ 
+ /** Fails on a tree whose install does not hold `extra`, and passes on one that does. */
+ const NEEDS_EXTRA = { id: 'needs-extra', kind: 'behavioral', onBase: 'fails', command: ['node', '-e', "require('extra')"], required: true, timeoutMs: 10_000 };
+-const EXTRA = 'node_modules/extra';
++export const EXTRA = 'node_modules/extra';
+ 
+ /** Every file under `root`, by its path relative to it. */
+ async function listing(root: string, at = ''): Promise<string[]> {
+@@ -42,50 +42,50 @@ async function listing(root: string, at = ''): Promise<string[]> {
+ /**
+  * The stub sandbox, recording each sandbox asked for and the files its
+  * workspace held when it was provisioned; an exec in a sandbox of `scripted`'s
+  * image is answered with its result instead of run.
+  */
+-class Recording implements SandboxProvider {
++export class Recording implements SandboxProvider {
+   readonly id = 'recording-stub';
+   readonly provisioned: Array<{ readonly spec: SandboxSpec; readonly listed: readonly string[] }> = [];
+   readonly #scriptedHandles = new Set<SandboxHandle>();
+   constructor(private readonly inner: SandboxProvider, private readonly scripted?: { readonly image: string; readonly result: ExecResult }) {}
+   async provision(spec: SandboxSpec): Promise<SandboxHandle> {
+     this.provisioned.push({ spec, listed: await listing(spec.mounts.workspace.source) });
+     const handle = await this.inner.provision(spec);
+     if (spec.image === this.scripted?.image) this.#scriptedHandles.add(handle);
+     return handle;
+   }
+   exec(h: SandboxHandle, cmd: string[], options?: ExecOptions): Promise<ExecResult> {
+     if (this.#scriptedHandles.has(h) && this.scripted !== undefined) return Promise.resolve(this.scripted.result);
+     return this.inner.exec(h, cmd, options);
+   }
+   destroy(h: SandboxHandle): Promise<Teardown> {
+     return this.inner.destroy(h);
+   }
+   capabilities(): SandboxCapabilities {
+     return this.inner.capabilities();
+   }
+ }
+ 
+-async function recording(scripted?: { image: string; result: ExecResult }): Promise<Recording> {
++export async function recording(scripted?: { image: string; result: ExecResult }): Promise<Recording> {
+   const { StubSandboxProvider } = await import('@olympus-ai/sandbox');
+   return new Recording(new StubSandboxProvider(), scripted);
+ }
+ 
+ /**
+  * A base that declares dependencies: a manifest and `lockfile`, beside a
+  * `.npmrc` and a `.pnpmfile.cjs` no install may read. The fixture's tree
+  * also holds `extra` under `node_modules`, where the stand-in installs it
+  * from, so a check that ran over the base's own trees would find it.
+  */
+-async function withDependencies(rig: LineRig, lockfile: string): Promise<void> {
++export async function withDependencies(rig: LineRig, lockfile: string): Promise<void> {
+   const root = rig.dirs.artifacts;
+   await writeFile(join(root, 'package.json'), JSON.stringify({ name: 'hello', private: true }));
+   await writeFile(join(root, 'package-lock.json'), lockfile);
+   await writeFile(join(root, '.npmrc'), 'registry=https://registry.example.invalid/\n');
+   await writeFile(join(root, '.pnpmfile.cjs'), "require('node:fs').writeFileSync('/tmp/pnpmfile-ran', '')\n");
+   await mkdir(join(root, EXTRA), { recursive: true });
+   await writeFile(join(root, EXTRA, 'index.js'), "module.exports = 'extra';\n");
+ }
+ 
+ /** The rig's stub builder, made to write `files` into its tree as an agent would. */
+
+=== BUNDLE END === a3984956e75f57a64a5fcd4130fa34ff

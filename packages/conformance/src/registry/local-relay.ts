@@ -102,6 +102,8 @@ require('node:https').createServer({ key: process.env.UPSTREAM_KEY, cert: proces
       if (t.omit !== 'all') {
         message.usage = { input_tokens: t.input, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
         if (t.omit !== 'final') message.usage.output_tokens = t.output;
+        // A-R56-01: the web searches the call made, as the API reports them.
+        if (t.searches !== undefined) message.usage.server_tool_use = { web_search_requests: t.searches };
       }
       const answer = JSON.stringify(message);
       s.writeHead(200, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(answer) });
@@ -267,7 +269,7 @@ const DIALECT_PATH: Readonly<Record<RelayMeter['dialect'], string>> = {
 const MAX_OUTPUT = 96;
 
 /** A relay for `dialect`: the Messages API with its key written raw, or an OpenAI API with a bearer token (A-R6-01, A-R6-02, A-R26-01). */
-function meteredRelay(budget: RelayBudget = AMPLE, dialect: RelayMeter['dialect'] = 'anthropic-messages'): RelaySpec {
+function meteredRelay(budget: RelayBudget = AMPLE, dialect: RelayMeter['dialect'] = 'anthropic-messages', serverTools: RelaySpec['serverTools'] = []): RelaySpec {
   const openai = dialect !== 'anthropic-messages';
   const prices = dialect === 'openai-responses'
     ? Object.fromEntries(Object.entries(METER.prices).map(([model, price]) => [model, { ...price, maxOutputTokens: MAX_OUTPUT }]))
@@ -281,6 +283,7 @@ function meteredRelay(budget: RelayBudget = AMPLE, dialect: RelayMeter['dialect'
     urlVariable: 'MODEL_BASE_URL',
     budget,
     meter: { dialect, prices },
+    serverTools,
   };
 }
 
@@ -344,9 +347,10 @@ async function withMeteredSandbox(
   body: (handle: SandboxHandle, upstreamLog: () => Promise<string[]>) => Promise<void>,
   dialect: RelayMeter['dialect'] = 'anthropic-messages',
   expected = 'unused',
+  serverTools: RelaySpec['serverTools'] = [],
 ): Promise<MeterReading> {
   const { EGRESS_PROXY_IMAGE, relayOf } = await import('@olympus-ai/sandbox');
-  const handle = await provider.provision(specFor(dirs, 'rw', { image: EGRESS_PROXY_IMAGE, relay: meteredRelay(budget, dialect) }));
+  const handle = await provider.provision(specFor(dirs, 'rw', { image: EGRESS_PROXY_IMAGE, relay: meteredRelay(budget, dialect, serverTools) }));
   const upstreamName = `relay-upstream-${randomUUID()}`;
   let destroyed = false;
   try {
@@ -411,6 +415,60 @@ export const MODEL_RELAY_ENFORCES_BUDGET = runtime({
         if (reading.calls !== 2 || reading.inputTokens !== 2000 || reading.outputTokens !== 200 || reading.refused !== 1 || reading.exhausted !== exhausted) {
           throw new Error(`I4: under ${bound} destroy read ${JSON.stringify(reading)}`);
         }
+      }
+    });
+  },
+});
+
+/** The server tool the pinned Claude Code CLI sends for `WebSearch` (D-R56-02), as a request names it. */
+const SEARCH = { type: 'web_search_20250305', name: 'web_search', max_uses: 8 };
+
+export const MODEL_RELAY_FORWARDS_ONLY_GRANTED_SERVER_TOOLS = runtime({
+  id: 'I4.model-relay-forwards-only-granted-server-tools',
+  title:
+    'a request sent from inside the sandbox, by node rather than a model CLI, that offers a tool the API runs itself is refused before the upstream sees it unless the relay grant names its exact type, ' +
+    'as is one naming mcp_servers or a container; a granted one is forwarded and each use it reports is charged against the budget, and a grant the relay cannot count is refused at provisioning (A-R56-01)',
+  run: async () => {
+    const certificate = await makeCertificate();
+    await withSandboxDirs('i4-relay-server-tools-', async (dirs) => {
+      const { LocalDockerProvider: Provider } = await import('@olympus-ai/sandbox');
+      const provider = await Provider.create({ vaultPaths: [dirs.vault], credentials: { [CREDENTIAL]: `canary-${randomUUID()}` }, relayTrust: certificate.cert });
+
+      const uncounted = await refusalFrom(() => provider.provision(specFor(dirs, 'rw', { relay: meteredRelay(AMPLE, 'anthropic-messages', [{ type: 'code_execution_20250825', perUseUsd: 0 }]) })));
+      if (uncounted.layer !== 'relay' || !uncounted.message.includes('code_execution_20250825')) {
+        throw new Error(`I4: a grant naming a server tool the relay cannot count was refused at the ${uncounted.layer} layer with: ${uncounted.message}`);
+      }
+
+      // Ungranted: the search, a remote MCP server, and a container are each refused unsent; the client's own tools pass.
+      const ungranted = metered(
+        await withMeteredSandbox(provider, dirs, certificate, AMPLE, async (handle, upstreamLog) => {
+          const answers = await sendAll(provider, handle, [
+            { ...message(10, 1), tools: [SEARCH] },
+            { ...message(10, 1), mcp_servers: [{ type: 'url', url: 'https://example.invalid/mcp', name: 'x' }] },
+            { ...message(10, 1), container: 'container_1' },
+            { ...message(10, 1), tools: [{ name: 'Read', input_schema: {} }] },
+          ]);
+          if (answers.map((a) => a.status).join(',') !== '400,400,400,200') throw new Error(`I4: with no server tool granted the relay answered ${JSON.stringify(answers)}`);
+          if (!(answers[0]?.body ?? '').includes('web_search_20250305')) throw new Error(`I4: the refusal does not name the tool: ${answers[0]?.body ?? ''}`);
+          const reached = await upstreamLog();
+          if (reached.length !== 1) throw new Error(`I4: the upstream received ${String(reached.length)} calls; the refused ones must not reach it`);
+        }),
+        'I4',
+      );
+      if (ungranted.calls !== 1 || ungranted.refused !== 3) throw new Error(`I4: with no server tool granted destroy read ${JSON.stringify(ungranted)}`);
+
+      // Granted: forwarded, and its three searches charged at a cent each beside the tokens.
+      const granted = metered(
+        await withMeteredSandbox(provider, dirs, certificate, AMPLE, async (handle, upstreamLog) => {
+          const answers = await sendAll(provider, handle, [{ ...message(1000, 100), tools: [SEARCH], relay_test: { input: 1000, output: 100, searches: 3 } }]);
+          if (answers[0]?.status !== 200) throw new Error(`I4: a granted server tool was answered ${JSON.stringify(answers)}`);
+          if ((await upstreamLog()).length !== 1) throw new Error('I4: a granted server tool did not reach the upstream');
+        }, 'anthropic-messages', 'unused', [{ type: 'web_search_20250305', perUseUsd: 0.01 }]),
+        'I4',
+      );
+      const expected = (1000 * 1 + 100 * 10) / 1e6 + 3 * 0.01;
+      if (granted.calls !== 1 || granted.refused !== 0 || Math.abs(granted.costUsd - expected) > 1e-9) {
+        throw new Error(`I4: a granted search was not charged its uses: destroy read ${JSON.stringify(granted)}, expected $${String(expected)}`);
       }
     });
   },

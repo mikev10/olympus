@@ -3,7 +3,13 @@ import { R4_I4 } from './parallel.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { GIT_REMOTE_UNREACHABLE_FROM_EVERY_SANDBOX, MERGE_TOKEN_REACHES_NO_SANDBOX } from './integration.js';
 import { APPROVAL_OUTCOME_GATES_THE_STATION } from './line-assertions.js';
-import { MODEL_RELAY_ENFORCES_BUDGET, MODEL_RELAY_ENFORCES_BUDGET_OPENAI_CHAT, MODEL_RELAY_ENFORCES_BUDGET_OPENAI_RESPONSES, MODEL_RELAY_FORWARDS_ONLY_ITS_GRANT } from './local-relay.js';
+import {
+  MODEL_RELAY_ENFORCES_BUDGET,
+  MODEL_RELAY_ENFORCES_BUDGET_OPENAI_CHAT,
+  MODEL_RELAY_ENFORCES_BUDGET_OPENAI_RESPONSES,
+  MODEL_RELAY_FORWARDS_ONLY_GRANTED_SERVER_TOOLS,
+  MODEL_RELAY_FORWARDS_ONLY_ITS_GRANT,
+} from './local-relay.js';
 import { MODEL_RELAY_REACHES_THE_DOCKER_HOST_ONLY_AS_DECLARED } from './local-endpoint.js';
 import { CODEX_CREDENTIAL_NOT_READABLE, CODEX_TOOL_INVENTORY_VALIDATED } from './codex.js';
 import { OPENAI_COMPATIBLE_CREDENTIAL_NOT_READABLE, OPENAI_COMPATIBLE_TOOL_INVENTORY_VALIDATED } from './openai-compatible.js';
@@ -17,6 +23,7 @@ import { READINESS_NEVER_RAISES_A_CAP, ABSENT_SCAN_IS_NOT_A_PASS } from './readi
 import { R20_I4 } from './roles.js';
 import { R13A_I4 } from './nightly.js';
 import { R34_I4 } from './install.js';
+import { R57_I4 } from './builder-run.js';
 import { R40_I4 } from './admission-readiness.js';
 import { R36A_I4 } from './first-run.js';
 import { R13B_I4 } from './nightly-review.js';
@@ -46,6 +53,7 @@ export const I4: InvariantEntry = {
     ...R13A_I4,
     // R34: the install's egress is the granted registries alone, and none is granted unless policy says so.
     ...R34_I4,
+    ...R57_I4,
     ...R36A_I4,
     ...R40_I4,
     // R13b: the nightly reviewers.
@@ -343,6 +351,8 @@ export const I4: InvariantEntry = {
     MODEL_RELAY_ENFORCES_BUDGET_OPENAI_CHAT,
     // R26: the third dialect, for the Codex CLI (A-R26-01).
     MODEL_RELAY_ENFORCES_BUDGET_OPENAI_RESPONSES,
+    // R56: a tool the API runs itself is a capability too, forwarded and charged only when granted (A-R56-01).
+    MODEL_RELAY_FORWARDS_ONLY_GRANTED_SERVER_TOOLS,
     OPENAI_COMPATIBLE_TOOL_INVENTORY_VALIDATED,
     OPENAI_COMPATIBLE_CREDENTIAL_NOT_READABLE,
     // R26: the Codex driver, under the same controls.

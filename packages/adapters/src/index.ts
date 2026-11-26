@@ -64,7 +64,7 @@ export {
 } from './stand-in.js';
 export { AUDITORS, DEPENDENCY_AUDIT_IMAGE, NPM_AUDITOR, PNPM_AUDITOR, PNPM_AUDIT_VERSION, UNSUPPORTED_LOCKFILES } from './audit.js';
 export { INSTALLERS, NPM_INSTALLER, PNPM_INSTALLER } from './install.js';
-export { DEPENDENCY_TREES, isDependencyTree, NODE_DEPENDENCY_TREES, PYTHON_DEPENDENCY_TREES } from './trees.js';
+export { DEPENDENCY_TREES, isDependencyTree, isToolCache, NODE_DEPENDENCY_TREES, PYTHON_DEPENDENCY_TREES, TOOL_CACHES } from './trees.js';
 export { PIP_INSTALLER, PYPI_REGISTRIES, PYTHON_IMAGE, UV_INSTALLER } from './python/install.js';
 export { PYTEST_BOOTSTRAP, PytestAdapter } from './python/framework.js';
 export { CoveragePyAdapter, type CoveragePyOptions } from './python/coverage.js';

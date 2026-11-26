@@ -2265,6 +2265,23 @@ its decisions carry a `TOOLING` id rather than a unit's. The design is
 - **Rejected:** (a) a GitHub approval review as the merge signal, unavailable as above; (b) a label as the signal, forgeable by the session; (c) asking per paid run, which spent a turn per run for a decision with a known answer; (d) rerunning any paid failure, which would hide a real defect, so only listed intermittents with an owning unit are rerun, once.
 - **Reverse:** delete `.claude/skills/merge-unit/`, restore `triage-review` §9's printed commands and `WORKFLOW.md` step 7's text, and ask per paid run again.
 
+### D-TOOLING-12: a paid run is counted at 40 cents, not 15
+
+- **Problem:** the ledger counted each paid run at $0.15, but the runs cost more. Run 45504526619 (PR #230, 2026-11-24), where every paid suite ran fresh, reported about $0.41 in model costs. Run 45524132461, which reused both driver reports from cache, metered $0.21 for the init assertion alone. The ledger understated the week's spend, so the $2 cap allowed more spending than it said.
+- **Chosen:** count each paid run at $0.40, the measured cost of a full run, rounded down to the nearest 5 cents. The $2 cap stays, so it now covers 5 runs a week instead of 13.
+- **Rejected:** (a) counting each run's actual metered cost, which the skill cannot read until the run ends, though the ledger line is written before the run starts; (b) raising the cap to keep 13 runs, which would raise spend, the opposite of the aim.
+- **Reverse:** set the rate in `merge-unit` §2 and its ledger example back to 15 cents and 13 runs.
+
+### D-TOOLING-13: one script runs the local checks, in two sizes (#197)
+
+- **Problem:** R55 ran the full local suite three times, about 25 minutes each, and two of the three were wasted. The first failed on the Greek-name scan, a static check that takes seconds. The others never reached `api`, `cli`, or `benchmark`: `pnpm -r test` runs the conformance package before the packages whose reports its registry reads (D-R6-08 fixed this for CI only), the registry then fails on reports only CI's paid suites write, and neither pass ran those three packages, the second with `--no-bail`. Deciding by hand which of about 48 failures were expected was a rule in `ship-unit` that a session applied by reading a log.
+- **Verified before building:** the R55 log shows `conformance` run before `drivers/openai-compatible` and `api`, and no line from `api`, `cli`, or `benchmark` in either pass. The registry prints its problem lines in full after a `Problems` heading (`formatReport`, `packages/conformance/src/kit/registry.ts`). An external entry's test title ends `(external: <package> <file>)` (`packages/conformance/test/registry.test.ts`). A preflight naming one local entry and one paid entry passed the first and printed the second as not run here.
+- **Chosen:** `scripts/local-check.ts`. `preflight` runs typecheck, lint, the tests of each package the branch changed, the Greek-name scan, and the registry entries named on the command line, stopping at the first failure; it took 80 seconds on this branch. `full` runs every package's tests one package at a time, so none is skipped, then the conformance package last. Both sort the conformance failures by the rule `ship-unit` already stated, now in code with tests: an external entry whose report a paid suite writes is printed as `NOT RUN HERE`, the two aggregate tests are excused only when every problem line the registry printed is about such an entry, and everything else, including a report the script cannot read and a named id no passed test carried, is a failure.
+- **Why the gate is untouched:** the script reads the registry's output and decides only its own exit status and summary. Nothing under `packages/conformance/` changes, CI runs what it ran, and a merge still needs CI's registry fully green against fresh reports. The first proposal was a "not run here" mode inside the registry test; that would have put a way to pass without a report into the gate itself, which is the failure the reconciliation check exists to prevent.
+- **Rejected:** (a) the mode inside the registry, as above; (b) leaving `I9.packaged-host-runs` out of the local full run because it is slow: the full run is the acceptance run and now happens once, and preflight already runs only named entries; (c) a root `package.json` script, a gate-path change for a convenience alias.
+- **Limit:** a preflight pass is not acceptance, and the script says so. An entry printed as `NOT RUN HERE` has not been checked by anything until CI's paid run.
+- **Reverse:** delete `scripts/local-check.ts` and its test, and restore the commands in `ship-unit` §2, `start-unit` §5, and `triage-review` §7.
+
 ## P6: Verification + evidence
 
 ### D-P6-01: The unit spec was completed before the code, after a contradiction in the ledger was resolved
@@ -13051,6 +13068,609 @@ triage are in `docs/reviews/2026-11-23-R54-deep-tier-benchmark-*`.
   2. That is A-R40-02's design, merged by its own pull request and not this
   unit's work: a rig's scan is a stand-in, and what the rigs prove is that
   admission enforces the term.
+
+### A-R56-01: the relay grant names the server tools a task may use, each with its price (D-A-ST-01)
+
+Confirmed by the maintainer in two steps. On 2026-11-24, before R56 started,
+the direction: the relay's grant gains the server-side tools a task may use,
+so the relay can refuse an Anthropic-dialect request naming an ungranted one
+(#189). On the same day, in R56's session, the three parts that go past that
+shape, each taking the recommended answer:
+
+- **Contract.** `RelaySpec` (`packages/sandbox/src/types.ts`) gains a
+  required `serverTools: readonly ServerToolGrant[]`. Each entry is
+  `{ type, perUseUsd }`: the exact `type` a request's tool names, such as
+  `web_search_20250305`, and what one use costs. An empty list grants none.
+- **The fee is metered.** A web search is billed per use ($10 per 1,000),
+  outside the token usage the meter reads. P13 refuses spend the meter cannot
+  count (D-P13-12), so a granted server tool is charged, not merely let
+  through. The relay reads the uses from `usage.server_tool_use`, and a
+  request offering one must name a positive integer `max_uses`, the ceiling
+  charged when the count cannot be read. The relay knows how to count one
+  type, `web_search_20250305`. A grant naming any other is refused when the
+  sandbox is provisioned, and the relay will not start with one.
+- **The driver derives it.** Only a driver knows that a grant of its
+  `WebSearch` means the API's `web_search_20250305`. `Driver.relayRequest()`
+  becomes `relayRequest(tools: readonly string[])`
+  (`packages/core/src/driver/contract.ts`). It is given the task's granted
+  tools and returns the relay with `serverTools` derived from them. Rejected:
+  a separate driver method merged by the line, because two calls can drift
+  apart. Also rejected: an empty list from every driver, which leaves a policy
+  able to grant `WebSearch` with nothing working.
+- **Request-level server features.** A non-null `mcp_servers` or `container`
+  is refused under the Anthropic dialect, whatever the grant. Each reaches
+  something that runs at the API, and no grant names either. In `tools`, an
+  entry with no `type` or `type: "custom"` is a tool the client runs and is
+  forwarded. Any other `type` passes only if the grant names it. An
+  Anthropic-defined client tool (`bash_*`, `text_editor_*`) is refused like a
+  server tool: default deny, and the pinned CLI sends none (D-R56-02).
+- **Other dialects.** `openai-chat` and `openai-responses` already refuse
+  every hosted tool (D-P13-12). A relay of either dialect whose grant names a
+  server tool is refused at provisioning rather than started with a grant it
+  would ignore.
+
+Gate paths: `packages/sandbox/src/types.ts`,
+`packages/core/src/driver/contract.ts`, `packages/conformance/`. R56 builds
+it. Reverse by removing `serverTools` and the parameter, which restores
+forwarding every tool unchecked, the gap #189 names.
+
+## R56: The relay forwards only the tools a task was granted
+
+Started on `v2` at f413f12. Issue #189. Builds A-R56-01 (D-A-ST-01). The
+amendment record is this unit's first commit rather than a pull request of its
+own, because the maintainer confirmed it before the unit began and it has no
+second consumer to land ahead of.
+
+### D-R56-01: boundary, verified
+
+- **Deliverables:**
+  - A-R56-01 in `packages/sandbox/src/types.ts` (`ServerToolGrant`,
+    `RelaySpec.serverTools`) and `packages/core/src/driver/contract.ts`
+    (`relayRequest(tools)`).
+  - `checkRelay` refuses a malformed grant, an unknown type, a price that is
+    not a non-negative finite number, and any server tool under an OpenAI
+    dialect. The plan and `AppliedRelay` carry the grant.
+  - The relay, under `anthropic-messages`: refuses unsent a request whose
+    `tools` name a typed tool the grant omits, one offering a granted tool
+    with no positive integer `max_uses`, or one carrying `mcp_servers` or
+    `container`. It charges each use reported in `usage.server_tool_use`, or
+    `max_uses` times the price when a successful answer reports none.
+  - The Claude Code driver maps `WebSearch` to
+    `{ type: 'web_search_20250305', perUseUsd: 0.01 }`, and nothing else to a
+    server tool. Codex and openai-compatible return an empty grant. The line,
+    the nightly review, and the benchmark pass each call's granted tools.
+  - A conformance entry: from inside a real sandbox, a request naming an
+    ungranted server tool is refused and never reaches the upstream, and a
+    granted one passes and is charged its uses.
+  - Changesets for every package changed.
+- **Out of scope** (verbatim from #189, "Scope note"): "This is relay work,
+  beside P12 and P13's relay controls. It is not R52's: R52 changes only the
+  driver's CLI pin and its Code Mode switch." Also out: granting any init
+  seat `Bash` (R57), and metering any server tool other than web search.
+- **Acceptance:**
+  - `pnpm -r typecheck`, `pnpm -r lint`, `pnpm -r test`, and
+    `pnpm conformance` pass. The relay tests and the conformance entry run
+    against Docker and call no model.
+  - The new entry is shown failing with the check it guards removed.
+  - The paid driver suites run under `run-driver` at merge, as for every unit.
+- **Invariants:** default deny (I4): a server tool the grant does not name
+  is refused. Fail closed (I5): an unknown type, a missing `max_uses`, and an
+  unreadable use count are refused or charged their ceiling, never let
+  through. Every capability claim has an assertion that fails when the
+  capability is deleted (I8). No Greek names in code (I10).
+- **Pending registry entries owed:** none name R56.
+
+### D-R56-02: assumptions, each verified
+
+- The dependencies have shipped. `reviewed/P12`, `reviewed/P13`, and
+  `reviewed/R26` exist (`git tag -l`).
+- Under `anthropic-messages` the relay reads only `model` and `max_tokens`,
+  and `unmeterable` is `null` for that dialect
+  (`packages/sandbox/src/local/relay.ts`, `metered()`). Only the OpenAI paths
+  check tools (`responsesUnmeterable`, `chatUnmeterable`).
+- `RelaySpec` carries paths and no tools (`packages/sandbox/src/types.ts:52`).
+- **What the pinned CLI (2.1.330) sends.** Verified by running it locally
+  against a capturing upstream that answers like the Messages API. No model
+  was called. With `--tools WebSearch,WebFetch,Bash,Read,Write,Edit,ToolSearch,Task`,
+  the main request's tools have no `type`. `WebSearch` and `WebFetch` are
+  deferred behind `ToolSearch`. When the model calls `WebSearch`, the CLI
+  sends a second request with
+  `tools: [{"type":"web_search_20250305","name":"web_search","max_uses":8}]`
+  and `tool_choice: {"type":"auto"}`. `WebFetch` fetches on the client and
+  then sends a request with no tools. No request carries `mcp_servers` or
+  `container`.
+- The API reports uses as `usage.server_tool_use.web_search_requests`, at $10
+  per 1,000. A failed search is not billed, and `max_uses` is optional, with a
+  minimum of 1 (platform.claude.com web-search-tool and Messages API
+  reference, read through Context7 on 2026-11-24).
+- No policy in the repository grants `WebSearch` (`rg WebSearch` finds only
+  `packages/drivers/claude-code/src/tools.ts`). No run today sends a server
+  tool, so refusing ungranted ones changes no shipped behaviour.
+- `RELAY_SOURCE` is 30,246 characters, against Windows' 32,767 limit for
+  the whole command line, environment arguments included. The new checks are
+  written compactly, and the duplicated OpenAI tool loop is shared to make
+  room (D-R56-03).
+- `relayRequest()` has three callers: `packages/api/src/line.ts`,
+  `packages/api/src/nightly-review.ts`, and `packages/benchmark/src/alone.ts`.
+
+### D-R56-03: choices
+
+- **Exact type, not a family prefix.** `web_search_20250305` is granted, not
+  `web_search_*`. A later version can change behaviour and billing: the API's
+  web search accepts `allowed_callers` naming code execution, and a CLI bump
+  that moves to a newer version is a reviewed change to the driver's map, not
+  something a prefix lets through. Reverse by matching a prefix in the
+  relay's tool check.
+- **The count is read like the tokens.** From the body, or from the
+  `message_start` and `message_delta` events. A successful answer to a
+  request offering a granted tool, with no readable count, is charged the
+  summed `max_uses` at the price. It does not stop the relay, as a ceiling
+  charge for output tokens does not. Reverse in `charge`.
+- **`MeterReading` is unchanged.** The fee is in `costUsd`. The meter's log
+  line names the uses, so the relay's own record keeps them. A separate
+  reading field would be a contract change nothing reads.
+- **The price is the driver's,** beside its model prices (`MODEL_METER`), at
+  $0.01 a use from the published rate.
+
+### D-R56-04: judgment calls made during the work
+
+- **The relay's shipped source is stripped.** With the new checks,
+  `RELAY_SOURCE` grew to 33,042 characters, past the 32,767 Windows allows
+  for the whole command line. `RELAY_SOURCE_TEXT` keeps the readable source,
+  and `RELAY_SOURCE`, what runs, drops whole-line comments and indentation
+  (25,745 characters). This is safe because no line of the source is a string
+  continued from the one before, and the source holds no template literal.
+  The relay tests start the stripped copy. Rejected: passing the source in the
+  relay container's environment, which changes how the relay is started
+  (D-P12) for a size problem the stripping solves. Reverse by exporting the
+  text unchanged once the source shrinks.
+- **The OpenAI dialects share one hosted-tool loop** (`hosted`), the same
+  check that was written out twice, to make room. Behaviour is unchanged, and
+  the existing tests for both dialects pass.
+- **Refusal reasons.** An ungranted tool, `mcp_servers`, or `container` is
+  logged as `ungranted`. A granted tool with no `max_uses` is logged as
+  `unreadable-request`, beside a missing `max_tokens`. Both count in
+  `refused`, which the line records as a `relay-refused` decision (D-P14-05).
+- **An unreported count is a `ceiling` charge,** the label a missing final
+  output count already uses. It never exhausts the budget the way
+  `unreadable` does.
+- **The DECOMPOSITION entry had no out-of-scope line.** It gains the one
+  D-R56-01 states, derived from #189's scope note and R57's entry.
+
+### D-R56-05: review fixes
+
+Both families' reviews counted on their first runs. Codex raised one finding;
+Gemini raised none. The triage is
+`docs/reviews/2026-11-24-R56-relay-server-tools-triage.md`.
+
+- **codex-1, fixed (2849b55).** A `server_tool_use` count on a stream's
+  `message_start` was kept as the call's count. A stream cut before
+  `message_delta` was then charged that early count instead of `max_uses`.
+  The relay now reads a count from final usage alone: the JSON body, or
+  `message_delta`. Shown failing on the old code first. Reverse by taking the
+  count on every usage event in `u.take`.
+
+## R55: An operator can read a draft, and the host refuses a rejected key
+
+Started on `v2` at 746aca2. Both dependencies are merged and tagged:
+`git tag -l reviewed/R19 reviewed/R36b` prints both.
+
+### D-R55-01: boundary, verified
+
+- **Deliverables:**
+  - `GET /runs/:id/draft?station=<spec|test-design>`: the station's latest
+    recorded draft, as its hash and attempt, whether it is the draft waiting
+    for a decision, each file's path, hash, and bytes, and the questions part
+    read by the runtime.
+  - `olympus-ai draft <run id> <station>`: prints that answer as text, one
+    HTTP request, nothing read from the store.
+  - Start-up sends one `GET /v1/models?limit=1` to the model provider with
+    `ANTHROPIC_API_KEY` and refuses, in the same list as every other start-up
+    problem, unless the provider accepts the key.
+  - The README names the command where it tells a person to read the draft,
+    and says what the key check does. Changesets for `api` and the CLI.
+- **Out of scope, verbatim from the entry as fixed below:** "approving,
+  rejecting, or editing a draft from the new command, which `approve` and
+  `reject` already do; reading any attempt but a station's latest; probing
+  `FACTORY_CODEX_KEY` or `FACTORY_ENDPOINT_KEY`, neither of which has a
+  request known to spend nothing and to be open to every valid key."
+- **Acceptance, as commands:** `pnpm typecheck`, `pnpm lint`, `pnpm test`,
+  `pnpm conformance`, with an assertion per deliverable that fails when the
+  behaviour is deleted. The accepted-key path needs a real key, which only CI
+  holds, so the paid init suite proves it at the merge gate (C8).
+- **Invariants touched:**
+  - The runtime is a service and the CLI its client (I9): the command reads
+    the draft through the API and never opens the store.
+  - Fail closed (I5): a key the provider rejects, or a check that could not
+    be made, stops the host before it listens. A draft whose stored bytes do
+    not hash to the hash recorded is refused, never shown.
+  - An agent is not judged by what it can write (I3): the hash a person
+    approves is the hash of the bytes the command showed.
+  - Payloads are data (I7): a draft's text reaches a terminal with its
+    control characters made visible, and enters no prompt.
+  - Every claim has an assertion (I8). No Greek name in code (I10).
+- **Pending registry entries owed:** none. `grep -rn R55
+  packages/conformance` finds nothing, and the baseline is unchanged.
+- **The entry lacked three of the five parts** (out of scope, done-when, gate
+  paths). Each follows from the entry's own two bullets and from the
+  neighbouring entries (R37, R40), so `docs/plan/DECOMPOSITION.md` is fixed in
+  this commit rather than asked about. *Reverse:* delete the three paragraphs.
+- **Gate paths touched:** `packages/conformance/` only, now declared. No
+  `types.ts`, manifest, or config changes. One existing assertion is changed,
+  not only added to: see C7.
+
+### D-R55-02: assumptions, each verified
+
+- `status` shows a draft's hash, failed conditions, problems, and critic
+  findings, and no file (`DraftStanding`, `packages/api/src/run.ts:1953`,
+  filled at `run.ts:1994`). No route returns a draft: the run routes are the
+  view, `report`, `telemetry`, `events`, `approve`, `reject`, `cancel`
+  (`packages/api/src/http/server.ts:697-733`). The CLI has no draft command
+  (`COMMANDS`, `packages/cli/src/cli.ts:50-110`).
+- A draft is one record holding every file as base64 with its hash, and a
+  hash over the sorted paths and hashes (`DraftRecord`,
+  `packages/vault/src/types.ts:632-660`; `draftDigest`,
+  `packages/vault/src/local/vault.ts:603`). Run state names each attempt's
+  record and hash (`DraftAttempt`, `packages/core/src/run/types.ts`).
+- The questions part is `{ assumptions: [{point, chose}], openQuestions }`,
+  read by `parseQuestions` (`packages/api/src/spec-parts.ts:92`), at
+  `specDraftPaths(runId).questions` (`packages/api/src/drafting.ts:121`). A
+  test draft holds a manifest and test files and no questions part.
+- Every route but `POST /events/:subscription` is behind the token
+  (`server.ts:655`), and one already returns untrusted text for the principal
+  to read (`CandidateView.body`, `packages/api/src/http/wire.ts`).
+- The CLI imports types from `api` and no code (`cli.ts:13`), so the hash
+  check is the server's.
+- Start-up checks only that the key is set (`required('ANTHROPIC_API_KEY')`,
+  `packages/api/src/host/config.ts:145`). `checkStartup` collects the
+  environment, the endpoint file, and the symlink probe into one list and
+  skips a check whose input is unset (`config.ts:208-226`); `main.ts:91`
+  calls it before anything is composed and `main.ts:136` listens.
+- The relay sends the key to `https://api.anthropic.com` in `x-api-key`
+  (`MODEL_RELAY`, `packages/drivers/claude-code/src/driver.ts:121-129`).
+- `GET /v1/models?limit=1` there answers 401 to a made-up key and to none:
+  run on 2026-11-24 with `curl`, both printed 401. The relay's own comment
+  records that a `GET` costs nothing upstream
+  (`packages/sandbox/src/local/relay.ts:84`).
+- This shell has no `ANTHROPIC_API_KEY` (`[ -n "$ANTHROPIC_API_KEY" ]` is
+  false), so a 200 for a valid key cannot be run here. See C8.
+- Three callers start a host with a key that is not real and must not reach
+  the network: `packages/api/test/host-config.test.ts:145,165`,
+  `packages/conformance/src/registry/init.ts:74`, and the packaged host in
+  `packages/conformance/src/registry/release.ts:164`, which expects it to
+  listen.
+- The host already makes outbound requests to a fixed origin from the `api`
+  package (`checks.ts:82`, `integrate.ts:273`), so one more is no new kind.
+
+### D-R55-03: where the code differs from the entry
+
+- The entry says "prints a draft's files and questions". Only a spec draft
+  has a questions part; for a test draft the answer says there is none.
+- "Beside the other start-up refusals" is `checkStartup`'s one list, which
+  is where the probe goes; the entry names no function.
+
+### D-R55-04: choices
+
+- **C1, the route.** *Chosen:* `GET /runs/:id/draft?station=<station>`. The
+  dispatcher refuses any run path longer than three parts (`server.ts:697`)
+  and `readiness` already takes its argument as a query. *Rejected:*
+  `/runs/:id/drafts/:station`, which loosens that length check for every
+  path under a run. *Reverse:* move the station into the path.
+- **C2, which draft.** *Chosen:* the station's latest attempt that recorded a
+  draft, with `awaiting` true only when `runStanding` names that hash and
+  attempt as the draft waiting. A locked or sent-back draft can still be
+  read, and the answer says it is not the one being decided. *Rejected:*
+  refusing unless the run is awaiting approval, which hides a draft a person
+  already approved from the person auditing it. *Rejected:* a hash or attempt
+  argument, which the entry does not ask for.
+- **C3, bytes and the hash.** *Chosen:* the answer carries each file's bytes
+  as base64, as stored. Before answering, the server hashes each file's
+  bytes, derives the draft's hash with `draftDigest`, and compares both with
+  the record and with run state; any difference is a 500 naming it, and no
+  byte is returned. *Rejected:* decoding to text on the server, which loses a
+  file that is not UTF-8. *Rejected:* checking in the CLI, which would need
+  the Vault's code in a client that imports none.
+- **C4, what the command prints.** *Chosen:* text. The hash and attempt
+  first, then whether the draft is waiting and at which key, then each file
+  under a header line, every line of content behind a `| ` margin, then the
+  questions part as the runtime read it. Control characters other than
+  newline and tab, and the Unicode direction overrides, are printed as
+  `\u{..}` escapes, in paths as in content. A drafter is a model, and bytes
+  that move the cursor or reorder a line could show a person something other
+  than what the hash covers; the margin keeps a line of content from passing
+  as one of the command's own headers. *Rejected:* the JSON body, as other
+  commands print, which leaves a person decoding base64. *Rejected:* raw
+  bytes to the terminal. *Reverse:* print `text` unescaped.
+- **C5, the request.** *Chosen:* `GET /v1/models?limit=1` on
+  `MODEL_RELAY.upstream`, the key in `MODEL_RELAY.header`, both read from the
+  driver's constant so the probe and the relay cannot name different
+  providers. *Rejected:* token counting, which needs a model id that goes
+  stale. *Rejected:* a one-token message, which spends.
+- **C6, what refuses.** *Chosen:* only a 2xx passes. 401 and 403 are "the
+  provider rejected the key". Any other status, a network failure, or no
+  answer in 10 seconds is "the key could not be checked", and also refuses: a
+  check that did not run is not a pass. Neither message holds the key or the
+  provider's body. No retry. *Known limit:* a provider outage or a rate
+  limit at start-up stops the host until it is started again. *Rejected:*
+  starting with a warning. *Reverse:* none that keeps the rule.
+- **C7, where the probe runs, and the callers with made-up keys.** *Chosen:*
+  inside `checkStartup`, skipped only when the key is unset, as the symlink
+  probe is for unset trees. It is a fourth parameter whose default is the
+  real probe, so a caller that says nothing gets the check. No environment
+  variable turns it off or points it elsewhere. The two in-process callers
+  pass a stand-in. The packaged host is a separate process, so its assertion
+  (`I9.packaged-host-runs`) preloads a module that answers the one probe URL,
+  through `NODE_OPTIONS`, and now also proves that the installed host
+  refuses when that answer is 401. This changes an existing assertion on a
+  gate path: everything it asserted it still asserts, and the host it starts
+  runs its real start-up path. *Rejected:* a host variable naming the probe's
+  origin, which is a switch an operator could use to skip the check.
+  *Reverse:* remove the fourth parameter and the preload.
+- **C8, proving the accepted path.** No key exists here. *Chosen:* the paid
+  init suite, which runs in CI with the real key before a merge, asserts that
+  the real probe accepts that key and rejects a made-up one. The request is
+  free, so the paid run costs what it did. Until that run, a 200 for a valid
+  key rests on the provider's documentation. *Rejected:* stopping for a
+  local key, which the maintainer revoked on purpose (D-R54-05).
+- **C9, the other keys.** `FACTORY_CODEX_KEY` and `FACTORY_ENDPOINT_KEY` are
+  not probed. An OpenAI key can be restricted so that it runs a model and
+  cannot list models, and whether such a key answers 401 there cannot be run
+  from here; an endpoint file declares one path, the one that spends. Both
+  are filed as an issue with the pull request rather than guessed at.
+
+### D-R55-05: what proves it, each shown failing, and the order it was built in
+
+- **`I5.host-refuses-a-rejected-key`** (`packages/conformance/src/registry/startup-key.ts`).
+  With the line that lists the probe's answer removed from `checkStartup`, it
+  failed with "the host would start although the provider answered 401".
+- **`I9.draft-is-read-through-the-api`** (`registry/draft-read.ts`). With the
+  per-file byte hash check removed from `readDraft`, it failed with "a draft
+  whose bytes were changed was not refused". Without the route the CLI gets a
+  404 and the first step fails.
+- **`I9.packaged-host-runs`** now starts the installed host with the provider
+  stand-in answering 401 and requires the refusal, then 200 and requires it
+  to listen. It passed on Windows through the installed `.cmd` shims.
+- **Unit tests:** `packages/api/test/draft-view.test.ts`,
+  `packages/cli/test/draft.test.ts` (what a hostile file may print), and the
+  two start-up callers in `host-config.test.ts`, which pass a stand-in.
+- **Not run here:** `packages/api/test/paid/key-probe.paid.test.ts`, the real
+  key against the real provider (C8). It runs in CI's paid step.
+- **Order, stated as it happened:** the product code was written before the
+  two assertions, not after, against working rule 3. Each assertion was then
+  shown failing by deleting the behaviour it covers, as above.
+- **Local results on 2026-11-24:** `pnpm typecheck` and `pnpm lint` clean.
+  Every package's tests pass except the conformance registry's 46 entries
+  marked `external`, which read driver reports only CI produces, and the two
+  registry-completeness entries that count them (decisions, line 2015). No
+  entry this unit adds or changes is among them.
+- **Found on the way:** the first full run failed on the Greek-name scan, for
+  a test string holding the CLI's name inside a longer string. Fixed in the
+  test. The run it cost is why the four process changes on #197 were filed.
+
+### D-R55-06: external review, what was fixed and what stays a limit
+
+Both families counted on the first run. Seven findings and notes, all holding,
+none rejected; the triage is `docs/reviews/2026-11-24-R55-draft-read-key-check-triage.md`.
+
+- **C4 is corrected.** It said control characters and direction overrides were
+  escaped and each file line sat behind a margin, and that this made what a
+  person reads what the hash covers. It did not: a file that was not UTF-8 was
+  withheld behind a notice, an escape and its own literal text printed alike,
+  and a byte-order mark, a carriage return, and a missing final newline were
+  invisible (codex-1, codex-2). Now a file's printed form stands for one
+  sequence of bytes. *Rejected:* refusing a draft that holds a file that is
+  not UTF-8, which leaves a person unable to read what they must decide.
+  *Reverse:* none wanted.
+- **The list of dangerous characters is a Unicode category, not a list**
+  (gemini-1): controls, format characters, separators, private-use, and
+  unassigned. *Reverse:* restore the ranges.
+- **The probe's time limit is a parameter and is asserted** (codex).
+- **Known limit, no owner needed:** the start-up check shows the provider
+  accepted the key when the host started. A key revoked later fails each
+  attempt until the run parks, as before R55.
+- **Order, stated as it happened:** the first review fix was committed before
+  lint ran on it, and a second commit (62bbbce) made it lint-clean.
+
+## R57: A build runs the locked acceptance tests in its own sandbox
+
+Started on `v2` at ef868ca. Issue #220. Rebased onto c53f09a (R55, merged during the unit) before review; the only conflict was both units appending here.
+
+### D-R57-01: boundary, verified
+
+- **Deliverables:**
+  - `build` installs the dependencies into the tree it hands the builder:
+    the runtime's install of the build tree's lockfile (`installInto`, R34),
+    placed in the start copy before it is copied to the builder's working copy.
+    This applies only where the stack's checks run in the profile's image.
+  - A write under Vite's default cache directory, `node_modules/.vite`, is
+    not recorded as a dependency-tree write. Every other write in a dependency
+    tree still is (D-R15-05). Neither kind is carried.
+  - init's builder is granted `Bash`, and no other init seat is. Its role tells
+    it to run the acceptance tests before it finishes.
+  - Conformance entries, each shown failing with the thing it guards
+    removed. Changesets for every package changed.
+- **Out of scope:** a builder install for a stack whose checks run in an image
+  of their own (Python: the copied interpreter reads that image's standard
+  library, and the builder's container is the driver's). This becomes an
+  issue. Also out: changing what a retry is told (D-R37-03); the drafter's
+  instructions and the fixture's intent (#220, question 2); egress, `Edit`, or
+  any other tool for any seat; a field on `TestFrameworkAdapter` or
+  `DependencyInstaller`, which would be a contract change; taking the paid
+  init assertion off the intermittent list, which is a tooling PR made after a
+  paid run passes.
+- **Acceptance:** `pnpm -r typecheck`, `pnpm -r lint`, `pnpm -r test`, and
+  `pnpm conformance` pass. Each new entry is shown failing with its guard
+  removed. The paid suites run under `run-driver` at merge, including
+  `I5.init-setup-merges-on-the-real-driver`.
+- **Invariants:**
+  - The builder may not be judged by an artifact it can write (I3). The
+    install in its tree is a copy. `verify` still removes every dependency tree
+    and reinstalls, so nothing the builder ran or wrote there decides a check.
+  - Payloads are data (I7). Test output reaches the model only as the result
+    of its own tool call. The runtime places no output in a prompt.
+  - Default deny (I4). `Bash` is granted to one seat, and that seat has no
+    egress.
+  - Fail closed (I5). An install refused at `build` leaves the tree with no
+    dependency tree, as at `verify`, where the same refusal leaves every check
+    unstarted.
+  - No Greek names in code (I10).
+- **Pending registry entries owed:** none name R57
+  (`packages/conformance/pending-baseline.json`).
+
+### D-R57-02: assumptions, each verified
+
+- **The dependencies have shipped.** `reviewed/R37`, `reviewed/R36b`, and
+  `reviewed/R56` are ancestors of `origin/v2` (`git merge-base --is-ancestor`).
+- **init's builder holds `[Read, Write]` with `egress: none`, and no init
+  seat holds `Bash`** (`packages/api/setup/policy.yaml`).
+- **The build tree gets no install.** `build()` materializes the start copy,
+  omits withheld paths, and copies it to the working copy. It never calls
+  `installInto` (`packages/api/src/line.ts`, `build`). Only `runOnBase` and
+  `verify` call it.
+- **One node digest.** The install image (`DEPENDENCY_AUDIT_IMAGE`,
+  `packages/adapters/src/audit.ts:16`), the Claude Code driver's base
+  (`BASE_IMAGE`, `packages/drivers/claude-code/src/image.ts:30`), and the
+  default check image (`config.checkImage ?? BASE_IMAGE`,
+  `packages/api/src/host/compose.ts:245`) are all
+  `node@sha256:83f487e0…`. A host that configures another `checkImage` can
+  give the builder a different `node` from the checks. That is acceptable,
+  because the builder's run is a tool it uses, not evidence.
+- **Python's checks run in an image of their own** (`checkImageOf`,
+  `packages/api/src/verification.ts:91`, A-R29-01). An install made for them
+  does not run in the driver's container, hence the out-of-scope line.
+- **A dependency-tree write is recorded, then escalated** (`notCarried` in
+  `verify`, `notCarriedFindings`). Vite's default `cacheDir` is
+  `path.join(pkgDir, 'node_modules/.vite')`, and no environment variable
+  overrides it (`vite@8.2.2`, `dist`). Vitest keeps its results there:
+  `node_modules/.vite/vitest/<hash>/results.json` exists in this repository
+  after a run. A builder that runs vitest would therefore raise the finding on
+  every build.
+- **`TestFrameworkAdapter` and `DependencyInstaller` are in
+  `packages/adapters/src/types.ts`,** which matches the gate path
+  `^packages/([^/]+/)?[^/]+/src/.*types\.ts$`
+  (`.github/protected-paths.txt`). Declaring the cache on either one is an
+  amendment.
+- **`copyTree` copies links verbatim** (`packages/api/src/workspace.ts:412`).
+  npm's `.bin` links survive the copy to the working copy.
+- **`Bash` is in the driver's inventory** (`DECLARED_TOOLS`,
+  `packages/drivers/claude-code/src/tools.ts`). Since R56, the relay refuses
+  an ungranted server tool in a request the task sends itself, which is the
+  path DECOMPOSITION gives for waiting on R56.
+
+### D-R57-03: choices
+
+- **The install goes into the start copy, not only into the working copy.**
+  The task's own diff is start against work. With the install in both, a
+  package the builder edits, adds, or removes still appears in that diff, so
+  D-R15-05 still records it. Rejected: installing into the working copy alone,
+  which puts the whole install in the diff as the task's writes. Also
+  rejected: mounting the install read-only beside the tree, because the
+  sandbox refuses a nested mount (D-R34-03) and a sibling mount is a sandbox
+  change. Reverse by removing the `installInto` call in `build`.
+- **The install comes before `omitWithheld`,** so a withheld path is left out
+  of the install's files too, and the model never sees one.
+- **An install refused or failed at `build` does not stop the build.** The
+  tree keeps no dependency tree, and `verify` judges the same refusal and
+  leaves every check unstarted. A sandbox that cannot be provisioned spends a
+  retry, as at `verify`. Rejected: parking at `build`, which needs a new park
+  cause (a contract change) for an outcome `verify` already reaches. Reverse
+  in `build`.
+- **The cache exemption is a constant in `packages/adapters/src/trees.ts`,
+  matched exactly,** not a field on an adapter. The entry the exemption keys
+  on is `node_modules/.vite`, at any depth below the tree's root, in exact
+  case. A case variant, or a `.vite` under a package's own `node_modules`, is
+  recorded as before. The exemption is safe because the safety comes from the
+  reinstall: `verify` replaces every dependency tree before any check, so
+  nothing in the cache reaches a check. Rejected: a field on
+  `TestFrameworkAdapter`, which is an amendment and so waits for the
+  maintainer (filed as the reversal path). Also rejected: telling the builder
+  to run `--no-cache`, which a role cannot enforce, and exempting every dot
+  directory, which would hide writes in `node_modules/.pnpm`, where pnpm keeps
+  the real package code. Reverse by emptying the constant.
+- **Only the builder gets `Bash`.** The drafters, critics, and reviewer run no
+  tests. Reverse in `packages/api/setup/policy.yaml`.
+
+### D-R57-04: judgment calls made during the work
+
+- **Where Vitest's cache lands was run, not assumed.** The calc corpus
+  repository was installed with npm's declared install in its pinned image.
+  Then `node node_modules/vitest/vitest.mjs run` (4.1.11) ran in the
+  driver's image (`factory-claude-code:2.1.330`) with `--network none`. The
+  tests passed, and the run wrote
+  `node_modules/.vite/vitest/<hash>/results.json` and nothing else in the
+  tree. Over a Windows bind mount the same run writes nothing, because Vitest
+  swallows the write's failure. That case does not apply to a Linux host's
+  workspace.
+- **The CLI runs a `Bash` call without a sandbox of its own.** The driver
+  starts it with `--permission-mode bypassPermissions` and
+  `--permission-prompts none`
+  (`packages/drivers/claude-code/src/driver.ts`). The image has no `bwrap`.
+  The container is the sandbox. A real model calling `Bash` is proven only by
+  the paid run at merge. No local test makes that call.
+- **The base's own dependency trees no longer reach the builder.** With the
+  install removed, `I3.build-tree-holds-the-runtime-install` fails on
+  `node_modules/stale`. Before R57, a dependency tree the base's tree held was
+  in the builder's tree. `installInto` removes every one before it installs.
+  For a stack whose checks run in an image of their own, that is unchanged.
+- **The conformance rig's helpers are exported** (`install.ts`: `EXTRA`,
+  `Recording`, `recording`, `withDependencies`; `init.ts`: `asClone`), not
+  copied.
+- **Guards shown failing.** With `installForBuild` skipped, the install entry
+  fails. With `TOOL_CACHES` empty, the cache entry fails on
+  `["node_modules/.vite","node_modules/extra"]`. With the exemption widened to
+  every `node_modules` entry, it fails on `[]`. With `Bash` dropped from init's
+  builder, the init entry fails.
+- **An existing entry's sample path moved.** The second case of
+  `I3.dependency-trees-are-the-bases` used `node_modules/.vite/...` as its
+  example of a dependency-tree write that escalates. After R57 that path is
+  not recorded, so the entry failed. The property it holds is that a write in
+  a dependency tree escalates the integrate exit, and that is unchanged. The
+  sample is now `node_modules/left-pad/index.js` (`base-run.ts`). The narrowing
+  itself is the one the DECOMPOSITION entry asks this unit to settle, and
+  `I3.builder-tool-cache-is-not-a-dependency-write` asserts its exact edges.
+  Reverse with the exemption.
+- **The shipped examples follow the setup.** `examples/policy.yaml` and
+  `examples/roles/builder.md` must equal init's setup byte for byte
+  (`packages/api/test/init.test.ts`), so they carry the same grant and role
+  text. The api test harness wraps a stub driver to declare `Read` and
+  `Write`. It now also declares `Bash` (`DECLARED_TEST_TOOLS`,
+  `packages/api/test/harness.ts`), the same tool the Claude Code driver
+  declares, so the example runs are admitted as before. The fixture's own
+  grant, `TEST_TOOLS`, is unchanged. `line.test.ts` moved its sample
+  escalating write off `.vite`, as `base-run.ts` did.
+- **One more existing entry followed the examples.**
+  `I4.tool-grant-undeclared-by-the-seat-driver-refused` lowers the builder's
+  `Read` to `read` by replacing the first `tools: [Read, Write]` in the
+  example policy. With the builder's grant now `[Read, Write, Bash]`, the
+  first match became the reviewer's, and the refusal named the wrong seat. It
+  now replaces `tools: [Read, Write, Bash]`, the builder's grant (`first-run.ts`).
+  The property is unchanged: an undeclared grant is refused at admission,
+  naming the builder, before the estimate.
+
+### D-R57-05: review fixes
+
+Both families counted on their first runs. Codex raised two findings, and
+Gemini raised one, which matches one of Codex's. All three hold. The triage is
+`docs/reviews/2026-11-25-R57-builder-runs-tests-triage.md`.
+
+- **codex-2 and gemini-1, fixed (3a8e3e8).** `build` read `spendRetry`'s
+  `undefined`, which means a retry is still to come, as "go on". So a failed
+  install, and a failed provision too, still reached the builder.
+  `installForBuild` now returns its outcome tagged, and every failure ends the
+  attempt. Shown failing first: the builder was asked three times over a
+  failed install. This replaces D-R57-03's "an install refused or failed at
+  `build` does not stop the build". Reverse in `installForBuild`.
+- **The build reuses the run's install (f196e6e).** The build-tree entry
+  asserts that one install sandbox is provisioned per run, the base run's. The
+  failure path above is therefore reachable only when that cache is missing.
+- **codex-1, known limit, no owner needed.** The dependency-write record
+  compares the final working copy with the start copy. A write the builder
+  reverts before it returns leaves no trace, as one made with `Write` already
+  could before R57. D-R15-05 records what a change leaves in a dependency
+  tree, not every write. Nothing reverted or left there reaches a check,
+  because `verify` replaces every dependency tree first.
+- **Codex coverage note, fixed (f196e6e).** The cache entry also fails when
+  the change's diff carries any `node_modules` path.
 
 ## A-R28-02: a finding's outcome is named for what the runtime proves
 

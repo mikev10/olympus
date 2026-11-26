@@ -10,6 +10,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
 import { checkStartup, HOST_VARIABLES, listenProblem, mergeEnvFile, readHostConfig, refusalText, type HostFacts } from '../src/host/config.js';
+import { probeModelKey } from '../src/host/key-probe.js';
 import { probeSymlinks } from '../src/host/symlinks.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -20,6 +21,9 @@ const documented = (v: (typeof HOST_VARIABLES)[number]): string => (v.prefix ===
 
 /** A host with uids, as Linux and macOS are: the container user is optional there, so these tests are the same on every OS. */
 const HAS_UIDS: HostFacts = { uids: true };
+
+/** The provider's answer, stood in for: the key in `FULL` is not a real one, and `I5.host-refuses-a-rejected-key` owns that check (R55). */
+const ACCEPTED = (): Promise<null> => Promise.resolve(null);
 
 const FULL: Record<string, string> = {
   FACTORY_API_TOKEN: 'x'.repeat(32), FACTORY_LISTEN_PORT: '7300', FACTORY_POLICY_FILE: '/p.yaml', FACTORY_ROLES_DIR: '/roles',
@@ -145,7 +149,7 @@ describe('every start-up problem in one list (review: codex-5)', () => {
       const result = await checkStartup({
         ...rest, FACTORY_API_TOKEN: 'short', FACTORY_TREES: join(blocker, 'trees'),
         FACTORY_ENDPOINT_CONFIG: join(dir, 'no-such-endpoint.json'), FACTORY_ENDPOINT_KEY: 'k',
-      }, undefined, HAS_UIDS);
+      }, undefined, HAS_UIDS, ACCEPTED);
       expect(result.ok).toBe(false);
       if (result.ok) return;
       const text = result.problems.join('\n');
@@ -162,12 +166,24 @@ describe('every start-up problem in one list (review: codex-5)', () => {
   test('a configuration with every check passing is returned with its settings', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'r35-startup-'));
     try {
-      const result = await checkStartup({ ...FULL, FACTORY_TREES: join(dir, 'trees') }, undefined, HAS_UIDS);
+      const result = await checkStartup({ ...FULL, FACTORY_TREES: join(dir, 'trees') }, undefined, HAS_UIDS, ACCEPTED);
       expect(result.ok).toBe(true);
       if (result.ok) expect(result.settings.trees).toBe(join(dir, 'trees'));
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('the key check gives up (review: codex)', () => {
+  test('a provider that never answers is a key that could not be checked, within the time allowed', async () => {
+    const never = ((_input: unknown, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => { reject(init.signal?.reason as Error); });
+    })) as typeof fetch;
+    const started = Date.now();
+    const line = await probeModelKey('k', never, 50);
+    expect(line).toMatch(/^ANTHROPIC_API_KEY could not be checked: .* could not be reached \(TimeoutError\)/u);
+    expect(Date.now() - started).toBeLessThan(5_000);
   });
 });
 

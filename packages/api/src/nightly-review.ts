@@ -326,7 +326,7 @@ async function seatOnce(options: ReviewJobOptions, request: SeatRequest): Promis
     return { ok: false, refusal: { part: 'seat', cause: 'seat-refused', detail: `the reviewer driver lacks what the seat requires (${capability.reason})` }, review: { ...UNSEATED, role: roleVersion } };
   }
   const level = seatLevel(request.policy);
-  const relay = driver.relayRequest();
+  const relay = driver.relayRequest(scope.tools);
   // An unmetered call spends what nothing bounds; the line runs none above L1, and neither does a night (I4).
   if (relay === null && level > 1) {
     return { ok: false, refusal: { part: 'seat', cause: 'seat-refused', detail: 'the reviewer driver calls no model through a relay, so its call would be unmetered above L1' }, review: { ...UNSEATED, role: roleVersion } };

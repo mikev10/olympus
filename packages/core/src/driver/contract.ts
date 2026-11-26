@@ -158,8 +158,13 @@ export interface Driver {
    * sandbox adds it (A-I1a-02, D-P12-05). `null` for a driver that calls no
    * model through a relay. Its calls are unmetered, so the line runs no task
    * on it above L1.
+   *
+   * `tools` is the call's granted tools, as policy names them. The relay's
+   * `serverTools` is derived from them and from nothing else: a tool the API
+   * runs itself is forwarded only when the grant holds the tool that uses it
+   * (I4, A-R56-01).
    */
-  relayRequest(): Omit<RelaySpec, 'budget'> | null;
+  relayRequest(tools: readonly string[]): Omit<RelaySpec, 'budget'> | null;
   runTask(req: TaskRequest): Promise<TaskResult>;
   /** Runs `role` as a child task under `req`'s grants: the role replaces `req.role`, and nothing else does. */
   spawnSubagent?(role: CompiledRole, req: TaskRequest): Promise<TaskResult>;
