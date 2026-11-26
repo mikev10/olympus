@@ -93,7 +93,7 @@ export const COMMANDS: readonly Command[] = [
       to: { type: 'string', value: '<time>', help: 'only runs admitted before this ISO time' },
     },
   },
-  { name: 'findings', args: '', summary: 'every located review, critic, and nightly finding, and whether it is open, resolved, or dismissed', flags: {} },
+  { name: 'findings', args: '', summary: 'every located review, critic, and nightly finding, and whether it is open, addressed, or dismissed', flags: {} },
   {
     name: 'dismiss-finding', args: '<finding id>', summary: 'record that a finding will not be worked, with a cause and no text',
     flags: { cause: { type: 'string', value: '<cause>', help: 'required: not-a-defect, duplicate, insufficient-detail, or not-reproducible' } },

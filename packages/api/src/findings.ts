@@ -273,14 +273,14 @@ export async function outcomesByFinding(vault: Vault): Promise<Map<string, Findi
  * (D-A-FO-01): a located finding whose file's hash differs between the draft
  * the critic read and the locked draft. At `test-design` the locked draft
  * must have a base record, which shows its checks ran over the base. No
- * check covers a spec file, so a `spec` finding is never resolved. Safe to
+ * check covers a spec file, so a `spec` finding is never addressed. Safe to
  * call again: an outcome already written is refused, and nothing is written.
  */
 export async function resolveCriticFindings(vault: Vault, state: RunState, station: DraftStation, lockRef: VaultRef, lock: DraftLockRecord, at: () => string): Promise<number> {
   if (station === 'spec') return 0;
   if ((await vault.readBaseRun(state.runId, lock.draft.sha256)) === null) return 0;
   const locked = new Map(lock.files.map((f) => [f.path, f.sha256]));
-  let resolved = 0;
+  let addressed = 0;
   for (const attempt of state.drafts[station]?.attempts ?? []) {
     if (attempt.critic === null || attempt.critic === 'not-seated' || attempt.draft === null) continue;
     const critic = decodeJson(await vault.read(attempt.critic)) as CriticRecord;
@@ -295,14 +295,14 @@ export async function resolveCriticFindings(vault: Vault, state: RunState, stati
       if (raised === undefined || now === undefined || raised === now) continue;
       const written = await vault.recordFindingOutcome({
         finding: { source: { kind: 'critic', record: attempt.critic }, index },
-        outcome: { kind: 'resolved', resolution: { kind: 'draft-changed', lock: lockRef, raised, locked: now } },
+        outcome: { kind: 'addressed', resolution: { kind: 'draft-changed', lock: lockRef, raised, locked: now } },
         at: at(),
         collectedBy: 'runtime',
       });
-      if (written !== null) resolved += 1;
+      if (written !== null) addressed += 1;
     }
   }
-  return resolved;
+  return addressed;
 }
 
 /**
@@ -350,7 +350,7 @@ function passed(result: CheckResult): boolean {
 
 /** What one resolving run did to the open code findings. */
 export interface CodeResolutions {
-  readonly resolved: number;
+  readonly addressed: number;
   /** Findings whose history could not be read, by id: each stays open, and the walk names them (I5). */
   readonly unreadable: readonly string[];
 }
@@ -367,26 +367,26 @@ export interface CodeResolutions {
  */
 export async function resolveCodeFindings(vault: Vault, checkout: string, runId: RunId, at: () => string): Promise<CodeResolutions> {
   const merged = (await readIntegration(vault, runId)).find((r): r is IntegrationMerged => r.kind === 'merged');
-  if (merged === undefined) return { resolved: 0, unreadable: [] };
+  if (merged === undefined) return { addressed: 0, unreadable: [] };
   let state: RunState;
   try {
     state = await vault.readRunState(runId);
   } catch (error) {
     // A merged run whose state the store does not hold has no evidence to resolve anything by; the plan's
-    // reader refuses it at close (D-A-OB-14). Anything else is a fault, never nothing resolved (I5).
-    if (isNoRunState(error)) return { resolved: 0, unreadable: [] };
+    // reader refuses it at close (D-A-OB-14). Anything else is a fault, never nothing addressed (I5).
+    if (isNoRunState(error)) return { addressed: 0, unreadable: [] };
     throw error;
   }
   const accepted = await latestAccepted(vault, state);
   // A bundle stored before R28 names no lines: read as none.
   const lines = accepted?.bundle.tamper.changedLines ?? null;
-  if (accepted === null || lines === null) return { resolved: 0, unreadable: [] };
+  if (accepted === null || lines === null) return { addressed: 0, unreadable: [] };
   const check = accepted.bundle.checks.find((c) => c.checkId === lines.check);
-  if (check === undefined || !passed(check)) return { resolved: 0, unreadable: [] };
+  if (check === undefined || !passed(check)) return { addressed: 0, unreadable: [] };
 
   const outcomes = await outcomesByFinding(vault);
   const unreadable: string[] = [];
-  let resolved = 0;
+  let addressed = 0;
   for (const f of await raisedFindings(vault)) {
     if (f.cites.kind !== 'code' || f.cites.commit === null || f.runId === runId || outcomes.has(findingKeyOf(f.ref))) continue;
     const { path, line: cited, commit } = f.cites;
@@ -404,16 +404,16 @@ export async function resolveCodeFindings(vault: Vault, checkout: string, runId:
       if (executed.length === 0) continue;
       const written = await vault.recordFindingOutcome({
         finding: f.ref,
-        outcome: { kind: 'resolved', resolution: { kind: 'covered-change', runId, mergeCommit: merged.mergeCommit, path, line, hunk, executed, evidence: accepted.ref } },
+        outcome: { kind: 'addressed', resolution: { kind: 'covered-change', runId, mergeCommit: merged.mergeCommit, path, line, hunk, executed, evidence: accepted.ref } },
         at: at(),
         collectedBy: 'runtime',
       });
-      if (written !== null) resolved += 1;
+      if (written !== null) addressed += 1;
     } catch {
       unreadable.push(f.id);
     }
   }
-  return { resolved, unreadable };
+  return { addressed, unreadable };
 }
 
 /** A raised finding with what became of it, as the API and the CLI show it (R28). `open` is the absence of an outcome. */

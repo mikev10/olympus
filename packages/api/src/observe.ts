@@ -334,7 +334,7 @@ export async function walkHistory(vault: Vault, target: ObserveTarget | null, po
       const run = pending.get(commit.commit);
       if (run !== undefined) {
         open.push(run);
-        // The code findings this run's merged change resolved, if its evidence shows it covered them (R28). One
+        // The code findings this run's merged change addressed, if its evidence shows it covered them (R28). One
         // whose history cannot be read stays open, and the walk names it (I5).
         if (run.runId !== null) {
           try {

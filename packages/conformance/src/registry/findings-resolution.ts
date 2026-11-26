@@ -1,7 +1,7 @@
 /**
  * R28: what resolves a code finding. Each assertion drives the real code over
  * a real git checkout: the filesystem Vault, the history walk, and the
- * findings reader. A finding is resolved only when a later merged run's change
+ * findings reader. A finding is addressed only when a later merged run's change
  * rewrote a hunk holding the cited line, mapped through history to that run's
  * base, and that run's accepted evidence shows its coverage check passed with
  * a line of the hunk executed (D-R28-01). Every other case leaves it open.
@@ -144,7 +144,7 @@ function onlyResolution(outcomes: readonly FindingOutcomeEntry[], b: Built): voi
   if (finding.source.kind !== 'review' || finding.source.record.hash !== b.findingsRef.hash || finding.source.record.runId !== RUN_S || finding.index !== 0) {
     throw new Error(`I2: the outcome names another finding: ${JSON.stringify(finding)}`);
   }
-  if (outcome.kind !== 'resolved' || outcome.resolution.kind !== 'covered-change') throw new Error(`I2: the finding was not resolved by a covered change: ${JSON.stringify(outcome)}`);
+  if (outcome.kind !== 'addressed' || outcome.resolution.kind !== 'covered-change') throw new Error(`I2: the finding was not addressed by a covered change: ${JSON.stringify(outcome)}`);
   const r = outcome.resolution;
   const h = r.hunk;
   const ok = r.runId === RUN_R && r.mergeCommit === b.rMerge && r.path === PATH && r.line === b.target
@@ -155,12 +155,12 @@ function onlyResolution(outcomes: readonly FindingOutcomeEntry[], b: Built): voi
 }
 
 export const CODE_FINDING_RESOLVED_BY_COVERED_CHANGE = runtime({
-  id: 'I2.code-finding-resolved-by-covered-change',
-  title: "a review seat's code finding is resolved only by a later merged change that rewrote the cited line, mapped through history to its base, where that run's passing coverage check executed a line of the hunk; no coverage, a failed check, executed lines outside the hunk, or a line the history rewrote leaves it open, and a second pass writes nothing",
+  id: 'I2.code-finding-addressed-by-covered-change',
+  title: "a review seat's code finding is addressed only by a later merged change that rewrote the cited line, mapped through history to its base, where that run's passing coverage check executed a line of the hunk; no coverage, a failed check, executed lines outside the hunk, or a line the history rewrote leaves it open, and a second pass writes nothing",
   timeoutMs: 180_000,
   run: async () => {
     const { resolveCodeFindings } = await api();
-    await withObserve('r28-resolved-', async (rig) => {
+    await withObserve('r28-addressed-', async (rig) => {
       const b = await build(rig, PASSING);
       await walked(rig, '2026-11-05');
       const first = await rig.vault.readFindingOutcomes();
@@ -169,7 +169,7 @@ export const CODE_FINDING_RESOLVED_BY_COVERED_CHANGE = runtime({
       await rig.repo.commit({ 'b.txt': 'b, later\n' }, 'later');
       await walked(rig, '2026-11-06');
       const again = await resolveCodeFindings(rig.vault, rig.repo.dir, RUN_R, () => new Date().toISOString());
-      if (again.resolved !== 0 || again.unreadable.length !== 0) throw new Error(`I2: a second pass over R resolved again: ${JSON.stringify(again)}`);
+      if (again.addressed !== 0 || again.unreadable.length !== 0) throw new Error(`I2: a second pass over R addressed again: ${JSON.stringify(again)}`);
       const after = await rig.vault.readFindingOutcomes();
       onlyResolution(after, b);
       if (after[0]?.sha256 !== first[0]?.sha256) throw new Error('I2: the outcome was rewritten by a second pass');
@@ -182,8 +182,8 @@ export const CODE_FINDING_RESOLVED_BY_COVERED_CHANGE = runtime({
 });
 
 export const RECORD_FINDING_NEVER_RESOLVED = runtime({
-  id: 'I5.record-finding-never-resolved',
-  title: "a nightly reviewer's finding that cites a record is never resolved, even by a walk that resolves a code finding, and is listed open",
+  id: 'I5.record-finding-never-addressed',
+  title: "a nightly reviewer's finding that cites a record is never addressed, even by a walk that addresses a code finding, and is listed open",
   timeoutMs: 60_000,
   run: async () => {
     const { listFindings } = await api();
