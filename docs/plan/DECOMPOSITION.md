@@ -653,6 +653,24 @@ order between them is settled before any of them is picked up.
 | R55 | An operator can read a draft, and the host refuses a rejected key ([#175](https://github.com/mikev10/olympus/issues/175), [#176](https://github.com/mikev10/olympus/issues/176)) | M2 | R19, R36b | — |
 | R56 | The relay forwards only the tools a task was granted ([#189](https://github.com/mikev10/olympus/issues/189)) (opens with a contract amendment) | M2 | P12, P13, R26 | — |
 | R57 | A build runs the locked acceptance tests in its own sandbox before it claims done ([#220](https://github.com/mikev10/olympus/issues/220)) | M2 | R37, R36b, R56 | — |
+| R58 | A refused run says so, and a spent budget parks at once ([#181](https://github.com/mikev10/olympus/issues/181), [#193](https://github.com/mikev10/olympus/issues/193)) (opens with a contract amendment) | M2 | P4, P9, P13, P14, R37 | — |
+| R59 | Token efficiency is reported, and a regression fails the benchmark ([#196](https://github.com/mikev10/olympus/issues/196)) | M2 | P13, R2, R7 | — |
+| R60 | What code can derive from a draft, code writes and checks ([#195](https://github.com/mikev10/olympus/issues/195), [#210](https://github.com/mikev10/olympus/issues/210)) | M2 | R15, R19, R36b, R37 | — |
+| R61 | One repository map per base commit ([#194](https://github.com/mikev10/olympus/issues/194)) | M2 | R19, R59, R60 | — |
+| R62 | The base install is reused while the lockfile is unchanged ([#184](https://github.com/mikev10/olympus/issues/184)) | M2 | R29, R34, R57 | — |
+| R63 | Drafted files stay out of the person's tree, and approved tests ship with the change ([#201](https://github.com/mikev10/olympus/issues/201), [#198](https://github.com/mikev10/olympus/issues/198)) | M2 | R15, R19, R36b, R55 | — |
+| R64 | `init` prepares the first run ([#183](https://github.com/mikev10/olympus/issues/183), [#209](https://github.com/mikev10/olympus/issues/209), [#200](https://github.com/mikev10/olympus/issues/200)) | M2 | R17, R26, R35, R36b | — |
+| R65 | Start-up checks every key the host holds ([#239](https://github.com/mikev10/olympus/issues/239)) | M2 | R6, R26, R55 | — |
+| R66 | The relay meters what it forwards, and starts on Windows ([#205](https://github.com/mikev10/olympus/issues/205), [#208](https://github.com/mikev10/olympus/issues/208), [#207](https://github.com/mikev10/olympus/issues/207)) | M2 | P13, R6, R26, R38, R56 | — |
+| R67 | Committed directories named like dependency trees are judged or refused ([#203](https://github.com/mikev10/olympus/issues/203)) | M2 | R17, R34 | — |
+| R68 | Instruction files loaded during tool use are covered ([#206](https://github.com/mikev10/olympus/issues/206)) | M2 | R24, R38, R52 | — |
+| R69 | A Python build runs its tests in its own sandbox ([#241](https://github.com/mikev10/olympus/issues/241)) | M2 | R29, R57 | — |
+| R70 | The benchmark can tell two critics apart, and a real model builds ([#227](https://github.com/mikev10/olympus/issues/227), [#223](https://github.com/mikev10/olympus/issues/223)) | M2 | R7, R19, R54 | — |
+| R71 | A committed benchmark result is bound to the run that produced it ([#228](https://github.com/mikev10/olympus/issues/228)) | M2 | R7, R38, R54 | — |
+| R72 | The Codex driver's tiers, chosen by the benchmark ([#236](https://github.com/mikev10/olympus/issues/236)) | M2 | P13, R7, R14, R26, R70 | — |
+| R73 | Review depth set by policy risk class ([#237](https://github.com/mikev10/olympus/issues/237)) (opens with a contract amendment) | M3 | P3, P14, R14 | — |
+| R74 | A run can start from a spec a person already approved ([#182](https://github.com/mikev10/olympus/issues/182)) | M3 | R11, R19 | — |
+| R75 | A spec for a UI change carries a mockup ([#191](https://github.com/mikev10/olympus/issues/191)) | M3 | R3, R19 | — |
 
 ### R1 — Readiness
 
@@ -3487,6 +3505,339 @@ init assertion off the intermittent list.
 `pnpm conformance` pass, each new entry shown failing with its guard removed;
 the paid suites, `I5.init-setup-merges-on-the-real-driver` among them, run
 under `run-driver` at merge (D-R57-01).
+
+---
+
+### The backlog after R57: every open issue has a home
+
+Placed on 2026-11-25, after R57 merged (#242). Thirty-two open issues named
+no unit: those found in R36b's proof runs, in the reviews of R38, R25, R28,
+R53 and R54, in R55 and R57, and three filed from the week's vendor
+releases. Each is now named by a unit below, folded into an existing unit,
+or listed as a watch item. Each section restates its issues; the spec is
+written when the unit starts and verified against the code then, so where a
+section and the code differ, the code wins and the start-unit record says
+so.
+
+**Folded into existing units:**
+- [#216](https://github.com/mikev10/olympus/issues/216) (suite and property checks read evidence from the process the
+  change runs in) joins R50. Both are the same gap: the process that
+  produces a verdict also runs code the change wrote, so a change can forge
+  the result it is judged by. R50's runner must also carry the verdict and
+  the property reports out of that process.
+- [#238](https://github.com/mikev10/olympus/issues/238) (what a sandboxed browser cannot reach) is input to R3's spec.
+- [#232](https://github.com/mikev10/olympus/issues/232) (a finding outcome that proves the problem fixed) joins R11, the
+  first reader that needs "fixed" rather than "addressed". It opens with a
+  contract amendment.
+- [#229](https://github.com/mikev10/olympus/issues/229) (the "resolved" rate measures a covered edit, not a fix) is the
+  amendment A-R28-02, open as #233, and closes with it.
+- [#218](https://github.com/mikev10/olympus/issues/218) (the nightly review seat's record names no harness image) is an
+  **amendment**: a field on a Vault type, which R53's decision record
+  recorded as contract work rather than unit work. It lands before the next
+  unit that changes `packages/api/src/nightly-review.ts`.
+
+**Watch item:** [#197](https://github.com/mikev10/olympus/issues/197) (spend tokens on judgment, do in code what code can
+do) is the tracker for R58 to R61 and stays open until they ship.
+
+**Closed before this,** each with its evidence in the issue: #180 and #192
+(fixed in R36b, D-R36b-10 and D-R36b-12), #185 (delivered by
+`scripts/local-check.ts`, D-TOOLING-13).
+
+**Suggested order:** R58 first: it is small, and every spent-budget retry
+it removes is paid for today. Then R66, because the relay's source is
+within about 2,500 characters of the Windows command-line limit and the
+next dialect check will cross it. Then R59, which is the measurement R60
+and R61 need to prove a saving, then R60 and R61. R63, R64 and R65 are what
+a first-time operator meets and come next, then R62, R67, R68, R69. The
+benchmark units run in order, R70, R71, R72, because R72's comparison is
+only worth paying for once the critic arm can tell two critics apart. The
+M3 units R73 to R75 wait for M2.
+
+### R58 — A refused run says so, and a spent budget parks at once
+
+Issues [#181](https://github.com/mikev10/olympus/issues/181), [#193](https://github.com/mikev10/olympus/issues/193). Both found in R36b's proof runs. A run refused at a
+station still reported `phase: working` and `standing: open` for forty
+minutes, so a client reading `status` could not tell it from one still
+working. And a relay refusal for a spent budget was classed as a driver
+failure and retried twice under the same budget, which cannot succeed.
+
+- `status` reports a refused run as refused: the station, the cause, and
+  the refusal's message, derived from the decision record and never from a
+  model's account.
+- A relay refusal for a spent budget parks the task at once, with a cause
+  that names the budget. No retry is started under an unchanged budget.
+
+**Opens with a contract amendment:** `ParkCause`
+(`packages/core/src/station/types.ts`) has no cause for a spent budget.
+
+**Out of scope:** raising or reshaping the budgets themselves.
+
+### R59 — Token efficiency is reported, and a regression fails the benchmark
+
+Issue [#196](https://github.com/mikev10/olympus/issues/196). `report` gives tokens and dollars per station and task, and
+nothing says whether they were spent well. In R36b a build read 593,227
+cached tokens to write 6,976, visible only by hand.
+
+- `report` adds, per task, the ratio of tokens read to tokens written and
+  the run's cost per accepted change, and names a task that ended on a
+  spent budget.
+- The benchmark records tokens per task for each fixture, and the model
+  tier fails when a fixture's tokens grow past a set margin over its
+  recorded baseline.
+
+Every figure is read from P13's usage records. It changes no gate on the
+line.
+
+### R60 — What code can derive from a draft, code writes and checks
+
+Issues [#195](https://github.com/mikev10/olympus/issues/195), [#210](https://github.com/mikev10/olympus/issues/210). A model writes fields that are facts about the
+repository, and gets them wrong: three paid test drafts failed on manifest
+shape alone (#195). And a drafted test whose imports cannot resolve fails
+on the base and passes the fails-on-base check for the wrong reason, so the
+build can never satisfy it (#210).
+
+- The test drafter writes only test files. The runtime builds the manifest
+  from them, and writes the stack facts `init` already detected.
+- A drafted test is accepted only when its failure on the base is the
+  failure of an assertion. One that cannot load is refused with a code the
+  drafter's retry is told.
+
+Neither change lets an agent write what it is judged by: the manifest moves
+from a model's draft to the runtime's code, and the lock before Build is
+unchanged.
+
+### R61 — One repository map per base commit
+
+Issue [#194](https://github.com/mikev10/olympus/issues/194). The spec drafter, the test drafter and the builder each
+explore the same tree at the same commit, and every file read is billed
+again on every later turn.
+
+- The runtime builds a map once per base commit, in code: the file tree
+  with sizes, each source file's exports and imports, and the files the
+  locked spec names.
+- Each seat starts from it and may still read anything its grants allow.
+- The map is recorded with its hash, so what a seat was handed can be
+  recomputed.
+
+**Depends on R59:** the saving is claimed only against R59's recorded
+baseline.
+
+### R62 — The base install is reused while the lockfile is unchanged
+
+Issue [#184](https://github.com/mikev10/olympus/issues/184). Each base run and each verify installs the lockfile from
+scratch, minutes per run on a real repository.
+
+- An install is keyed by the lockfile's hash, the stack image's content ID
+  and the install steps, and reused read-only when all three match.
+- It stays the runtime's: no task can write it, and a key that does not
+  match exactly installs afresh rather than reusing a near match.
+
+### R63 — Drafted files stay out of the person's tree, and approved tests ship with the change
+
+Issues [#201](https://github.com/mikev10/olympus/issues/201), [#198](https://github.com/mikev10/olympus/issues/198). Both found in R36b's proof runs, and both are about
+where drafted files end up. The drafting stations write into the person's
+live checkout and leave the files behind, where the project's own test
+command picks them up (#201). And the pull request the line opens holds the
+build's files without the approved acceptance tests it was verified
+against, so the repository gains the feature and loses the tests that
+proved it (#198).
+
+- Drafters write to a copy the runtime owns. Nothing is written to the
+  person's working tree, and nothing is left there when a run ends.
+- The pull request carries the locked test files beside the accepted diff,
+  byte for byte as recorded, and says which commit of the run locked them.
+
+**Needs maintainer design** at start: where an operator reads a draft once
+it no longer sits in their tree (R55's command is the likely answer), and
+whether a person may decline the tests in the pull request.
+
+### R64 — `init` prepares the first run
+
+Issues [#183](https://github.com/mikev10/olympus/issues/183), [#209](https://github.com/mikev10/olympus/issues/209), [#200](https://github.com/mikev10/olympus/issues/200). Three things a first-time operator learned
+late in R36b's runs: a security check that cannot finish inside its
+timeout on their repository, forty minutes into a paid run (#183); that a
+second model family can fill the critic and reviewer seats, which only a
+row in the README says (#209); and that a hosted preview fails for the
+factory's commits unless its git identity is allowed (#200).
+
+- `init` or the readiness scan runs each security check once over the
+  repository as installed, and reports any that does not finish inside its
+  timeout or produce a readable report, before any run is admitted.
+- `init` writes the second family's variables into `host.env`, commented
+  out, with what they buy and what they cost.
+- The getting-started guide gains a section on hosted previews.
+
+A reviewer may never share the author's model family, because a model
+judging its own family shares its blind spots. This unit makes that easy to
+satisfy on a first run; it does not change the rule or what is recorded
+when one family fills every seat.
+
+### R65 — Start-up checks every key the host holds
+
+Issue [#239](https://github.com/mikev10/olympus/issues/239). R55 made the host refuse a model key its provider rejects.
+The Codex key and the endpoint key are still checked only for being set, so
+a host with either rejected starts, admits a run, and fails every attempt
+of the seats that key fills.
+
+- For the Codex key, a request shown to cost nothing and to be open to
+  every key that can run a model, restricted keys included.
+- For an endpoint, a field in the endpoint file naming such a request. A
+  file that names none is accepted and reported as unchecked at start-up,
+  never as checked.
+
+**Changes a configuration shape:** the endpoint file, declared in scope.
+
+### R66 — The relay meters what it forwards, and starts on Windows
+
+Issues [#205](https://github.com/mikev10/olympus/issues/205), [#208](https://github.com/mikev10/olympus/issues/208), [#207](https://github.com/mikev10/olympus/issues/207). Two ways spend can escape the meter, from
+R38's review: a Chat Completions search model bills per search outside the
+token counts the meter reads (#205), and the `openai-responses` dialect
+does not read the tier an answer was served at, so a call served at another
+rate is priced at the default (#208). And the relay's source is one command
+argument, within about 2,500 characters of the Windows limit (#207).
+
+- A price table naming a model the relay knows bills per call is refused
+  at provisioning, unless it carries a per-call price.
+- The `openai-responses` dialect reads the served tier and stops
+  forwarding after an answer served at any tier but the default, as
+  `openai-chat` does.
+- The relay source no longer travels as one argument, with "nothing
+  mounted, no image build" still true, and a test fails when the argument
+  list for the largest shipped meter would exceed the limit.
+
+Each of the first two is a case where spend the budget cannot see is
+refused, not estimated.
+
+### R67 — Committed directories named like dependency trees are judged or refused
+
+Issue [#203](https://github.com/mikev10/olympus/issues/203). The install removes every directory named as one of the
+stack's dependency trees, at any depth, before the checks run. That
+includes directories the repository itself committed. Their content is
+never tested, scanned or reviewed, and it is what ships.
+
+**Needs maintainer design** at start. The two options the issue records:
+refuse at admission a base that commits such a directory, naming the path;
+or keep committed content in the judged tree and remove only what an
+install made. Either way no content in the base goes unjudged silently.
+
+### R68 — Instruction files loaded during tool use are covered
+
+Issue [#206](https://github.com/mikev10/olympus/issues/206). The assertion that a workspace's instruction files are not
+loaded compares what a session sends over an empty and a planted workspace,
+and never exercises files the CLI might load while a tool runs, such as a
+nested instruction file picked up when a read touches its directory.
+
+- The recording endpoint answers with a tool call that reads a planted
+  nested file, and the follow-up requests are compared across both
+  workspaces.
+- A control shows the planted file does load without the flag, so the
+  assertion fails when the protection is removed.
+
+A coverage gap, not observed behaviour of the pinned CLI.
+
+### R69 — A Python build runs its tests in its own sandbox
+
+Issue [#241](https://github.com/mikev10/olympus/issues/241). R57 gives the builder the runtime's install so it can run the
+locked acceptance tests before it finishes, only where the stack's checks
+run in the profile's image, which today means Node. A Python builder still
+never runs its tests.
+
+- A Python build has an install that runs in the driver's container.
+- What the test runner writes there is settled: `__pycache__` is a
+  dependency tree and `.pytest_cache` is not, so one would raise a finding
+  on every build and the other would be carried as part of the change.
+
+### R70 — The benchmark can tell two critics apart, and a real model builds
+
+Issues [#227](https://github.com/mikev10/olympus/issues/227), [#223](https://github.com/mikev10/olympus/issues/223). Both found in R54. At `deep`, the critic arm sent
+back every clean control for both models, six of six, so it cannot tell a
+careful critic from one that always objects (#227). And the benchmark seats
+a model only as a judge of finished work, so it says nothing about
+iterations or parks (#223).
+
+- The six control trials' findings are read and classified first. The
+  controls, the rubric, or the count of controls changes on that evidence.
+- An arm in which a real driver builds a small set of tasks through the
+  line, reporting attempts per station, parks and metered cost per model,
+  each with its sample size. The set includes at least one edge case, one
+  permission refusal and one failure case, not only clean work.
+
+**Decided at start:** whether a change to a prompt template or a tier map
+must carry this arm's result before and after. That would be a gate-path
+change and must be declared in scope if taken.
+
+**Cost:** a real build is many calls per item, so the arm runs under a cap
+the maintainer sets.
+
+### R71 — A committed benchmark result is bound to the run that produced it
+
+Issue [#228](https://github.com/mikev10/olympus/issues/228). From R54's review. Nothing ties a committed result file to
+the workflow run that wrote it, and the spending caps are enforced by the
+pull request's own code, so a branch that changed that code could spend
+past them.
+
+- A result names the run that produced it in a form the suite checks.
+- The caps are enforced by code the pull request cannot change.
+
+**Changes a gate path:** the paid workflows, declared in scope.
+
+### R72 — The Codex driver's tiers, chosen by the benchmark
+
+Issue [#236](https://github.com/mikev10/olympus/issues/236). OpenAI released GPT-6.2 Sol and Astra on 2026-11-17, and the
+driver's tier map still names the 5.6 models. The vendor's figures are the
+vendor's. As R54 did for the `claude` family, the unit runs R7's benchmark
+with each candidate in the seat, on the same tasks and repetitions, and the
+map changes only where a candidate is no worse on false-dones let through
+and clean work refused, and costs less. The result is committed under
+`docs/benchmark/` either way.
+
+Both models are in the `openai` family, so this changes which model sits in
+a seat, not who may review whom.
+
+**Depends on R70:** a comparison at `deep` is not worth paying for until
+the critic arm separates two critics.
+
+### R73 — Review depth set by policy risk class
+
+Issue [#237](https://github.com/mikev10/olympus/issues/237). Every change gets the same review seats. Policy names risk
+classes by path, and a class fixes the review tier, the number of reviewing
+families, and whether a human approval is required. The runtime classifies
+a change from the diff's paths alone and records the classification as a
+decision. A class can only raise depth above the default.
+
+No model picks the depth: one that rated its own change low-risk would be
+choosing how hard it is judged.
+
+**Opens with a contract amendment** to the policy document.
+
+**Why M3:** nothing in M2 is reviewed less than it should be today; this
+adds depth where a policy asks for it.
+
+### R74 — A run can start from a spec a person already approved
+
+Issue [#182](https://github.com/mikev10/olympus/issues/182). Each run of the same intent redrafts the spec from nothing,
+and the drafter asks the same questions again; in R36b a person answered
+them in three runs.
+
+**Needs maintainer design** at start. The issue records two options: admit
+a run with a spec approved in an earlier run, locked again under the new
+one; or carry earlier answers forward as context. Either way the spec a
+build is judged against is locked before Build, and no agent can write it.
+
+**Why M3:** the second option is the `learn` station's territory (R11).
+
+### R75 — A spec for a UI change carries a mockup
+
+Issue [#191](https://github.com/mikev10/olympus/issues/191). The spec gate is the last point where a person shapes what
+gets built, and for a UI change it approves layout from text alone.
+
+- For an intent that touches the UI, the spec draft carries a static
+  mockup with no scripts and no network access, beside the spec.
+- The mockup is an illustration for the person at the gate. It is not an
+  acceptance criterion and no check reads it.
+
+**Why M3:** it belongs with R3, which gives the line a browser to judge a
+UI by.
 
 ## Working Rules
 
