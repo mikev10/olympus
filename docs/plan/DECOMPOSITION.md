@@ -598,7 +598,8 @@ order between them is settled before any of them is picked up.
 | R2 | Outcome measurement | M2 | P4, P6, P9, P14 | `docs/plan/R2-outcomes.md` |
 | R3 | Behavioral breadth (browser) | M3 | P8, P5 | — |
 | R4 | Parallel task execution | M2 | P4, P6, I1 | `docs/plan/R4-parallel.md` |
-| R5 | Goal decomposition | M3 | R4, R20 | — |
+| R5a | Drafting at `plan` | M2 | R4, R19, R20 | `docs/plan/R5-planning.md` |
+| R5b | Goal decomposition | M3 | R5a, R4, R20 | — |
 | R6 | Driver: any OpenAI-compatible endpoint | M2 | P5, P10, P12 | `docs/plan/R6-openai-compatible.md` |
 | R7 | False-done benchmark | M2 | P6, P7, I1, R17, R19 | `docs/plan/R7-benchmark.md` |
 | R8a | Post-merge attribution and the baseline | M2 | I1, R2, R22 | `docs/plan/R8-observe.md` |
@@ -779,11 +780,49 @@ happened. Binding:
   finish, and their evidence is recorded
 - status is derived per task, as it is today. No task reports on another
 
-### R5 — Goal decomposition
+### R5a — Drafting at `plan`
+
+**Spec:** `docs/plan/R5-planning.md`, written by the amendment that split R5
+(D-A-GD-01 to D-A-GD-07). Where this entry and the spec differ, the spec is
+the one verified against the code.
+
+The task graph is a file a person writes before the run starts, and `plan`
+locks it. A run that drafts its spec and tests is still admitted with one, a
+single build task that cannot depend on a spec not yet written. This unit
+seats a planner at `plan`: it reads the locked spec and the repository,
+proposes the build tasks and their order, and the proposal goes through the
+station's gate and is locked before any builder is seated. Binding:
+
+- the drafted graph is a *proposal*. It is locked in the Vault before any
+  task is created, approved through the policy's gate for `plan` under R19's
+  drafted floor, and no seat can edit it after the lock
+- policy grants planning or the run is refused: the most build tasks a
+  drafted graph may hold and the roles it may seat them under are a person's
+  edit to policy. A planner that could name any role would be choosing a
+  task's tools, egress and budget
+- the cost a person approves at admission is the bound's worst case, and no
+  drafted graph can exceed it. A graph past the bound is sent back, never run
+- the planner writes build tasks only. The runtime derives the review task
+  and its security seat, so the author's side never arranges what is reviewed
+- every drafted build task states its objective, which reaches its builder as
+  granted context and reaches no review seat
+- the planner reads the locked spec, never the intent or a trigger's input
+
+**Not in this unit:** a goal above the spec (R5b); enforcing `dependencySet`;
+replanning after a park or any change to a locked graph; a plan reviewed in a
+pull request (`VISION-GAP.md`, R-B); `auto` on a drafted graph at L3; scoring
+a plan's quality (R11). The spec's list is the binding one.
+
+**Why M2:** `VISION-GAP.md` puts plan decomposition in the first-release
+headline, idea to spec to locked tests, and R19 already drafts the two
+artifacts before it. Its dependencies, R4, R19 and R20, have all shipped.
+
+### R5b — Goal decomposition
 
 Today a run starts from one spec. This unit adds the level above: a goal that
 decomposes into several specs, with dependencies between them, each carried
-through the full line as its own run. Binding:
+through the full line as its own run. Each child run drafts its own task graph
+through R5a. Binding:
 
 - the decomposition is a *proposal*. It is locked in the Vault before any
   child run starts, and it is approved through the policy's gate for the
@@ -798,6 +837,9 @@ through the full line as its own run. Binding:
   work or its judge
 - "goal" is a new artifact. Adding it to the spine's vocabulary is a
   deliberate amendment the unit takes first, as R1 did with `readiness`
+
+It has no spec yet. The amendment that writes one settles its deliverables,
+out-of-scope list, conformance and acceptance criteria before the unit starts.
 
 ### R6 — Driver: any OpenAI-compatible endpoint
 
@@ -1806,7 +1848,7 @@ Binding:
 
 **Not in this unit:** drafting at `plan`. A run that drafts its spec is admitted
 with a task graph that does not depend on the spec's content, the single build
-task M1 runs; a graph derived from the spec is R5's. Also out: the role format,
+task M1 runs; a graph derived from the spec is R5a's. Also out: the role format,
 compiler, and renderer, which are R20's; `auto` on a
 drafted artifact at L3; reviving a parked run; a drafter for the rest of the
 verification manifest; and R16's bug-fix intent, which is R16's.
@@ -2031,7 +2073,7 @@ Binding:
 - the `compiler` package, depending on `core`'s published types only
 
 **Not in this unit:** the roles for R19's drafters and critics, which are
-R19's; R5's planner role; R11's proposals to roles; an API, CLI, or approval
+R19's; R5a's planner role; R11's proposals to roles; an API, CLI, or approval
 flow for editing a role, which is a person's edit to a file as policy is;
 rates keyed by role version (R11); a review seat with its own policy scope
 (R9); any change to what `emitArtifacts` does; and the Codex driver's
@@ -2058,7 +2100,7 @@ written into the workspace to deliver them; the review seat runs under the
 given an `UntrustedPayload` does not compile; and a `CompiledRole` still
 carries no grant.
 
-**Why M2:** R19's drafters and critics, R5's planner, and R11's proposals all
+**Why M2:** R19's drafters and critics, R5a's planner, and R11's proposals all
 assume roles with content, and a unit started on that assumption would invent
 the format inside its own scope.
 

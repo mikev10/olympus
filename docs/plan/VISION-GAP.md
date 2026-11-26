@@ -100,7 +100,7 @@ rule the model is only asked to follow is a rule it skips (section 9).
 | # | Step | Today | Gap |
 |---|---|---|---|
 | 1 | Idea and brainstorm | Missing | No conversational intake. The user writes `spec.md` by hand. |
-| 2 | Plan / PRD in phases and tasks | Missing | `graph.json` is hand-written; R5 (goal decomposition) is M3, unstarted. |
+| 2 | Plan / PRD in phases and tasks | Missing | `graph.json` is hand-written; R5a (drafting at `plan`) is M2 and specified, unstarted. R5b (goal decomposition) is M3. |
 | 3 | Plan reviewed in a PR, cross-family | Missing | R-B. |
 | 4 | Spec and acceptance tests | Partial | R19 drafting shipped but halts in real use (#151). `verify.json` is hand-written. |
 | 5 | Spec and tests reviewed | Partial | R19 has a critic seat; no PR, no plain-English briefing. |
@@ -158,7 +158,7 @@ drivers; none ran the shipped example against the real driver.
    working policy, manifest and checks for the detected stack.
 2. **Idea → spec → locked tests, excellent.** The first-release headline. The
    front-door skills (brainstorm, plan, spec), R-A, R-B, R-E, R-F, and the
-   plan decomposition (pull R5 forward from M3).
+   plan decomposition (R5a, split from R5 and pulled forward to M2).
 3. **Build quality.** Model and effort per role (R-D), build-side role
    prompts, token-efficiency targets (R-G).
 4. **New apps from nothing** (R-I).
