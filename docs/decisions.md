@@ -14040,3 +14040,168 @@ the line of D-R58-04 that judged a successful call as before.
   calls each end just under their bound can use every iteration.
 - **Reverse** by removing the check in `startAttempt` and the commit in
   `runTask`, and restoring the two comments.
+## R66 — The relay meters what it forwards, and starts on Windows
+
+### D-R66-01: boundary, verified
+
+- **Deliverables:**
+  - A price table naming a model the relay knows searches on every call is
+    refused at provisioning (`checkMeter`), and by the relay's own start
+    checks (#205).
+  - The `openai-responses` dialect reads the tier an answer reports, from the
+    body and from the `response.completed` event, and stops forwarding after
+    one served at any tier but `default`, as `openai-chat` does (#208).
+  - The relay source reaches the container on standard input and is in no
+    argument. Nothing is mounted and no image is built (#207).
+  - A measure of the Windows command line for the relay's argument list, a
+    test over each shipped meter that fails past the limit, and conformance
+    cases for each of the above, each shown failing with its guard removed.
+    A changeset for every package changed.
+- **Out of scope** (the entry names none; proposed here from the issues and
+  the neighbouring entries): charging a per-call price, which needs a field
+  on `ModelPrice` and is a contract change (D-R66-04); the proxy's and the
+  probe's sources, which also travel as one argument and are a fraction of
+  the limit; what the `anthropic-messages` dialect reads; any price or
+  budget; a refusal for an operator's price table too large for the Windows
+  command line, beyond the error `spawn` already gives.
+- **Acceptance:** `pnpm -r typecheck`, `pnpm -r lint`, `pnpm -r test`, and
+  `pnpm conformance` pass. Each new case is shown failing with its guard
+  removed. The paid Codex suite runs under `run-driver` at merge and is the
+  first real answer the new tier check reads (D-R66-02).
+- **Invariants:**
+  - Fail closed (I5): spend the meter cannot count is refused, never
+    estimated and never forwarded with a warning. Both metering deliverables
+    are this rule.
+  - Default deny (I4): the relay container keeps `--read-only`, `--cap-drop
+    ALL`, no mount, and no route it did not have.
+  - Every claim maps to an assertion that fails when the capability is
+    deleted (I8): each deliverable has a case shown failing first.
+  - No Greek names in code (I10).
+- **Pending registry entries owed:** none name R66
+  (`packages/conformance/pending-baseline.json`).
+
+### D-R66-02: assumptions, each verified
+
+- **The dependencies have shipped.** `reviewed/P13`, `reviewed/R6`,
+  `reviewed/R26`, `reviewed/R38`, and `reviewed/R56` are ancestors of
+  `origin/v2` (`git merge-base --is-ancestor`).
+- **The responses dialect does not read the answer's tier.**
+  `u.tierOpenai` is called for `openai-chat` alone, in `streamParser` and
+  `bodyParser` (`packages/sandbox/src/local/relay.ts:395`, `:432`). `charge`
+  already stops forwarding on `offTier` for any dialect (`:454`, `:472`).
+- **A Responses answer carries `service_tier` at its top level.** OpenAI's
+  published OpenAPI document puts it on `ModelResponseProperties`, which the
+  response object includes, and says "the response body will include the
+  `service_tier` utilized" (`openai/openai-openapi`, `manual_spec` branch,
+  read 2026-11-26). The streamed `response.completed` event carries the whole
+  response object, which is where the relay already reads its usage.
+- **Not verified from here: the value a live Responses answer reports when
+  the request names no tier.** The document's examples show `default`. No
+  recorded live answer is in the repository, and reading one costs a paid
+  call. If the live API reports anything else, the relay stops forwarding
+  after the first call, which is the fail-closed direction, and the paid
+  Codex suite at the merge gate fails visibly. The tier is read from
+  `response.completed` alone, because earlier events can carry the tier as
+  requested rather than as served.
+- **Nothing restricts which models a meter prices.** `checkMeter` checks
+  each price's fields and nothing about the name (`relay.ts:1123-1167`). It
+  also builds each price from the known fields alone, so a field it does not
+  know is dropped, not charged.
+- **`ModelPrice` is a contract.** It is in `packages/sandbox/src/types.ts`,
+  which matches `^packages/([^/]+/)?[^/]+/src/.*types\.ts$`
+  (`.github/protected-paths.txt`). The entry declares no amendment, where
+  R58's does.
+- **No shipped configuration prices a search model.** The Claude Code and
+  Codex drivers' tables name no such model
+  (`packages/drivers/claude-code/src/driver.ts:91`,
+  `packages/drivers/codex/src/driver.ts:87`); the openai-compatible driver's
+  table is the operator's.
+- **Which models search on every call, as far as it can be read from here:**
+  OpenAI's web-search guide says Chat Completions search models always
+  search, names `gpt-4o-search-preview` and `gpt-4o-mini-search-preview` as
+  retired on 2026-07-23, and names `gpt-5-search-api` as current. Its pricing
+  page was read by a subagent as listing `gpt-5-search-api` with token prices
+  and no per-call fee. That reading is second-hand and is not relied on
+  (D-R66-04).
+- **The source is one argument today.** `startRelay` ends its `docker run`
+  with `'node', '--eval', RELAY_SOURCE` (`relay.ts:1299`). The built source
+  is 25,760 characters.
+- **`docker cp` cannot put the source in.** Run here against Docker 29.8.0:
+  `docker cp` into a container created with `--read-only` answers "container
+  rootfs is marked read-only".
+- **Standard input can.** Run here: `docker create --interactive --read-only
+  --cap-drop ALL --init <image> node -`, then `docker start --interactive`
+  with a 40,000-character script on standard input, runs the script;
+  `Config.StdinOnce` is true, so the end of input reaches `node`. The client
+  stays attached, and killing it leaves the container running.
+- **Four other places pass the source as an argument,** all tests:
+  `packages/sandbox/test/relay.test.ts:898`, `:960`, `:985`, and
+  `relayStart` in `packages/conformance/src/registry/local-endpoint.ts:260`.
+  They move to standard input too, or the next growth of the source breaks
+  them on Windows.
+- **No one package sees every shipped meter without a paid suite.**
+  `conformance` does not depend on the drivers, and the api package's one
+  reported suite is the paid one. Each driver depends on `sandbox`.
+
+### D-R66-03: choices
+
+- **How the source reaches the container.**
+  - (a) `docker create --interactive … node -`, then `docker start
+    --interactive` with the source on standard input. **Chosen.** No mount,
+    no image build, no file, no loosened flag, and no limit below the
+    daemon's.
+  - (b) Create, `docker cp`, start. Rejected: refused on a read-only root
+    (D-R66-02). It would need `--read-only` dropped or a volume added, each
+    of which weakens the container to move a string.
+  - (c) An environment variable evaluated by a one-line program. Rejected:
+    one variable is limited to 32,767 characters on Windows, so it moves the
+    ceiling by the length of the other arguments and no further.
+  - (d) Compress the source into the argument. Rejected: still one argument,
+    and a ceiling about three times further away is still a ceiling.
+  - (e) A loader that takes the source over a socket from a `docker exec`.
+    Rejected: a listener that runs what it is sent is a new way in.
+  - **Cost of (a):** the `docker start` client stays attached until it is
+    killed, which `startRelay` does once the relay listens or the start
+    fails. It is killed with SIGKILL, which a client cannot proxy to the
+    container. The container is connected to its outbound network before it
+    starts rather than after, which no longer leaves a moment where the
+    relay runs without it.
+  - **Reverse:** restore `'node', '--eval', RELAY_SOURCE` on one `docker
+    run --detach`.
+- **Where the tier is read under `openai-responses`.** From the body's
+  `service_tier` and from `response.completed`'s `response.service_tier`,
+  through the same `u.tierOpenai` the chat dialect uses. An answer naming no
+  tier is read at the table's rate, as under `openai-chat` (D-R38-06), so
+  that a local endpoint keeps working. Requiring the field was rejected
+  there for that reason and is rejected here. **Reverse:** drop the two
+  calls.
+- **Where the limit test lives.** A measure in `sandbox`
+  (`windowsCommandLineLength`, quoting as Node does on Windows, and
+  `relayCreateArgs`, the argument list as `startRelay` builds it), proved by
+  a conformance case; and a test in each driver that ships a meter, over
+  that driver's own table. Rejected: one test in `api`, whose only reported
+  suite is paid. **Reverse:** delete the two tests and the helpers.
+- **Which names the relay knows.** A model id ending `-search-preview` or
+  `-search-api`, with or without a date suffix. Rejected: any id containing
+  `search`, which would refuse a local model for its name. The list is what
+  could be read on 2026-11-26 and is incomplete by nature: a search model
+  under a name the relay does not know is not caught. **Reverse:** delete
+  `PER_CALL_MODEL` and its two checks.
+
+### D-R66-04: open, for the maintainer — the per-call price
+
+The entry says a table naming such a model is refused "unless it carries a
+per-call price". `ModelPrice` has no such field, and adding one is a
+contract change this unit does not declare. Built so far: the refusal, which
+both readings need. Options:
+
+1. **Refuse, with no per-call price (recommended).** The criterion holds
+   with its exception unreachable. No live model could be confirmed to bill
+   a flat per-call fee an operator could declare: the two preview models
+   that did are retired, and what `gpt-5-search-api` bills could not be
+   verified first-hand. A price field nobody can check against a real bill
+   is an estimate, which the entry's last line rules out. The entry's first
+   bullet is amended to drop "unless it carries a per-call price".
+2. Amend `ModelPrice` with `perCallUsd`, charged on every successful call,
+   and accept it in the openai-compatible driver's configuration. Needs a
+   confirmed amendment before it is built.
