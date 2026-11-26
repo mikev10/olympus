@@ -294,8 +294,11 @@ change, then apply them. A fix is applied only when all of these hold:
 A fix that turns out larger or different from its line is re-verified against
 these limits before it lands, and its line in the triage is corrected.
 
-On the unit branch, never on `v2`. One commit per fix, naming the finding. Re-run the unit's full acceptance criteria
-afterwards, not just the tests near the change.
+On the unit branch, never on `v2`. One commit per fix, naming the finding, each
+committed only after `node scripts/local-check.ts preflight` passes on it with
+the registry entries the fix touches named. Re-run the unit's full acceptance
+criteria afterwards (`node scripts/local-check.ts full`, once, after the last
+fix), not just the tests near the change.
 
 **Never weaken a check, a test, an assertion, or an acceptance criterion to
 satisfy a finding.** A reviewer asking for that has found a disagreement
