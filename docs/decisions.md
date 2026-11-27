@@ -14251,6 +14251,6 @@ adds a per-call price to `ModelPrice` and lets a table carrying one through
   I10.no-greek-names-in-code` (typecheck, lint, the unpaid driver suites,
   the sandbox suite at 223 passed and 2 skipped, and the entry), and both
   `relay-argv` tests.
-- **Not rerun:** the full run as a whole. The one change since it is a
-  string in two test files, and every check that string can reach was
-  rerun.
+- **The full run, run again on the fixed code, passed:** nothing failed
+  locally. 27 registry entries need the paid suites and are not run here;
+  the pull request's paid job is their proof.
