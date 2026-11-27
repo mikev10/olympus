@@ -14188,7 +14188,7 @@ the line of D-R58-04 that judged a successful call as before.
   under a name the relay does not know is not caught. **Reverse:** delete
   `PER_CALL_MODEL` and its two checks.
 
-### D-R66-04: open, for the maintainer — the per-call price
+### D-R66-04: the per-call price — refused, with no price field (confirmed 2026-11-26)
 
 The entry says a table naming such a model is refused "unless it carries a
 per-call price". `ModelPrice` has no such field, and adding one is a
@@ -14205,6 +14205,12 @@ both readings need. Options:
 2. Amend `ModelPrice` with `perCallUsd`, charged on every successful call,
    and accept it in the openai-compatible driver's configuration. Needs a
    confirmed amendment before it is built.
+
+**Confirmed by the maintainer, 2026-11-26: option 1.** The entry's first
+bullet in `docs/plan/DECOMPOSITION.md` now ends at "refused at
+provisioning". `ModelPrice` is unchanged. **Reverse:** a later amendment
+adds a per-call price to `ModelPrice` and lets a table carrying one through
+`checkMeter` and the relay's start check.
 
 ### D-R66-05: where it was built, and what was run
 
