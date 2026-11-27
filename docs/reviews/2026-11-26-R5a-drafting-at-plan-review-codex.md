@@ -1,3 +1,41 @@
+# External review of R5a, codex, 2026-11-26
+
+R5a (drafting at `plan`), reviewed from the bundle alone. The triage of this reply
+and Gemini's is `2026-11-26-R5a-drafting-at-plan-triage.md`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex. A headless `codex exec` run under a
+  read-only sandbox, with recorded approval policy `never`, in an empty scratch
+  working directory and a scratch config home holding only `auth.json`, with an
+  environment of `CODEX_HOME` alone. The pre-run listing of both is the manifest's
+  `cleanRoom`.
+- **Cross-family agreement:** none. Its one finding (a builder's tree holds the
+  locked graph file) was not raised by Gemini, and it raised neither of Gemini's
+  two.
+- **Date:** 2026-11-26
+- **Bundle:** `2026-11-26-R5a-drafting-at-plan-review-bundle.txt`, SHA-256
+  `754837ca862f486d2c06d9c26b740c359f5c355f19609ad2dadf410d4917caa1`, base `e3e851c`
+  (`reviewed/R58`), head `be7353a` (R5a's tip before the review files). It held 52
+  changed files: R5a's, and the one change merged since R58's review (the
+  local-check tooling, #250). `docs/decisions.md`, `docs/reviews/`, `docs/plan/` and
+  `pnpm-lock.yaml` were excluded. Prompt:
+  `2026-11-26-R5a-drafting-at-plan-review-prompt.txt`.
+- **Prior context and lookups:** it said it had no prior project context and made
+  no external lookups, that a local file-listing command was blocked, and that it
+  ran no tests. This is a self-report and cannot be verified independently.
+- **Coverage, and any gap:** items 1, 2, 3, 4, 6 and 7 were answered: one
+  construction; no tautological assertion, with the objective assertion called too
+  narrow; no fail-open path found; no language escape hatch found; five mechanisms
+  assessed sound; the framing called right, with an extension. Item 5 (ways the
+  configuration can be satisfied without doing what it appears to do) was not
+  answered. It said it could not assess `worstCaseCost` or `reviewView`, which the
+  bundle did not show whole. Silence is not an endorsement.
+- **Citations:** line numbers are positions in the bundle's diffs, not in the
+  repository. Each was treated as a hint to the function it names.
+
+---
+
 BASE: reviewed/R58  
 HEAD: be7353a  
 scripts/test/local-check.test.ts  

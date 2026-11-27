@@ -1,3 +1,38 @@
+# External review of R5a, gemini, 2026-11-26
+
+R5a (drafting at `plan`), reviewed from the bundle alone. The triage of this reply
+and Codex's is `2026-11-26-R5a-drafting-at-plan-triage.md`.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini. A direct `generateContent`
+  API call to `gemini-3.1-pro-preview`, offering no tools. `cleanRoom` is `null`
+  because an API call loads no local configuration. This is the family's third
+  run: the first two were `FAILED`, each an HTTP 402 from Google for depleted
+  prepaid credit before any reply, and are kept as `.attempt-1` and `.attempt-2`.
+- **Cross-family agreement:** none. Neither of its two findings (the costliest
+  role chosen by per-call ceiling; the review seat offered grants its contract
+  drops) was raised by Codex, and it did not raise Codex's one.
+- **Date:** 2026-11-26
+- **Bundle:** `2026-11-26-R5a-drafting-at-plan-review-bundle.txt`, SHA-256
+  `754837ca862f486d2c06d9c26b740c359f5c355f19609ad2dadf410d4917caa1`, base `e3e851c`
+  (`reviewed/R58`), head `be7353a` (R5a's tip before the review files). It held 52
+  changed files: R5a's, and the one change merged since R58's review (the
+  local-check tooling, #250). `docs/decisions.md`, `docs/reviews/`, `docs/plan/` and
+  `pnpm-lock.yaml` were excluded. Prompt:
+  `2026-11-26-R5a-drafting-at-plan-review-prompt.txt`.
+- **Prior context and lookups:** it said it had no prior context and made no
+  external lookups. This is a self-report and cannot be verified independently.
+- **Coverage, and any gap:** it raised two findings, one of which it filed under
+  item 5. Items 2, 3, 4, 6 and 7 were not answered: it named no tautological
+  check, no fail-open path, no language escape hatch, assessed no mechanism as
+  sound beyond one general sentence, and said nothing on whether the framing was
+  right. Silence is not an endorsement.
+- **Citations:** line numbers are positions in the bundle's diffs, not in the
+  repository. Each was treated as a hint to the function it names.
+
+---
+
 BASE: reviewed/R58
 HEAD: be7353a
 scripts/test/local-check.test.ts

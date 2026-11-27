@@ -14297,10 +14297,10 @@ a place the declared deliverables land.
   back, because the Vault refuses a draft record with no file. This is
   R19's behaviour at every drafting station. Changing it is a change to
   what the Vault accepts and is not this unit's.
-- The builder's tree holds the locked `graph.json`, as it holds a supplied
-  graph file today, so a builder that opens it reads every objective. The
-  `task-graph` grant is what the runtime tells it; the file is locked and a
-  change to it is a tamper.
+- A supplied graph's file is in a builder's tree, as it was before this
+  unit, so a builder that opens it reads any objective the person wrote
+  there. A drafted graph's locked file is left out of every builder's tree
+  (D-R5a-10).
 - The spec's own two: the runtime checks shape and bound, not whether the
   plan is good; an objective is model-written text in a builder's context,
   approved with the graph and bounded in size.
@@ -14410,3 +14410,27 @@ roles that existed before.
   admitted with a graph file, so its planner and plan critic are never
   seated. It now requires that those two were not called, and that every
   other seat was. Nothing it reads of the seats that ran is loosened.
+
+### D-R5a-10: external review, what was fixed and what was rejected
+
+Triage: `docs/reviews/2026-11-26-R5a-drafting-at-plan-triage.md`. Three
+findings, none raised by both families.
+
+- **Fixed (codex-1): a drafted graph's locked file is left out of every
+  builder's tree.** D-R5a-05 first recorded the file in a builder's tree as a
+  limit, on the ground that a supplied graph file is there too. The review
+  showed the ground does not carry: the objective filter in the
+  `task-graph` grant was then a filter a file read defeats. `build` now
+  omits the path from both copies, as a withheld path is omitted, and
+  `I3.objective-reaches-the-builder-never-the-reviewer` reads each
+  builder's tree; it failed against the code as reviewed. *Rejected:*
+  keeping the graph out of the base, which the spec's lock writes it into;
+  and dropping the filter. *Reverse:* remove the two lines in `build`.
+- **Rejected (gemini-1): the costliest role is not the costliest.** The
+  worst case is a call count, the same for every build task, times
+  `budget.maxCostUsd`. Tier and escalation enter neither, and the case the
+  finding describes was run and cost less than the bound's figure.
+- **Rejected (gemini-2): the review seat is offered `plan` and
+  `author-narrative` and gets neither.** Deliberate, on `v2` before this
+  unit, and what `I6.reviewer-receives-no-author-material` depends on.
+
