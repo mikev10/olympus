@@ -14229,3 +14229,26 @@ Run on 2026-11-26, before the rebuild in D-R3-14 and on the same R3 code, one gu
 - **Left alone:** `unit/r66` and `../olympus-r39`, which are the R66 session's. `unit/r66` still holds this unit's five commits on top of R66's first; R66 continued on `unit/r66-relay`, which does not.
 - **Corrected in D-R3-01 and D-R3-05:** the first record cited R66's relay as the precedent for a program on standard input. That work is not on `v2`. The fact it supported is verified by this unit's own test.
 - **Reverse:** nothing to reverse; the first copies remain on `unit/r66` until its owner removes them.
+
+### D-R3-15: three review fixes, each shown failing first
+
+From the external review, triaged in `docs/reviews/2026-11-26-R3-browser-triage.md`. Each was verified by running the reviewer's construction against the real browser before anything changed.
+
+- **codex-2, `fill` set a disabled select.** Verified: a disabled `<select>`, and a disabled option of an enabled one, were set and their `change` handlers ran. `CHOOSE` now refuses both, and the step fails. A disabled button or text field needed no change: a real click or keystroke does nothing there, which is what a person gets, and the next observation shows it.
+- **codex-1, in part: text on an element nobody can see.** Verified: `display:none` text is found, reported `visible: false`, and held an expectation that named `text` and not `visible`. `compareBrowser` now requires a visible element for `text` and `value` unless the scenario names `visible` itself. This is a second implied field, beside `matched` (D-R3-08). **Reverse:** drop the branch in `compareObservation`.
+- **codex-4, nothing asserted the runner's own script world.** Verified: the world works, and no entry failed without it. `I2.browser-verdict-judged-outside-the-product` now judges a page that rewrites what its own scripts read, with the page's title as the control that the rewrite took. With the runner's reads moved into the page's world the entry fails: "a page that reports itself as showing the expected text held".
+
+### D-R3-16: `visible` does not mean unclipped, uncovered, or on screen, and R76 owns that
+
+- **Found by codex-1, verified:** an element clipped away by `clip-path: inset(100%)` is reported `visible: true`. A covered element and one outside the viewport are too.
+- **Options:** (a) a hit test at the element's centre; (b) leave it and record it.
+- **Chosen: (b), owned by R76, issue #252.** A hit test reads text under a transparent overlay, or with `pointer-events: none`, as hidden, so it trades one wrong answer for another, and picking between them changes what `visible` means in `BrowseObservation`. That is a contract question. Screenshots are out of this unit's scope.
+- **What this means for claims:** `visible: true` is evidence the element is rendered, and not evidence a person can see it. R76 settles it before the line relies on it.
+- **Reverse:** add the hit test to `DESCRIBE` and amend the contract's comment.
+
+### D-R3-17: a request the page's own policy blocks is not a refused host
+
+- **Found by codex-3, verified:** a page with `Content-Security-Policy: img-src 'none'` and an image on another host reports no refused host. Chrome blocks the request before it reaches the proxy.
+- **Chosen:** no change. The rule is about a host the sandbox kept the page from reaching, so a page cannot pass unexercised. This request is blocked by the page's own policy wherever the page runs, so nothing the sandbox withheld went untested.
+- **Rejected:** reporting every request Chrome fails. It would fail pages for requests that are never sent anywhere.
+- **Reverse:** read the blocked reason from the protocol's failure event and report its host.

@@ -1,3 +1,19 @@
+# External review of R3, codex, 2026-11-26
+
+A review of R3, the browser behavioral adapter and the browser it observes through, by one of two independent families. Each finding is verified and decided in `2026-11-26-R3-browser-triage.md`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex. A headless `codex exec` run under a read-only sandbox, with recorded approval policy `never`, in an empty scratch working directory and a scratch config home holding only `auth.json`, with an environment of `CODEX_HOME` alone. The pre-run listing of both is the manifest's `cleanRoom`.
+- **Cross-family agreement:** none. All four findings (codex-1 to codex-4) were raised by this family alone. Gemini assessed the script-world isolation as sound, where codex-4 says nothing asserts it; those are different claims and both hold.
+- **Date:** 2026-11-26
+- **Bundle:** `2026-11-26-R3-browser-review-bundle.txt`, SHA-256 `52be323423fb2f77666760e9fb2446bffc55c75fdab441de62381c9fa3b72aa1`, base `e3e851c` (`reviewed/R58`), head `43703db` (the unit's one commit, before any review fix). It held every new file in full and every modified file as a function-context diff, 20 sections. Excluded by construction: `docs/decisions.md`, `docs/reviews/`, `docs/plan/`, and `pnpm-lock.yaml`. Prompt: `2026-11-26-R3-browser-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated it had no prior project context and performed no external lookups, and that local command execution was denied, so it ran nothing. A self-report, not independently verifiable.
+- **Coverage, and any gap:** item 1 answered (codex-1 to codex-3). Item 2 answered: no strictly tautological assertion found, with codex-4 on what the assertions do not establish. Item 3 answered: no path found where an exception becomes a pass. Item 4 answered briefly. Item 5, configuration satisfied without doing what it appears to, was not addressed. Item 6 answered. Item 7 answered: the framing was called appropriate, with a distinction drawn between authentic evidence and perceptible content.
+- **Citations:** line numbers refer to positions in the bundle and were treated as hints. Each finding was located by the construct it describes.
+
+---
+
 BASE: reviewed/R58  
 HEAD: 43703db  
 packages/sandbox/test/browse.test.ts  

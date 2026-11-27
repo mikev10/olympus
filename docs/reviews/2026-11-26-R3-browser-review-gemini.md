@@ -1,3 +1,19 @@
+# External review of R3, gemini, 2026-11-26
+
+A review of R3, the browser behavioral adapter and the browser it observes through, by one of two independent families. Its one finding is verified and decided in `2026-11-26-R3-browser-triage.md`.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini. A direct `generateContent` API call to `gemini-3.1-pro-preview`, offering no tools. `cleanRoom` is `null` because an API call loads no local configuration.
+- **Cross-family agreement:** none. Its one finding (gemini-1) was raised by this family alone, and it raised none of Codex's four.
+- **Date:** 2026-11-26
+- **Bundle:** `2026-11-26-R3-browser-review-bundle.txt`, SHA-256 `52be323423fb2f77666760e9fb2446bffc55c75fdab441de62381c9fa3b72aa1`, base `e3e851c` (`reviewed/R58`), head `43703db` (the unit's one commit, before any review fix). It held every new file in full and every modified file as a function-context diff, 20 sections. Excluded by construction: `docs/decisions.md`, `docs/reviews/`, `docs/plan/`, and `pnpm-lock.yaml`. Prompt: `2026-11-26-R3-browser-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated it set aside any prior context and performed no external lookups. A self-report, not independently verifiable.
+- **Coverage, and any gap:** items 2, 6, and 7 answered. Items 1, 3, 4, and 5 came back empty: no bypass construction, nothing on failing open, nothing on language escape hatches, nothing on configuration. That silence is recorded and is not read as clearance; Codex found three constructions under item 1 that this review did not.
+- **Citations:** line numbers refer to positions in the bundle and were treated as hints. The finding was located by the construct it describes.
+
+---
+
 BASE: reviewed/R58
 HEAD: 43703db
 packages/sandbox/test/browse.test.ts
