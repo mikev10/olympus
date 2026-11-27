@@ -41,7 +41,8 @@ export interface BrowserInput {
  * What one `observe` step must show. Only the fields named are compared, and
  * at least one is named. Unless `matched` is named, the target must have
  * matched exactly one element: an expectation is never held against one
- * element picked from several, or against none (D-R3-08).
+ * element picked from several, or against none (D-R3-08). Unless `visible` is
+ * named, `text` and `value` are held against a visible element only.
  */
 export interface BrowserExpectedObservation {
   readonly matched?: number;
@@ -218,6 +219,11 @@ function compareObservation(expected: BrowserExpectedObservation, observed: Brow
   if (observed.matched === 1) {
     if (expected.visible !== undefined && observed.visible !== expected.visible) {
       out.push({ field: `${at}.visible`, expected: String(expected.visible), observed: String(observed.visible) });
+    }
+    // Text and a value are what a person reads. Held against an element nobody can see, they would pass on a page
+    // that shows nothing, so they require a visible one unless the scenario says it expects the element hidden.
+    if (expected.visible === undefined && !observed.visible && (expected.text !== undefined || 'value' in expected)) {
+      out.push({ field: `${at}.visible`, expected: 'true, since text and value are read from an element a person can see', observed: 'false' });
     }
     if (expected.text !== undefined && observed.text !== expected.text) out.push({ field: `${at}.text`, expected: expected.text, observed: quote(observed.text) });
     if ('value' in expected && observed.value !== expected.value) {

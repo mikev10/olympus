@@ -26,7 +26,8 @@ its host reported. The browser observes and decides nothing.
 and compares on the host. A refused host fails the scenario unless its
 `mayBlock` lists it, a document that navigates off the loopback always fails
 it, and a step that could not be done fails it and leaves every later
-observation unmade. One browser scenario per handle. Stack detection carries
+observation unmade. Text and a value are held against a visible element
+unless the scenario names `visible` itself. One browser scenario per handle. Stack detection carries
 the adapter when the provider has a `browse` and names `behavioral:browser`,
 with the provider as the reason, otherwise.
 

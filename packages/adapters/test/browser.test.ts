@@ -112,6 +112,16 @@ describe('compareBrowser', () => {
     expect(compareBrowser(expecting({ matched: 0 }), [], none)).toEqual({ held: true });
   });
 
+  test('text or a value on an element that is not visible does not hold, unless the scenario expects it hidden', () => {
+    const hidden = result({ observations: [{ ...seen, visible: false, value: 'Ada' }] });
+    for (const entry of [{ text: 'Hello' }, { value: 'Ada' }]) {
+      const outcome = compareBrowser(expecting(entry), [], hidden);
+      expect(outcome.held ? [] : outcome.mismatches.map((m) => m.field)).toEqual(['observations[0].visible']);
+    }
+    expect(compareBrowser(expecting({ text: 'Hello', visible: false }), [], hidden)).toEqual({ held: true });
+    expect(compareBrowser(expecting({ title: 'Greeter' }), [], hidden)).toEqual({ held: true });
+  });
+
   test('a port that never answered does not hold, whatever was expected', () => {
     const outcome = compareBrowser(expecting({ matched: 0 }), [], result({ ready: false, observations: [] }));
     expect(outcome.held ? [] : outcome.mismatches.map((m) => m.field)).toEqual(['ready']);
