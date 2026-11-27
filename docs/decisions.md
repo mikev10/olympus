@@ -14252,3 +14252,10 @@ From the external review, triaged in `docs/reviews/2026-11-26-R3-browser-triage.
 - **Chosen:** no change. The rule is about a host the sandbox kept the page from reaching, so a page cannot pass unexercised. This request is blocked by the page's own policy wherever the page runs, so nothing the sandbox withheld went untested.
 - **Rejected:** reporting every request Chrome fails. It would fail pages for requests that are never sent anywhere.
 - **Reverse:** read the blocked reason from the protocol's failure event and report its host.
+
+### D-R3-18: one unrelated test failed once in the last full run
+
+- **Seen:** the full run after the review fixes failed on one test, `packages/sandbox/test/image-lock.test.ts` ("callers that start together..."), with `SyntaxError: Unexpected end of JSON input`. Everything else passed, the paid entries aside.
+- **Verified:** this unit changes neither that file nor `image.ts`. The test passed in the two earlier full runs, three of three when rerun alone, and in a rerun of the whole package (257 passed, 2 skipped). The same job passed that test in CI.
+- **Chosen:** reported as it happened and not retried until green. Filed as issue #254. A second session was running Docker suites on the same machine, which is a possible cause and not a confirmed one.
+- **What this means for the merge gate:** the acceptance criteria are met by the reruns and by CI, and the one failure is on record here.
