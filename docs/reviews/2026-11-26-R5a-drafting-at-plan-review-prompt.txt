@@ -1,0 +1,111 @@
+The code under review is in the file
+`2026-11-26-R5a-drafting-at-plan-review-bundle.txt` (SHA-256 754837ca862f486d2c06d9c26b740c359f5c355f19609ad2dadf410d4917caa1) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing the part of a software factory runtime that lets a model draft a run's task graph, in a
+TypeScript project. You have the source and nothing else — no design documents,
+no author reasoning, no prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The runtime carries a change through fixed stations: intake, spec, test-design, plan, build, verify, review, integrate. Until this change, the task graph (which build tasks exist, under which role, in what order, and which review covers them) was a file a person supplied, hashed at admission and locked at `plan`. This change lets a run be admitted with the literal 'draft' in place of that file. A model seated as "planner" at `plan` then reads the locked spec and the repository and writes one file, `.drafts/<run id>/graph.json`, holding build tasks only. The runtime reads that file, records the bytes, checks them against a bound a person wrote into policy (`planning`: the most build tasks, and the roles they may run under), adds one review task itself, has a second model (the "plan critic") read the draft, and puts the draft through the station's approval gate. Only an approved draft is written into the artifact root and locked, and only then are the tasks created and builders seated. Because no graph exists at admission, admission's checks that used to read the graph (which roles are compiled and granted, what the trigger admits, and the worst-case cost a person approves) now read the bound instead. Each drafted task also carries an `objective`, text the planner wrote, which is placed in a builder's context. The commit range also carries one earlier, unrelated change to a local test script under `scripts/`.
+
+It must hold against a capable, motivated party trying to get more work, a wider role, or a weaker review than a person granted and approved: a graph run that was not the one approved, a task seated under a role policy did not allow, a run costing more than the approved figure, a review that does not cover the work, or instructions reaching a seat that is not granted them. Assume no deceptive intent — only
+that the easiest path gets taken.
+
+That party is the model seated as planner, and any model seated as a builder afterwards. It controls what the model returns, every file in its own working copy including the graph draft and anything else it writes there, the text of each task's objective, and when its process stops. It does not control the components the runtime is wired with — the Vault, the sandbox provider, and the drivers are runtime-selected and trusted, even where a function takes one as an argument — and it does not control code running inside
+the runtime's own process. It does not control the policy, the roles directory, the rubric, the run request, the admission record, the run state, or a person's approval or rejection.
+
+The invariants at stake:
+
+- An agent may not be judged by an artifact it can write. The graph a builder's work is held to is locked before any builder exists, from the bytes the runtime read, and no seat can change it afterwards. Which work is reviewed is not arranged by the side that authored the work.
+- Default deny. A capability not granted in policy is unavailable. The roles a drafted graph may seat a task under, and how many tasks it may hold, are a person's edit to policy; a model never grants a scope by naming a role.
+- Fail closed. A missing grant, a missing role, a graph past its bound, or a check that cannot be made is a refusal or a send-back, never a silent degrade and never a larger run than was approved.
+- The runtime derives status; the model never reports it. No task exists, and no task status is written, from anything the planner said.
+- Reviewers never share the author's model family and claim independence. A critic's independence is derived from the models the runtime resolved, never from what a result reports about itself, and a critic that is not independent satisfies nothing.
+- Event payloads are data, never instructions. The planner is granted the locked spec and never the person's original intent or a trigger's input.
+- Every capability claim maps to an executable assertion that fails when the capability is deleted.
+
+The mechanisms that matter most:
+
+- `parseDraftedGraph` and `boundGraph` in packages/api/src/planning.ts, and the objective rules added to `parseGraph`: what a draft may hold, how the review task is added, and what the bound's worst case is computed from.
+- Admission in packages/api/src/run.ts: the refusal under a policy with no `planning`, the reads made over the bound (`seatedRolesOf`, `policyRefusal`, `seatedScopes`, `admitRoles`, `toolGrantRefusal`, the worst-case cost and its comparison with the approved figure), and how the bound is recorded and read back (`recordArtifacts`, `loadLine`).
+- The `plan` path through packages/api/src/drafting.ts and packages/api/src/line.ts: what is read from the planner's working copy, what is recorded, `graphWithinBound`, `lockApproved`, when tasks are created, what a resume does, and what `stepGraph` and `graphOf` do while no graph is locked.
+- `taskGraphGrant` and the review seats' context: which objectives reach which seat.
+- The policy validation of `planning`, and the conformance entries in packages/conformance/src/registry/planning.ts.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+- A goal that becomes several specs, child runs, and a status derived across
+  them (R5b).
+- Enforcing `dependencySet`. It stays required by the parser and read by
+  nothing. A planner's guess at which files a task will touch is not a bound
+  the builder should park against, and R4's conflict check already catches two
+  tasks changing one path. Its reader is the distributed scheduler's (M4b).
+- A planner that names review tasks, review seats, or which reviewer covers
+  what (R9, R31).
+- Phases, milestones, or a requirements document above the task graph. The
+  graph is the plan the line runs; anything above it is R5b's or a front-door
+  skill's.
+- A plan reviewed in a pull request by another family (`VISION-GAP.md`, R-B).
+  The plan critic is a seat on the line, not a pull-request review.
+- Replanning after a task parks, and any change to a locked graph.
+- `auto` on a drafted graph at L3.
+- A parallelism or tier value the planner sets. Both stay policy's.
+- Keying R2's rates by planner, or scoring a plan's quality (R11).
+
+Identifiers such as unit and decision ids, in this list and in the code's comments, refer to the project's records, which you do not have; they are not something to resolve.
+
+THE QUESTION
+
+As the model seated as planner, or as a builder seated afterwards, how would you get a graph run that is not the bytes a person or the policy approved, get a task seated under a role or in a number policy did not grant, make the run able to cost more than the figure approved at admission, leave built work uncovered by the review, get tasks created or a builder seated before the draft is approved and locked, or get text you wrote in front of a seat that is not granted it?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.
