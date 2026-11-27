@@ -409,3 +409,46 @@ describe('propertyPerAuthorizationRule (R25, D-R25-05)', () => {
     expect(refuse({ ...authored(), propertyPerAuthorizationRule: 'yes' }).map((d) => d.path)).toContain('propertyPerAuthorizationRule');
   });
 });
+
+describe('the planning grant (A-R5a-02)', () => {
+  /** A document with one build role, one review role, and `planning` as given. */
+  function planned(planning: unknown): Record<string, unknown> {
+    const document = authored();
+    document.roles = { builder: scope(), reviewer: { ...scope(), stations: ['review'] }, drafter: { ...scope(), stations: ['spec'] } };
+    document.planning = planning;
+    return document;
+  }
+
+  test('is accepted with a positive bound and roles granted build, and absent or null it grants nothing', () => {
+    expect(accept(planned({ maxBuildTasks: 3, roles: ['builder'] })).planning).toEqual({ maxBuildTasks: 3, roles: ['builder'] });
+    expect(accept(planned(null)).planning).toBeUndefined();
+    expect(accept(authored()).planning).toBeUndefined();
+  });
+
+  test('refuses zero build tasks, and a bound that is not a whole number', () => {
+    for (const maxBuildTasks of [0, -1, 1.5, '3']) {
+      expect(lines(refuse(planned({ maxBuildTasks, roles: ['builder'] }))).join('\n')).toContain('planning.maxBuildTasks: expected a positive integer');
+    }
+  });
+
+  test('refuses an empty role list', () => {
+    expect(lines(refuse(planned({ maxBuildTasks: 1, roles: [] })))).toContainEqual('planning.roles: a planner with no role to seat a builder under can draft no graph');
+  });
+
+  test('refuses a role the policy does not define, one with no scope at build, a reviewing role, and a role listed twice', () => {
+    const reported = lines(refuse(planned({ maxBuildTasks: 1, roles: ['nobody', 'drafter', 'reviewer', 'security-reviewer', 'builder', 'builder'] })));
+    expect(reported).toEqual([
+      "planning.roles[0]: 'nobody' is not a role this policy defines",
+      "planning.roles[1]: 'drafter' is granted no scope at build",
+      "planning.roles[2]: 'reviewer' is a role a review seat runs under; a build task may not author under it",
+      "planning.roles[3]: 'security-reviewer' is a role a review seat runs under; a build task may not author under it",
+      "planning.roles[5]: 'builder' is listed twice",
+    ]);
+  });
+
+  test('refuses an unknown key, a missing one, and a value that is not an object', () => {
+    expect(lines(refuse(planned({ maxBuildTasks: 1, roles: ['builder'], perTask: 2 }))).join('\n')).toContain('planning.perTask');
+    expect(lines(refuse(planned({ roles: ['builder'] }))).join('\n')).toContain('planning.maxBuildTasks');
+    expect(lines(refuse(planned(3))).join('\n')).toContain('planning');
+  });
+});

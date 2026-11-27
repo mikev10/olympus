@@ -6,6 +6,10 @@
 import { describe, expect, test } from 'vitest';
 import {
   approvalKey,
+  DRAFT_ROLES,
+  DRAFT_STATIONS,
+  isAgentStation,
+  SEAT_TASK_IDS,
   capabilityRefusal,
   contractTableProblems,
   CRITIC_CONTRACTS,
@@ -450,5 +454,37 @@ describe('retrySuffix', () => {
     const line = suffix.split('\n').find((l) => l.startsWith('- a: b — ')) ?? '';
     expect(line.length).toBe('- a: b — '.length + RETRY_MESSAGE_LIMIT);
     expect(line.endsWith('…')).toBe(true);
+  });
+});
+
+describe('plan as a drafting station (A-R5a-03)', () => {
+  test('is in every drafting table, under the fixed roles planner and plan-critic', () => {
+    expect(DRAFT_STATIONS).toEqual(['spec', 'test-design', 'plan']);
+    expect(DRAFT_ROLES.plan).toEqual({ drafter: 'planner', critic: 'plan-critic' });
+    expect(SEAT_TASK_IDS).toContain('plan.drafter');
+    expect(SEAT_TASK_IDS).toContain('plan.critic');
+    expect(isAgentStation('plan')).toBe(true);
+  });
+
+  test('keeps its three grants, never the intent or the acceptance tests, writes its drafts alone, and allows three attempts', () => {
+    const plan = STATION_CONTRACTS.plan;
+    expect(plan.allowedContext).toEqual(['repo-instructions', 'locked-spec', 'base-repo-readonly']);
+    expect(plan.requires).toEqual(['parallelism']);
+    expect(plan.writeBoundary.workspaceGlobs).toEqual(['.drafts/**']);
+    expect(plan.maxIterations).toBe(3);
+    expect(CRITIC_CONTRACTS.plan.allowedContext).toEqual(['repo-instructions', 'locked-spec', 'base-repo-readonly', 'draft', 'rubric']);
+    expect(CRITIC_CONTRACTS.plan.writeBoundary.workspaceGlobs).toEqual([]);
+    expect(contractTableProblems(STATION_CONTRACTS)).toEqual([]);
+    expect(criticContractProblems(CRITIC_CONTRACTS)).toEqual([]);
+  });
+
+  test('a rejection there carries the approver\'s notes, as at spec, and never at test-design', () => {
+    expect(retrySuffix('plan', 2, [{ kind: 'notes', notes: 'split the second task' }])).toContain('[approver-notes]\nsplit the second task');
+    expect(() => retrySuffix('test-design', 2, [{ kind: 'notes', notes: 'x' }])).toThrow(/no notes/u);
+  });
+
+  test('a person\'s rejection of its last draft parks the run, naming plan', () => {
+    const refusal = draftsRejected('plan');
+    expect(refusal).toMatchObject({ reason: 'parked', cause: 'drafts-rejected', station: 'plan', task: null, limit: 3 });
   });
 });
