@@ -43,6 +43,15 @@ require('node:http').createServer((req, res) => {
     '<script>fetch("https://api.example.invalid/v1").catch(() => {}); try { new WebSocket("ws://socket.example.invalid/s") } catch (e) {}</script>'));
   if (req.url === '/leave') return res.end(page('Leave', '<a href="http://elsewhere.example.invalid/">Leave</a>'));
   if (req.url === '/twins') return res.end(page('Twins', '<button>Save</button><button>Save</button>'));
+  if (req.url === '/disabled') return res.end(page('Disabled', '<label for="s">Size</label><select id="s" disabled onchange="document.title = &quot;Changed&quot;"><option>Small</option><option>Large</option></select>' +
+    '<label for="o">Colour</label><select id="o" onchange="document.title = &quot;Changed&quot;"><option>Red</option><option disabled>Blue</option></select>'));
+  // A page that lies about itself in its own script world, and shows in its title that the lie took.
+  if (req.url === '/forged') return res.end(page('Forged', '<p role="status" id="out">Goodbye, Ada</p><script>' +
+    'Object.defineProperty(HTMLElement.prototype, "innerText", { get() { return "Hello, Ada"; } });' +
+    'Object.defineProperty(Node.prototype, "textContent", { get() { return "Hello, Ada"; } });' +
+    'Element.prototype.checkVisibility = () => true;' +
+    'document.title = "page reads: " + document.getElementById("out").innerText;</script>'));
+  if (req.url === '/hidden') return res.end(page('Hidden', '<p style="display:none">Secret</p><p style="clip-path: inset(100%)">Clipped</p>'));
   if (req.url === '/slow') return setTimeout(() => res.end(page('Slow', '<h1>Late</h1>')), 3000);
   res.statusCode = 404;
   res.end(page('Missing', 'nothing here'));
@@ -268,6 +277,35 @@ describe('browse', () => {
     expect(result.failedStep?.index).toBe(2);
     expect(result.failedStep?.reason).toContain('matched 2 elements');
     expect(result.observations[1]?.kind).toBe('not-reached');
+  });
+
+  test('a disabled select, and a disabled option, cannot be chosen: the step fails and nothing on the page changes', async () => {
+    for (const [label, value] of [['Size', 'Large'], ['Colour', 'Blue']] as const) {
+      const h = await serving();
+      const result = await provider.browse(h, steps({ do: 'goto', path: '/disabled' }, { do: 'fill', target: { label }, value }, { do: 'observe', target: { label } }));
+      expect(result.failedStep?.index).toBe(1);
+      expect(result.failedStep?.reason).toContain('disabled');
+      expect(result.observations).toEqual([{ kind: 'not-reached', reason: 'step 1 could not be done' }]);
+    }
+    // Control: the same page's enabled select takes an enabled option, so the refusals above are the disabled state's.
+    const h = await serving();
+    const chosen = await provider.browse(h, steps({ do: 'goto', path: '/disabled' }, { do: 'fill', target: { label: 'Colour' }, value: 'Red' }, { do: 'observe', target: { label: 'Colour' } }));
+    expect(chosen.failedStep).toBeNull();
+    expect(chosen.observations[0]).toMatchObject({ kind: 'observed', value: 'Red' });
+  });
+
+  test('a page that rewrites what its own scripts read is still reported as it is', async () => {
+    const h = await serving();
+    const result = await provider.browse(h, steps({ do: 'goto', path: '/forged' }, { do: 'observe', target: { role: 'status', name: '' } }, { do: 'observe', target: { text: 'Hello, Ada' } }));
+    // Control: the title is written by the page from its own reading, so the lie took in the page's world.
+    expect(result.observations[0]).toMatchObject({ kind: 'observed', matched: 1, text: 'Goodbye, Ada', title: 'page reads: Hello, Ada' });
+    expect(result.observations[1]).toMatchObject({ kind: 'observed', matched: 0 });
+  });
+
+  test('text that is not rendered is found and reported as not visible', async () => {
+    const h = await serving();
+    const result = await provider.browse(h, steps({ do: 'goto', path: '/hidden' }, { do: 'observe', target: { text: 'Secret' } }));
+    expect(result.observations[0]).toMatchObject({ kind: 'observed', matched: 1, visible: false, text: 'Secret' });
   });
 
   test('a path that begins with two slashes is a path on the loopback, never another host', async () => {

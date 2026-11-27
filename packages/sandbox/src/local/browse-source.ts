@@ -128,8 +128,11 @@ const DESCRIBE = function () {
 };
 const CHOOSE = function (wanted) {
   const norm = function (text) { return String(text).replace(/\s+/g, ' ').trim(); };
+  // A person cannot open a disabled select or pick a disabled option, so neither is set for them.
+  if (this.matches(':disabled')) return 'it is disabled';
   const options = Array.from(this.options).filter(function (option) { return norm(option.label) === wanted; });
   if (options.length !== 1) return 'it has ' + options.length + ' options shown as ' + JSON.stringify(wanted);
+  if (options[0].matches(':disabled')) return 'the option shown as ' + JSON.stringify(wanted) + ' is disabled';
   if (this.value !== options[0].value) {
     this.value = options[0].value;
     this.dispatchEvent(new Event('input', { bubbles: true }));
