@@ -161,7 +161,7 @@ const BROKEN_ENTRIES: ReadonlyArray<{ readonly what: string; readonly entry: str
   { what: 'an oversized role file', entry: 'builder.md', code: 'too-large', make: (dir) => writeFile(join(dir, 'builder.md'), 'a'.repeat(32 * 1024 + 1)) },
   { what: 'a role file that is not UTF-8', entry: 'builder.md', code: 'not-utf8', make: (dir) => writeFile(join(dir, 'builder.md'), new Uint8Array([0x42, 0xc3, 0x28])) },
   { what: 'an empty role file', entry: 'builder.md', code: 'empty', make: (dir) => writeFile(join(dir, 'builder.md'), '') },
-  { what: 'a misnamed role file', entry: 'Planner.md', code: 'invalid-name', make: (dir) => writeFile(join(dir, 'Planner.md'), 'Plan.') },
+  { what: 'a misnamed role file', entry: 'Scheduler.md', code: 'invalid-name', make: (dir) => writeFile(join(dir, 'Scheduler.md'), 'Schedule.') },
   { what: 'a directory in the roles directory', entry: 'drafts', code: 'not-regular', make: (dir) => mkdir(join(dir, 'drafts')) },
 ];
 

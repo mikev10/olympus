@@ -14393,3 +14393,20 @@ the `plan` rows (`packages/core/test`), the drafted-graph parser, the bound's
 graph, the objective rules and the `task-graph` grant
 (`packages/api/test/planning.test.ts`), and `--draft-plan`
 (`packages/cli/test/help.test.ts`).
+
+### D-R5a-09: two existing entries' fixtures, corrected
+
+The full local check failed two entries the unit did not write. Neither
+showed a change in behaviour; each fixture assumed the six seats and eight
+roles that existed before.
+
+- **`I5.broken-role-entry-refuses-admission`** wrote a misnamed role file
+  as `Planner.md`. Beside the shipped `planner.md`, on a filesystem that
+  ignores case, that write lands on the shipped file and no misnamed entry
+  exists. The fixture's file is now `Scheduler.md`. The check is unchanged:
+  a name that is not a role id refuses admission as `invalid-name`.
+- **`I7.bug-fix-run-sends-no-report-text`** required every drafting driver
+  to have been called before reading what each was sent. Its run is
+  admitted with a graph file, so its planner and plan critic are never
+  seated. It now requires that those two were not called, and that every
+  other seat was. Nothing it reads of the seats that ran is loosened.
