@@ -14434,3 +14434,14 @@ findings, none raised by both families.
   `author-narrative` and gets neither.** Deliberate, on `v2` before this
   unit, and what `I6.reviewer-receives-no-author-material` depends on.
 
+
+### D-R5a-11: the maintainer's answers at the merge gate
+
+Given on 2026-11-26, after the triage report.
+
+- **`PolicyDocument.planning` accepting `null` (D-R5a-06) is accepted** as
+  the form A-R5a-02 takes. Without it a resume of any run admitted under a
+  policy with no planning would refuse its own pinned policy.
+- **#256 stays open.** Whether the example policy grants planning and
+  `init` prints `--draft-plan` is decided after R5a has run once on the
+  canary.
