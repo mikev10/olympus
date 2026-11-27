@@ -2282,6 +2282,16 @@ its decisions carry a `TOOLING` id rather than a unit's. The design is
 - **Limit:** a preflight pass is not acceptance, and the script says so. An entry printed as `NOT RUN HERE` has not been checked by anything until CI's paid run.
 - **Reverse:** delete `scripts/local-check.ts` and its test, and restore the commands in `ship-unit` §2, `start-unit` §5, and `triage-review` §7.
 
+### D-TOOLING-14: the local check reads the runner's exit and requires that the suite ran (#249)
+
+Found by R58's external review (codex-2, codex-3), which carried `scripts/local-check.ts` in its bundle. Each claim was checked against the script and held.
+
+- **Surfaced:** `preflight` never read the conformance runner's exit status. `full` read it only when no entry was `NOT RUN HERE`, and a checkout always has paid entries in that list, so a runner error beside them was excused by the exit they explain. `full` also accepted a report in which nothing ran.
+- **Chosen:** `runnerProblems` reads the exit status and the printed output of every conformance run, in both sizes. A non-zero exit with no failed test in the report fails. An unhandled error vitest printed fails, whatever else failed beside it. An exit of zero beside a failed test fails. `unexecuted` applies to `full` only: a run with no passed test fails, and any test neither passed nor failed is named and fails.
+- **Rejected:** comparing the report against the registry's own list of entries. The script would then read the registry's source, and D-TOOLING-13 keeps it to the registry's output.
+- **Limit:** the unhandled error is found by the heading vitest prints, alone on its line. A vitest that words it differently is caught only by its exit status, and only when no test failed beside it.
+- **Reverse:** remove the two functions and their three call sites.
+
 ## P6: Verification + evidence
 
 ### D-P6-01: The unit spec was completed before the code, after a contradiction in the ledger was resolved
