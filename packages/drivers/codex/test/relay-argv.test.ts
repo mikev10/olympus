@@ -17,11 +17,11 @@ test("the argument list for this driver's relay, with its whole price table, is 
     new Set([MODEL_RELAY.credential]),
     new Set(),
   );
-  // Names as long as the provider makes them, a label, and Docker Desktop's own path to the executable.
+  // Names as long as the provider makes them, a label longer than the provider's own, and Docker Desktop's own path to the executable.
   const args = relayCreateArgs(plan, {
     name: `model-relay-${'f'.repeat(64)}`,
     network: `relay-in-${'f'.repeat(64)}`,
-    labels: ['--label', `dev.olympus.owner=${'f'.repeat(64)}`],
+    labels: ['--label', `${'l'.repeat(32)}=${'f'.repeat(64)}`],
     image: EGRESS_PROXY_IMAGE,
     secrets: ['RELAY_CREDENTIAL', 'RELAY_TRUST'],
   });

@@ -14232,3 +14232,25 @@ adds a per-call price to `ModelPrice` and lets a table carrying one through
   rerun. The run's report did not keep the failing test's name. The four
   registry entries this unit touches passed.
 - **Not yet run:** `node scripts/local-check.ts full`. It waits on D-R66-04.
+
+### D-R66-06: the full run, and what it found
+
+`node scripts/local-check.ts full` was run once on the rebased branch
+(2026-11-26) and failed in two places. Everything else passed.
+
+- **`I10.no-greek-names-in-code`, this unit's fault.** The two new driver
+  tests built a container label from the provider's own label key, a string
+  holding the project's name. The tests need a label's length, not its
+  name, so each now uses a neutral key longer than the provider's.
+- **`test/image-lock.test.ts`, not this unit's.** A waiter on an image tag
+  lock read a holder file that existed and was still empty, and
+  `JSON.parse` threw (`packages/sandbox/src/local/image.ts:198`). The unit
+  does not touch that file. Filed as #253 and left alone: the fix is
+  adjacent work. This is very likely the unnamed failure D-R66-05 records.
+- **Rerun after the fix, all passing:** `preflight
+  I10.no-greek-names-in-code` (typecheck, lint, the unpaid driver suites,
+  the sandbox suite at 223 passed and 2 skipped, and the entry), and both
+  `relay-argv` tests.
+- **Not rerun:** the full run as a whole. The one change since it is a
+  string in two test files, and every check that string can reach was
+  rerun.
