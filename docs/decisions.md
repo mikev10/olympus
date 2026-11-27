@@ -14304,3 +14304,86 @@ a place the declared deliverables land.
 - The spec's own two: the runtime checks shape and bound, not whether the
   plan is good; an objective is model-written text in a builder's context,
   approved with the graph and bounded in size.
+
+### D-R5a-06: choices made while building
+
+- **`PolicyDocument.planning` accepts `null` as well as absent.** A-R5a-02
+  writes it as optional. A resolved policy is what an admission record pins,
+  and a resume validates that record's policy as a document before running
+  under it (`checkedPolicy`, `packages/api/src/run.ts`). The resolved form
+  spells "no grant" as `null`, so a validator that refused `null` would
+  refuse every resume. `null` grants nothing, exactly as absent does.
+  *Reverse:* resolve to an absent key, which the amendment's "never
+  undefined" rules out.
+- **`RequestProblemCode` gains `objective-empty` and `objective-too-long`.**
+  `parseGraph` reports through a closed set of codes, and the two are named
+  for the field so a planner's retry line says which rule it broke. A
+  drafted graph's own codes (`objective-missing`, `role-not-granted`,
+  `over-bound`, `not-a-build-task`) are `planning.ts`'s, and reach the
+  planner the same way.
+- **The planner's request states its bound.** The line a drafter's request
+  opens with names where to write; at `plan` it also says how many build
+  tasks and which roles. Both are policy's numbers, written by the runtime,
+  and a planner told neither would learn them only by being sent back.
+- **The report reads a task's objective from the Vault alone.** A drafted
+  graph's bytes are in its draft record; a supplied graph's file is in the
+  artifact root and nowhere in the Vault. The report's rule is that it is
+  read from the Vault, so a supplied graph's tasks report `null`.
+  *Rejected:* re-reading the file from the artifact root. The report would
+  then show text the Vault cannot vouch for. *Reverse:* read and hash-check
+  the supplied file, as `loadLine` does.
+- **A planner or plan critic granted egress is refused as
+  `not-applicable`**, at `policy.roles.<role>.network.egress`. The existing
+  code for the test seats, `not-black-box`, names a rule that is not the
+  planner's.
+- **`examples/rubrics/plan.md` is added, and nothing else under
+  `examples/`.** A test holds `examples/rubrics` to the shipped rubrics byte
+  for byte, so the rubric is mirrored. The example policy grants no
+  planning and the example roles hold no planner: what the example run
+  grants is R36b's `init` and the README's first run, which name a graph
+  file. The README says how to grant it. Shipping the grant in the example
+  is filed as an issue rather than done here.
+
+### D-R5a-07: what the code did that the record above did not expect
+
+- **`rejectDraft` branched on `station === 'spec'`** and so refused notes at
+  `plan` with `test-design`'s message. Found by
+  `I5.drafted-graph-shape-goes-back` on its first run, fixed, and the branch
+  is now `station !== 'test-design'`.
+- **`ReviewSeat.authors` holds identities, not tasks.** Two build tasks
+  built by one identity are one author, so the count does not show that a
+  review covers both. `I3.runtime-derives-the-review-of-a-drafted-graph`
+  reads the evidence each seat was handed, by task id, instead.
+
+### D-R5a-08: what proves it, each shown failing
+
+Sixteen entries in `packages/conformance/src/registry/planning.ts`, the
+sixteen the spec lists, each over the real admission and line, the
+filesystem Vault, and stub drivers. Each was run against a build with the
+one thing it guards removed, and each failed; the tree was restored after
+every run.
+
+| Entry | Removed | It failed with |
+|---|---|---|
+| `I5.drafted-plan-needs-a-policy-grant` | the refusal of a drafted graph under no `planning` | the run refused as `invalid-request`, not `policy-refused` at `plan` |
+| `I4.drafted-graph-seats-only-granted-roles` | the check of a role against the bound | attempt 1 not sent back |
+| `I5.worst-case-covers-a-drafted-graph` | the costliest role, replaced by the cheapest | a cheaper graph's figure no longer below the bound's |
+| `I3.drafted-graph-locks-nothing-until-approved` | tasks created when the draft reached the gate | tasks existing before approval |
+| `I3.locked-graph-is-the-bytes-read` | the artifact root written from the planner's tree | a tamper at the lock |
+| `I3.runtime-derives-the-review-of-a-drafted-graph` | the refusal of a drafted review task | the draft not sent back for it |
+| `I3.objective-reaches-the-builder-never-the-reviewer` | the own-and-dependencies filter | a builder given another task's objective |
+| `I4.plan-draft-outside-the-grant-is-discarded` | the record of what was discarded | a stray path in no record |
+| `I7.planner-is-not-granted-the-intent` | nothing; the intent was added to the planner's context | the planner's context holding the intent |
+| `I5.drafted-graph-shape-goes-back` | the missing-objective check | attempt 1 not sent back |
+| `I4.plan-exit-floor` | the critic condition at `plan` | a draft with a finding recording no failed condition |
+| `I6.plan-critic-of-planner-family-is-advisory` | the binding test on a critic's finding | an advisory finding sending the graph back |
+| `I5.plan-lock-survives-a-stop` | `plan` from the artifact-root settle | a tamper on resume |
+| `I5.drafted-plan-needs-its-roles` | the planner seats from the roles admission needs | a run with no compiled planner admitted |
+| `I3.supplied-graph-seats-no-planner` | the drafted test at `plan` | a supplied graph seating a planner, which throws for want of a bound |
+| `I4.parallel-tasks-of-a-drafted-graph` | the drafted tasks' dependencies | the dependent task starting before the two it needs had passed |
+
+Unit tests beside them: the planning grant's validation and resolution and
+the `plan` rows (`packages/core/test`), the drafted-graph parser, the bound's
+graph, the objective rules and the `task-graph` grant
+(`packages/api/test/planning.test.ts`), and `--draft-plan`
+(`packages/cli/test/help.test.ts`).

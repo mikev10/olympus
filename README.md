@@ -273,6 +273,28 @@ role's `budget` is per task, and `maxTokens` counts the tokens a model reads
 from its cache: a model reading the repository spends most of its tokens
 there. The example gives each drafter 400000 and every other seat 200000.
 
+A run can draft its task graph too: `create --draft-plan` in place of
+`--graph`. A planner then reads the locked spec and the repository at `plan`
+and proposes the build tasks and their order; the runtime adds the review
+itself, a critic checks the proposal against `rubrics/plan.md`, and the gate
+at `plan` passes it, a person at L1, before any task is built. The example policy does not grant
+this. To grant it, add a `planning` key naming the most build tasks a
+drafted graph may hold and the roles a planner may seat them under, and a
+scope at `plan` for the roles `planner` and `plan-critic`, with no egress:
+
+```yaml
+planning:
+  maxBuildTasks: 4
+  roles: [builder]
+```
+
+Copy `planner.md` and `plan-critic.md` from
+[packages/compiler/roles/](packages/compiler/roles) into your roles
+directory. The cost `create` prints for such a run is the bound's worst
+case: that many build tasks under the costliest role listed, plus the
+planner, its critic, and the review. A drafted graph past the bound, or
+naming another role, is sent back and never run.
+
 Every run is scanned by two security checks the manifest must pin, each with
 the scanner image the runtime declares for it:
 
