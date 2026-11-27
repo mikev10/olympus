@@ -341,8 +341,19 @@ export const PLAN_DRAFT_OUTSIDE_THE_GRANT_IS_DISCARDED: LocalAssertion = runtime
 
 export const PLANNER_IS_NOT_GRANTED_THE_INTENT: LocalAssertion = runtime({
   id: 'I7.planner-is-not-granted-the-intent',
-  title: 'on a run whose spec is drafted from an intent, the planner and the plan critic are given the locked spec and not the intent\'s text: in neither\'s context, and in neither\'s tree',
+  title: 'on a run whose spec is drafted from an intent, the planner and the plan critic are given the locked spec and not the intent\'s text: in neither\'s context, and in neither\'s tree; a policy granting either seat egress is refused at admission, so neither can fetch input no grant names',
   run: async () => {
+    for (const role of ['planner', 'plan-critic']) {
+      await withLine(`r5a-egress-${role.replace('-', '')}-`, async (rig) => {
+        const { admitRun } = await api();
+        const r = await drafting(rig);
+        const policy = await draftingPolicy({}, { [role as RoleId]: { ...lineScope(['plan'], 'deep'), network: { egress: ['example.com'] } } }, { planning: RIG_PLANNING });
+        const outcome = await admitRun(await r.request({ artifacts: PLAN_ARTIFACTS, policy }));
+        if (outcome.ok || outcome.reason !== 'invalid-request' || !outcome.problems.some((p) => p.path === `policy.roles.${role}.network.egress`)) {
+          throw new Error(`R5a: a drafting run whose ${role} is granted egress was ${outcome.ok ? 'admitted' : JSON.stringify(outcome)}`);
+        }
+      });
+    }
     await withLine('r5a-intent-', async (rig) => {
       const intent = { text: 'INTENT-ONLY-MARKER: please write hello.txt at the root, holding hello.', from: 'principal' } as const;
       const r = await drafting(rig);

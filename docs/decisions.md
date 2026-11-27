@@ -14344,6 +14344,11 @@ a place the declared deliverables land.
   file. The README says how to grant it. Shipping the grant in the example
   is filed as an issue rather than done here.
 
+- **The plan critic's results join the rates R2 keeps by independence
+  grade, as every critic's do** (`packages/api/src/outcomes.ts` reads every
+  station in `state.drafts`). No rate is keyed by planner, which stays out
+  of scope.
+
 ### D-R5a-07: what the code did that the record above did not expect
 
 - **`rejectDraft` branched on `station === 'spec'`** and so refused notes at
@@ -14374,6 +14379,7 @@ every run.
 | `I3.objective-reaches-the-builder-never-the-reviewer` | the own-and-dependencies filter | a builder given another task's objective |
 | `I4.plan-draft-outside-the-grant-is-discarded` | the record of what was discarded | a stray path in no record |
 | `I7.planner-is-not-granted-the-intent` | nothing; the intent was added to the planner's context | the planner's context holding the intent |
+| the same entry, its egress half | the refusal of a planner granted egress | a run whose planner holds egress admitted |
 | `I5.drafted-graph-shape-goes-back` | the missing-objective check | attempt 1 not sent back |
 | `I4.plan-exit-floor` | the critic condition at `plan` | a draft with a finding recording no failed condition |
 | `I6.plan-critic-of-planner-family-is-advisory` | the binding test on a critic's finding | an advisory finding sending the graph back |
