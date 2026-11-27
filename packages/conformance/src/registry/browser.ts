@@ -26,7 +26,9 @@ const run = promisify(execFile);
  * A product on 8080. `/` greets by the name typed into its form and `/wrong`
  * says goodbye instead; `/external` shows its heading and asks another host
  * for an image; `/leave` links off the loopback; `/twins` has two buttons with
- * one name; `/slow` takes four seconds to answer.
+ * one name; `/forged` shows a goodbye and rewrites what its own scripts read
+ * to say hello, writing what it then reads into its title; `/slow` takes four
+ * seconds to answer.
  */
 const SERVER = `
   const page = (title, body) => '<!doctype html><html><head><title>' + title + '</title></head><body>' + body + '</body></html>';
@@ -40,6 +42,10 @@ const SERVER = `
     if (req.url === '/external') return res.end(page('External', '<h1>Shown</h1><img src="http://images.example.invalid/x.png">'));
     if (req.url === '/leave') return res.end(page('Leave', '<h1>Here</h1><a href="http://elsewhere.example.invalid/">Leave</a>'));
     if (req.url === '/twins') return res.end(page('Twins', '<button>Save</button><button>Save</button>'));
+    if (req.url === '/forged') return res.end(page('Forged', '<p role="status" id="out">Goodbye, Ada</p><script>' +
+      'Object.defineProperty(HTMLElement.prototype, "innerText", { get() { return "Hello, Ada"; } });' +
+      'Object.defineProperty(Node.prototype, "textContent", { get() { return "Hello, Ada"; } });' +
+      'document.title = "page reads: " + document.getElementById("out").innerText;</script>'));
     if (req.url === '/slow') return setTimeout(() => res.end(page('Slow', '<h1>Late</h1>')), 4000);
     res.statusCode = 404;
     res.end(page('Missing', 'nothing here'));
@@ -158,7 +164,8 @@ export const BROWSER_VERDICT_JUDGED_OUTSIDE_THE_PRODUCT: LocalAssertion = runtim
   id: 'I2.browser-verdict-judged-outside-the-product',
   title:
     'a browser scenario runs against a real server in a real sandbox; a page that shows what the scenario expects after its steps holds, ' +
-    'one that renders with the wrong text does not, naming the observation and the field, and the gate fails it on its expectation',
+    'one that renders with the wrong text does not, naming the observation and the field, and the gate fails it on its expectation; ' +
+    'a page that rewrites what its own scripts read is still judged on what it shows',
   run: async () => {
     const { requiredShortfall } = await import('@olympus-ai/api');
     const spec = { id: 'greets', kind: 'behavioral' as const, command: ['serve'] as const, required: true, timeoutMs: 60_000 };
@@ -175,6 +182,15 @@ export const BROWSER_VERDICT_JUDGED_OUTSIDE_THE_PRODUCT: LocalAssertion = runtim
       if (named !== 'observations[0].text') throw new Error(`I2: the mismatch named ${named}, not the observation and field that differed`);
       const failed = requiredShortfall(spec, wrong);
       if (failed?.cause !== 'expectation') throw new Error(`I2: a page with the wrong text did not fail the gate on its expectation (${failed?.cause ?? 'passed'})`);
+
+      // A page that rewrites what its own scripts read does not rewrite what the browser reports. The title is the
+      // control: the page wrote it from its own reading, so the expectation on it holds only if the rewrite took.
+      const status = [{ do: 'goto', path: '/forged' }, { do: 'observe', target: { role: 'status', name: '' } }];
+      const forged = await judged(rig, scenario('forged', status, [{ text: 'Hello, Ada', title: 'page reads: Hello, Ada' }]));
+      const told = fields(forged).join(',');
+      if (told !== 'observations[0].text') {
+        throw new Error(`I2: a page that reports itself as showing the expected text ${told === '' ? 'held' : `failed on ${told}`}, not on the text the browser read`);
+      }
     });
   },
 });
