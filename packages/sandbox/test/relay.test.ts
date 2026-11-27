@@ -26,12 +26,16 @@ import {
   LocalDockerProvider,
   RELAY_ALIAS,
   RELAY_PORT,
+  PER_CALL_MODEL,
   RELAY_SOURCE,
   RELAY_URL,
   SandboxRefusal,
   StubSandboxProvider,
+  WINDOWS_COMMAND_LINE_LIMIT,
   checkRelay,
+  relayCreateArgs,
   relayOf,
+  windowsCommandLineLength,
   type AppliedRelay,
   type RelaySpec,
   type SandboxHandle,
@@ -895,7 +899,8 @@ describe('a relay that cannot be applied exactly is refused (I5)', () => {
     };
     const start = (given: Record<string, string>): Promise<string> =>
       new Promise((done) => {
-        const child = spawn(process.execPath, ['--eval', RELAY_SOURCE], { env: { PATH: process.env.PATH ?? '', ...given } });
+        const child = spawn(process.execPath, ['-'], { env: { PATH: process.env.PATH ?? '', ...given } });
+        child.stdin.end(RELAY_SOURCE);
         let output = '';
         const read = (c: Buffer): void => {
           output += c.toString('utf8');
@@ -957,7 +962,13 @@ describe('a relay that cannot be applied exactly is refused (I5)', () => {
     // Without it, the refusals below could be an image or a daemon that runs nothing (external review, codex-4).
     const control = `relay-start-control-${randomUUID()}`;
     upstreams.push(control);
-    await run('docker', ['run', '--detach', '--name', control, ...LABEL_ARGS, ...flagsFor(valid), EGRESS_PROXY_IMAGE, 'node', '--eval', RELAY_SOURCE]);
+    // The source goes in on standard input, as startRelay sends it (#207). The client stays attached until the container is removed.
+    const sourced = (args: string[]): ReturnType<typeof run> => {
+      const started = run('docker', ['run', '--interactive', ...args, EGRESS_PROXY_IMAGE, 'node', '-']);
+      started.child.stdin?.end(RELAY_SOURCE);
+      return started;
+    };
+    sourced(['--name', control, ...LABEL_ARGS, ...flagsFor(valid)]).catch(() => undefined);
     await new Promise((resolve) => setTimeout(resolve, 2_000));
     expect((await run('docker', ['inspect', '--format', '{{.State.Running}}', control])).stdout.trim()).toBe('true');
 
@@ -980,9 +991,11 @@ describe('a relay that cannot be applied exactly is refused (I5)', () => {
       [{ ...valid, RELAY_TOOLS: '[{"type":"web_search_20250305","perUseUsd":-1}]' }, 'no server-tool grant'],
       [{ ...valid, RELAY_TOOLS: '[{"type":"web_search_20250305","perUseUsd":0.01},{"type":"web_search_20250305","perUseUsd":0}]' }, 'no server-tool grant'],
       [{ ...valid, RELAY_METER: JSON.stringify(TEST_OPENAI_METER) }, 'no server-tool grant'],
+      // #205: a table naming a model that searches on every call.
+      [{ ...valid, RELAY_METER: JSON.stringify({ ...TEST_METER, prices: { ...TEST_METER.prices, 'gpt-5-search-api': TEST_METER.prices[TEST_MODEL] } }) }, 'billed per call'],
     ];
     for (const [env, named] of attempts) {
-      const outcome = await run('docker', ['run', '--rm', ...LABEL_ARGS, ...flagsFor(env), EGRESS_PROXY_IMAGE, 'node', '--eval', RELAY_SOURCE]).then(
+      const outcome = await sourced(['--rm', ...LABEL_ARGS, ...flagsFor(env)]).then(
         () => ({ code: 0, stderr: '' }),
         (error: unknown) => ({ code: (error as { code?: unknown }).code, stderr: stderrOf(error) }),
       );
@@ -990,6 +1003,49 @@ describe('a relay that cannot be applied exactly is refused (I5)', () => {
       expect(outcome.code, JSON.stringify(env)).toBe(1);
       expect(outcome.stderr, JSON.stringify(env)).toContain('model-relay: ');
       expect(outcome.stderr, JSON.stringify(env)).toContain(named);
+    }
+  });
+});
+
+describe('the relay source is in no argument, and the argument list is measured against the Windows limit (#207)', () => {
+  const plan = checkRelay(relaySpec(), new Set([CREDENTIAL]), NO_PORTS);
+  const target = { name: relayNames(randomUUID()).container, network: relayNames(randomUUID()).internal, labels: LABEL_ARGS, image: EGRESS_PROXY_IMAGE, secrets: ['RELAY_CREDENTIAL'] };
+
+  test('docker create is told to read the program from standard input, and no argument holds any of it', () => {
+    const args = relayCreateArgs(plan, target);
+    expect(args.slice(0, 2)).toStrictEqual(['create', '--interactive']);
+    expect(args.slice(-2)).toStrictEqual(['node', '-']);
+    expect(args).not.toContain('--eval');
+    expect(args.some((arg) => arg.includes('\n') || arg.includes('use strict'))).toBe(false);
+    expect(args).toStrictEqual(expect.arrayContaining(['--read-only', '--cap-drop', 'ALL', '--env', 'RELAY_CREDENTIAL']));
+    expect(args.some((arg) => arg.startsWith('--volume') || arg.startsWith('--mount') || arg.startsWith('--tmpfs') || arg === '-v')).toBe(false);
+    expect(windowsCommandLineLength('docker', args)).toBeLessThan(WINDOWS_COMMAND_LINE_LIMIT);
+  });
+
+  test('the measure counts what Windows is handed: quotes around an argument with a space, a backslash for every quote, and doubled backslashes before one', () => {
+    expect(windowsCommandLineLength('docker', ['ps'])).toBe('docker ps'.length);
+    expect(windowsCommandLineLength('C:\\Program Files\\docker.exe', ['a b', ''])).toBe('"C:\\Program Files\\docker.exe" "a b" ""'.length);
+    expect(windowsCommandLineLength('docker', ['{"k":1}'])).toBe('docker "{\\"k\\":1}"'.length);
+    expect(windowsCommandLineLength('docker', ['a\\b', 'a \\"b\\'])).toBe('docker a\\b "a \\\\\\"b\\\\"'.length);
+  });
+
+  test('the source as an argument, as it travelled before, is what the measure exists to catch', () => {
+    const args = relayCreateArgs(plan, target);
+    const price = TEST_METER.prices[TEST_MODEL];
+    if (price === undefined) throw new Error('the test meter prices no model');
+    const table = Object.fromEntries(Array.from({ length: 60 }, (_, i) => [`model-${String(i)}`, price]));
+    const large = relayCreateArgs(checkRelay(relaySpec({ meter: { ...TEST_METER, prices: table } }), new Set([CREDENTIAL]), NO_PORTS), target);
+    expect(windowsCommandLineLength('docker', large)).toBeLessThan(WINDOWS_COMMAND_LINE_LIMIT);
+    expect(windowsCommandLineLength('docker', [...large.slice(0, -1), '--eval', RELAY_SOURCE])).toBeGreaterThanOrEqual(WINDOWS_COMMAND_LINE_LIMIT);
+    expect(windowsCommandLineLength('docker', [...args, 'x'.repeat(WINDOWS_COMMAND_LINE_LIMIT)])).toBeGreaterThanOrEqual(WINDOWS_COMMAND_LINE_LIMIT);
+  });
+
+  test('the names the relay knows search on every call, and no others', () => {
+    for (const model of ['gpt-4o-search-preview', 'gpt-4o-mini-search-preview', 'gpt-4o-search-preview-2025-03-11', 'gpt-5-search-api', 'gpt-5-search-api-2025-10-14']) {
+      expect(PER_CALL_MODEL.test(model), model).toBe(true);
+    }
+    for (const model of ['gpt-5', 'research-preview', 'my-search-model', 'search', 'gpt-5-search-api-mini', TEST_MODEL]) {
+      expect(PER_CALL_MODEL.test(model), model).toBe(false);
     }
   });
 });

@@ -1,0 +1,59 @@
+{
+  "unit": "R66",
+  "family": "codex",
+  "artifacts": {
+    "promptFile": "2026-11-26-R66-relay-meters-and-starts-on-windows-review-prompt.txt",
+    "bundleFile": "2026-11-26-R66-relay-meters-and-starts-on-windows-review-bundle.txt",
+    "matchingPairs": 1
+  },
+  "invocation": {
+    "kind": "cli",
+    "command": "C:\\Program Files\\nodejs\\node.exe",
+    "argv": [
+      "C:\\Users\\Mike\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\bin\\codex.js",
+      "exec",
+      "--sandbox",
+      "read-only",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "--json",
+      "-o",
+      "C:\\Users\\Mike\\AppData\\Local\\Temp\\factory-codex-scratch-KjHncz\\last-message.txt",
+      "-"
+    ],
+    "envOverrides": {
+      "CODEX_HOME": "C:\\Users\\Mike\\AppData\\Local\\Temp\\factory-codex-scratch-KjHncz\\config"
+    }
+  },
+  "cleanRoom": {
+    "configHome": [
+      "auth.json"
+    ],
+    "workDir": []
+  },
+  "exitCode": 0,
+  "timedOut": false,
+  "startedAt": "2026-11-27T02:01:42.193Z",
+  "endedAt": "2026-11-27T02:02:49.800Z",
+  "durationMs": 67607,
+  "cliVersion": "0.155.1",
+  "modelReported": "gpt-6-astra",
+  "tokenUsage": {
+    "input_tokens": 58924
+  },
+  "payloadSha256": "ba3d9ed7fd229796db1ee6b459cf9b6d5b53dd08e920040ca2b0ecb625028e41",
+  "payloadBytes": 173765,
+  "ingestion": {
+    "kind": "complete",
+    "inputTokens": 58924,
+    "floor": 34753
+  },
+  "postRunFileCount": 645,
+  "recordedApprovalPolicy": "never",
+  "bundleSha256": "e4dd6740fb661c8a7658908383216207472bba068d716951db8e169f465175dc",
+  "integrity": {
+    "kind": "verified"
+  },
+  "replySha256": "0530149550e2bda76c89c48f8cfb3e2bfc325afe0e9ba36f9d311f9f2cff2ea9",
+  "outcome": "counted"
+}

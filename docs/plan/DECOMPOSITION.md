@@ -3760,7 +3760,7 @@ rate is priced at the default (#208). And the relay's source is one command
 argument, within about 2,500 characters of the Windows limit (#207).
 
 - A price table naming a model the relay knows bills per call is refused
-  at provisioning, unless it carries a per-call price.
+  at provisioning.
 - The `openai-responses` dialect reads the served tier and stops
   forwarding after an answer served at any tier but the default, as
   `openai-chat` does.

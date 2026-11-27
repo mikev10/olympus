@@ -89,6 +89,7 @@ require('node:https').createServer({ key: process.env.UPSTREAM_KEY, cert: proces
         response.usage = { input_tokens: t.input, input_tokens_details: { cached_tokens: 0 } };
         if (t.omit !== 'final') response.usage.output_tokens = t.output;
       }
+      if (t.tier !== undefined) response.service_tier = t.tier;
       const answer = JSON.stringify(response);
       s.writeHead(200, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(answer) });
       s.end(answer);
@@ -267,6 +268,9 @@ const DIALECT_PATH: Readonly<Record<RelayMeter['dialect'], string>> = {
 
 /** The most a model generates in one response, as the Responses meter requires every price to name (A-R26-01). */
 const MAX_OUTPUT = 96;
+
+/** A token price for a model that is also billed per search: complete, so the name alone is what refuses it (#205). */
+const SEARCH_PRICE = { inputPerMTok: 1, outputPerMTok: 10, cacheReadPerMTok: 0.1, cacheWritePerMTok: 1.25, cacheWrite1hPerMTok: 2 };
 
 /** A relay for `dialect`: the Messages API with its key written raw, or an OpenAI API with a bearer token (A-R6-01, A-R6-02, A-R26-01). */
 function meteredRelay(budget: RelayBudget = AMPLE, dialect: RelayMeter['dialect'] = 'anthropic-messages', serverTools: RelaySpec['serverTools'] = []): RelaySpec {
@@ -572,12 +576,22 @@ export const MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE_OPENAI_CHAT = runtime({
   id: 'I5.model-relay-fails-closed-on-unmetered-usage-openai-chat',
   title:
     'under the openai-chat dialect a model with no price, a request with no output ceiling, and a request asking for a service tier other than the default, a web search, audio, or a tool the API runs itself are refused before the upstream sees them, ' +
-    'while one naming the default tier, text alone, and a function tool is sent; an answer with no completion_tokens is charged its ceiling, and an answer with no readable usage, or one served at a tier other than the default, stops the relay forwarding',
+    'while one naming the default tier, text alone, and a function tool is sent; an answer with no completion_tokens is charged its ceiling, and an answer with no readable usage, or one served at a tier other than the default, stops the relay forwarding; ' +
+    'and a price table naming a model that searches on every call is refused at provisioning',
   run: async () => {
     const certificate = await makeCertificate();
     await withSandboxDirs('i5-relay-unmetered-openai-', async (dirs) => {
       const { LocalDockerProvider: Provider } = await import('@olympus-ai/sandbox');
       const provider = await Provider.create({ vaultPaths: [dirs.vault], credentials: { [CREDENTIAL]: `canary-${randomUUID()}` }, relayTrust: certificate.cert });
+      // #205: a search model searches, and is billed per search, whatever the request names. No request field
+      // turns it off, so the table that prices one is refused before any container starts.
+      for (const model of ['gpt-5-search-api', 'gpt-4o-search-preview-2025-03-11']) {
+        const searching: RelaySpec = { ...meteredRelay(AMPLE, 'openai-chat'), meter: { dialect: 'openai-chat', prices: { ...METER.prices, [model]: SEARCH_PRICE } } };
+        const refused = await refusalFrom(() => provider.provision(specFor(dirs, 'rw', { relay: searching })));
+        if (refused.layer !== 'relay' || !refused.message.includes(model) || !refused.message.includes('searches on every call')) {
+          throw new Error(`I5: a price table naming ${model} was not refused at the relay layer for its cause: ${refused.message}`);
+        }
+      }
       const reading = metered(
         await withMeteredSandbox(
           provider,
@@ -714,7 +728,7 @@ export const MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE_OPENAI_RESPONSES = runt
   id: 'I5.model-relay-fails-closed-on-unmetered-usage-openai-responses',
   title:
     "under the openai-responses dialect a model with no price, a malformed max_output_tokens, and a hosted tool billed outside the token usage are refused before the upstream sees them, an answer with no output_tokens is charged the model's maxOutputTokens, " +
-    'an answer with no readable usage stops the relay forwarding, and a meter whose model names no maxOutputTokens is refused at provisioning',
+    'an answer with no readable usage, or one served at a tier other than the default, stops the relay forwarding, and a meter whose model names no maxOutputTokens is refused at provisioning',
   run: async () => {
     const certificate = await makeCertificate();
     await withSandboxDirs('i5-relay-unmetered-responses-', async (dirs) => {
@@ -749,6 +763,94 @@ export const MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE_OPENAI_RESPONSES = runt
       );
       if (reading.calls !== 2 || reading.inputTokens !== 1000 || reading.outputTokens !== MAX_OUTPUT * 2 || reading.exhausted !== 'unreadable' || reading.refused !== 4) {
         throw new Error(`I5: the openai-responses destroy read ${JSON.stringify(reading)}`);
+      }
+      // #208: a request naming no tier is served at the upstream's own default, so the tier the answer
+      // reports is read. One at the default is counted; any other is counted and stops the relay
+      // forwarding, because the price table holds the default rate alone.
+      const tiered = metered(
+        await withMeteredSandbox(
+          provider,
+          dirs,
+          certificate,
+          AMPLE,
+          async (handle) => {
+            const answers = await sendAll(
+              provider,
+              handle,
+              [
+                { ...message(100, 10), relay_test: { input: 100, output: 10, tier: 'default' } },
+                { ...message(100, 10), relay_test: { input: 100, output: 10, tier: 'priority' } },
+                message(10, 1),
+              ],
+              'openai-responses',
+            );
+            if (answers.map((a) => a.status).join(',') !== '200,200,402') {
+              throw new Error(`I5: after an openai-responses answer served at the priority tier the relay answered ${JSON.stringify(answers)}`);
+            }
+          },
+          'openai-responses',
+        ),
+        'I5',
+      );
+      if (tiered.calls !== 2 || tiered.inputTokens !== 200 || tiered.outputTokens !== 20 || tiered.exhausted !== 'unreadable' || tiered.refused !== 1) {
+        throw new Error(`I5: the openai-responses tier destroy read ${JSON.stringify(tiered)}`);
+      }
+    });
+  },
+});
+
+/**
+ * The relay's source is in no argument (R66, #207). As one `docker run`
+ * argument it counted toward the host's command line, which Windows ends at
+ * 32767 characters and no other host does, so a relay that started on Linux
+ * failed to start there. It is written to the container's standard input
+ * instead, and what is left on the command line is measured.
+ */
+export const MODEL_RELAY_SOURCE_IS_IN_NO_ARGUMENT = runtime({
+  id: 'I5.model-relay-source-is-in-no-argument',
+  title:
+    "a relay's source reaches its container on standard input and is in no argument of the command that creates it; the container it runs in has a read-only root, no mount, and the pinned image as published; " +
+    'the Windows command line for that argument list is under the limit, and one for a price table too large for it is measured over',
+  run: async () => {
+    await withSandboxDirs('i5-relay-source-', async (dirs) => {
+      const { LocalDockerProvider: Provider, EGRESS_PROXY_IMAGE, RELAY_SOURCE, WINDOWS_COMMAND_LINE_LIMIT, checkRelay, relayCreateArgs, relayOf, windowsCommandLineLength } =
+        await import('@olympus-ai/sandbox');
+      const provider = await Provider.create({ vaultPaths: [dirs.vault], credentials: { [CREDENTIAL]: `canary-${randomUUID()}` } });
+      const handle = await provider.provision(specFor(dirs, 'rw', { image: EGRESS_PROXY_IMAGE, relay: meteredRelay() }));
+      try {
+        const applied = relayOf(provider.appliedControls(handle).egress);
+        if (applied === undefined) throw new Error('I5: a spec with a relay was provisioned without one');
+        const args = applied.runArgs;
+        // A line of the source is long enough to be nothing else, and short enough that any argument holding the source holds it.
+        const line = RELAY_SOURCE.split('\n').find((text) => text.length > 40);
+        if (line === undefined) throw new Error('I5: the relay source has no line to look for');
+        if (args[0] !== 'create' || !args.includes('--interactive') || args.slice(-2).join(' ') !== 'node -' || args.includes('--eval')) {
+          throw new Error(`I5: the relay was not created to read its program from standard input: ${args.join(' ')}`);
+        }
+        if (args.some((arg) => arg.includes('\n') || arg.includes(line))) throw new Error('I5: an argument of the relay holds its source');
+        if (args.some((arg) => /^(?:-v|--volume|--mount|--tmpfs)(?:=|$)/u.test(arg))) throw new Error(`I5: the relay was created with a mount: ${args.join(' ')}`);
+        // What ran is the source, in the image as published, with nothing mounted and a root it cannot write.
+        const { stdout: facts } = await docker('docker', ['inspect', '--format', '{{.State.Running}} {{.HostConfig.ReadonlyRootfs}} {{len .Mounts}} {{.Config.Image}}', applied.containerId]);
+        if (facts.trim() !== `true true 0 ${EGRESS_PROXY_IMAGE}`) throw new Error(`I5: the relay's container is ${facts.trim()}, expected running, read-only, no mount, on ${EGRESS_PROXY_IMAGE}`);
+        const logs = await docker('docker', ['logs', applied.containerId]);
+        if (!`${logs.stdout}${logs.stderr}`.includes('model-relay listening')) throw new Error('I5: the relay container is running something other than the relay source');
+        const length = windowsCommandLineLength('docker', args);
+        if (!(length < WINDOWS_COMMAND_LINE_LIMIT)) throw new Error(`I5: the relay's argument list is ${String(length)} characters on Windows, at or past ${String(WINDOWS_COMMAND_LINE_LIMIT)}`);
+        // The measure measures: a table too large for the line is reported over it, quotes counted.
+        const relay = meteredRelay();
+        const price = Object.values(relay.meter.prices)[0];
+        if (price === undefined) throw new Error('I5: the conformance meter prices no model');
+        const table = Object.fromEntries(Array.from({ length: 400 }, (_, i) => [`model-${String(i)}`, price]));
+        const plan = checkRelay({ ...relay, meter: { ...relay.meter, prices: table } }, new Set([CREDENTIAL]), new Set());
+        const large = relayCreateArgs(plan, { name: applied.name, network: applied.internalNetwork, labels: [], image: EGRESS_PROXY_IMAGE, secrets: ['RELAY_CREDENTIAL'] });
+        const meterArg = large.find((arg) => arg.startsWith('RELAY_METER='));
+        if (meterArg === undefined) throw new Error('I5: the relay argument list names no meter');
+        const over = windowsCommandLineLength('docker', large);
+        if (over < WINDOWS_COMMAND_LINE_LIMIT || over < meterArg.length + (meterArg.split('"').length - 1)) {
+          throw new Error(`I5: a 400-model table was measured at ${String(over)} characters, under the limit or under its own quoted length`);
+        }
+      } finally {
+        await provider.destroy(handle);
       }
     });
   },

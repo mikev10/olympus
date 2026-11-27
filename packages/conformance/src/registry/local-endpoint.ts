@@ -257,7 +257,9 @@ async function freePort(): Promise<number> {
 
 /** Runs the relay's own source on the host with `env`, and returns how it ended within a few seconds and what it wrote. */
 async function relayStart(source: string, env: Record<string, string>): Promise<{ code: number | null; output: string }> {
-  const child = spawn(process.execPath, ['--eval', source], { env: { PATH: process.env.PATH ?? '', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+  // On standard input, as the provider sends it (#207): the source is free to outgrow a command line.
+  const child = spawn(process.execPath, ['-'], { env: { PATH: process.env.PATH ?? '', ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
+  child.stdin.end(source);
   let output = '';
   child.stdout.on('data', (c: Buffer) => (output += c.toString('utf8')));
   child.stderr.on('data', (c: Buffer) => (output += c.toString('utf8')));
