@@ -14254,3 +14254,28 @@ adds a per-call price to `ModelPrice` and lets a table carrying one through
 - **The full run, run again on the fixed code, passed:** nothing failed
   locally. 27 registry entries need the paid suites and are not run here;
   the pull request's paid job is their proof.
+
+### D-R66-07: known limit — an answer that names no tier is taken at the default
+
+Raised by the Codex review (codex-1) and verified. `tierOpenai` stops the
+relay after an answer whose `service_tier` is anything but `default`, and
+takes a missing or `null` tier as the default, in both OpenAI dialects.
+
+- **Why it stands.** The entry says the Responses dialect behaves "as
+  `openai-chat` does", and `openai-chat` needs the lenient reading:
+  OpenAI-compatible endpoints report no tier. Refusing a missing tier in
+  `openai-responses` alone is the stricter, fail-closed rule, and it rests
+  on the fact D-R66-02 could not verify: that a live Responses answer always
+  carries the field. If it does not, every Codex run stops after one call.
+- **Exposure.** A request naming any tier but the default is refused
+  unsent, so what is left is an upstream that serves another rate and does
+  not say so.
+- **Owner.** #258, which says to read the tier from a real answer first.
+  No unit owns it yet.
+- **Reverse / tighten:** in the Responses paths, set `offTier` when the
+  tier is `undefined` or `null`, and give the test upstream's Responses
+  answers a `default` tier.
+
+The review's other finding (codex-2, the ceiling charged for a missing
+output count) is rejected in the triage: the rule is A-R26-01's and this
+unit does not change it.

@@ -1,3 +1,38 @@
+# External review of R66, codex, 2026-11-26
+
+R66 (the relay meters what it forwards, and starts on Windows), reviewed from the
+bundle alone. The triage of this reply and Gemini's is
+`2026-11-26-R66-relay-meters-and-starts-on-windows-triage.md`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex. A headless `codex exec` run under a
+  read-only sandbox, with recorded approval policy `never`, in an empty scratch
+  working directory and a scratch config home holding only `auth.json`, with an
+  environment of `CODEX_HOME` alone. The pre-run listing of both is the manifest's
+  `cleanRoom`.
+- **Cross-family agreement:** none. It raised two findings and Gemini raised none.
+  Gemini assessed the tier check as sound, which is the mechanism finding 1 is about.
+- **Date:** 2026-11-26
+- **Bundle:** `2026-11-26-R66-relay-meters-and-starts-on-windows-review-bundle.txt`, SHA-256
+  `e4dd6740fb661c8a7658908383216207472bba068d716951db8e169f465175dc`, base `e3e851c`
+  (`reviewed/R58`), head `061f9f3` (R66's tip before the review files). It held 14
+  changed files, all R66's: new files in full, modified files as diffs showing each
+  changed function whole. `docs/decisions.md`, `docs/reviews/`, `docs/plan/` and
+  `pnpm-lock.yaml` were excluded. Prompt:
+  `2026-11-26-R66-relay-meters-and-starts-on-windows-review-prompt.txt`.
+- **Prior context and lookups:** it said it had no prior context and performed no
+  lookups. That is a self-report and cannot be checked from here.
+- **Coverage, and any gap:** items 1 and 3 are answered by its two findings, item 4
+  (language escape hatches) and item 6 (sound mechanisms) explicitly, and item 7
+  (the framing) explicitly: it accepts the question, says the bundle did not show
+  the relay's request admission, model lookup, or final accounting, and says the
+  prompt's invariant is stricter than the code's ceiling rule. It names no
+  tautological check (item 2), saying the oversized-table and source-in-argument
+  checks are not tautologies, and says nothing separately on item 5.
+- **Citations:** line numbers refer to the new side of the bundle's diffs and are
+  treated as hints. Each finding was located by the function it names.
+
 BASE: reviewed/R58
 HEAD: 061f9f3
 packages/sandbox/test/upstream.ts
