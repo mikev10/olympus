@@ -30,6 +30,9 @@ export type RequestProblemCode =
   | 'differs-from-commit'
   /** A string that must have content is blank, or is not a string. */
   | 'empty'
+  /** A task's objective is blank, is not text, or is over `OBJECTIVE_MAX_BYTES` (A-R5a-04). */
+  | 'objective-empty'
+  | 'objective-too-long'
   /** A run id that is not one directory name, so neither the Vault nor the workspace store can hold it (D-P14-14). */
   | 'unusable'
   /** An id or a path is listed twice. */
@@ -572,6 +575,9 @@ export function reproductionProblems(checks: readonly CheckSpec[], bugFix: boole
   return [{ path: `${at}.checks`, code: 'no-reproduction', message: "a bug-fix run needs a required check that declares reproduces: true and onBase 'fails': the runtime running it over the unchanged tree is the reproduction" }];
 }
 
+/** The most bytes of UTF-8 a task's objective may hold: it reaches a builder in its context (A-R5a-04). */
+export const OBJECTIVE_MAX_BYTES = 2048;
+
 export interface GraphBinding {
   readonly runId: RunId;
   readonly baseCommit: string;
@@ -584,7 +590,9 @@ export interface GraphBinding {
  * depends only on build tasks; a review task depends on at least one build
  * task and on nothing else; every build task is covered by a review task, so
  * no work reaches `integrate` unreviewed; and the dependencies are acyclic, so
- * the graph can finish.
+ * the graph can finish. A build task may state its objective, in bounded
+ * text; a review task states none, since no review seat is given one
+ * (A-R5a-04).
  */
 export function parseGraph(value: unknown, bind: GraphBinding): { ok: true; graph: TaskGraph } | { ok: false; problems: RequestProblem[] } {
   const { problems, report } = collector();
@@ -621,10 +629,17 @@ export function parseGraph(value: unknown, bind: GraphBinding): { ok: true; grap
     if (!Array.isArray(t.dependencySet) || t.dependencySet.length === 0 || !t.dependencySet.every(isNonEmptyString)) {
       report(`${at}.dependencySet`, 'missing', `${at}.dependencySet must name at least one glob`);
     }
+    if (t.objective !== undefined && t.objective !== null) {
+      if (t.station === 'review') report(`${at}.objective`, 'not-applicable', `${at}.objective: a review task states no objective; a review seat is never given one`);
+      else if (typeof t.objective !== 'string' || t.objective.trim() === '') report(`${at}.objective`, 'objective-empty', `${at}.objective must be text saying what the task delivers`);
+      else if (Buffer.byteLength(t.objective, 'utf8') > OBJECTIVE_MAX_BYTES) {
+        report(`${at}.objective`, 'objective-too-long', `${at}.objective is ${String(Buffer.byteLength(t.objective, 'utf8'))} bytes, over the ${String(OBJECTIVE_MAX_BYTES)} an objective may hold`);
+      }
+    }
   });
   if (problems.length > 0) return { ok: false, problems };
 
-  const tasks = entries as ReadonlyArray<{ id: string; station: 'build' | 'review'; role: string; dependsOn: string[]; dependencySet: string[] }>;
+  const tasks = entries as ReadonlyArray<{ id: string; station: 'build' | 'review'; role: string; dependsOn: string[]; dependencySet: string[]; objective?: string | null }>;
   const reviewed = new Set<string>();
   tasks.forEach((t, i) => {
     const at = `graph.tasks[${String(i)}].dependsOn`;
@@ -659,6 +674,7 @@ export function parseGraph(value: unknown, bind: GraphBinding): { ok: true; grap
     dependencySet: [...t.dependencySet],
     worktreePath: bind.workspace,
     attempt: 1,
+    objective: t.objective ?? null,
   }));
   // Beside every review task, the security seat: the same task's grants, dependencies, and role, so
   // no graph can leave it out and every counter the line keeps counts it as a task (R9, D-R9-03).

@@ -1,6 +1,7 @@
 /**
- * Drafting at `spec` and `test-design` (R19). A run admitted without its spec
- * or its acceptance tests drafts them on the line: a drafter writes, the
+ * Drafting at `spec`, `test-design` (R19), and `plan` (R5a). A run admitted
+ * without its spec, its acceptance tests, or its task graph drafts them on
+ * the line: a drafter writes, the
  * runtime reads exactly the draft's paths and records the bytes it read under
  * one hash, the base run runs a test draft over the base, an independent
  * critic reads the recorded bytes, and the exit's approval carries the
@@ -20,6 +21,7 @@ import {
   capabilityRefusal,
   CRITIC_CONTRACTS,
   DRAFT_ROLES,
+  DRAFT_STATIONS,
   levelOf,
   gradeAgainst,
   gradeOf,
@@ -50,8 +52,10 @@ import type {
   ModelIdentity,
   RetryPart,
   RunState,
+  RoleId,
   RunTemplateId,
   StationRefusal,
+  TaskGraph,
   VaultRef,
 } from '@olympus-ai/core';
 import type { CheckSpec } from '@olympus-ai/integrity';
@@ -85,6 +89,8 @@ import {
 } from './line.js';
 import { denialRefusal, parseSecurityPart, type SecurityPart } from './security.js';
 import { parsePlan, planDraftPath } from './observation-plan.js';
+import { worstCaseCost } from './cost.js';
+import { boundGraph, graphDraftPath, parseDraftedGraph, type GraphBound } from './planning.js';
 import { DRAFT_DIR, defectBytes, parseQuestions, parseReproduction, parseRunRequirements, type DefectPart, type RunRequirements } from './spec-parts.js';
 import { mergedCheckProblems, parseManifest, reproductionProblems } from './validate.js';
 import { suiteBindingProblems, taskResultProblems, writesOutsideGrant } from './verification.js';
@@ -92,12 +98,14 @@ import { propertyAdmissionProblems } from './property.js';
 import { planInstall } from './install.js';
 import { basePath, copyOnly, copyTree, draftBaseRunPath, draftPaths, existsIn, ownDiff, scratchPath, treeDigest, writeFiles } from './workspace.js';
 
-/** The drivers that seat each drafter and each critic (R19). A run that drafts is refused without them. */
+/** The drivers that seat each drafter and each critic (R19), the planner and the plan critic among them (A-R5a-05). A run that drafts is refused without them. */
 export interface DraftingDrivers {
   readonly specDrafter: Driver;
   readonly specCritic: Driver;
   readonly testDrafter: Driver;
   readonly testCritic: Driver;
+  readonly planner: Driver;
+  readonly planCritic: Driver;
 }
 
 /** What a run was admitted to draft, with the intent and rubrics it was admitted with (R19). */
@@ -109,9 +117,13 @@ export interface DraftingContext {
   /** A bug fix's three parts, from its intent record, that the runtime writes `defect.json` from; null for any other run (A-R16-03). */
   readonly defect: DefectPart | null;
   readonly rubrics: Readonly<Partial<Record<DraftStation, { readonly text: string; readonly sha256: string }>>>;
+  /** What a drafted graph is held to, from the admission record; null for a run admitted with its graph (R5a). */
+  readonly graphBound: GraphBound | null;
 }
 
-export const NOT_DRAFTING: DraftingContext = Object.freeze({ drafted: Object.freeze({ spec: false, 'test-design': false }), intent: null, template: null, defect: null, rubrics: Object.freeze({}) });
+export const NOT_DRAFTING: DraftingContext = Object.freeze({
+  drafted: Object.freeze({ spec: false, 'test-design': false, plan: false }), intent: null, template: null, defect: null, rubrics: Object.freeze({}), graphBound: null,
+});
 
 /**
  * Where a drafted spec's files are written, in the drafter's tree and in the
@@ -135,6 +147,12 @@ export function specDraftPaths(runId: string): {
  */
 export function draftDestination(ctx: Pick<LineContext, 'run' | 'drafting' | 'requirements'>, station: DraftStation): string {
   if (station === 'spec') return `[drafts] write the draft under ${DRAFT_DIR}/${ctx.run.id}/: ${specDraftFiles(ctx).join(', ')}`;
+  if (station === 'plan') {
+    // The bound is policy's, so the runtime says it: a planner told neither would learn both from being sent back (R5a).
+    const bound = ctx.drafting.graphBound;
+    const within = bound === null ? '' : `; at most ${String(bound.maxBuildTasks)} build task(s), each under one of these roles: ${bound.roles.join(', ')}`;
+    return `[drafts] write the task graph at ${graphDraftPath(ctx.run.id)}${within}`;
+  }
   // A test draft is read from two places; naming only the manifest's sent a real drafter's tests under `.drafts/`,
   // where they were discarded on every attempt (D-R36b-11). The directory is the locked spec's.
   const tests = ctx.requirements === null ? 'the test directory run-requirements.json names' : `${ctx.requirements.testDirectory}/`;
@@ -154,8 +172,11 @@ export function manifestDraftPath(runId: string): string {
 }
 
 export function seatDriver(drivers: DraftingDrivers, station: DraftStation, seat: DraftSeat): Driver {
-  if (station === 'spec') return seat === 'drafter' ? drivers.specDrafter : drivers.specCritic;
-  return seat === 'drafter' ? drivers.testDrafter : drivers.testCritic;
+  switch (station) {
+    case 'spec': return seat === 'drafter' ? drivers.specDrafter : drivers.specCritic;
+    case 'test-design': return seat === 'drafter' ? drivers.testDrafter : drivers.testCritic;
+    case 'plan': return seat === 'drafter' ? drivers.planner : drivers.planCritic;
+  }
 }
 
 export function isDrafted(ctx: Pick<LineContext, 'drafting'>, station: DraftStation): boolean {
@@ -310,13 +331,21 @@ async function conditionsFailed(ctx: LineContext, station: DraftStation, current
  * Every model the build driver can resolve for this run: each build task's
  * station tier, and each tier its escalation grant can raise it to (R14). A
  * test drafter of any of their families is not independent of the builder.
+ *
+ * A run that drafts its graph has none at `test-design`, so the roles are
+ * every role its bound lets a planner seat a builder under: a superset of
+ * what the locked graph will name, read the same before and after the lock
+ * (R5a).
  */
-export function builderModels(ctx: Pick<LineContext, 'graph' | 'policy' | 'components'>): ModelIdentity[] {
+export function builderModels(ctx: Pick<LineContext, 'graph' | 'policy' | 'components' | 'drafting'>): ModelIdentity[] {
   const models = new Map<string, ModelIdentity>();
-  for (const task of ctx.graph.tasks) {
-    if (task.station !== 'build') continue;
+  const bound = ctx.drafting.graphBound;
+  const roles: readonly RoleId[] = bound !== null
+    ? bound.roles
+    : (ctx.graph ?? noGraph()).tasks.filter((task) => task.station === 'build').map((task) => task.role);
+  for (const role of new Set(roles)) {
     // Tiers and escalation are the role's own whether or not the run is narrowed.
-    const scope = roleScope(ctx.policy, task);
+    const scope = roleScope(ctx.policy, { role, station: 'build' });
     const from = tierRank(stationTier(scope, 'build'));
     const to = scope.escalation === 'none' ? from : Math.max(from, tierRank(scope.escalation.ceiling));
     for (let rank = from; rank <= to; rank++) {
@@ -384,7 +413,8 @@ async function retryParts(ctx: LineContext, station: DraftStation, previous: Dra
     case 'base-run':
       return [{ kind: 'base-refusal' }];
     case 'principal':
-      if (station === 'spec') return back.notes === null ? [] : [{ kind: 'notes', notes: back.notes }];
+      // Notes at `spec` and `plan`; at `test-design` a reason from the fixed set and no text (D-A-DS-02, R5a).
+      if (station !== 'test-design') return back.notes === null ? [] : [{ kind: 'notes', notes: back.notes }];
       return back.reason === null ? [] : [{ kind: 'rejection-reason', reason: back.reason }];
   }
 }
@@ -393,7 +423,9 @@ async function retryParts(ctx: LineContext, station: DraftStation, previous: Dra
  * Runs the drafter for the station's current attempt and records what it
  * drafted. The spec drafter works over a fresh copy of the base; the test
  * drafter over a tree holding the locked spec and nothing else, so it is
- * black-box by what it can reach, not by its instructions (I3).
+ * black-box by what it can reach, not by its instructions (I3). The planner
+ * works over a fresh copy of the base, granted the locked spec and never the
+ * intent (R5a, I7).
  */
 async function draft(ctx: LineContext, station: DraftStation, current: DraftAttempt, previous: DraftAttempt | null): Promise<StationRefusal | undefined> {
   const drivers = draftingDrivers(ctx);
@@ -420,7 +452,10 @@ async function draft(ctx: LineContext, station: DraftStation, current: DraftAtte
   } else {
     const spec = await readText(ctx, specArtifacts(ctx));
     if (spec.tampered.length > 0) return recordTamper(ctx, station, null, spec.tampered, { phase: 'context' }, null);
-    context = joinParts(grantedContext(STATION_CONTRACTS['test-design'], { 'locked-spec': spec.text }));
+    // The planner is offered the locked spec and the target's instructions, and nothing else: its contract holds no `intent` (D-A-GD-06).
+    context = station === 'plan'
+      ? joinParts(grantedContext(STATION_CONTRACTS.plan, withInstructions({ 'locked-spec': spec.text }, instructions)))
+      : joinParts(grantedContext(STATION_CONTRACTS['test-design'], { 'locked-spec': spec.text }));
   }
   // Where the draft is written, named by the runtime: a drafter granted no listing tool cannot find it otherwise (#151).
   const suffix = [draftDestination(ctx, station), retrySuffix(station, current.attempt, await retryParts(ctx, station, previous))].join('\n');
@@ -430,8 +465,8 @@ async function draft(ctx: LineContext, station: DraftStation, current: DraftAtte
   const { workspaces } = ctx.components;
   const { start, work } = draftPaths(workspaces, ctx.run.id, station, 'drafter', current.attempt);
   const base = basePath(workspaces, ctx.run.id);
-  if (station === 'spec') await copyTree(base, start);
-  else await copyOnly(base, start, specArtifacts(ctx).map((a) => a.path));
+  if (station === 'test-design') await copyOnly(base, start, specArtifacts(ctx).map((a) => a.path));
+  else await copyTree(base, start);
   // What the drafter is not given is left out of the tree it is handed (D-A-TR-04).
   await omitWithheld(ctx, DRAFT_ROLES[station].drafter, start);
   // A bug fix's defect part is the runtime's, written from the intent record before the drafter runs; the
@@ -453,7 +488,7 @@ async function draft(ctx: LineContext, station: DraftStation, current: DraftAtte
   const result = await ctx.components.vault.recordTaskResult(ctx.run.id, ran.result);
   await commit(ctx, { tasks: { [seat.id]: 'verifying' }, results: { [seat.id]: result } });
 
-  const read = station === 'spec' ? await readSpecDraft(ctx, start, work) : await readTestDraft(ctx, start, work);
+  const read = station === 'spec' ? await readSpecDraft(ctx, start, work) : station === 'plan' ? await readGraphDraft(ctx, start, work) : await readTestDraft(ctx, start, work);
   // A drafted path the drafter's policy grant does not cover is a problem, as a build's write outside it is an escape (I4, A-R19-11).
   const entries = read.files.map((f) => ({ path: f.path, change: 'added' as const, sha256: f.sha256 }));
   for (const path of writesOutsideGrant(entries, scopeFor(ctx, seat).writableGlobs, STATION_CONTRACTS[station].writeBoundary.workspaceGlobs)) {
@@ -551,6 +586,41 @@ async function readSpecDraft(ctx: LineContext, start: string, work: string): Pro
     parse(paths.reproduction, (v) => parseReproduction(v, 'reproduction'));
   }
   return { files, discarded: await discardedOf(start, work, (p) => all.includes(p)), problems };
+}
+
+/**
+ * A graph draft: the one path the planner writes, read and held to the
+ * shape, the bound, and the objectives a drafted graph needs (R5a). Anything
+ * else the planner wrote stays in its workspace.
+ */
+async function readGraphDraft(ctx: LineContext, start: string, work: string): Promise<ReadDraft> {
+  const path = graphDraftPath(ctx.run.id);
+  const file = await fileAt(work, path);
+  const problems: DraftProblem[] = [];
+  if (file === undefined) problems.push({ path, code: 'missing' });
+  else {
+    const json = jsonOf(file);
+    if (json === undefined) problems.push({ path, code: 'not-json' });
+    else {
+      const parsed = parseDraftedGraph(json, graphBinding(ctx), graphBoundOf(ctx));
+      if (!parsed.ok) for (const p of parsed.problems) problems.push({ path: `${path}#${p.path}`, code: p.code, message: p.message });
+    }
+  }
+  return { files: file === undefined ? [] : [file], discarded: await discardedOf(start, work, (p) => p === path), problems };
+}
+
+export function graphBinding(ctx: Pick<LineContext, 'run'>): { runId: LineContext['run']['id']; baseCommit: string; workspace: string } {
+  return { runId: ctx.run.id, baseCommit: ctx.run.baseCommit, workspace: ctx.run.repo };
+}
+
+function graphBoundOf(ctx: Pick<LineContext, 'drafting'>): GraphBound {
+  const bound = ctx.drafting.graphBound;
+  if (bound === null) throw new Error('line: the run drafts its graph and its admission record holds no bound; admission refuses that');
+  return bound;
+}
+
+function noGraph(): never {
+  throw new Error('line: no task graph is locked yet, and this run was not admitted to draft one');
 }
 
 /** A path is under `dir` when it is `dir/…`. */
@@ -812,8 +882,8 @@ async function critique(ctx: LineContext, station: DraftStation, current: DraftA
   const { workspaces } = ctx.components;
   const { work } = draftPaths(workspaces, ctx.run.id, station, 'critic', current.attempt);
   const base = basePath(workspaces, ctx.run.id);
-  if (station === 'spec') await copyTree(base, work);
-  else await copyOnly(base, work, specArtifacts(ctx).map((a) => a.path));
+  if (station === 'test-design') await copyOnly(base, work, specArtifacts(ctx).map((a) => a.path));
+  else await copyTree(base, work);
   await omitWithheld(ctx, DRAFT_ROLES[station].critic, work);
   await writeFiles(work, record.files.map((f) => ({ path: f.path, bytes: bytesOf(f) })));
 
@@ -858,7 +928,7 @@ function draftingDrivers(ctx: LineContext): DraftingDrivers {
 
 /**
  * The artifacts a locked draft makes of the line's: a spec's file and its
- * three parts, or the tests and their manifest (R19). Pure, from the lock's
+ * three parts, the tests and their manifest (R19), or the task graph (R5a). Pure, from the lock's
  * paths, so a drive and a resume derive the same set.
  */
 export function lockedArtifacts(artifacts: LineArtifacts, runId: string, station: DraftStation, files: ReadonlyArray<{ readonly path: string; readonly sha256: string }>): LineArtifacts {
@@ -875,6 +945,7 @@ export function lockedArtifacts(artifacts: LineArtifacts, runId: string, station
       },
     };
   }
+  if (station === 'plan') return { ...artifacts, taskGraph: at(graphDraftPath(runId)) };
   const manifest = manifestDraftPath(runId);
   const plan = planDraftPath(runId);
   return { ...artifacts, acceptanceTests: files.filter((f) => f.path !== manifest && f.path !== plan), acceptanceManifest: at(manifest), observationPlan: at(plan) };
@@ -896,6 +967,8 @@ export async function lockApproved(ctx: LineContext, station: DraftStation, appr
   if (current?.draft == null || current.sha256 === null) throw new Error(`line: ${station} approved no draft`);
   const record = await readRecord<DraftRecord>(ctx, current.draft);
   if (record.problems.length > 0 || record.files.length === 0) throw new Error(`line: ${station}'s draft ${record.sha256} carries problems and cannot be locked; approval refuses it`);
+  // The graph's own worst case against the bound's, which is the figure a person approved, before anything is written (R5a, I5).
+  if (station === 'plan') graphWithinBound(ctx, record);
   const base = basePath(workspaces, ctx.run.id);
   let lock: DraftLockRecord;
   if (drafts.locked === null) {
@@ -951,9 +1024,41 @@ export async function lockApproved(ctx: LineContext, station: DraftStation, appr
   return undefined;
 }
 
-/** The line's artifacts, checks, and spec parts once `record` is locked at `station`, parsed from the bytes it holds. */
+/**
+ * The graph a recorded draft holds, parsed from its bytes with the review
+ * task the runtime adds. A draft that reached its lock parsed when it was
+ * read, so a failure here is the validator having changed under the record.
+ */
+function draftedGraphOf(ctx: LineContext, record: DraftRecord): TaskGraph {
+  const file = fileOf(record, graphDraftPath(ctx.run.id));
+  const parsed = file === undefined ? undefined : parseDraftedGraph(jsonOf(file), graphBinding(ctx), graphBoundOf(ctx));
+  if (parsed?.ok !== true) throw new Error(`line: graph draft ${record.sha256} reached its lock without a graph that parses`);
+  return parsed.graph;
+}
+
+/**
+ * Refuses to lock a drafted graph whose worst case is above the bound's
+ * (R5a, I5). The bound's is what admission compared the approved figure
+ * with, and a graph the bound's checks passed cannot cost more: no more
+ * build tasks, each under a role no costlier than the costliest allowed, and
+ * the same one review. This is that argument asserted on the numbers, so a
+ * change to either side that breaks it stops the run before anything of the
+ * graph is written, rather than spending past an approval.
+ */
+function graphWithinBound(ctx: LineContext, record: DraftRecord): void {
+  const stations = DRAFT_STATIONS.filter((station) => ctx.drafting.drafted[station]);
+  const own = worstCaseCost(draftedGraphOf(ctx, record), ctx.policy, stations).usd;
+  const approved = worstCaseCost(boundGraph(graphBoundOf(ctx), ctx.policy, graphBinding(ctx)), ctx.policy, stations).usd;
+  if (own > approved) throw new Error(`line: graph draft ${record.sha256} could cost ${String(own)} USD, above the ${String(approved)} the run was approved for; refusing to lock it`);
+}
+
+/** The line's artifacts, checks, graph, and spec parts once `record` is locked at `station`, parsed from the bytes it holds. */
 function applyLock(ctx: LineContext, station: DraftStation, record: DraftRecord): void {
   ctx.artifacts = lockedArtifacts(ctx.artifacts, ctx.run.id, station, record.files);
+  if (station === 'plan') {
+    ctx.graph = draftedGraphOf(ctx, record);
+    return;
+  }
   if (station === 'spec') {
     const paths = specDraftPaths(ctx.run.id);
     const security = fileOf(record, paths.security);
@@ -981,7 +1086,7 @@ export function parsedParts(texts: { security: unknown; runRequirements: unknown
  */
 export async function settleBase(vault: Vault, base: string, state: RunState): Promise<string | null> {
   let digest: string | null = null;
-  for (const station of ['spec', 'test-design'] as const) {
+  for (const station of DRAFT_STATIONS) {
     const lockRef = state.drafts[station]?.locked ?? null;
     if (lockRef === null) continue;
     const lock = JSON.parse(new TextDecoder().decode(await vault.read(lockRef))) as DraftLockRecord;
@@ -1004,7 +1109,7 @@ export async function settleBase(vault: Vault, base: string, state: RunState): P
  */
 export async function settleArtifactRoot(vault: Vault, repo: string, state: RunState): Promise<void> {
   const held = new Set((await vault.readLocks(state.runId))?.entries.map((e) => e.path) ?? []);
-  for (const station of ['spec', 'test-design'] as const) {
+  for (const station of DRAFT_STATIONS) {
     const lockRef = state.drafts[station]?.locked ?? null;
     if (lockRef === null) continue;
     const lock = JSON.parse(new TextDecoder().decode(await vault.read(lockRef))) as DraftLockRecord;

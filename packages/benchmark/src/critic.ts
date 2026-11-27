@@ -127,8 +127,8 @@ export async function throughTheCritic(bench: Bench, corpus: Corpus, item: Item,
     driver: idle,
     reviewer: idle,
     drafting: station === 'spec'
-      ? { specDrafter: drafter, specCritic: critic.driver, testDrafter: idle, testCritic: idle }
-      : { specDrafter: idle, specCritic: idle, testDrafter: drafter, testCritic: critic.driver },
+      ? { specDrafter: drafter, specCritic: critic.driver, testDrafter: idle, testCritic: idle, planner: idle, planCritic: idle }
+      : { specDrafter: idle, specCritic: idle, testDrafter: drafter, testCritic: critic.driver, planner: idle, planCritic: idle },
     workspaces: localWorkspaceStore({ root: join(root, 'trees'), user: bench.user }),
     integrator: null,
     profile: { buildImage: critic.image, checkImage: BASE_IMAGE, limits: DEFAULT_LIMITS },

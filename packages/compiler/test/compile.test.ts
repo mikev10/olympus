@@ -153,8 +153,8 @@ describe('isRoleId', () => {
 });
 
 describe('the shipped roles', () => {
-  test('are builder, the two review seats (R9), the four drafting seats (R19), and the findings reviewer (R13b), and compile', async () => {
-    const roles = ['builder', 'findings-reviewer', 'reviewer', 'security-reviewer', 'spec-critic', 'spec-drafter', 'test-critic', 'test-drafter'];
+  test('are builder, the two review seats (R9), the four drafting seats (R19), the planner and its critic (R5a), and the findings reviewer (R13b), and compile', async () => {
+    const roles = ['builder', 'findings-reviewer', 'plan-critic', 'planner', 'reviewer', 'security-reviewer', 'spec-critic', 'spec-drafter', 'test-critic', 'test-drafter'];
     expect((await readdir(DEFAULT_ROLES_DIRECTORY)).sort()).toEqual(roles.map((r) => `${r}.md`));
     const outcome = await compileRoles(DEFAULT_ROLES_DIRECTORY);
     if (!outcome.ok) throw new Error(JSON.stringify(outcome.refused));

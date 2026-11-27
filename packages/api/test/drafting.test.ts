@@ -107,8 +107,8 @@ describe('the worst case with drafting seats (R19, D-P9-03)', () => {
   const policy = new StrictPolicyEngine().resolvePolicy(doc);
   const graph: TaskGraph = {
     tasks: [
-      { id: 'b' as TaskId, runId: 'r' as RunId, station: 'build', role: 'builder' as RoleId, dependsOn: [], baseCommit: 'c', dependencySet: ['**'], worktreePath: '', attempt: 1 },
-      { id: 'v' as TaskId, runId: 'r' as RunId, station: 'review', role: 'reviewer' as RoleId, dependsOn: ['b' as TaskId], baseCommit: 'c', dependencySet: ['**'], worktreePath: '', attempt: 1 },
+      { id: 'b' as TaskId, runId: 'r' as RunId, station: 'build', role: 'builder' as RoleId, dependsOn: [], baseCommit: 'c', dependencySet: ['**'], worktreePath: '', attempt: 1, objective: null },
+      { id: 'v' as TaskId, runId: 'r' as RunId, station: 'review', role: 'reviewer' as RoleId, dependsOn: ['b' as TaskId], baseCommit: 'c', dependencySet: ['**'], worktreePath: '', attempt: 1, objective: null },
     ],
     edges: [],
   };

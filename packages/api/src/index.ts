@@ -33,9 +33,10 @@ export {
   type ContainerUser,
   type WorkspaceStore,
 } from './workspace.js';
-export { boundTo, egressFor, evidenceFactsOf, integrateEscalations, readIntegration, UNANALYSED_TESTS, type GateFailedCheck, type GateFailure, type LineArtifacts } from './line.js';
-export { builderModels, manifestDraftPath, criticNote, readCriticResult, specDraftPaths, type DraftingContext, type DraftingDrivers } from './drafting.js';
+export { boundTo, egressFor, evidenceFactsOf, integrateEscalations, readIntegration, taskGraphGrant, UNANALYSED_TESTS, type GateFailedCheck, type GateFailure, type LineArtifacts } from './line.js';
+export { builderModels, manifestDraftPath, criticNote, NOT_DRAFTING, readCriticResult, specDraftPaths, type DraftingContext, type DraftingDrivers } from './drafting.js';
 export { DEFAULT_RUBRICS_DIRECTORY, RUBRIC_MAX_BYTES, type ReadRubric } from './rubrics.js';
+export { boundGraph, graphDraftPath, parseDraftedGraph, type GraphBound, type GraphDraftProblem } from './planning.js';
 export { DRAFT_DIR, defectBytes, defectIntentText, isDraftableDirectory, parseQuestions, parseReproduction, parseRunRequirements, type DefectPart, type Questions, type Reproduction, type RunRequirements } from './spec-parts.js';
 export * from './http/server.js';
 export * from './host/compose.js';

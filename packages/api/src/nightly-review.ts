@@ -43,7 +43,7 @@ export const FINDINGS_REVIEWER_ROLE = 'findings-reviewer' as RoleId;
 
 /** The roles that judge rather than author: a call under one is never an author (D-R13b-05). */
 export const JUDGING_ROLES: ReadonlySet<RoleId> = new Set<RoleId>([
-  REVIEWER_ROLE, SECURITY_REVIEWER_ROLE, DRAFT_ROLES.spec.critic, DRAFT_ROLES['test-design'].critic, FINDINGS_REVIEWER_ROLE,
+  REVIEWER_ROLE, SECURITY_REVIEWER_ROLE, DRAFT_ROLES.spec.critic, DRAFT_ROLES['test-design'].critic, DRAFT_ROLES.plan.critic, FINDINGS_REVIEWER_ROLE,
 ]);
 
 /** What seats a nightly reviewer: the service's reviewer driver, the roles directory, and the image the driver runs in. */

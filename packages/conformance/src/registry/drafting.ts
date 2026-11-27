@@ -45,7 +45,7 @@ import { ARTIFACTS, lineScope, linePolicy, readRecord, refusalOf, RIG_TOOLS, wit
 const api = async () => import('@olympus-ai/api');
 const core = async () => import('@olympus-ai/core');
 
-const INTENT = { text: 'Write hello.txt at the repository root, holding the word hello.', from: 'principal' } as const;
+export const INTENT = { text: 'Write hello.txt at the repository root, holding the word hello.', from: 'principal' } as const;
 
 /** The scopes the rig's policy grants each drafting seat; none of the test seats has egress (I3). */
 export function draftingScopes(): Record<RoleId, ReturnType<typeof lineScope>> {
@@ -54,11 +54,25 @@ export function draftingScopes(): Record<RoleId, ReturnType<typeof lineScope>> {
     ['spec-critic' as RoleId]: lineScope(['spec'], 'deep'),
     ['test-drafter' as RoleId]: lineScope(['test-design'], 'deep'),
     ['test-critic' as RoleId]: lineScope(['test-design'], 'deep'),
+    ['planner' as RoleId]: lineScope(['plan'], 'deep'),
+    ['plan-critic' as RoleId]: lineScope(['plan'], 'deep'),
   };
 }
 
+/** The planning grant the rig's policy holds for a run that drafts its graph, unless the assertion sets another (R5a). */
+export const RIG_PLANNING = { maxBuildTasks: 3, roles: ['builder' as RoleId] };
+
+/** The graph a stub planner drafts for the hello fixture: one build task, whose builder writes `hello.txt`. */
+export function helloGraph(
+  runId: string, tasks: readonly unknown[] = [{ id: 'hello', station: 'build', role: 'builder', dependsOn: [], dependencySet: ['**'], objective: 'Write hello.txt at the repository root.' }],
+): Record<string, string> {
+  return { [`.drafts/${runId}/graph.json`]: JSON.stringify({ tasks }) };
+}
+
 /** The rig's policy with the drafting seats granted: every M1 station `auto` at L0 and L1 unless `cells` says otherwise. */
-export async function draftingPolicy(cells: Parameters<typeof linePolicy>[0] = {}, roles: Record<RoleId, ReturnType<typeof lineScope>> = {}): Promise<Policy> {
+export async function draftingPolicy(
+  cells: Parameters<typeof linePolicy>[0] = {}, roles: Record<RoleId, ReturnType<typeof lineScope>> = {}, overrides: NonNullable<Parameters<typeof linePolicy>[1]> = {},
+): Promise<Policy> {
   return linePolicy(cells, {
     roles: {
       ['builder' as RoleId]: lineScope(['build', 'verify'], 'standard'),
@@ -66,6 +80,7 @@ export async function draftingPolicy(cells: Parameters<typeof linePolicy>[0] = {
       ...draftingScopes(),
       ...roles,
     },
+    ...overrides,
   });
 }
 
@@ -109,7 +124,7 @@ function helloTests(runId: string, script = HELLO_CHECK): Record<string, string>
 export const HELLO_CHECK = "const fs = require('node:fs');\nprocess.exit(fs.existsSync('hello.txt') && fs.readFileSync('hello.txt', 'utf8').trim() === 'hello' ? 0 : 1);\n";
 
 /** Writes `files` into the task's sandbox, as an agent does, through the provider that runs it. */
-async function writeIn(sandbox: SandboxProvider, req: TaskRequest, files: Record<string, string>): Promise<void> {
+export async function writeIn(sandbox: SandboxProvider, req: TaskRequest, files: Record<string, string>): Promise<void> {
   const script = `const fs=require('node:fs');const path=require('node:path');for(const [p,c] of Object.entries(${JSON.stringify(files)})){fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,c);}`;
   const wrote = await sandbox.exec(req.sandbox, ['node', '-e', script]);
   if (wrote.exitCode !== 0) throw new Error(`R19: a stub seat's write did not land: ${wrote.stderr}`);
@@ -129,7 +144,7 @@ async function workspaceOf(sandbox: SandboxProvider, req: TaskRequest): Promise<
   return JSON.parse(listed.stdout) as Record<string, string>;
 }
 
-interface SeatOptions {
+export interface SeatOptions {
   readonly family: string;
   readonly model?: string;
   /** The family the seat's result reports, where it is not the one it resolves; only the resolved one may grade it. */
@@ -147,7 +162,7 @@ export interface ObservedSeat extends Driver {
 }
 
 /** A stub driver for one seat, whose model the assertion sets, recording every request it is given. */
-async function seat(options: SeatOptions): Promise<ObservedSeat> {
+export async function seat(options: SeatOptions): Promise<ObservedSeat> {
   const { StubDriver } = await core();
   const inner = new StubDriver();
   const model: ModelIdentity = { provider: 'stub', family: options.family as ModelFamily, model: options.model ?? `${options.family}-model`, version: '0' };
@@ -182,7 +197,7 @@ async function seat(options: SeatOptions): Promise<ObservedSeat> {
 const CLEAN = JSON.stringify({ findings: [] });
 
 /** What a drafting rig's seats do: the families they run on, and what each drafts or finds per attempt. */
-interface Seats {
+export interface Seats {
   readonly drafterFamily?: string;
   readonly drafterModel?: string;
   readonly testDrafterFamily?: string;
@@ -193,6 +208,11 @@ interface Seats {
   readonly testDrafterReports?: string;
   readonly spec?: (attempt: number, runId: string) => Record<string, string>;
   readonly tests?: (attempt: number, runId: string) => Record<string, string>;
+  /** What the planner writes on each attempt; the hello fixture's one-task graph where none is given (R5a). */
+  readonly graph?: (attempt: number, runId: string) => Record<string, string>;
+  readonly plannerFamily?: string;
+  /** `false` leaves the builder as given: for a graph whose tasks each write their own file (R4, R5a). */
+  readonly work?: boolean;
   readonly critic?: (station: DraftStation, attempt: number) => string;
   /** The provider every seat runs on and writes through; a fresh stub where none is given. */
   readonly sandbox?: SandboxProvider;
@@ -223,7 +243,7 @@ async function boundGraph(rig: LineRig, path: string): Promise<TaskGraph> {
  */
 export async function drafting(rig: LineRig, seats: Seats = {}): Promise<DraftingRig> {
   const { StubSandboxProvider } = await import('@olympus-ai/sandbox');
-  const { DEFAULT_RUBRICS_DIRECTORY, worstCaseCost } = await api();
+  const { DEFAULT_RUBRICS_DIRECTORY, worstCaseCost, boundGraph: boundOf } = await api();
   const sandbox = seats.sandbox ?? new StubSandboxProvider();
   const rubrics = join(rig.roles, '..', 'rubrics');
   await cp(DEFAULT_RUBRICS_DIRECTORY, rubrics, { recursive: true, force: true });
@@ -258,16 +278,31 @@ export async function drafting(rig: LineRig, seats: Seats = {}): Promise<Draftin
       },
     }),
     testCritic: await seat({ ...criticSeat, act: critic('test-design') }),
+    planner: await seat({
+      family: seats.plannerFamily ?? drafterFamily,
+      sandbox,
+      ...(seats.drafterModel === undefined ? {} : { model: seats.drafterModel }),
+      act: async (req) => {
+        await writeIn(sandbox, req, (seats.graph ?? ((_, id) => helloGraph(id)))(attemptOf(req), rig.runId));
+        return undefined;
+      },
+    }),
+    planCritic: await seat({ ...criticSeat, act: critic('plan') }),
   };
   const components = async (): Promise<BuiltGraph> => rig.components({
     sandbox, drafting: drivers, ...(seats.builder === undefined ? {} : { driver: seats.builder }), ...(seats.reviewer === undefined ? {} : { reviewer: seats.reviewer }),
-  });
+  }, seats.work === false ? { work: false } : {});
   const request = async (overrides: Partial<RunRequest> = {}): Promise<RunRequest> => {
-    const policy = overrides.policy ?? (await draftingPolicy());
     const artifacts = overrides.artifacts ?? artifactsFor(true, false);
-    const drafted = [...(artifacts.spec === 'draft' ? ['spec' as const] : []), ...(artifacts.acceptanceTests === 'draft' ? ['test-design' as const] : [])];
-    // Bound as admission binds it, so the security seat it derives is in the figure (R9).
-    const graph = await boundGraph(rig, artifacts.taskGraph);
+    const graphDrafted = artifacts.taskGraph === 'draft';
+    const policy = overrides.policy ?? (await draftingPolicy({}, {}, graphDrafted ? { planning: RIG_PLANNING } : {}));
+    const drafted = [
+      ...(artifacts.spec === 'draft' ? ['spec' as const] : []), ...(artifacts.acceptanceTests === 'draft' ? ['test-design' as const] : []), ...(graphDrafted ? ['plan' as const] : []),
+    ];
+    // Bound as admission binds it, so the security seat it derives is in the figure (R9). A drafted graph's figure is
+    // its bound's (R5a); under a policy that grants no planning there is none, and admission refuses before it is read.
+    const bind = { runId: rig.runId, baseCommit: '0', workspace: rig.dirs.artifacts };
+    const graph = !graphDrafted ? await boundGraph(rig, artifacts.taskGraph) : policy.planning === null ? { tasks: [], edges: [] } : boundOf(policy.planning, policy, bind);
     return rig.request(await components(), {
       intent: artifacts.spec === 'draft' ? INTENT : null,
       rubrics,
@@ -318,7 +353,7 @@ export async function approveAndResume(rig: LineRig, r: DraftingRig, key: Approv
   return resumeRun({ runId: rig.runId, components });
 }
 
-async function decisionsOf(vault: Vault, runId: string): Promise<EnforcementDecision[]> {
+export async function decisionsOf(vault: Vault, runId: string): Promise<EnforcementDecision[]> {
   const out: EnforcementDecision[] = [];
   for (const ref of await vault.readDecisions(runId as never)) out.push(await readRecord<EnforcementDecision>(vault, ref));
   return out;
@@ -948,7 +983,8 @@ export const TEST_DRAFTER_OF_BUILDER_FAMILY: LocalAssertion = runtime({
       const { parseGraph } = await api();
       const graph = parseGraph(JSON.parse(await readFile(join(rig.dirs.artifacts, 'graph.json'), 'utf8')), { runId: rig.runId, baseCommit: '0', workspace: rig.dirs.artifacts });
       if (!graph.ok) throw new Error('R19: the fixture graph did not parse');
-      const resolved = builderModels({ graph: graph.graph, policy, components: { ...(await rig.components()), driver } });
+      const { NOT_DRAFTING } = await api();
+      const resolved = builderModels({ graph: graph.graph, policy, components: { ...(await rig.components()), driver }, drafting: NOT_DRAFTING });
       const names = resolved.map((m) => m.family).sort();
       if (JSON.stringify(names) !== JSON.stringify(['deep-family', 'stub'])) throw new Error(`R19: the builder's models were read as ${JSON.stringify(names)}, escalation not included`);
     });

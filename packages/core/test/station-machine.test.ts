@@ -69,6 +69,7 @@ function task(id: string, station: 'build' | 'review', dependsOn: string[] = [])
     dependencySet: ['**'],
     worktreePath: '/w',
     attempt: 1,
+    objective: null,
   };
 }
 

@@ -233,6 +233,7 @@ export class StrictPolicyEngine implements PolicyEngine {
       concurrency: frozen({ ...valid.concurrency }),
       installRegistries: frozenCopy(valid.installRegistries ?? []),
       propertyPerAuthorizationRule: valid.propertyPerAuthorizationRule ?? false,
+      planning: valid.planning == null ? null : frozen({ maxBuildTasks: valid.planning.maxBuildTasks, roles: frozenCopy(valid.planning.roles) }),
     });
   }
 

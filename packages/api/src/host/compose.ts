@@ -80,8 +80,8 @@ export function parseCodexSeats(seats: string, key: string): HostCodex | null {
   return { key, seats: named };
 }
 
-/** The seats an endpoint can fill: the build seat, the review seat, and the four drafting seats (R19). */
-export const ENDPOINT_SEATS = ['driver', 'reviewer', 'specDrafter', 'specCritic', 'testDrafter', 'testCritic'] as const;
+/** The seats an endpoint can fill: the build seat, the review seat, the four drafting seats (R19), and the planner and its critic (R5a). */
+export const ENDPOINT_SEATS = ['driver', 'reviewer', 'specDrafter', 'specCritic', 'testDrafter', 'testCritic', 'planner', 'planCritic'] as const;
 export type EndpointSeat = (typeof ENDPOINT_SEATS)[number];
 
 export interface HostEndpoint {
@@ -239,7 +239,7 @@ export async function composeHost(config: HostConfig): Promise<BuiltGraph> {
     reviewer: seat('reviewer'),
     // And in every drafting seat: a critic of its drafter's family is not seated, the condition is recorded as
     // failed, and every draft goes to a person (R19, D-A-DS-04). An endpoint of another family seats one.
-    drafting: { specDrafter: seat('specDrafter'), specCritic: seat('specCritic'), testDrafter: seat('testDrafter'), testCritic: seat('testCritic') },
+    drafting: { specDrafter: seat('specDrafter'), specCritic: seat('specCritic'), testDrafter: seat('testDrafter'), testCritic: seat('testCritic'), planner: seat('planner'), planCritic: seat('planCritic') },
     workspaces: localWorkspaceStore(config.containerUser === undefined ? { root: config.trees } : { root: config.trees, user: config.containerUser }),
     integrator: config.git === null ? null : new GitHubIntegrator(config.git),
     profile: { buildImage, driverImages, checkImage: config.checkImage ?? BASE_IMAGE, limits: config.limits ?? DEFAULT_LIMITS },

@@ -25,7 +25,7 @@ const api = async () => import('@olympus-ai/api');
 const REVIEW = 'parts-review' as TaskId;
 
 /** Each file in `parts/` reads `good`, and there is at least one. The directory's name is built, so the command names no path a task writes (D-R15-03). */
-const PARTS_GOOD = {
+export const PARTS_GOOD = {
   id: 'parts-good',
   kind: 'behavioral',
   onBase: 'fails',
@@ -61,7 +61,7 @@ function delay(ms: number): Promise<void> {
 }
 
 /** Overlap as the driver saw it: how many builder calls were inside `runTask` at once, at most. */
-interface Overlap {
+export interface Overlap {
   mostAtOnce: number;
 }
 
@@ -73,7 +73,7 @@ interface Overlap {
  * calls overlap is decided by the line and not by how fast a loaded host
  * reaches each one. `during` runs after that.
  */
-async function wideDriver(
+export async function wideDriver(
   sandbox: SandboxProvider,
   parallelism: number,
   options: { holdMs?: number; meet?: number; overlap?: Overlap; write?: (req: TaskRequest, call: number) => Record<string, string> | null; during?: DriverOptions['during'] } = {},

@@ -53,6 +53,7 @@ import { R13B_I5 } from './nightly-review.js';
 import { R22_I5 } from './triggers.js';
 import { R10_I5 } from './ratchet.js';
 import { R19_ASSERTIONS } from './drafting.js';
+import { R5A_ASSERTIONS } from './planning.js';
 import { R16_ASSERTIONS } from './bug-fix.js';
 import { R24_I5 } from './repo-instructions.js';
 import { R53_I5 } from './harness-image.js';
@@ -84,6 +85,8 @@ export const I5: InvariantEntry = {
       file: 'test/invariants.test.ts',
     }),
     ...R19_ASSERTIONS.I5,
+    // R5a: drafting at plan.
+    ...R5A_ASSERTIONS.I5,
     ...R36A_I5,
     // R37: a run parked on its gate says which check failed.
     ...R37_I5,
