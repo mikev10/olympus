@@ -17,32 +17,32 @@
     ]
   },
   "cleanRoom": null,
-  "exitCode": 1,
+  "exitCode": 0,
   "timedOut": false,
-  "startedAt": "2026-11-27T02:42:36.732Z",
-  "endedAt": "2026-11-27T02:42:37.754Z",
-  "durationMs": 1022,
+  "startedAt": "2026-11-27T02:47:20.948Z",
+  "endedAt": "2026-11-27T02:51:56.938Z",
+  "durationMs": 275990,
   "cliVersion": "api:generativelanguage/v1beta",
-  "modelReported": null,
-  "tokenUsage": null,
+  "modelReported": "gemini-3.1-pro-preview",
+  "tokenUsage": {
+    "promptTokenCount": 140678,
+    "candidatesTokenCount": 638,
+    "totalTokenCount": 184233,
+    "thoughtsTokenCount": 42917
+  },
   "payloadSha256": "83ef82d835391c8bf1a4563a07318242c9fe0ae4103a68bac5476e0cfb9de5de",
   "payloadBytes": 489965,
   "ingestion": {
-    "kind": "unreported",
+    "kind": "complete",
+    "inputTokens": 140678,
     "floor": 97993
   },
   "postRunFileCount": null,
   "recordedApprovalPolicy": null,
   "bundleSha256": "754837ca862f486d2c06d9c26b740c359f5c355f19609ad2dadf410d4917caa1",
   "integrity": {
-    "kind": "failed",
-    "absent": [
-      "base",
-      "head",
-      "finalSection",
-      "endNonce"
-    ]
+    "kind": "verified"
   },
-  "replySha256": null,
-  "outcome": "FAILED"
+  "replySha256": "26a5e58f559ebe8e5f5f7343b7f2b394df263fc471337ca5f1d0bc804d5f22db",
+  "outcome": "counted"
 }
