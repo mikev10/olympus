@@ -137,7 +137,7 @@ function attemptOf(req: TaskRequest): number {
 }
 
 /** Every file in the task's sandbox workspace, by relative path, read through the provider that runs it. */
-async function workspaceOf(sandbox: SandboxProvider, req: TaskRequest): Promise<Record<string, string>> {
+export async function workspaceOf(sandbox: SandboxProvider, req: TaskRequest): Promise<Record<string, string>> {
   const script = "const fs=require('node:fs');const path=require('node:path');const out={};const walk=(d)=>{for(const e of fs.readdirSync(d,{withFileTypes:true})){const p=path.join(d,e.name);if(e.isDirectory())walk(p);else out[path.relative('.',p).split(path.sep).join('/')]=e.isFile()?fs.readFileSync(p,'utf8'):'<not a file>';}};walk('.');process.stdout.write(JSON.stringify(out));";
   const listed = await sandbox.exec(req.sandbox, ['node', '-e', script]);
   if (listed.exitCode !== 0) throw new Error(`R19: a stub seat could not list its workspace: ${listed.stderr}`);

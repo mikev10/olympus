@@ -1637,6 +1637,11 @@ async function build(ctx: LineContext, task: Task): Promise<StationRefusal | und
   if (!prepared.ok) return prepared.outcome;
   // What the role is not given is left out of both copies, so the model never has it and its diff never shows it (D-A-TR-04).
   await omitWithheld(ctx, task.role, start);
+  // A drafted graph's locked file holds every task's objective. It is left out of both copies, as a withheld path is, so
+  // what a builder has of the graph is its `task-graph` grant and the file is no way around it (A-R5a-04; review: codex-1).
+  // The base keeps it, so every tree `verify` builds holds it, and a builder that writes the path adds a locked artifact to its diff.
+  const drafted = isDrafted(ctx, 'plan') ? ctx.artifacts.taskGraph : null;
+  if (drafted !== null) await omitPaths(start, (path) => path === drafted.path);
   await copyTree(start, work);
   // Input a declared source brought for this task narrows the run before it is placed, and is placed only after (D-A-TR-03).
   const brought = ctx.inputFor?.(task) ?? null;

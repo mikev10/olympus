@@ -22,7 +22,7 @@ import type { LocalAssertion } from '../kit/types.js';
 import { around } from './line-assertions.js';
 import { ARTIFACTS, lineScope, readRecord, refusalOf, stubDriver, withLine, writeManifest, type LineRig } from './line.js';
 import {
-  admitAndDrive, approveAndResume, artifactsFor, awaiting, decisionsOf, drafting, draftingPolicy, helloGraph, lastAttempt, RIG_PLANNING, seat,
+  admitAndDrive, approveAndResume, artifactsFor, awaiting, decisionsOf, drafting, draftingPolicy, helloGraph, lastAttempt, RIG_PLANNING, seat, workspaceOf,
   type DraftingRig, type Seats,
 } from './drafting.js';
 import { PARTS_GOOD, wideDriver, type Overlap } from './parallel.js';
@@ -275,12 +275,14 @@ export const RUNTIME_DERIVES_THE_REVIEW: LocalAssertion = runtime({
 
 export const OBJECTIVE_REACHES_THE_BUILDER: LocalAssertion = runtime({
   id: 'I3.objective-reaches-the-builder-never-the-reviewer',
-  title: 'a builder\'s context holds its own task\'s objective and the objective of each task it depends on, and no other task\'s; neither review seat\'s context holds any objective or the graph',
+  title: 'a builder\'s context holds its own task\'s objective and the objective of each task it depends on, and no other task\'s, and no builder\'s tree holds the locked graph file or any objective, so the file is not a way around the grant; neither review seat\'s context holds any objective or the graph',
   run: async () => {
     await withLine('r5a-objective-', async (rig) => {
       const sandbox = await stubSandbox();
       await writeManifest(rig.dirs, [PARTS_GOOD]);
-      const builder = await wideDriver(sandbox, 1);
+      // What each builder's tree held when its call began, by task: the grant is one channel and the tree is another.
+      const trees = new Map<string, Record<string, string>>();
+      const builder = await wideDriver(sandbox, 1, { during: async (req) => { trees.set(req.taskId, await workspaceOf(sandbox, req)); } });
       const reviewer = await stubDriver();
       const OBJ = { a: 'OBJECTIVE-ALPHA lays the foundation.', b: 'OBJECTIVE-BRAVO stands alone.', c: 'OBJECTIVE-CHARLIE builds on alpha.' };
       const { r, sha256 } = await toPlanGate(rig, {
@@ -300,6 +302,15 @@ export const OBJECTIVE_REACHES_THE_BUILDER: LocalAssertion = runtime({
       holds('a', [OBJ.a], [OBJ.b, OBJ.c]);
       holds('b', [OBJ.b], [OBJ.a, OBJ.c]);
       holds('c', [OBJ.c, OBJ.a], [OBJ.b]);
+      for (const id of ['a', 'b', 'c']) {
+        const tree = trees.get(id);
+        if (tree === undefined || Object.keys(tree).length === 0) throw new Error(`R5a control: the tree of ${id}'s builder was not read`);
+        if (!Object.hasOwn(tree, 'spec.md')) throw new Error(`R5a control: the tree of ${id}'s builder does not hold the locked spec, so it was not the builder's tree`);
+        if (Object.hasOwn(tree, graphPath(rig.runId))) throw new Error(`R5a: the tree of ${id}'s builder holds the locked graph file, every task's objective in it`);
+        for (const text of Object.values(OBJ)) {
+          if (Object.values(tree).some((bytes) => bytes.includes(text))) throw new Error(`R5a: a file in the tree of ${id}'s builder holds ${text}`);
+        }
+      }
       const seats = new Set(reviewer.requests.map((q) => q.taskId));
       if (!seats.has('review' as TaskId) || !seats.has('review.security' as TaskId)) throw new Error(`R5a: the review seats called were ${JSON.stringify([...seats])}`);
       for (const req of reviewer.requests) {
