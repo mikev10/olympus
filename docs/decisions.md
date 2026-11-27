@@ -14040,6 +14040,7 @@ the line of D-R58-04 that judged a successful call as before.
   calls each end just under their bound can use every iteration.
 - **Reverse** by removing the check in `startAttempt` and the commit in
   `runTask`, and restoring the two comments.
+
 ## R66 — The relay meters what it forwards, and starts on Windows
 
 ### D-R66-01: boundary, verified
