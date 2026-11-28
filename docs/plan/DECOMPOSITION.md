@@ -4056,6 +4056,47 @@ and its pull request carries the `gate-change` label.
   after its suite passed are kept. A key reaches only the step that calls
   the model, and without the label the tests that call no model still run.
 
+### The order to daily use
+
+Set on 2026-11-28 (D-A-DU-01). "Daily use" is the first v2 publish, R46: a
+person installs from npm, runs `init`, and uses the line on their own
+repository every day. Twenty-one M2 units were open on that date. Seventeen
+come before the publish and four after it. No milestone changes: this is an
+order, and the dependency table above still decides what can start.
+
+Nothing that guards the gate, the Vault, or a person's tree is in the four.
+
+**Before the publish, in four groups.** Units in one group touch different
+packages and can be worked at the same time, one session and one worktree
+each. A later group does not wait for an earlier one unless the dependency
+table says so.
+
+1. **The tests and CI every later unit pays for:** R77, then R78. R60, which
+   was already open, runs beside them.
+2. **What the line may be judged by, and what it may leave behind:** R44 (a
+   drafted check may name a path the builder can write, I3), R63 (drafted
+   files left in the person's checkout, approved tests missing from the
+   pull request), R67 (committed directories no check ever reads; needs the
+   maintainer's design at start), R68 (instruction files loaded during tool
+   use), R41 (the enforcement record's order and completeness), R65 (a
+   rejected key found at start-up, not mid-run), R47 (no dependency audit for
+   Python, and a scanner with no rules validates).
+3. **Repositories that are refused or slow today:** R45 (npm and pnpm
+   workspaces), R43 (readiness installs, with granted hosts), R62 (the base
+   install reused), R69 (a Python build runs its tests).
+4. **The first run, then the publish:** R64 (`init`), R42 (getting-started
+   documents, written last so they describe what ships), R46 (the publish).
+
+**After the publish:** R61 (one repository map per base commit: a cost
+saving, measured by R59's report), R70 and R71 (the benchmark's critic arm,
+and a result bound to its run: maintainer tooling, on no operator's path),
+R72 (the Codex tier map: it changes which model a seat gets, never whether
+the gate holds). The M3 units follow as the dependency table orders them.
+
+A unit found necessary for daily use that is not in the seventeen is added
+here by an amendment, with the reason.
+
+
 ## Working Rules
 
 1. **One unit per session.** Load `F1-spine.md`, `CLAUDE.md`, and this unit's section. Nothing else.

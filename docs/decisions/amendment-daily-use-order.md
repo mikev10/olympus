@@ -1,0 +1,14 @@
+# Decisions: daily-use-order (amendment)
+
+## Amendment: the order to daily use
+
+### D-A-DU-01: seventeen M2 units come before the first publish, and four after
+
+- **Problem:** on 2026-11-28, 21 M2 units were open and the maintainer asked for Olympus to be ready for daily use sooner, without giving up quality or security. The decomposition ordered units only by dependency, and 19 of the 21 had every dependency shipped, so nothing said which to take first or which the first publish could go without.
+- **Verified before deciding:** each open M2 unit's section in `docs/plan/DECOMPOSITION.md` was read for what it changes for a person running the line, and for whether it closes a way past the gate. `node scripts/unit-status.ts` gave the open units and their dependencies.
+- **Chosen:** "daily use" is the first v2 publish (R46). Seventeen units come before it, in four groups a session can pick from in parallel: tests and CI (R77, R78, with R60 already open); what the line may be judged by and may leave behind (R44, R63, R67, R68, R41, R65, R47); repositories refused or slow today (R45, R43, R62, R69); the first run and the publish (R64, R42, R46). Four come after: R61, R70, R71, R72. The order is prose in the decomposition, "The order to daily use"; no milestone and no dependency changes.
+- **Why each of the four can wait:** R61 saves tokens and changes no verdict. R70 and R71 are about the benchmark the maintainer runs in this repository's CI; no operator's run passes through them. R72 changes which model the Codex seat is given; a wrong tier costs money or quality at one seat and the gate still judges the result.
+- **Why R44 and R47 cannot:** a first reading put both after the publish, as benchmark and scanning follow-ups. R44 holds #67, where a drafted check may name a path the builder can then write, which is I3. R47 holds #97, where a security scanner declared with no rules validates, and the missing Python dependency audit. Both are ways past the gate, so both come before.
+- **Rejected:** (a) publishing after only the first-run units (R64, R42, R46), with the rest as patches: it would ship the open I3 path and files left in a person's checkout to people who had not chosen to test them. (b) Moving the four to M3: a milestone is a claim about scope, and this decision is about order only. (c) A strict sequence of all seventeen: the groups exist so that sessions can run side by side.
+- **Limit:** the groups say what can be worked in parallel by package, read from each unit's section, not checked against the code each will touch. Two units that turn out to change the same file merge one after the other.
+- **Reverse:** delete the section from the decomposition. The dependency table is unchanged by it.

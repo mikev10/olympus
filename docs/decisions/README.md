@@ -107,6 +107,7 @@ git grep -n "D-P3-06" -- docs/decisions
 | [amendment-agent-run-delivery.md](amendment-agent-run-delivery.md) | Amendment: the line checked against an account of agent-run delivery |
 | [amendment-base-and-bug-intake.md](amendment-base-and-bug-intake.md) | Amendment: the base before build, and bug-fix intake |
 | [amendment-ci.md](amendment-ci.md) | Amendment: CI gets a credential, and the order the gate needs |
+| [amendment-daily-use-order.md](amendment-daily-use-order.md) | Amendment: the order to daily use |
 | [amendment-drafting-and-role-compiler.md](amendment-drafting-and-role-compiler.md) | Amendment: drafting at `spec` and `test-design`, and the role compiler |
 | [amendment-host-refusal-and-script-scan.md](amendment-host-refusal-and-script-scan.md) | Amendment: the host prints its own refusal, and the name scan reads scripts |
 | [amendment-lockfile-install-and-python.md](amendment-lockfile-install-and-python.md) | Amendment: lockfile install (R34) and Python adapters (R29) |
