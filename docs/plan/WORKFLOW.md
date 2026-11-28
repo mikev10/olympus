@@ -21,7 +21,7 @@ rule 6. Nothing is built on an assumption that has not been verified against
 the code or by running it. A plan document is a claim about the code, not
 evidence of it: the code is read before the plan is relied on. For units and
 review fixes, the plan and every assumption are recorded in
-`docs/decisions.md` before any code and the work proceeds; the record ships in
+`docs/decisions/<id>.md` before any code and the work proceeds; the record ships in
 the review bundle, where both families challenge it. Amendments wait for the
 maintainer's confirmation. Rule 6 lists the conditions that stop a unit; what
 cannot be verified from here is one of them.
@@ -37,7 +37,7 @@ maintainer's.
 
 1. `/start-unit <id>` — fresh session. It reads the code the unit touches,
    verifies every assumption, records the boundary and the assumptions in
-   `docs/decisions.md`, and proceeds.
+   `docs/decisions/<id>.md`, and proceeds.
 2. Work. Conformance suite first. Decisions logged as they are made.
 3. `/ship-unit` — same session. Verifies acceptance criteria, opens the PR.
 4. `/review-request <id>` — writes two files to `docs/reviews/`, a
@@ -75,7 +75,7 @@ maintainer's.
 7. The maintainer reads the triage report and types `/merge-unit <id>`.
    That command is the approval (D-TOOLING-11): it re-checks the four
    conditions below, runs the paid suites under a standing `run-driver`
-   authorization capped at $2 a week, reruns a listed intermittent paid
+   authorization capped at $5 a week, reruns a listed intermittent paid
    failure once, merges, tags, closes the issues the unit delivered, and names
    the next unit. What it does is what follows. The PR is merged, then tagged: `git tag reviewed/<id> <the v2
    commit> && git push origin reviewed/<id>`. The tag is the diff base for the
@@ -109,7 +109,7 @@ Between step 7 and the next unit: land any amendments the unit surfaced.
 - What is next: the DECOMPOSITION.md dependency graph, first unit whose
   dependencies have shipped
 - What is owed: pending registry entries, each with an owning unit
-- Why something was done: docs/decisions.md
+- Why something was done: docs/decisions/, one file per unit
 - What a review found and what was done about it: docs/reviews/
 
 There is no separate status document. If "what is next" cannot be answered from

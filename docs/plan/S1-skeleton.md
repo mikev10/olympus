@@ -282,6 +282,6 @@ wc -l packages/vault/src/stub/vault.ts packages/sandbox/src/stub/provider.ts pac
 - `TaskResult` has no status field and none was added anywhere: the I2 fixtures still pass, and the driver stub's result has the contract's six keys.
 - The three stub files total under roughly 400 lines. If they come out materially larger, that is a signal about the contracts: report it in the pull request's review notes with the lines that grew, and do not absorb it by relaxing an interface.
 - Every package change has a changeset: `@olympus-ai/api` (new), `core`, `vault`, `sandbox`, and `conformance`.
-- Every judgment call is in `docs/decisions.md` under `D-S1-nn`, including any of finding 4 that the implementation had to take a position on.
+- Every judgment call is in `docs/decisions/S1.md` under `D-S1-nn`, including any of finding 4 that the implementation had to take a position on.
 
 **STOP after this unit.** Human review before P1, P2, P3, or P8 starts.

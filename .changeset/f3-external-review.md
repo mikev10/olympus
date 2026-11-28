@@ -18,5 +18,5 @@ toward an entry's state; and the I6 seat obligation now states that reduced
 independence is reportable at L0-L2 only while L3 refuses a same-family
 reviewer. `verifyExternalAssertion` and the `root` evaluation option are
 removed. Six further findings are recorded as known limits of type-level
-fixtures in `docs/decisions.md`, and the triage is recorded in
+fixtures in `docs/decisions/F3.md`, and the triage is recorded in
 `docs/reviews/`.

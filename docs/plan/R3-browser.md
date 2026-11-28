@@ -103,7 +103,7 @@ Each is a registry assertion that fails when the capability it covers is deleted
 - every conformance entry above is present and passes: `node scripts/local-check.ts preflight <each id>`, then the full run once
 - `git grep -n "browser scenarios are R3" -- packages` prints nothing
 - `git grep -n "browse?(" -- packages/sandbox/src/types.ts` prints the method
-- the browser container's argument vector adds no capability, no `--privileged`, no mount, and no security option beyond the probe's. If the browser's own process sandbox cannot start inside those limits, the unit records what it ran instead and why in `docs/decisions.md`, verified by running it, and never widens the container to make it start
+- the browser container's argument vector adds no capability, no `--privileged`, no mount, and no security option beyond the probe's. If the browser's own process sandbox cannot start inside those limits, the unit records what it ran instead and why in `docs/decisions/R3.md`, verified by running it, and never widens the container to make it start
 - every package change has a changeset
 - `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm conformance` pass
 - `git ls-files -- .plan/` prints nothing

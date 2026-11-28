@@ -15,7 +15,7 @@ its children's endings, never written.
 
 The amendment that wrote this spec added "goal" to the spine's frozen
 vocabulary (D-A-GL-01), as D-A-GD-07 left it to do. Its choices are
-D-A-GL-02 to D-A-GL-09 in `docs/decisions.md`.
+D-A-GL-02 to D-A-GL-09 in `docs/decisions/R5b.md`.
 
 Checked against the code on `v2` at 147a4dd.
 

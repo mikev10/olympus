@@ -58,8 +58,8 @@ means the paid run has not happened.
 
 **Standing authorization (D-TOOLING-11):** this skill may add `run-driver`,
 and rerun a failed paid job once, without asking, while the week's paid runs
-stay within the cap. The cap is **$2 per rolling 7 days**, counted at
-**40 cents per paid run** (D-TOOLING-12), so 5 runs. The ledger is
+stay within the cap. The cap is **$5 per rolling 7 days**, counted at
+**40 cents per paid run** (D-TOOLING-12, D-TOOLING-18), so 12 runs. The ledger is
 `.claude/handoff/run-driver-ledger.jsonl` in the **main checkout**, never in
 a worktree, maintainer-local and excluded from git:
 
@@ -69,7 +69,7 @@ ledger="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.c
 
 The cap is one per maintainer, not one per checkout. A path relative to the
 current checkout gives each worktree session its own ledger, and parallel
-sessions would each spend a full $2. Create the directory if it is absent.
+sessions would each spend a full $5. Create the directory if it is absent.
 One line per paid run this skill starts:
 
 ```
@@ -77,7 +77,7 @@ One line per paid run this skill starts:
 ```
 
 Before adding the label or rerunning, sum `usd` over lines from the last 7
-days. If one more run would pass $2.00, stop and ask, naming the total. A
+days. If one more run would pass $5.00, stop and ask, naming the total. A
 missing ledger is an empty one. Write the line before starting the run, so a
 run interrupted after it began is still counted.
 
@@ -156,6 +156,6 @@ next", as the exact command for a fresh session: `/start-unit <next id>`.
 - Merge on a red newest check, or on a green one whose paid suites did not run
 - Rerun a paid job more than once per pull request, or for a failure not in
   an intermittent issue
-- Start a paid run that takes the rolling week past $2.00 without asking
+- Start a paid run that takes the rolling week past $5.00 without asking
 - Tag before the merge, or tag anything but the squash commit on `v2`
 - Start the next unit
