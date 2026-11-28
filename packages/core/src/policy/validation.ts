@@ -31,8 +31,9 @@ import {
 import type {
   ApprovalKey, ApprovalOutcome, CapabilityScope, EscalationGrant, PolicyDocument, TriggerPolicy,
   NightlyPolicy, NightlyScanner, ObservePolicy, TriggerSchedule, TriggerSubscription,
-  NarrowedScope, SensitiveClass,
+  NarrowedScope, PlanningGrant, SensitiveClass,
 } from './types.js';
+import { REVIEWING_ROLES } from '../station/contracts.js';
 import {
   BUG_FIX_KINDS, CHAR_CLASSES, LABEL_CLASS, SIGNAL_KINDS, TEMPLATE_IDS, hasFieldSchema, isJobTemplate, isObserveTemplate, isRunTemplate, isSignalTemplate, isTemplateId,
   type RunTemplateId, type TemplateId,
@@ -64,7 +65,7 @@ export type DocumentValidation =
 const DOCUMENT_KEYS: Readonly<Record<keyof PolicyDocument, true>> = {
   globalCap: true, stationCaps: true, approvals: true, roles: true,
   protectedPaths: true, sensitivePaths: true, triggers: true, concurrency: true, installRegistries: true,
-  propertyPerAuthorizationRule: true,
+  propertyPerAuthorizationRule: true, planning: true,
 };
 
 const SCOPE_KEYS: Readonly<Record<keyof CapabilityScope, true>> = {
@@ -138,6 +139,10 @@ const WINDOW_KEYS: Readonly<Record<keyof TriggerPolicy['budgetPerWindow'], true>
 
 const CONCURRENCY_KEYS: Readonly<Record<keyof PolicyDocument['concurrency'], true>> = {
   maxParallelTasks: true, maxConflictRetries: true,
+};
+
+const PLANNING_KEYS: Readonly<Record<keyof PlanningGrant, true>> = {
+  maxBuildTasks: true, roles: true,
 };
 
 /**
@@ -886,7 +891,9 @@ export function validatePolicyDocument(input: unknown): DocumentValidation {
       }
     });
   }
-  if (defects.length > 0) return { ok: false, defects };
+  // Absent or null in a document written before R5a, and in a resolved policy that grants none: no graph is drafted (A-R5a-02, I4).
+  const planning = Object.hasOwn(record, 'planning') && record.planning !== null ? validatePlanning(record.planning, roles, defects) : null;
+  if (defects.length > 0 || planning === undefined) return { ok: false, defects };
   return {
     ok: true,
     document: {
@@ -894,8 +901,34 @@ export function validatePolicyDocument(input: unknown): DocumentValidation {
       concurrency: { maxParallelTasks, maxConflictRetries },
       installRegistries,
       propertyPerAuthorizationRule,
+      ...(planning === null ? {} : { planning }),
     },
   };
+}
+
+/**
+ * The planning grant (A-R5a-02): at least one build task, and at least one
+ * role, each defined, each granted `build`, none a reviewing role, none
+ * listed twice. A role a planner may seat a builder under that has no scope
+ * at `build` would be a task no policy lets run, and a reviewing role would
+ * seat an author as the identity that reviews it (R9).
+ */
+function validatePlanning(value: unknown, roles: Readonly<Record<RoleId, CapabilityScope>>, defects: PolicyDefect[]): PlanningGrant | undefined {
+  const before = defects.length;
+  const record = shape(value, 'planning', keysOf(PLANNING_KEYS), defects);
+  if (record === undefined) return undefined;
+  const maxBuildTasks = read(record, 'maxBuildTasks', 'planning', 'a positive integer', isPositiveInteger, defects);
+  const named = readArray<string>(record, 'roles', 'planning', 'a role id', isNonEmptyString, defects);
+  if (named?.length === 0) defects.push({ path: 'planning.roles', problem: 'a planner with no role to seat a builder under can draft no graph' });
+  (named ?? []).forEach((role, i) => {
+    const at = `planning.roles[${String(i)}]`;
+    if (named?.indexOf(role) !== i) defects.push({ path: at, problem: `'${role}' is listed twice` });
+    else if (REVIEWING_ROLES.includes(role as RoleId)) defects.push({ path: at, problem: `'${role}' is a role a review seat runs under; a build task may not author under it` });
+    else if (!Object.hasOwn(roles, role)) defects.push({ path: at, problem: `'${role}' is not a role this policy defines` });
+    else if (roles[role as RoleId]?.stations.includes('build') !== true) defects.push({ path: at, problem: `'${role}' is granted no scope at build` });
+  });
+  if (maxBuildTasks === undefined || named === undefined || defects.length > before) return undefined;
+  return { maxBuildTasks, roles: named as RoleId[] };
 }
 
 /** Whether `glob` can match a path as the runtime names one: relative to the tree's root, `/`-separated, never leaving it. */

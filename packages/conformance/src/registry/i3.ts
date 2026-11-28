@@ -24,6 +24,7 @@ import { R29_I3 } from './stacks.js';
 import { R20_I3 } from './roles.js';
 import { R23_I3 } from './workspace-instructions.js';
 import { R19_ASSERTIONS } from './drafting.js';
+import { R5A_ASSERTIONS } from './planning.js';
 import { R16_ASSERTIONS } from './bug-fix.js';
 import { R8B_I3 } from './observe-plan.js';
 import { R24_I3 } from './repo-instructions.js';
@@ -60,6 +61,8 @@ export const I3: InvariantEntry = {
     // R20: the role compiler.
     // R19: drafting at spec and test-design.
     ...R19_ASSERTIONS.I3,
+    // R5a: drafting at plan.
+    ...R5A_ASSERTIONS.I3,
     ...R16_ASSERTIONS.I3,
     ...R8B_I3,
     ...R25_ASSERTIONS.I3,

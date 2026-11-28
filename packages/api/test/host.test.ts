@@ -70,17 +70,17 @@ describe('the endpoint file (R6, D-R6-07)', () => {
 
   test('the endpoint fills the seats it names and the default fills every other', () => {
     expect(seatedDrivers('claude', null)).toStrictEqual({
-      driver: 'claude', reviewer: 'claude', specDrafter: 'claude', specCritic: 'claude', testDrafter: 'claude', testCritic: 'claude',
+      driver: 'claude', reviewer: 'claude', specDrafter: 'claude', specCritic: 'claude', testDrafter: 'claude', testCritic: 'claude', planner: 'claude', planCritic: 'claude',
     });
     expect(seatedDrivers('claude', { driver: 'other', seats: ['reviewer', 'testCritic'] })).toStrictEqual({
-      driver: 'claude', reviewer: 'other', specDrafter: 'claude', specCritic: 'claude', testDrafter: 'claude', testCritic: 'other',
+      driver: 'claude', reviewer: 'other', specDrafter: 'claude', specCritic: 'claude', testDrafter: 'claude', testCritic: 'other', planner: 'claude', planCritic: 'claude',
     });
-    expect(ENDPOINT_SEATS).toHaveLength(6);
+    expect(ENDPOINT_SEATS).toHaveLength(8);
   });
 
   test('Codex fills the seats it names, and a seat the endpoint also names stops the host (R9, D-R9-06)', () => {
     expect(seatedDrivers('claude', { driver: 'other', seats: ['testCritic'] }, { driver: 'codex', seats: ['reviewer', 'specCritic'] })).toStrictEqual({
-      driver: 'claude', reviewer: 'codex', specDrafter: 'claude', specCritic: 'codex', testDrafter: 'claude', testCritic: 'other',
+      driver: 'claude', reviewer: 'codex', specDrafter: 'claude', specCritic: 'codex', testDrafter: 'claude', testCritic: 'other', planner: 'claude', planCritic: 'claude',
     });
     expect(() => seatedDrivers('claude', { driver: 'other', seats: ['reviewer'] }, { driver: 'codex', seats: ['reviewer'] })).toThrow(/both/u);
   });

@@ -336,6 +336,7 @@ function declaringAll(graph: BuiltGraph): BuiltGraph {
       drafting: {
         specDrafter: declaring(drafting.specDrafter), specCritic: declaring(drafting.specCritic),
         testDrafter: declaring(drafting.testDrafter), testCritic: declaring(drafting.testCritic),
+        planner: declaring(drafting.planner), planCritic: declaring(drafting.planCritic),
       },
     }),
   };

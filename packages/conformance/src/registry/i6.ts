@@ -4,6 +4,7 @@ import { REVIEW_SEAT_FAMILY_CHECK, REVIEWER_RECEIVES_NO_AUTHOR_MATERIAL } from '
 import { EVERY_MODEL_THAT_BUILT_IS_AN_AUTHOR } from './tier.js';
 import { REVIEW_SEAT_READS_ONLY_ITS_GRANTS } from './verification.js';
 import { R19_ASSERTIONS } from './drafting.js';
+import { R5A_ASSERTIONS } from './planning.js';
 import { CODEX_FAMILY_IS_DECLARED } from './codex.js';
 import { OPENAI_COMPATIBLE_FAMILY_IS_DECLARED } from './openai-compatible.js';
 import { AUTHOR_IDENTITY_NEVER_REVIEWS, SECURITY_SEAT_FAMILY_CHECKED } from './separation.js';
@@ -15,6 +16,8 @@ export const I6: InvariantEntry = {
   assertions: [
     // R19: drafting at spec and test-design.
     ...R19_ASSERTIONS.I6,
+    // R5a: drafting at plan.
+    ...R5A_ASSERTIONS.I6,
     compileError({
       id: 'I6.model-family-is-explicit',
       title: 'ModelFamily is branded: a plain string, the driver id, the provider, or the model name cannot be passed as a family',

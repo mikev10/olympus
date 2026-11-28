@@ -49,24 +49,24 @@ export const M1_STATIONS: readonly StationId[] = Object.freeze([
 ]);
 
 /**
- * Where a driver runs a task. `spec` and `test-design` seat a drafter when
- * the run was admitted without that station's artifact, and otherwise lock
- * what was admitted with no driver at all (R19). Every other station is the
- * runtime's own work and requires nothing of a driver.
+ * Where a driver runs a task. `spec`, `test-design` and `plan` seat a drafter
+ * when the run was admitted without that station's artifact, and otherwise
+ * lock what was admitted with no driver at all (R19, R5a). Every other
+ * station is the runtime's own work and requires nothing of a driver.
  */
-export type AgentStation = 'spec' | 'test-design' | 'build' | 'review';
+export type AgentStation = 'spec' | 'test-design' | 'plan' | 'build' | 'review';
 
-export const AGENT_STATIONS: readonly AgentStation[] = Object.freeze(['spec', 'test-design', 'build', 'review']);
+export const AGENT_STATIONS: readonly AgentStation[] = Object.freeze(['spec', 'test-design', 'plan', 'build', 'review']);
 
 export function isAgentStation(station: StationId): station is AgentStation {
-  return station === 'spec' || station === 'test-design' || station === 'build' || station === 'review';
+  return station === 'spec' || station === 'test-design' || station === 'plan' || station === 'build' || station === 'review';
 }
 
-/** The stations a drafter may be seated at, in line order (R19). */
-export const DRAFT_STATIONS: readonly DraftStation[] = Object.freeze(['spec', 'test-design']);
+/** The stations a drafter may be seated at, in line order (R19, R5a). */
+export const DRAFT_STATIONS: readonly DraftStation[] = Object.freeze(['spec', 'test-design', 'plan']);
 
 export function isDraftStation(station: StationId): station is DraftStation {
-  return station === 'spec' || station === 'test-design';
+  return station === 'spec' || station === 'test-design' || station === 'plan';
 }
 
 /**
@@ -77,6 +77,7 @@ export function isDraftStation(station: StationId): station is DraftStation {
 export const DRAFT_ROLES: Readonly<Record<DraftStation, Readonly<Record<DraftSeat, RoleId>>>> = Object.freeze({
   spec: Object.freeze({ drafter: 'spec-drafter' as RoleId, critic: 'spec-critic' as RoleId }),
   'test-design': Object.freeze({ drafter: 'test-drafter' as RoleId, critic: 'test-critic' as RoleId }),
+  plan: Object.freeze({ drafter: 'planner' as RoleId, critic: 'plan-critic' as RoleId }),
 });
 
 /**
@@ -129,9 +130,16 @@ export function securitySeatContract(review: StationContract): StationContract {
   return { ...review, allowedContext: review.allowedContext.filter((grant) => SECURITY_SEAT_GRANTS.includes(grant)) };
 }
 
+/**
+ * The review task the runtime adds to a drafted graph, covering every build
+ * task (R5a, D-A-GD-03). A drafted graph may not name it: which work is
+ * reviewed is not the planner's to arrange (I3).
+ */
+export const DERIVED_REVIEW_TASK_ID = 'review' as TaskId;
+
 /** Every seat task id, so a graph that names one is refused and a scan of run state finds them. */
 export const SEAT_TASK_IDS: readonly TaskId[] = Object.freeze(
-  (['spec', 'test-design'] as const).flatMap((station) => (['drafter', 'critic'] as const).map((seat) => seatTaskId(station, seat))),
+  DRAFT_STATIONS.flatMap((station) => (['drafter', 'critic'] as const).map((seat) => seatTaskId(station, seat))),
 );
 
 /** Stations whose own work is to lock artifacts: every transition from the first of them on re-verifies the locks (I3). */
@@ -172,6 +180,11 @@ function runtimeStation(id: StationId, allowedContext: ContextGrant[], approval:
  * directory, which no static glob names, so `**` here and the runtime reads
  * the test directory and the manifest alone. Three attempts at each.
  *
+ * `plan` is the planner's where the run was admitted to draft its graph
+ * (R5a): the locked spec, the base, and the target's instructions, never the
+ * intent or the acceptance tests as context (D-A-GD-06, I7), writing
+ * `.drafts/` alone. A run admitted with a graph file seats nobody there.
+ *
  * `repo-instructions` is first wherever it is allowed, so a granted seat's
  * set renders after its role and before the rest of its context; it is
  * allowed at `spec`, `plan`, `build`, and `review`, and never at
@@ -185,7 +198,7 @@ export const STATION_CONTRACTS: StationContractTable = {
   intake: runtimeStation('intake', ['conversation']),
   spec: drafterStation('spec', ['repo-instructions', 'intent', 'base-repo-readonly'], ['.drafts/**']),
   'test-design': { ...drafterStation('test-design', [], ['**']), allowedContext: ['locked-spec'] },
-  plan: runtimeStation('plan', ['repo-instructions', 'locked-spec', 'base-repo-readonly']),
+  plan: drafterStation('plan', ['repo-instructions', 'locked-spec', 'base-repo-readonly'], ['.drafts/**']),
   build: {
     id: 'build',
     requires: ['parallelism'],
@@ -221,6 +234,7 @@ export const TEST_CRITIC_CONTEXT: readonly ['locked-spec', 'draft', 'rubric'] = 
 export interface CriticContractTable {
   readonly spec: CriticContract;
   readonly 'test-design': CriticContract & { readonly allowedContext: ['locked-spec', 'draft', 'rubric'] };
+  readonly plan: CriticContract;
 }
 
 /**
@@ -241,6 +255,13 @@ export const CRITIC_CONTRACTS: CriticContractTable = {
     station: 'test-design',
     requires: ['parallelism'],
     allowedContext: ['locked-spec', 'draft', 'rubric'],
+    writeBoundary: { workspaceGlobs: [], vault: 'never', protectedPathPolicy: 'escalate' },
+    retry: { max: 2, backoffMs: 100 },
+  },
+  plan: {
+    station: 'plan',
+    requires: ['parallelism'],
+    allowedContext: ['repo-instructions', 'locked-spec', 'base-repo-readonly', 'draft', 'rubric'],
     writeBoundary: { workspaceGlobs: [], vault: 'never', protectedPathPolicy: 'escalate' },
     retry: { max: 2, backoffMs: 100 },
   },

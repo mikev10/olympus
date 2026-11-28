@@ -120,4 +120,16 @@ describe('what the table makes the parser send (review: codex-6)', () => {
     expect(sent[2]).toEqual({ url: 'http://127.0.0.1:1/runs/run-1/reject', body: { key: 'test-design:1', draft: 'h', notes: 'n', reason: 'not-runnable' } });
     expect(sent[3]?.url).toBe('http://127.0.0.1:1/outcomes?from=2026-01-01&to=2026-02-01');
   });
+
+  test('--draft-plan sends draft for the task graph and needs no --graph; naming both is refused before any request (R5a)', async () => {
+    const sent: unknown[] = [];
+    const out = io();
+    const capture = { ...out, fetch: ((_: URL | string, init?: RequestInit) => { sent.push(init?.body === undefined ? null : JSON.parse(init.body as string)); return Promise.resolve(new Response('{}', { status: 200 })); }) as typeof fetch };
+    const create = ['create', '--workspace', '/w', '--base-commit', 'c', '--level', '1', '--spec', 's.md', '--tests', 't.md', '--manifest', 'm', '--url', 'http://127.0.0.1:1', '--token', 't'];
+    expect(await runCli([...create, '--draft-plan'], capture)).toBe(0);
+    expect(sent[0]).toMatchObject({ artifacts: { spec: ['s.md'], acceptanceTests: ['t.md'], taskGraph: 'draft' } });
+    expect(await runCli([...create, '--draft-plan', '--graph', 'g.json'], capture)).not.toBe(0);
+    expect(await runCli(create, capture)).not.toBe(0);
+    expect(sent).toHaveLength(1);
+  });
 });

@@ -183,6 +183,19 @@ export interface TriggerSchedule {
  * only through PolicyEngine.resolvePolicy, which decides what every omitted
  * key means.
  */
+/**
+ * The grant a run needs to draft its task graph at `plan` (A-R5a-02): the
+ * most build tasks a drafted graph may hold, and the roles a planner may seat
+ * them under. A planner choosing a task's role is choosing its tools, egress
+ * and budget, so the set it chooses from is a person's edit here and never
+ * the request's or the planner's (I4). Admission approves the worst case of
+ * this bound, and no drafted graph may exceed it (I5).
+ */
+export interface PlanningGrant {
+  maxBuildTasks: number;
+  roles: RoleId[];
+}
+
 export interface PolicyDocument {
   globalCap: AutonomyLevel;                                    // ships as 2
   stationCaps: Partial<Record<StationId, AutonomyLevel>>;
@@ -207,6 +220,12 @@ export interface PolicyDocument {
    * property requirement is policy's to set, and nothing sets it by default.
    */
   propertyPerAuthorizationRule?: boolean;
+  /**
+   * Absent or null, no run may draft its task graph (A-R5a-02, I4). Null is
+   * the resolved form's spelling of absent, accepted here so a resolved
+   * policy read back from a record validates as the document it came from.
+   */
+  planning?: PlanningGrant | null;
 }
 
 /**
@@ -232,6 +251,8 @@ export interface Policy {
   installRegistries: string[];
   /** Whether each authorization rule needs a required property check naming it, beside its denial check; false unless set (R25). */
   propertyPerAuthorizationRule: boolean;
+  /** What a drafted task graph is bound by, or null where policy grants no planning; never undefined (A-R5a-02). */
+  planning: PlanningGrant | null;
 }
 
 export interface PolicyRefusal {
