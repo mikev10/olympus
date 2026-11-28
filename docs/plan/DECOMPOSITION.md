@@ -1,6 +1,6 @@
 # Olympus v2 — Decomposition
 
-**Read `docs/plan/F1-spine.md` first.** This document breaks M1 into units. One unit per Claude Code session. The maintainer's master plan is not in the repository and is never loaded into a working session; it is reference material for the maintainer, not context for implementation.
+**Read `docs/plan/F1-spine.md` first.** Which units are done is in `docs/plan/STATUS.md`, generated from the tables here by `node scripts/unit-status.ts write`; a unit added to a table below is added there in the same change, and a unit with a section and no table row is not a unit the status knows. This document breaks M1 into units. One unit per Claude Code session. The maintainer's master plan is not in the repository and is never loaded into a working session; it is reference material for the maintainer, not context for implementation.
 
 ---
 
@@ -673,6 +673,8 @@ order between them is settled before any of them is picked up.
 | R74 | A run can start from a spec a person already approved ([#182](https://github.com/mikev10/olympus/issues/182)) | M3 | R11, R19 | — |
 | R75 | A spec for a UI change carries a mockup ([#191](https://github.com/mikev10/olympus/issues/191)) | M3 | R3, R19 | — |
 | R76 | The line runs behavioral scenarios from the locked manifest (opens with a contract amendment) | M3 | P6, P11, R3 | — |
+| R77 | Test runs are deterministic and leave nothing behind ([#253](https://github.com/mikev10/olympus/issues/253), [#259](https://github.com/mikev10/olympus/issues/259), [#260](https://github.com/mikev10/olympus/issues/260)) | M2 | P1, P2, R53 | — |
+| R78 | The registry shards across runners, and the paid suites run side by side ([#268](https://github.com/mikev10/olympus/issues/268), [#267](https://github.com/mikev10/olympus/issues/267)) | M2 | F3, P5, R26, I1a | — |
 
 ### R1 — Readiness
 

@@ -76,6 +76,37 @@ passed. The merge gate still holds: WORKFLOW step 7 merges only on green pull
 request checks, and those include the paid run and a fully green conformance
 registry against every fresh report.
 
+## 2a. Leave the documents true
+
+`CLAUDE.md`, working rule 7, and `docs/plan/WORKFLOW.md`, "Keeping the
+documents current". Mark the unit done, then check:
+
+```
+node scripts/unit-status.ts write --done <ID>     # the id as DECOMPOSITION.md writes it: R13a, not r13a
+node scripts/unit-status.ts check
+git diff --stat -- docs/plan/STATUS.md            # one row changed, and no other line
+```
+
+A `write` that changes any other row means the branch is behind `v2` or the
+decomposition changed on it: find out which before going on.
+
+Then, for `README.md` and `CONTRIBUTING.md`, search each for what the unit
+changed and read every hit against the code as it now stands:
+
+```
+git diff --name-only origin/v2...HEAD -- packages examples scripts
+git grep -n -e '<each host variable, command, flag, file, package, or check the unit added, renamed, or removed>' -- README.md CONTRIBUTING.md docs/plan/WORKFLOW.md
+```
+
+Correct every sentence the unit made false, and add what a person running or
+contributing to Olympus now needs: a new host variable in the README's table,
+a new command or flag, a new package in the layout, a station now entered, a
+stack now supported, a refusal that no longer happens. A unit that changed
+none of what those documents state says so, with the search it ran.
+
+**A document left false stops the ship**, as a failing criterion does. The
+pull request's "Documents" section records the result.
+
 ## 3. Verify nothing ignored is staged
 
 ```
@@ -120,6 +151,10 @@ The body is generated from the unit spec, in this order:
 ## Decisions
 <ids and one-line summaries from docs/decisions/<id>.md added by this unit>
 
+## Documents
+<each document changed and what in it, `docs/plan/STATUS.md` among them; or
+ "none beyond STATUS.md", with the search that showed no sentence went false>
+
 ## Registry delta
 <invariants moved between states; pending entries added or paid down.
  Omit this section if the unit touched no conformance assertions.>
@@ -157,6 +192,8 @@ Do not merge. Do not push to `v2` directly. Do not invoke `run-review` yourself;
 
 - Ship with a failing acceptance criterion, or reach step 6 with one
 - Modify a done-when criterion to make it pass
+- Edit `docs/plan/STATUS.md` by hand, or ship with a sentence the unit made
+  false still standing in the README or CONTRIBUTING.md
 - Touch `.github/workflows/`, `CLAUDE.md`, the conformance baseline, or a
   contract type file as part of shipping. Those are gate changes and belong to
   a unit that declares them in scope.

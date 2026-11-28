@@ -40,9 +40,11 @@ The planning documents are three kinds of file. The spine
 vocabulary, and the dependency graph between units. The decomposition
 ([DECOMPOSITION.md](docs/plan/DECOMPOSITION.md)) is every unit with its scope,
 deliverables, out-of-scope list, conformance obligations, and acceptance
-criteria, and the source of truth for what is done and what is next. A unit
-that needs more than an entry has its own spec beside them
-(`F2-contracts.md`, `S1-skeleton.md`).
+criteria. [STATUS.md](docs/plan/STATUS.md) is generated from it and is the
+source of truth for what is done; `node scripts/unit-status.ts` prints what
+can start next. A unit that needs
+more than an entry has its own spec beside them (`F2-contracts.md`,
+`S1-skeleton.md`).
 
 ## The five-part rule
 
@@ -68,7 +70,8 @@ against them, not against what they imagine the unit should do.
 ## Units
 
 Every unit, done and to come, is in
-[DECOMPOSITION.md](docs/plan/DECOMPOSITION.md). The Phase 2 units that were
+[DECOMPOSITION.md](docs/plan/DECOMPOSITION.md), and
+[STATUS.md](docs/plan/STATUS.md) says which are done. The Phase 2 units that were
 open to contributors (P1–P10) have all shipped, and the units now in progress
 are maintainer work. To help with one, open an issue that names it rather
 than a pull request: a unit is reviewed against its spec before its code
@@ -127,13 +130,13 @@ with `runtime`.
 **Assertions in your own package.** When your package has an implementation,
 its invariant assertions belong in its own test suite, next to the code they
 exercise. Write them with `invariantTest` from the kit and register them in
-the central registry as external. **Today the registry refuses every
-external assertion**: it can check that a file quotes an id, and a comment or
-a skipped test satisfies that, so presence is not evidence. The first unit
-that needs one must first land `I8.external-assertion-execution-reconciled`
-(pending, owner P2): the registry reconciles the external ids it lists
-against the tests the owning package actually ran and passed. The shape
-below is the target that unit builds toward.
+the central registry as external. The registry counts an external assertion
+only after reconciling it against the owning package's own run report
+(`I8.external-assertion-execution-reconciled`, in `src/kit/reconcile.ts`):
+the named test must have run, in the named file, and passed, against the
+tree being evaluated. That a file quotes an id is not evidence, since a
+comment or a skipped test does too, so every way the claim can be false is a
+refusal.
 
 ```ts
 // packages/sandbox/test/mount-table.test.ts
@@ -157,9 +160,9 @@ external({
 
 Your package's `test` script runs the assertion itself. The kit has no
 dependency on any other package, so your package may depend on the kit
-without creating a workspace cycle. Until reconciliation exists, an
-assertion that needs your implementation stays a pending entry owned by your
-unit, and your acceptance criteria include replacing it.
+without creating a workspace cycle. The conformance package reads the
+report your package's tests write, so run your package's tests before
+`pnpm conformance`; `node scripts/local-check.ts full` keeps that order.
 
 **Pending entries.** An assertion that cannot exist yet is recorded as
 pending, with the unit that owes it and the reason:
@@ -234,7 +237,17 @@ type, so omitting one is a compile error.
   anything adjacent.
 - CI runs `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm conformance`.
   All four must pass. Run them locally first; they need Node 22, pnpm 12, and
-  a Docker daemon.
+  a Docker daemon. `node scripts/local-check.ts preflight` runs typecheck,
+  lint, and the tests of the packages your branch changed, in minutes;
+  `node scripts/local-check.ts full` runs every package's tests and the
+  registry last, as CI orders them. It names the entries only CI's paid
+  suites can prove as `NOT RUN HERE`, never as passed.
+- **Keep the documents current in the same pull request.** A change that
+  makes a sentence in the README, this file, or `docs/plan/` false corrects
+  that sentence. A unit's pull request also marks the unit done:
+  `node scripts/unit-status.ts write --done <id>` regenerates
+  [STATUS.md](docs/plan/STATUS.md), and a test fails when that file is not
+  what the decomposition derives.
 - **Docker is required, and its absence fails the suite rather than skipping
   it.** The sandbox package and the I1 registry assertions provision real
   Linux containers, because the mount layer is where I1 is enforced and there
