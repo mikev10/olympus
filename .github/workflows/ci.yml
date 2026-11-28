@@ -20,11 +20,17 @@ permissions:
   actions: read
 
 jobs:
-  verify:
-    name: typecheck, lint, test, conformance
+  # The checks are four jobs that run side by side, and the one required
+  # status check is the gate at the end, which passes only when all four did
+  # (D-TOOLING-15). Every check still runs, each exactly once; what changed is
+  # that the sandbox suite, the other packages' suites, and the registry no
+  # longer wait for one another.
+
+  # Repository hygiene, typecheck, lint, and the tooling outside the workspace.
+  static:
+    name: hygiene, typecheck, lint, tooling
     runs-on: ubuntu-latest
-    # Raised from 20 by R26: the job now builds a second driver image and runs its suite.
-    timeout-minutes: 35
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
 
@@ -69,6 +75,108 @@ jobs:
             exit 1
           fi
 
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      # scripts/ is not a workspace package, so `pnpm -r typecheck` and
+      # `pnpm -r test` cannot see it. Without these two steps the review
+      # runner would ship untypechecked and untested.
+      - name: Typecheck tooling
+        run: pnpm typecheck:tooling
+
+      - name: Test tooling
+        run: pnpm test:tooling
+
+  # The sandbox suite on its own runner: it is the longest package suite, it
+  # writes no run report the registry reads, and nothing else waits for it.
+  sandbox:
+    name: sandbox package tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      # Reads the pnpm version from the packageManager field.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # The sandbox package provisions real Linux containers: the mount layer
+      # is where I1 is enforced, and a test that skipped itself without a
+      # daemon would report green having proved nothing. Checked here so a
+      # missing daemon fails with this message, and the images are pulled here
+      # so a cold-cache pull is never timed against a wall-clock assertion.
+      - name: Docker daemon and the pinned test images
+        run: |
+          docker version --format 'server {{.Server.Version}}, {{.Server.Os}} containers'
+          docker pull --quiet alpine@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
+          docker pull --quiet node@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5
+
+      - name: Sandbox tests
+        run: pnpm --filter @olympus-ai/sandbox test
+
+  # Every other package that writes no run report the registry reads. No
+  # credential: no package here calls a model, and one that starts to should
+  # refuse loudly rather than find a key waiting.
+  packages:
+    name: package tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      # Reads the pnpm version from the packageManager field.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Docker daemon and the pinned test images
+        run: |
+          docker version --format 'server {{.Server.Version}}, {{.Server.Os}} containers'
+          docker pull --quiet alpine@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
+          docker pull --quiet node@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5
+
+      - name: Test
+        run: pnpm -r --filter '!@olympus-ai/sandbox' --filter '!@olympus-ai/driver-claude-code' --filter '!@olympus-ai/driver-codex' --filter '!@olympus-ai/driver-openai-compatible' --filter '!@olympus-ai/conformance' test
+
+      # The conformance package's own suite, without the registry meta-test,
+      # which the conformance job runs once against the drivers' reports.
+      - name: Conformance package tests
+        run: pnpm --filter @olympus-ai/conformance exec vitest run --exclude test/registry.test.ts
+
+  # The drivers' and the line's run reports, then the registry over them.
+  conformance:
+    name: conformance registry
+    runs-on: ubuntu-latest
+    # Raised from 20 by R26 for the second driver's suite; the paid suites
+    # and the registry are now this job's whole critical path.
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v5
+
+      # Reads the pnpm version from the packageManager field.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
       # The sandbox package and the I1 registry assertions provision real Linux
       # containers: the mount layer is where I1 is enforced, and an assertion
       # that skipped itself without a daemon would report green having proved
@@ -80,12 +188,6 @@ jobs:
           docker version --format 'server {{.Server.Version}}, {{.Server.Os}} containers'
           docker pull --quiet alpine@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
           docker pull --quiet node@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5
-
-      - name: Typecheck
-        run: pnpm typecheck
-
-      - name: Lint
-        run: pnpm lint
 
       # Before the recursive test command, and the order is not incidental
       # (D-P5-23). The registry reconciles this package's external assertions
@@ -331,56 +433,62 @@ jobs:
           include-hidden-files: true
           retention-days: 30
 
-      # Every package but the two drivers, which the steps above already ran: their
-      # assertions call a real model, and a second pass bills every one of
-      # them again to prove nothing the first did not. The report it wrote is
-      # bound to the package's tree hash, which nothing between the two steps
-      # changes. No credential here: no other package calls a model, and one
-      # that starts to should refuse loudly rather than find a key waiting.
-      #
-      # The conformance package runs after the others, not among them: every
-      # package with external assertions depends on it, so `pnpm -r` would run
-      # it first and its registry would find no report from a package whose
-      # tests this step runs (D-R6-08).
-      - name: Test
-        run: pnpm -r --filter '!@olympus-ai/driver-claude-code' --filter '!@olympus-ai/driver-codex' --filter '!@olympus-ai/conformance' test
+      # The third driver's suite, which calls no model and writes the run
+      # report the registry reconciles its external assertions against. Here
+      # and not in the packages job, because the registry below reads it.
+      - name: openai-compatible driver tests, which write its conformance run report
+        run: pnpm --filter @olympus-ai/driver-openai-compatible test
 
-      - name: Conformance package tests
-        run: pnpm --filter @olympus-ai/conformance test
-
-      # scripts/ is not a workspace package, so `pnpm -r typecheck` and
-      # `pnpm -r test` cannot see it. Without these two steps the review
-      # runner would ship untypechecked and untested.
-      - name: Typecheck tooling
-        run: pnpm typecheck:tooling
-
-      - name: Test tooling
-        run: pnpm test:tooling
-
-      # Runs the registry meta-test on its own so its report is the last
-      # thing in the log: every invariant's state, every pending entry, and
-      # the unit that owes it. A `missing` invariant fails this step.
+      # The registry meta-test, once (D-TOOLING-15). It used to run twice: as
+      # one file of the conformance package's own suite and again here, the
+      # same file over the same tree. Its report is the last thing in the log:
+      # every invariant's state, every pending entry, and the unit that owes
+      # it. A `missing` invariant fails this step. It runs with or without the
+      # run-driver label, as the package suite's copy did, so its local
+      # assertions report on every push; without a report for this tree its
+      # external assertions refuse, and the steps below say which suite is owed.
       - name: Conformance registry
-        if: (steps.driver-report.outputs.cache-hit == 'true' && steps.codex-report.outputs.cache-hit == 'true' && steps.line-report.outputs.cache-hit == 'true') || (github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-driver'))
         run: pnpm conformance
 
       - name: Driver suite not yet run for this tree
-        if: steps.driver-report.outputs.cache-hit != 'true' && !(github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-driver'))
+        if: ${{ !cancelled() && steps.driver-report.outputs.cache-hit != 'true' && !(github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-driver')) }}
         run: |
           echo "::error::the driver's real-model assertions have not run for tree ${{ steps.driver-tree.outputs.hash }}, so the conformance registry was not evaluated. Add the run-driver label to this pull request when it is ready to merge; that run calls the model once."
           exit 1
 
       - name: Codex driver suite not yet run for this tree
-        if: steps.codex-report.outputs.cache-hit != 'true' && !(github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-driver'))
+        if: ${{ !cancelled() && steps.codex-report.outputs.cache-hit != 'true' && !(github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-driver')) }}
         run: |
           echo "::error::the Codex driver's real-model assertions have not run for tree ${{ steps.codex-tree.outputs.hash }}, so the conformance registry was not evaluated. Add the run-driver label to this pull request when it is ready to merge."
           exit 1
 
       - name: Line suite not yet run for this tree
-        if: steps.line-report.outputs.cache-hit != 'true' && !(github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-driver'))
+        if: ${{ !cancelled() && steps.line-report.outputs.cache-hit != 'true' && !(github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-driver')) }}
         run: |
           echo "::error::the composed line's real-model assertions have not run for tree ${{ steps.line-tree.outputs.hash }}, so the conformance registry was not evaluated. Add the run-driver label to this pull request when it is ready to merge; that run calls the model twice."
           exit 1
+
+  # The required status check. It runs whatever the four jobs did and passes
+  # only when every one succeeded: a failed, cancelled, or skipped job fails
+  # it, so a job that never ran can never count as green (I5).
+  gate:
+    name: typecheck, lint, test, conformance
+    if: always()
+    needs: [static, sandbox, packages, conformance]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every check job succeeded
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          failed="$(echo "$RESULTS" | jq -r '[to_entries[] | select(.value.result != "success") | .key] | join(", ")')"
+          if [ -n "$failed" ]; then
+            echo "::error::not every check job succeeded: ${failed}"
+            exit 1
+          fi
 
   # The false-done benchmark's deterministic tier (R7, D-R7-06): every
   # deterministic item of the current corpus through the real line, with the
@@ -388,7 +496,7 @@ jobs:
   # control that stops catching an item, or starts refusing a clean one,
   # changes the result and fails here until a commit records the new one
   # (I8). Its own job, because each item is a run of several containers and
-  # the tier outlasts the verify job's limit. No credential: no seat calls a
+  # the tier outlasts the conformance job's limit. No credential: no seat calls a
   # model.
   benchmark:
     name: false-done benchmark, deterministic tier
