@@ -12,7 +12,7 @@
 import { cp, mkdir, readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { buildGraph, DEFAULT_LIMITS, DEFAULT_RUBRICS_DIRECTORY, costTotals, localWorkspaceStore, readUsage, startRun, unsettledCalls, worstCaseCost, type RunRequest } from '@olympus-ai/api';
+import { buildGraph, DEFAULT_LIMITS, DEFAULT_RUBRICS_DIRECTORY, costTotals, localWorkspaceStore, readUsage, startRun, unsettledCalls, worstCaseCost, type CostTotals, type RunRequest } from '@olympus-ai/api';
 import { DEFAULT_ROLES_DIRECTORY } from '@olympus-ai/compiler';
 import {
   StrictPolicyEngine,
@@ -110,6 +110,29 @@ export function criticVerdict(
   return { verdict: sorted.length > 0 ? 'caught' : 'passed', causes: sorted };
 }
 
+/**
+ * What the relay counted for each task of a run, from the totals of its
+ * usage records (R59). A task is recorded for the calls a relay read: the
+ * scripted drafter's are unmetered, and it is recorded nowhere.
+ */
+export function tokensByTask(byTask: CostTotals['byTask']): Record<string, TaskTokens> {
+  const tokens: Record<string, TaskTokens> = {};
+  for (const [task, total] of Object.entries(byTask)) {
+    const m = total.metered;
+    if (m.calls === 0) continue;
+    tokens[task] = {
+      calls: m.calls,
+      inputTokens: m.inputTokens,
+      outputTokens: m.outputTokens,
+      cacheReadTokens: m.cacheReadTokens,
+      cacheWriteTokens: m.cacheWriteTokens,
+      exhausted: m.exhausted,
+      bound: total.bound,
+    };
+  }
+  return tokens;
+}
+
 /** One drafted item through the drafting station, with `critic` seated. */
 export async function throughTheCritic(bench: Bench, corpus: Corpus, item: Item, critic: CriticSeat): Promise<CriticOutcome> {
   const station = stationOf(item);
@@ -166,21 +189,7 @@ export async function throughTheCritic(bench: Bench, corpus: Corpus, item: Item,
   const unsettled = unsettledCalls(usage).length;
   if (unsettled > 0 || totals.lost > 0) throw new Error(`benchmark: ${String(unsettled + totals.lost)} call(s) of the drafted run have no known cost, so the spend cannot be held to the cap`);
   const costUsd = totals.metered.costUsd;
-  // The scripted drafter's calls are unmetered and counted nowhere: a task is recorded for the calls a relay read.
-  const tokens: Record<string, TaskTokens> = {};
-  for (const [task, total] of Object.entries(cost.byTask)) {
-    const m = total.metered;
-    if (m.calls === 0) continue;
-    tokens[task] = {
-      calls: m.calls,
-      inputTokens: m.inputTokens,
-      outputTokens: m.outputTokens,
-      cacheReadTokens: m.cacheReadTokens,
-      cacheWriteTokens: m.cacheWriteTokens,
-      exhausted: m.exhausted,
-      bound: total.bound,
-    };
-  }
+  const tokens = tokensByTask(cost.byTask);
   const first = state.drafts[station]?.attempts[0];
   if (first?.draft === null || first === undefined) throw new Error(`benchmark: the drafted run for an item recorded no first draft at ${station}`);
   const record = JSON.parse(new TextDecoder().decode(await vault.read(first.draft))) as DraftRecord;
