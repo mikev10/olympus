@@ -74,6 +74,7 @@ function counted(named: Named, shape: RunShape): Counted {
     corpus?: { version?: unknown; digest?: unknown } | null;
     run?: { repetitions?: unknown; model?: { model?: unknown } | null } | null;
     tokens?: Record<string, unknown> | null;
+    arms?: Record<string, { items?: unknown } | undefined> | null;
   } | null;
   if (typeof result !== 'object' || result === null) return refuse('is not a result');
   if (result.tier !== 'model') return refuse('is not a model-tier result');
@@ -82,6 +83,19 @@ function counted(named: Named, shape: RunShape): Counted {
   if (result.run.model?.model !== shape.model) return refuse(`is not ${shape.model}'s result`);
   const tokens = result.tokens;
   if (typeof tokens !== 'object' || tokens === null || Object.keys(tokens).length === 0) return refuse('records no tokens');
+  // The tokens must cover the result's own outcomes: every arm it holds, and every item of each. Fewer would be compared as if they were all.
+  const arms = result.arms;
+  if (typeof arms !== 'object' || arms === null || Object.keys(arms).sort().join() !== Object.keys(tokens).sort().join()) return refuse('does not count tokens for the arms it holds');
+  let items = 0;
+  for (const [arm, outcomes] of Object.entries(arms)) {
+    const named = outcomes?.items;
+    const counts = tokens[arm];
+    if (!Array.isArray(named) || !Array.isArray(counts)) return refuse(`holds no items in its '${arm}' arm`);
+    const ids = (list: unknown[]): string => JSON.stringify(list.map((i) => (i as { id?: unknown } | null)?.id).sort());
+    if (ids(named) !== ids(counts)) return refuse(`does not count tokens for the items of its own '${arm}' arm`);
+    items += named.length;
+  }
+  if (items === 0) return refuse('counts tokens for no item');
   for (const [arm, items] of Object.entries(tokens)) {
     if (!Array.isArray(items)) return refuse(`holds no items in the tokens of its '${arm}' arm`);
     const seen = new Set<string>();
@@ -94,7 +108,8 @@ function counted(named: Named, shape: RunShape): Counted {
         if (typeof repetition !== 'object' || repetition === null) return refuse(`holds a malformed repetition of item '${item.id}'`);
         for (const task of Object.values(repetition) as unknown[]) {
           const t = task as Record<string, unknown> | null;
-          if (typeof t !== 'object' || t === null || (t.bound !== 'exact' && t.bound !== 'lower') || COUNTS.some((k) => !Number.isSafeInteger(t[k]) || (t[k] as number) < 0)) {
+          // A task is recorded for the calls a relay read, so one recorded with no call is not a record the tier wrote.
+          if (typeof t !== 'object' || t === null || (t.bound !== 'exact' && t.bound !== 'lower') || COUNTS.some((k) => !Number.isSafeInteger(t[k]) || (t[k] as number) < 0) || t.calls === 0) {
             return refuse(`holds a count that is not one for item '${item.id}'`);
           }
         }
@@ -133,12 +148,15 @@ export function figure(item: ItemTokens): ItemFigure {
 }
 
 /**
- * `within`: no more than the limit. `grew`: past it. `unmeasured`: under
- * the limit, but only a lower bound, so nothing says it did not grow.
- * `no-baseline`: the baseline metered no call for the item and the run did.
- * Only `within` passes (I5).
+ * `within`: no more than the limit. `no-calls`: neither side metered a call
+ * for the item, so nothing was spent on it then or now. Those two pass.
+ * `grew`: past the limit. `unmeasured`: under the limit, but only a lower
+ * bound, so nothing says it did not grow. `no-baseline`: the baseline
+ * metered no call for the item and the run did. `no-sample`: the baseline
+ * metered calls and the run metered none, so the item was not compared. A
+ * comparison that was not made is never `within` (I5).
  */
-export type Held = 'within' | 'grew' | 'unmeasured' | 'no-baseline';
+export type Held = 'within' | 'no-calls' | 'grew' | 'unmeasured' | 'no-baseline' | 'no-sample';
 
 export interface ItemHeld {
   readonly arm: string;
@@ -151,9 +169,9 @@ export interface ItemHeld {
 }
 
 function verdict(baseline: ItemFigure, fresh: ItemFigure, margin: number): { limit: number | null; held: Held } {
-  // No call metered: no token was spent, whatever the baseline holds.
-  if (fresh.perCall === null) return { limit: baseline.perCall === null ? null : baseline.perCall * (1 + margin), held: 'within' };
+  if (fresh.perCall === null && baseline.perCall === null) return { limit: null, held: 'no-calls' };
   if (baseline.perCall === null) return { limit: null, held: 'no-baseline' };
+  if (fresh.perCall === null) return { limit: baseline.perCall * (1 + margin), held: 'no-sample' };
   const limit = baseline.perCall * (1 + margin);
   if (fresh.perCall > limit) return { limit, held: 'grew' };
   return { limit, held: fresh.bound === 'lower' ? 'unmeasured' : 'within' };
@@ -192,9 +210,9 @@ export function holdTokens(baseline: Named, fresh: Named, margin: number): ItemH
   return held;
 }
 
-/** The items a run failed on: every one that is not `within`. */
+/** The items a run failed on: every one that was not compared and found within its limit, but for those neither side spent a token on. */
 export function tokenFailures(held: readonly ItemHeld[]): ItemHeld[] {
-  return held.filter((h) => h.held !== 'within');
+  return held.filter((h) => h.held !== 'within' && h.held !== 'no-calls');
 }
 
 /** The failures as a person reads them, one line each. */

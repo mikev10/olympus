@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { loadCorpus } from '../src/corpus.js';
 import { coverage } from '../src/comparison.js';
-import type { BenchmarkResult, ItemTokens, TaskTokens } from '../src/result.js';
+import { armResult, type ArmResult, type BenchmarkResult, type ItemTokens, type TaskTokens } from '../src/result.js';
 import { baselineFor, committedResult, figure, holdTokens, TOKEN_BASELINES, tokenFailures, tokenHold, type RunShape } from '../src/tokens.js';
 
 const CORPUS = { version: 'v9', digest: 'a'.repeat(64) };
@@ -26,11 +26,15 @@ const task = (over: Partial<TaskTokens> = {}): TaskTokens => ({ calls: 1, inputT
 /** An item that ran twice, one task each time. */
 const item = (id: string, name: string, over: Partial<TaskTokens> = {}): ItemTokens => ({ id, repetitions: [{ [name]: task(over) }, { [name]: task(over) }] });
 
+/** An arm whose outcomes name `ids`; the rates are not read by anything here. */
+const arm = (ids: readonly string[]): ArmResult => armResult(ids.map((id) => ({ id, kind: 'seeded', group: 'g', verdicts: ['caught', 'caught'], detectorFired: [null, null], causes: [] })));
+
+/** A model-tier result whose arms name exactly the items its tokens count, unless `over` says otherwise. */
 function result(tokens: BenchmarkResult['tokens'], over: Partial<BenchmarkResult> = {}): BenchmarkResult {
   return {
     corpus: CORPUS,
     tier: 'model',
-    arms: {},
+    arms: Object.fromEntries(Object.entries(tokens ?? {}).map(([name, items]) => [name, arm(items.map((i) => i.id))])),
     run: RUN,
     ...(tokens === undefined ? {} : { tokens }),
     ...over,
@@ -74,10 +78,27 @@ describe('holdTokens', () => {
     expect(tokenFailures(under).map((h) => [h.id, h.held])).toStrictEqual([['a', 'unmeasured'], ['b', 'grew']]);
   });
 
-  test('an item the baseline metered no call for has no baseline, and one the run metered no call for spent nothing', () => {
-    const then = { file: 'then.json', result: result({ alone: [{ id: 'a', repetitions: [{}, {}] }, item('b', 'done-check')] }) };
-    const held = holdTokens(then, fresh({ alone: [item('a', 'done-check'), { id: 'b', repetitions: [{}, {}] }] }), 0.25);
-    expect(held.map((h) => [h.id, h.held])).toStrictEqual([['a', 'no-baseline'], ['b', 'within']]);
+  test('an item only one side metered a call for was not compared, and fails; one neither side metered spent nothing on either', () => {
+    const none = (id: string): ItemTokens => ({ id, repetitions: [{}, {}] });
+    const then = { file: 'then.json', result: result({ alone: [none('a'), item('b', 'done-check'), none('c')] }) };
+    const held = holdTokens(then, fresh({ alone: [item('a', 'done-check'), none('b'), none('c')] }), 0.25);
+    expect(held.map((h) => [h.id, h.held])).toStrictEqual([['a', 'no-baseline'], ['b', 'no-sample'], ['c', 'no-calls']]);
+    // Only the item neither side made a call for passes: nothing was spent, then or now.
+    expect(tokenFailures(held).map((h) => h.id)).toStrictEqual(['a', 'b']);
+  });
+
+  test('refuses a task recorded with no call, and tokens that do not cover the items the result itself names', () => {
+    const now = fresh(BASELINE.result.tokens);
+    // A task is recorded for the calls a relay read: one with none, and tokens counted, is not a record the tier wrote.
+    const ghost = { alone: [item('a', 'done-check', { calls: 0, bound: 'lower' }), item('b', 'done-check')], critic: [item('c', 'spec.critic')] };
+    expect(() => holdTokens(BASELINE, fresh(ghost), 0.25)).toThrow("now.json holds a count that is not one for item 'a'");
+    // Matching metadata and no items: nothing would be compared, and nothing would fail.
+    expect(() => holdTokens({ file: 'then.json', result: result({ alone: [] }) }, fresh({ alone: [] }), 0.25)).toThrow('now.json counts tokens for no item');
+    // Tokens for fewer items, or other arms, than the result's own outcomes.
+    const outcomes = { alone: arm(['a', 'b']), critic: arm(['c']) };
+    expect(() => holdTokens(BASELINE, fresh({ alone: [item('a', 'done-check')], critic: [item('c', 'spec.critic')] }, { arms: outcomes }), 0.25)).toThrow("now.json does not count tokens for the items of its own 'alone' arm");
+    expect(() => holdTokens(BASELINE, fresh({ alone: [item('a', 'done-check'), item('b', 'done-check')] }, { arms: outcomes }), 0.25)).toThrow('now.json does not count tokens for the arms it holds');
+    expect(() => holdTokens({ file: 'then.json', result: result(BASELINE.result.tokens, { arms: { alone: arm(['a', 'b', 'z']), critic: arm(['c']) } }) }, now, 0.25)).toThrow("then.json does not count tokens for the items of its own 'alone' arm");
   });
 
   test('refuses a baseline that is not the same work, and a margin that is not a positive number', () => {
@@ -91,6 +112,7 @@ describe('holdTokens', () => {
     expect(() => holdTokens(then({}, { alone: BASELINE.result.tokens?.alone ?? [] }), now, 0.25)).toThrow('do not count tokens for the same arms');
     expect(() => holdTokens(then({}, { alone: [item('a', 'done-check')], critic: [item('c', 'spec.critic')] }), now, 0.25)).toThrow("the 'alone' arms of then.json and now.json count tokens for different items");
     expect(() => holdTokens(then({}, { alone: [item('a', 'done-check'), { id: 'b', repetitions: [{}] }], critic: [item('c', 'spec.critic')] }), now, 0.25)).toThrow("does not count item 'b' once per repetition");
+    expect(() => holdTokens(then({}, { alone: [] }), fresh({ alone: [] }), 0.25)).toThrow('counts tokens for no item');
     expect(() => holdTokens(then({}, { alone: [item('a', 'done-check', { inputTokens: -1 }), item('b', 'done-check')], critic: [item('c', 'spec.critic')] }), now, 0.25)).toThrow("holds a count that is not one for item 'a'");
     expect(() => holdTokens(BASELINE, fresh(undefined), 0.25)).toThrow('now.json records no tokens');
     for (const margin of [0, -0.1, Number.NaN, Number.POSITIVE_INFINITY]) expect(() => holdTokens(BASELINE, now, margin)).toThrow('is not a positive number');
