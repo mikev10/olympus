@@ -14707,3 +14707,6 @@ has the evidence for each.
   so a rise shows in a committed result's diff. No unit owns a measure of
   useful work per token; it is named at the merge gate.
 - **`throughTheCritic` is still run by no suite.** #264 owns the tier.
+- **`node scripts/local-check.ts full` passed again after the fixes**, on
+  a5eb10e, which is the unit with `v2` at 832e0e7 merged in. The same 27
+  entries are named as not run: they need CI's paid suites.
