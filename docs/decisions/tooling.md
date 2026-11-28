@@ -171,3 +171,12 @@ Found by R58's external review (codex-2, codex-3), which carried `scripts/local-
 - **Rejected:** (a) one file for every amendment that belongs to no single unit: amendment branches would conflict on it as units did on the old file; (b) a file per section: 131 files, with a unit's record and its review amendment apart; (c) an index in the order sections were written: every branch would append to its last line.
 - **Limit:** nothing checks that the index lists every file. A file missing from it is still found by an id search.
 - **Reverse:** concatenate the files under one heading and restore the path in the references this commit changed.
+
+### D-TOOLING-20: the rule says what checks a unit's decision record, which is not the reviewers
+
+- **Problem:** working rule 6, `start-unit` §4, and `docs/plan/WORKFLOW.md` said a unit's decision record "ships in the review bundle, so both reviewing families challenge it". It does not. `review-request` leaves `docs/decisions/*` out of the bundle in both places it lists files, and says why: a reviewer who reads the author's reasoning inherits its conclusions. D-TOOLING-09 gave the reviewers' challenge as the reason a unit no longer waits for the maintainer to confirm its boundary, so the reason given was one the tooling never delivered.
+- **Verified before building:** (1) the `case` pattern in `review-request`'s bundle generator and in its section count skips `docs/decisions/*`, and skipped `docs/decisions.md` before D-TOOLING-19; (2) `triage-review` §9 prints every decision the unit made on its own, with its id and how to reverse it, in the report at the merge gate, which is the maintainer's one routine stop.
+- **Chosen:** the three texts now say what happens: the record stays out of the bundle so reviewers judge the code without the author's reasoning, and the maintainer reads every decision in the triage report at the merge gate. No behaviour changes.
+- **Rejected:** putting the unit's record into the bundle so the old sentence becomes true. It would undo the exclusion's purpose, and a reviewer shown "verified at file:line" is more likely to accept the line than to check it.
+- **Limit:** the record's assumptions are challenged only through the code they produced and by the maintainer at the gate. A wrong assumption that produced plausible code can pass both reviews. Whether that needs a check of its own is the maintainer's call and is not decided here.
+- **Reverse:** restore the three sentences.
