@@ -104,7 +104,8 @@ function draftLockFile(station: string): string {
   return `draft-lock.${station}.json`;
 }
 
-const DRAFT_STATIONS = new Set(['spec', 'test-design']);
+/** Repeated from core's `DRAFT_STATIONS`; `plan` since R5a (A-R5a-06). */
+const DRAFT_STATIONS = new Set(['spec', 'test-design', 'plan']);
 
 /** The job output schemas a scheduled candidate may name, repeated from core's `JOB_FIELD_SCHEMAS` (A-R13a-07, A-R13b-01). */
 const NIGHTLY_JOB_SCHEMAS: ReadonlySet<string> = new Set(['nightly-finding', 'nightly-tree-finding', 'nightly-record-finding']);

@@ -112,8 +112,11 @@ export interface ReviewSeat {
   readonly independence: IndependenceGrade;
 }
 
-/** The stations a drafter may be seated at (R19). */
-export type DraftStation = 'spec' | 'test-design';
+/**
+ * The stations a drafter may be seated at (R19). `plan` seats a planner where
+ * the run was admitted to draft its task graph (A-R5a-03).
+ */
+export type DraftStation = 'spec' | 'test-design' | 'plan';
 
 /** The two seats a drafting station holds. */
 export type DraftSeat = 'drafter' | 'critic';
@@ -123,7 +126,8 @@ export type DraftSeat = 'drafter' | 'critic';
  * one is recorded by name (D-A-DS-04). At `spec`: the parts parse, no open
  * question, a clean independent critic. At `test-design`: the base run
  * passed for the draft, a clean independent critic, and a test drafter of
- * another family than every model the build driver can resolve.
+ * another family than every model the build driver can resolve. At `plan`:
+ * the graph's shape and bound hold, and a clean independent critic (R5a).
  */
 export type DraftCondition =
   | 'shape'
@@ -155,7 +159,7 @@ export type BaseRefusalPart =
  * suffix and never in its stable prefix or role (D-A-DS-02). The runtime's
  * own problems with a draft are paths and codes, with the validator's
  * message where one read the draft alone (A-R36b-01); `notes` exist at `spec`
- * alone, and a `test-design` rejection carries a reason and no text.
+ * and `plan`, and a `test-design` rejection carries a reason and no text.
  * `base-refusal` carries nothing: at `test-design` it is the one fact a test
  * drafter learns of the repository, that its draft did not hold there
  * (A-R19-11).

@@ -215,7 +215,10 @@ const BUG_FIX_RUN_SENDS_NO_REPORT_TEXT: LocalAssertion = runtime({
       awaiting(await approveAndResume(rig, r, 'spec:1', spec.sha256 ?? ''), 'test-design:1', 'the bug fix\'s drafted tests');
       const tests = lastAttempt(await rig.state(), 'test-design');
       awaiting(await approveAndResume(rig, r, 'test-design:1', tests.sha256 ?? ''), 'integrate:1', 'the bug fix after its tests were approved');
-      const seats = [...Object.values(r.drivers).map((d) => d.requests), builder.requests, reviewer.requests];
+      // The run is admitted with its graph, so it seats no planner and no plan critic: every other seat must have been called (R5a).
+      const { planner, planCritic, ...drafters } = r.drivers;
+      if (planner.requests.length + planCritic.requests.length > 0) throw new Error('R16: a run admitted with its graph seated a planner');
+      const seats = [...Object.values(drafters).map((d) => d.requests), builder.requests, reviewer.requests];
       if (seats.some((requests) => requests.length === 0)) throw new Error(`R16: a seat was never called (${seats.map((s) => s.length).join(', ')}), so nothing was checked of it`);
       const sent = JSON.stringify(seats);
       const entry = await (await localVault(rig.dirs)).readCandidate(candidate);

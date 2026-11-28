@@ -127,7 +127,7 @@ function admission(level: 0 | 1 | 2 | 3 = 1): AdmissionRecord {
       acceptanceTests: { source: 'supplied', files: [{ path: 'acceptance.test.ts', sha256: 'e'.repeat(64) }] },
       acceptanceManifest: { source: 'none' },
       verificationManifest: { path: 'verify.json', sha256: 'f'.repeat(64) },
-      taskGraph: { path: 'graph.json', sha256: '0'.repeat(64) },
+      taskGraph: { source: 'supplied', file: { path: 'graph.json', sha256: '0'.repeat(64) } },
       specParts: { security: null, runRequirements: null, questions: null },
     },
     intent: null,

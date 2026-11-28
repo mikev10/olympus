@@ -1,0 +1,17 @@
+name: Documentation
+description: A doc is missing, wrong, or leaves a step unexplained.
+labels: [documentation]
+body:
+  - type: input
+    id: step
+    attributes:
+      label: Step or page
+      description: e.g. README "First run", or a path under docs/.
+    validations:
+      required: true
+  - type: textarea
+    id: what-you-see
+    attributes:
+      label: What a reader sees, and what is missing
+    validations:
+      required: true

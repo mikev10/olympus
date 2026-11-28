@@ -7,7 +7,7 @@
 import { afterEach, describe, expect, test } from 'vitest';
 import {
   APPROVAL_KEYS, AUTONOMY_LEVELS, DEFAULT_POLICY_DOCUMENT, STATION_IDS,
-  StrictPolicyEngine, validateToolGrants,
+  StrictPolicyEngine, validatePolicyDocument, validateToolGrants,
   type ApprovalKey, type AutonomyLevel, type CapabilityScope, type Policy,
   type PolicyDocument, type RoleId, type StationId,
 } from '../src/index.js';
@@ -440,5 +440,27 @@ describe('an autonomy level that is not one refuses (D-P3-12, second review find
     for (const level of AUTONOMY_LEVELS) {
       expect(engine.resolveAutonomy(level, 'build', BUILDER, policy)).toStrictEqual({ ok: true, level });
     }
+  });
+});
+
+describe('the planning grant, resolved (A-R5a-02)', () => {
+  test('is null where the document grants none, never undefined, and the resolved policy validates as a document again', () => {
+    const resolved = new StrictPolicyEngine().resolvePolicy(DEFAULT_POLICY_DOCUMENT);
+    expect(resolved.planning).toBeNull();
+    // A resolved policy is what an admission record pins, and a resume validates it as a document before running under it.
+    expect(validatePolicyDocument(JSON.parse(JSON.stringify(resolved))).ok).toBe(true);
+  });
+
+  test('carries the bound and the roles, frozen', () => {
+    const role = 'builder' as RoleId;
+    const builder: CapabilityScope = {
+      stations: ['build'], writableGlobs: ['**'], tools: [], network: { egress: 'none' }, tier: 'standard', tierByStation: {}, escalation: 'none', autonomyCeiling: 2,
+      triggerKinds: ['human'], budget: { maxTokens: 1, maxCostUsd: 1, maxWallClockMs: 1 }, sensitiveGrants: [], narrowed: null, repoInstructions: false,
+    };
+    const resolved = new StrictPolicyEngine().resolvePolicy({ ...DEFAULT_POLICY_DOCUMENT, roles: { [role]: builder }, planning: { maxBuildTasks: 4, roles: [role] } });
+    expect(resolved.planning).toEqual({ maxBuildTasks: 4, roles: [role] });
+    expect(Object.isFrozen(resolved.planning)).toBe(true);
+    expect(Object.isFrozen(resolved.planning?.roles)).toBe(true);
+    expect(validatePolicyDocument(JSON.parse(JSON.stringify(resolved))).ok).toBe(true);
   });
 });

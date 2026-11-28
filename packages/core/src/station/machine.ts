@@ -556,6 +556,7 @@ export function seatTask(state: Pick<RunState, 'runId'>, station: DraftStation, 
     dependencySet: [],
     worktreePath: '',
     attempt: 1,
+    objective: null,
   };
 }
 
@@ -606,7 +607,7 @@ export function retrySuffix(station: DraftStation, attempt: number, parts: reado
         lines.push('[rejection-reason]', part.reason);
         break;
       case 'notes':
-        if (station !== 'spec') throw new Error(`station machine: a ${station} retry carries no notes; a rejection there carries a reason from a fixed set`);
+        if (station === 'test-design') throw new Error(`station machine: a ${station} retry carries no notes; a rejection there carries a reason from a fixed set`);
         lines.push('[approver-notes]', part.notes);
         break;
     }

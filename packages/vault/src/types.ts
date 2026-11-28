@@ -596,6 +596,17 @@ export type AdmittedPlan =
   | { readonly source: 'drafted' }
   | { readonly source: 'none' };
 
+/**
+ * The task graph as admitted (A-R5a-01): a file a person wrote, hashed at
+ * admission and locked at `plan`, or drafted at `plan` within `bound`. The
+ * bound is the policy's `planning` grant as admission read it, and it is
+ * what the approved cost was the worst case of: no drafted graph is locked
+ * that holds more build tasks or names a role outside it (I4, I5).
+ */
+export type AdmittedGraph =
+  | { readonly source: 'supplied'; readonly file: AdmittedArtifact }
+  | { readonly source: 'drafted'; readonly bound: { readonly maxBuildTasks: number; readonly roles: readonly RoleId[] } };
+
 /** A rubric a person wrote for one drafting station's critic, as admission read and recorded it (R19). */
 export interface RubricVersion {
   readonly station: DraftStation;
@@ -766,7 +777,8 @@ export interface AdmissionRecord {
     /** Drafted exactly when the acceptance tests are (R19). */
     readonly acceptanceManifest: AdmittedManifest;
     readonly verificationManifest: AdmittedArtifact;
-    readonly taskGraph: AdmittedArtifact;
+    /** A record written before R5a holds the bare file, read as supplied (A-R5a-01). */
+    readonly taskGraph: AdmittedGraph;
     /** Drafted exactly when the acceptance tests are; absent on a run admitted before R8b, which is read as `none`. */
     readonly observationPlan?: AdmittedPlan;
     /**
