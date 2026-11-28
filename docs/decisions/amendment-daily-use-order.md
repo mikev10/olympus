@@ -1,3 +1,5 @@
+# Decisions: daily-use-order (amendment)
+
 ## Amendment: the order to daily use
 
 ### D-A-DU-01: seventeen M2 units come before the first publish, and four after
