@@ -119,6 +119,7 @@ jobs:
           docker version --format 'server {{.Server.Version}}, {{.Server.Os}} containers'
           docker pull --quiet alpine@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
           docker pull --quiet node@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5
+          docker pull --quiet ghcr.io/puppeteer/puppeteer@sha256:ee4d05f4d7817c2cbb1bc3e3cf2dd9ff7a40ffc899a99bdcf56ecef95503fe45
 
       - name: Sandbox tests
         run: pnpm --filter @olympus-ai/sandbox test
@@ -148,6 +149,7 @@ jobs:
           docker version --format 'server {{.Server.Version}}, {{.Server.Os}} containers'
           docker pull --quiet alpine@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
           docker pull --quiet node@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5
+          docker pull --quiet ghcr.io/puppeteer/puppeteer@sha256:ee4d05f4d7817c2cbb1bc3e3cf2dd9ff7a40ffc899a99bdcf56ecef95503fe45
 
       - name: Test
         run: pnpm -r --filter '!@olympus-ai/sandbox' --filter '!@olympus-ai/driver-claude-code' --filter '!@olympus-ai/driver-codex' --filter '!@olympus-ai/driver-openai-compatible' --filter '!@olympus-ai/conformance' test
@@ -188,6 +190,7 @@ jobs:
           docker version --format 'server {{.Server.Version}}, {{.Server.Os}} containers'
           docker pull --quiet alpine@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
           docker pull --quiet node@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5
+          docker pull --quiet ghcr.io/puppeteer/puppeteer@sha256:ee4d05f4d7817c2cbb1bc3e3cf2dd9ff7a40ffc899a99bdcf56ecef95503fe45
 
       # Before the recursive test command, and the order is not incidental
       # (D-P5-23). The registry reconciles this package's external assertions

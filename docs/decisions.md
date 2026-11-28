@@ -2301,6 +2301,15 @@ Found by R58's external review (codex-2, codex-3), which carried `scripts/local-
 - **Expected:** about 9-10 minutes without `run-driver` and about 18 with it, against 18-23 and 32. The PR's own CI run is the measurement.
 - **Rejected:** (a) `pnpm -r --no-sort` in one job: the sandbox and readiness suites both start containers, and running them on one runner at once puts wall-clock assertions under contention; separate runners do not. (b) Parallel paid suites: about 5 more minutes off a labelled run, but each needs its own cache and artifact wiring; a follow-up. (c) Sharding the registry: it is one file, so this needs a change under `packages/conformance/`; a follow-up.
 - **Reverse:** restore `.github/workflows/ci.yml` from the commit before this one.
+
+### D-TOOLING-16: CI pulls the browser image beside the other pinned test images
+
+- **Problem:** R3 pinned a browser image of 2.97 GB (`BROWSER_IMAGE`, D-R3-02) and left the workflow alone, because it is a gate path R3 did not declare (D-R3-11). The image was therefore pulled inside the first test that browses, on that test's clock.
+- **Verified before building:** (1) `BROWSER_IMAGE` in `packages/sandbox/src/local/browse.ts:33` is the one reference this line repeats. (2) Three suites start a real browser: `packages/sandbox/test/browse.test.ts`, `packages/adapters/test/browser.test.ts`, and `packages/conformance/src/registry/browser.ts`, which run in the `sandbox`, `packages`, and `conformance` jobs. (3) Each of those jobs already has a step pulling `alpine` and `node` by digest, and no other job browses.
+- **Chosen:** one `docker pull --quiet` of the same digest in each of those three steps.
+- **What does not change:** the provider still pulls by digest and runs by content ID, so a machine without this step behaves as before. No test, timeout, or assertion is touched.
+- **Limit:** the digest is now written in the workflow and in `browse.ts`. Nothing fails when the two differ; the pre-pull would then fetch an image no test uses, and the tests would pull their own as they did before this change.
+- **Reverse:** delete the three lines.
 ## P6: Verification + evidence
 
 ### D-P6-01: The unit spec was completed before the code, after a contradiction in the ledger was resolved
