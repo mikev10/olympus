@@ -252,7 +252,7 @@ type, so omitting one is a compile error.
   maintainer adds, and a fork's run has no credential for them. The driver
   tests that call no model still run on every pull request.
 - Record any decision the unit's description did not settle in
-  `docs/decisions.md`: what was unclear, what you chose, why, and how to
+  `docs/decisions/<unit>.md`: what was unclear, what you chose, why, and how to
   reverse it.
 - Stop where the unit says stop. A maintainer reviews before the next unit
   starts.

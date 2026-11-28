@@ -1,6 +1,6 @@
 ---
 name: start-unit
-description: Begin work on a decomposition unit. Loads the spine and the unit's spec, reads the code the unit touches, verifies every assumption and records the boundary in docs/decisions.md, works the unit to its done-when criteria, then chains through ship, review, and triage, stopping only on a rule-6 stop condition or at the merge gate. Use when starting a new unit of Olympus v2 work. Takes a unit id, e.g. start-unit P1.
+description: Begin work on a decomposition unit. Loads the spine and the unit's spec, reads the code the unit touches, verifies every assumption and records the boundary in the unit's file under docs/decisions/, works the unit to its done-when criteria, then chains through ship, review, and triage, stopping only on a rule-6 stop condition or at the merge gate. Use when starting a new unit of Olympus v2 work. Takes a unit id, e.g. start-unit P1.
 ---
 
 # Start a unit
@@ -36,7 +36,8 @@ has been wrong before.
 
 ## 4. Verify the boundary and every assumption, record it, then proceed
 
-Write the following as the unit's first entry in `docs/decisions.md`, print it,
+Write the following as the unit's first entry in `docs/decisions/<id>.md` (create the file, and add its row to
+`docs/decisions/README.md` in id order), print it,
 and continue to step 5 without waiting (`CLAUDE.md`, working rule 6). The
 entry ships in the review bundle, so both reviewing families challenge it; that
 replaces a confirmation typed by the maintainer, and it is only as good as the
@@ -72,7 +73,7 @@ proposal as the recommended answer.
   about half an hour, so it runs once, on code the preflight passed
   (D-TOOLING-13).
 - Stay inside scope. Adjacent work becomes a note in the PR body, not a commit.
-- Record every judgment call in `docs/decisions.md`: what was ambiguous, what
+- Record every judgment call in `docs/decisions/<id>.md`: what was ambiguous, what
   was chosen, why, how to reverse it.
 - Invariants outrank convenience. A change that makes the unit easier and
   weakens I1–I10 is wrong, however clean.
@@ -94,7 +95,7 @@ Stop and ask when:
   verified from here
 
 Everything else is decided without waiting: verify the options against the
-code, take the strongest, record it in `docs/decisions.md` with what was
+code, take the strongest, record it in `docs/decisions/<id>.md` with what was
 rejected and how to reverse it, and continue. A fact that turns out different
 from step 4's record is corrected in that record, in a commit of its own, and
 the work continues unless the correction meets a condition above.

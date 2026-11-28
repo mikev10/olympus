@@ -241,7 +241,7 @@ prediction, and this step is where it gets tested.
 
 - **Fix now** — on the unit's own branch, before merge. WORKFLOW.md calls
   this a review fix, one of the three work types.
-- **Known limit** — recorded in `docs/decisions.md` with the unit that owns
+- **Known limit** — recorded in the unit's file under `docs/decisions/` with the unit that owns
   it. Where it touches an invariant that has a registry entry, a pending
   entry with an owner and a raised baseline is stronger than prose, because
   prose is not counted and a pending entry is. D-S1-18 is the precedent.
@@ -335,7 +335,7 @@ everything the chain decided without them. Print:
 - The counts by verdict and by family, how many findings both families raised,
   and every rerun `run-review` made
 - What changed: each applied fix, one line, with its commit
-- Every decision the unit made on its own, from its `docs/decisions.md`
+- Every decision the unit made on its own, from its `docs/decisions/<id>.md`
   entries: one line each, with the decision id and how to reverse it
 - Anything not applied and why — findings recorded with an owning unit, issues
   filed, fixes held on an unverified assumption — each with a recommendation

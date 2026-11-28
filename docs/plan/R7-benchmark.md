@@ -6,7 +6,7 @@
 
 The `DECOMPOSITION.md` entry is binding and is not repeated here. This spec
 is what the entry rests on, checked against the code on `v2` at 100ba95, and
-the choices the entry leaves open, each recorded in `docs/decisions.md`
+the choices the entry leaves open, each recorded in `docs/decisions/R7.md`
 (D-R7-01 onwards). The maintainer chose the two-tier shape and the new
 package on 2026-10-26 and delegated the rest to the session's recommendation.
 

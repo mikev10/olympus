@@ -92,7 +92,7 @@ git checkout -b unit/<id>        # lowercase: unit/f3, unit/p1
 ```
 
 Commit message: `<id>: <unit title>`, then a body listing what was delivered.
-Reference decisions by their `docs/decisions.md` id rather than restating them.
+Reference decisions by their `docs/decisions/` id rather than restating them.
 
 ## 5. Open the PR
 
@@ -118,7 +118,7 @@ The body is generated from the unit spec, in this order:
 <each criterion, with the command run and its result>
 
 ## Decisions
-<ids and one-line summaries from docs/decisions.md added by this unit>
+<ids and one-line summaries from docs/decisions/<id>.md added by this unit>
 
 ## Registry delta
 <invariants moved between states; pending entries added or paid down.

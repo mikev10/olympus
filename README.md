@@ -129,7 +129,7 @@ packages/
     openai-compatible/  any OpenAI-compatible chat endpoint; the loop on the host, every tool in the sandbox
 docs/
   plan/         the spine, the decomposition into units, and unit specs
-  decisions.md  every judgment call made while building each unit
+  decisions/    every judgment call made while building each unit, one file per unit
   reviews/      external review findings and how each was resolved
 ```
 
@@ -439,7 +439,7 @@ every unit follows, how to send a small fix, and how to write a conformance
 suite with the kit. The units themselves are defined in
 [docs/plan](docs/plan): the spine, the decomposition, and a spec for each unit
 that needs one. Decisions made while building each unit are recorded in
-[docs/decisions.md](docs/decisions.md).
+[docs/decisions](docs/decisions/README.md), one file per unit.
 
 Questions, ideas, and things you built with Olympus go in
 [Discussions](https://github.com/mikev10/olympus/discussions). Issues are
