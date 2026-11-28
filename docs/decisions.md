@@ -14290,6 +14290,225 @@ The review's other finding (codex-2, the ceiling charged for a missing
 output count) is rejected in the triage: the rule is A-R26-01's and this
 unit does not change it.
 
+## R3: Behavioral breadth (browser)
+
+Started on `v2` at 6ed59bb and rebuilt on `v2` at e3e851c, on `unit/r3`
+(D-R3-14). Spec: `docs/plan/R3-browser.md`.
+Builds A-R3-01 and A-R3-02, which the spec's amendment confirmed
+(D-A-BR-02). Every "verified by running" below was run on 2026-11-26 against
+Docker 29.8.0, in a container started with the probe's own limits beside a
+`--network none` container serving a fixture page.
+
+### D-R3-01: boundary, verified
+
+- **Deliverables:**
+  - `LocalDockerProvider.browse(h, request)`: one container for the call, from
+    a browser image pinned by digest, in the sandbox's network namespace and
+    nothing else of it, removed when the call returns or the sandbox ends.
+  - A-R3-01 and A-R3-02 in `packages/sandbox/src/types.ts`: the optional
+    `browse` and the types it speaks.
+  - `BrowserBehavioralAdapter` in `packages/adapters`: reads a scenario,
+    starts `serve` detached, calls `browse`, compares on the host.
+  - Steps as data (`goto`, `click`, `fill`, `press`, `observe`), each element
+    named by role and accessible name, label, or visible text.
+  - Every request off the loopback refused and its host reported; `mayBlock`
+    and the always-failing document navigation, judged in the adapter.
+  - The image's content ID and the browser's name and version in every result.
+  - Stack detection carries the adapter on a provider with `browse` and names
+    `behavioral:browser`, with the provider as the reason, on one without.
+  - The seven registry entries the spec lists, the three existing entries
+    reworded, and a changeset for each package changed.
+- **Out of scope** (verbatim from the spec):
+  - Running a browser scenario, or any behavioral scenario, from a `VerificationManifest` on the real line, and the fresh sandbox each one runs in (R76).
+  - Mounting locked files into the sandbox for a scenario's `serve` to start (R76).
+  - A browser outside the sandbox's network, or one that carries a person's signed-in sessions.
+  - Egress for a browser scenario: a granted host, a preview URL, a proxy route (R30's later step, by amendment).
+  - Seeded sessions, injected cookies, stored browser state.
+  - Selectors over markup (CSS, XPath, test ids), scripts evaluated in the page, and a locked test script in place of steps.
+  - Screenshots, visual comparison, video, and traces.
+  - More than one browser engine, more than one page or tab, file upload and download, and dialogs.
+  - A display in the sandbox's container, and computer use by a driver. `computerUse` stays `false` on every provider and driver, and its assertions stay as they are.
+  - `MutationAdapter` (M3). A set on a provider that can browse still names `mutation`.
+  - Stopping a scenario's server. It ends with the sandbox.
+- **Acceptance:**
+  - `node scripts/local-check.ts preflight I2.browser-verdict-judged-outside-the-product I3.browser-out-of-the-products-reach I5.browser-never-leaves-loopback I5.browser-step-that-cannot-be-done I5.browser-unavailable-without-a-provider I5.browser-scenario-shape I8.browser-named-in-evidence`, then `node scripts/local-check.ts full` once.
+  - `git grep -n "browser scenarios are R3" -- packages` prints nothing.
+  - `git grep -n "browse?(" -- packages/sandbox/src/types.ts` prints the method.
+  - The browser container's argument vector adds no capability, no `--privileged`, no mount, and no security option beyond the probe's (asserted by `I3.browser-out-of-the-products-reach`).
+  - Every package change has a changeset.
+  - `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm conformance` pass.
+  - `git ls-files -- .plan/` prints nothing.
+- **Invariants, in words:**
+  - The runtime derives the verdict and the product never reports it (I2). The browser prints what it saw; the comparison runs in the adapter, on the host. The failure this prevents is a page, or a client the product could replace, announcing its own pass.
+  - An agent is not judged by something it can write (I3). The browser runs outside the product's filesystem and process tree, and a step names what a person sees, so a scenario locked before `build` does not depend on markup the agent picks afterwards.
+  - Nothing is available unless granted (I4). The request names a port and has no field for a host, so there is nothing for a scenario to ask for beyond the loopback.
+  - A missing piece refuses and never degrades (I5). A provider that cannot browse is named; a host the page could not reach fails the scenario unless the locked scenario lists it; a step that could not be done is never read as done.
+  - Every claim has an assertion that fails when the capability is deleted (I8). Seven entries, each shown failing with its guard removed.
+  - No Greek name in code (I10). None is added.
+- **Pending registry entries owed:** none. `grep -c "R3\b" packages/conformance/pending-baseline.json` prints 0.
+- **Gate paths:** `packages/sandbox/src/types.ts` and `packages/conformance/`, both declared by the spec. `.github/workflows/` is protected and not declared, so it is not touched (D-R3-11).
+- **Assumptions, each verified:**
+  - P8 and P11 shipped: `git tag -l reviewed/P8 reviewed/P11` prints both.
+  - `BehavioralAdapter.kind` admits `'browser'`: `packages/adapters/src/types.ts:80`.
+  - The one line that names the gap: `packages/adapters/src/detect.ts:226`.
+  - `probe` is optional on `SandboxProvider`, and the probe's limits are the ones the spec quotes: `packages/sandbox/src/types.ts:372`, `packages/sandbox/src/local/probe.ts:221-237`.
+  - A call is charged to the wall clock through `#remaining` and `#overBudget`, and a running probe's container is removed with its sandbox through `sandbox.probes`: `packages/sandbox/src/local/provider.ts:675-697,741-779,845-848`.
+  - `StubSandboxProvider` has no `probe` and gains no `browse`: `I5.http-probe-absent-is-named` checks the first.
+  - `imageId` pulls only a reference pinned by digest and returns the content ID: `packages/sandbox/src/local/image.ts:48-60`.
+  - A program can reach a container on standard input through `node -`, with nothing of it in the argument vector: verified by running, in `packages/sandbox/test/browse.test.ts`.
+  - `adapters` already depends on `sandbox`, so no `package.json` changes: `packages/adapters/src/http.ts:25`.
+  - A Chrome browser starts and drives a page under exactly the probe's limits: verified by running (D-R3-02, D-R3-03).
+- **Where the code differs from the entry and the spec:**
+  - The spec says the browser "refuses every request to a host other than the sandbox's loopback before it is sent". Chrome also makes requests of its own that no page asked for. They are refused too, and are not reported as the page's (D-R3-04).
+  - The spec's table says the probe's source is passed to `node --eval`. The browser's goes on standard input instead (D-R3-05).
+  - Nothing else differs.
+
+### D-R3-02: the browser image is the Puppeteer project's own
+
+- **Options, each pulled and run:**
+  - (a) `ghcr.io/puppeteer/puppeteer:25.19.0`, published by the Chrome team's Puppeteer project: Node 24, Chrome 158.0.8127.88, and `puppeteer-core` at `/home/pptruser/node_modules`.
+  - (b) `mcr.microsoft.com/playwright:v1.65.1-noble`: Node 26 and three browsers, and no driving library. `find / -name playwright-core` prints nothing and the global module directory holds only `npm` and `yarn`. Using it means writing the whole driver over the raw protocol, or installing a library at run time, which a read-only container with no network cannot do.
+  - (c) an image built by this repository with a library added. Nothing publishes one, so it could not be pulled by digest, which the spec requires.
+  - (d) a third party's image that bundles a library. Rejected on provenance.
+- **Chosen: (a)**, pinned as `ghcr.io/puppeteer/puppeteer@sha256:ee4d05f4d7817c2cbb1bc3e3cf2dd9ff7a40ffc899a99bdcf56ecef95503fe45`.
+- **What the library is used for:** starting Chrome, the protocol connection, mouse and keyboard input, and navigation waits. Finding elements and reading them is the runner's own code (D-R3-06), so a library upgrade cannot silently change what a target means.
+- **Cost:** 2.97 GB on disk. A daemon that does not hold it pulls it on first use (D-R3-11).
+- **Reverse:** change `BROWSER_IMAGE` and the two paths beside it. `I8.browser-named-in-evidence` and `I2.browser-verdict-judged-outside-the-product` fail if the new image does not run.
+
+### D-R3-03: Chrome runs without its own process sandbox (the outcome D-A-BR-08 left to this unit)
+
+- **Verified by running, both ways.** With Chrome's sandbox on, under `--cap-drop ALL`, `no-new-privileges`, user `65534`, and a read-only root, Chrome exits at start: `FATAL: zygote_host_impl_linux.cc: No usable sandbox!`. Its sandbox needs an unprivileged user namespace, which Docker's default seccomp profile refuses without `CAP_SYS_ADMIN`, or a setuid helper, which `no-new-privileges` refuses. With `--no-sandbox` under the same limits it starts, fills a form, clicks, and reads the result.
+- **Chosen:** `--no-sandbox`, and nothing added to the container. This is what D-A-BR-08 decided for this outcome.
+- **What it costs, stated plainly:** a page is the agent's own content. With no inner sandbox, a bug in Chrome's renderer that runs code gives that code the browser container: user `65534`, no capability, a read-only root, nothing mounted, and the network the product already has. It could then print observations of its choosing, which would be the product judging itself. The container is the only boundary, as it is for the probe, and the defence is a current pin. Nothing in this unit detects a stale one.
+- **Rejected:** a seccomp profile that allows user namespaces, or `CAP_SYS_ADMIN`. Each widens the container to strengthen a boundary inside it.
+- **Reverse:** amend the spec's acceptance criterion with the seccomp profile the inner sandbox needs, and drop `--no-sandbox`.
+
+### D-R3-04: a refusing proxy is the block, and the page's own browser context is the attribution
+
+- **Ambiguous:** how a request is "refused before it is sent", and which refused hosts are the page's.
+- **Options:**
+  - (a) intercept requests through the protocol and abort those off the loopback. It does not see a WebSocket handshake, a worker's request, or a preconnect, so those would leave unrefused.
+  - (b) point Chrome at a proxy that refuses everything, and let Chrome's built-in bypass send only loopback addresses direct. Every scheme and every initiator goes through it.
+- **Chosen: (b).** The runner listens on two ports of its own loopback and answers every request and every `CONNECT` on both with 403, connecting nowhere. The page runs in a browser context of its own whose proxy is the first port; Chrome's global proxy is the second. A host refused on the first port is one the page, its workers, or its sockets asked for, and is reported. A host refused on the second is Chrome's own traffic and is not.
+- **Verified by running:** a page that loads an image over `http`, fetches over `https`, and opens a WebSocket, each to another host, reports exactly those three hosts. A page that asks for nothing reports none, on three runs. Chrome's own requests (`redirector.gvt1.com`, its component updater) arrive on the second port only.
+- **Found on the way:** Chrome 158 makes three requests from inside a page's context that the page did not ask for: a form-fill lookup (`content-autofill.googleapis.com`), a network-time query (`clients2.google.com`), and an eligibility check (`www.google.com/async/folae`). Each is switched off by a named feature flag in the runner. `I2.browser-verdict-judged-outside-the-product` holds only when a clean page reports no host, so a pin whose Chrome adds a fourth fails that entry, loudly, at the bump.
+- **The product can reach the two ports**, since it shares the loopback. It can only be refused there, which adds a host to the report and fails its own scenario.
+- **Also set:** `--force-webrtc-ip-handling-policy=disable_non_proxied_udp`. Not verified by running; WebRTC over UDP is the one channel a proxy does not carry. The boundary underneath is the sandbox's network namespace, which the browser shares: it can reach nothing the product could not already reach.
+- **Reverse:** drop the second port and report every refusal, which fails any scenario on a Chrome that talks to its vendor.
+
+### D-R3-05: the browser is driven over a pipe, and its source arrives on standard input
+
+- **A pipe, never a port.** The browser shares the product's network. A debugging port on the loopback would let the product drive the browser that judges it. Chrome is started with `--remote-debugging-pipe`, through the library's `pipe: true`. `I3.browser-out-of-the-products-reach` checks from inside the product's container that the only listeners the browser added answer 403.
+- **Standard input.** The runner is about 15 KB. The container runs `node -`, and the provider writes the request, as a JSON string literal, followed by the runner. Nothing of either is in an argument, so no Windows command line grows with a scenario, and nothing a scenario supplies is on a command line, as `probe.ts` says of its own request.
+- **Rejected:** `node --eval`, as the probe does. It works at this size and stops working on Windows without warning when the runner grows.
+- **Reverse:** pass the source to `--eval` and the request on standard input.
+
+### D-R3-06: what a target names
+
+- **Role and name:** Chrome's own accessibility tree, queried for the role and the exact computed name. The runner computes neither.
+- **Label:** the form control of each `<label>` whose text is the label. An `aria-label` is not a label a person sees, and is reached by role and name instead.
+- **Text:** the innermost elements whose rendered text is exactly the text.
+- **Whitespace** is collapsed and trimmed on both sides of every comparison, and in an observation's `text`.
+- **Where it runs:** in a script world of the runner's own, so a page that replaces `innerText` or `getBoundingClientRect` in its own world changes nothing the runner reads.
+- **Rejected:** substring matching for text. `Save` would then name `Save all`, and a scenario would pass or fail on a neighbouring element.
+- **Rejected:** the library's own selectors. Its text selector matches substrings over hidden text, and a name holding `[` or `"` has to be escaped into its syntax.
+- **Known limits:** a label or text inside a shadow root or a frame is not found; role and name is. `visible` means rendered with an area and not hidden by `visibility`, `opacity`, or `display`; it does not mean inside the viewport or uncovered. A checkbox's checked state is not in `BrowseObservation`, so a scenario observes what checking it changed. Each needs an amendment to A-R3-02 to lift.
+- **Reverse:** change `FIND` in the runner; the conformance entries name the behaviour.
+
+### D-R3-07: when an observation is made
+
+- **Ambiguous:** the browser observes and decides nothing, so it cannot wait for the expected text. Observed too early, a correct page fails.
+- **Chosen:** before an `observe`, and after every other step, the runner waits until no request is in flight and the document has not changed for 250 ms, for at most 5 seconds, then reads the page as it is. A `click` or `fill` waits up to 10 seconds for its target to name exactly one visible element.
+- **Rejected:** sending the expectation into the browser to retry against. The comparison would then run beside the product.
+- **Known limit:** a page that never goes quiet is read at 5 seconds, whatever it shows then.
+- **Reverse:** the three durations are constants in `browse.ts`.
+
+### D-R3-08: an observation counts, and the adapter never picks
+
+- **An `observe` whose target matches no element, or several, is an observation**, with `matched` saying how many and no text or value. It is not a failed step: a scenario may hold a page to `matched: 0`.
+- **An expectation that does not name `matched` requires exactly one.** So a target that matched two elements fails on `matched`, and neither is compared.
+- **Refused by shape:** an expectation entry that names no field, and a scenario with no `observe` step. Each would be a check that checks nothing.
+- **A `click`, `fill`, or `goto` that cannot be done fails the scenario** naming its step. Every later observation is `not-reached` and is reported as a mismatch, never compared.
+- **Reverse:** make an unmatched `observe` a failed step in the runner, and drop `matched` from the expectation.
+
+### D-R3-09: what counts as leaving the loopback, and what stops a scenario
+
+- **A document navigation** is the page itself going to another host: a link, a redirect, a script. It fails its step, marks the host `navigation: true`, and fails the scenario whether or not `mayBlock` lists the host. A frame inside the page that asks another host is a resource the page does without, and `mayBlock` applies.
+- **A dialog** is dismissed and fails its step. **A second tab** fails its step. Both are out of scope, and a scenario that meets one is told so, not left to time out.
+- **`goto` joins the path to the origin as text.** A path of `//other.host/x` is therefore a path on the loopback, verified by running, and never another host.
+- **Reverse:** treat a frame's navigation as the document's.
+
+### D-R3-10: the browser container is given less than the probe, never more
+
+- **Added:** `--memory 2g`, `--memory-swap 2g`, `--pids-limit 1024`. A page is the agent's content and the sandbox's own limits do not cover a second container. Verified by running: Chrome starts and drives the fixture inside them.
+- **Not added:** a mount. Chrome's profile, home, and temporary files live under `/dev/shm`, the one writable path a read-only container has, 64 MB by default. Verified by running. A page that needs more fails its scenario.
+- **Rejected:** `--tmpfs` or `--shm-size`. The first is a mount the spec forbids; the second resizes one.
+- **Reverse:** amend the spec to allow a sized `/dev/shm`.
+
+### D-R3-11: the provider reads the image's content ID, and the workflow is not touched
+
+- **Chosen:** `browse` resolves `BROWSER_IMAGE` through `imageId(..., { pull: true })`, runs the container from the content ID it returns, and puts that ID in the result. The name and version come from the running browser; the image is the provider's fact, since a container cannot say what it was started from.
+- **The pull is inside the call**, so it is charged to the sandbox's wall clock, as the contract requires. On a daemon that does not hold the image the first call may spend the budget pulling and end the sandbox. Each conformance entry that browses reads the content ID before it provisions, so the pull is outside any sandbox's clock.
+- **Rejected:** a `docker pull` line in `.github/workflows/ci.yml`, beside the others. That file is a gate path this unit does not declare.
+- **Reverse:** add the pull to the workflow by an amendment and drop the read from the entries.
+
+### D-R3-12: what `fill` fills
+
+- **A text field** (an `input` that takes typed text, a `textarea`, an editable element) is clicked, its content selected and deleted, and the value typed, key by key, as a person would.
+- **A `select`** is set to the one option shown as the value, with the `input` and `change` events a person's choice fires. No option, or several, fails the step.
+- **Anything else** fails the step, naming what the target is.
+- **Reverse:** narrow `fill` to text fields in the runner.
+
+### D-R3-13: each entry was shown failing with its guard removed
+
+Run on 2026-11-26, before the rebuild in D-R3-14 and on the same R3 code, one guard at a time, each restored afterwards:
+
+- `I2.browser-verdict-judged-outside-the-product`: the text comparison removed from `compareBrowser`. Failed: "a page that rendered the wrong text was accepted by the runtime's comparison".
+- `I3.browser-out-of-the-products-reach`: `--read-only` removed from `browseRunArgs`. Failed on the inspected container.
+- `I5.browser-never-leaves-loopback`: the unlisted-host branch removed. Failed: "a page that asked an unlisted host for a resource held".
+- `I5.browser-step-that-cannot-be-done`: the failed-step mismatch removed. Failed: the scenario no longer named its step.
+- `I5.browser-unavailable-without-a-provider`: `canBrowse` made to accept any provider. Failed: the stub's set did not name `behavioral:browser`.
+- `I5.browser-scenario-shape`: the unknown-key check on `input` removed. Failed: a scenario with a `url` key was read.
+- `I8.browser-named-in-evidence`: the image in the result replaced with another content ID. Failed, naming both.
+
+### D-R3-14: the unit was rebuilt in a worktree of its own
+
+- **Found at ship:** the worktree this unit started in, `../olympus-r39`, was also used by the session building R66. That session checked out `unit/r66` there minutes after this unit created `unit/r3`, so this unit's five commits landed on `unit/r66`, and one of them, made with `git add -A`, carried R66's uncommitted relay changes. Nothing had been pushed.
+- **Chosen:** a new worktree, `../olympus-r3`, on `unit/r3` at the current `v2` (e3e851c). Only R3's own changes were carried over: whole files where R3 alone wrote them, and R3's own edits reapplied by hand to `packages/sandbox/src/index.ts` and `provider.ts`, which R66 had also changed. One test used a helper R66 adds and now measures the argument list itself. Every path was staged by name. The preflight, the guard removals' entries, and the full run were run again here.
+- **Left alone:** `unit/r66` and `../olympus-r39`, which are the R66 session's. `unit/r66` still holds this unit's five commits on top of R66's first; R66 continued on `unit/r66-relay`, which does not.
+- **Corrected in D-R3-01 and D-R3-05:** the first record cited R66's relay as the precedent for a program on standard input. That work is not on `v2`. The fact it supported is verified by this unit's own test.
+- **Reverse:** nothing to reverse; the first copies remain on `unit/r66` until its owner removes them.
+
+### D-R3-15: three review fixes, each shown failing first
+
+From the external review, triaged in `docs/reviews/2026-11-26-R3-browser-triage.md`. Each was verified by running the reviewer's construction against the real browser before anything changed.
+
+- **codex-2, `fill` set a disabled select.** Verified: a disabled `<select>`, and a disabled option of an enabled one, were set and their `change` handlers ran. `CHOOSE` now refuses both, and the step fails. A disabled button or text field needed no change: a real click or keystroke does nothing there, which is what a person gets, and the next observation shows it.
+- **codex-1, in part: text on an element nobody can see.** Verified: `display:none` text is found, reported `visible: false`, and held an expectation that named `text` and not `visible`. `compareBrowser` now requires a visible element for `text` and `value` unless the scenario names `visible` itself. This is a second implied field, beside `matched` (D-R3-08). **Reverse:** drop the branch in `compareObservation`.
+- **codex-4, nothing asserted the runner's own script world.** Verified: the world works, and no entry failed without it. `I2.browser-verdict-judged-outside-the-product` now judges a page that rewrites what its own scripts read, with the page's title as the control that the rewrite took. With the runner's reads moved into the page's world the entry fails: "a page that reports itself as showing the expected text held".
+
+### D-R3-16: `visible` does not mean unclipped, uncovered, or on screen, and R76 owns that
+
+- **Found by codex-1, verified:** an element clipped away by `clip-path: inset(100%)` is reported `visible: true`. A covered element and one outside the viewport are too.
+- **Options:** (a) a hit test at the element's centre; (b) leave it and record it.
+- **Chosen: (b), owned by R76, issue #252.** A hit test reads text under a transparent overlay, or with `pointer-events: none`, as hidden, so it trades one wrong answer for another, and picking between them changes what `visible` means in `BrowseObservation`. That is a contract question. Screenshots are out of this unit's scope.
+- **What this means for claims:** `visible: true` is evidence the element is rendered, and not evidence a person can see it. R76 settles it before the line relies on it.
+- **Reverse:** add the hit test to `DESCRIBE` and amend the contract's comment.
+
+### D-R3-17: a request the page's own policy blocks is not a refused host
+
+- **Found by codex-3, verified:** a page with `Content-Security-Policy: img-src 'none'` and an image on another host reports no refused host. Chrome blocks the request before it reaches the proxy.
+- **Chosen:** no change. The rule is about a host the sandbox kept the page from reaching, so a page cannot pass unexercised. This request is blocked by the page's own policy wherever the page runs, so nothing the sandbox withheld went untested.
+- **Rejected:** reporting every request Chrome fails. It would fail pages for requests that are never sent anywhere.
+- **Reverse:** read the blocked reason from the protocol's failure event and report its host.
+
+### D-R3-18: one unrelated test failed once in the last full run
+
+- **Seen:** the full run after the review fixes failed on one test, `packages/sandbox/test/image-lock.test.ts` ("callers that start together..."), with `SyntaxError: Unexpected end of JSON input`. Everything else passed, the paid entries aside.
+- **Verified:** this unit changes neither that file nor `image.ts`. The test passed in the two earlier full runs, three of three when rerun alone, and in a rerun of the whole package (257 passed, 2 skipped). The same job passed that test in CI.
+- **Chosen:** reported as it happened and not retried until green. Filed as issue #254. A second session was running Docker suites on the same machine, which is a possible cause and not a confirmed one.
+- **What this means for the merge gate:** the acceptance criteria are met by the reruns and by CI, and the one failure is on record here.
+
 ## R59: Token efficiency is reported, and a regression fails the benchmark
 
 Started on `v2` at 473324b, in a worktree of its own on `unit/r59`. Issue

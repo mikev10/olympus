@@ -1,0 +1,150 @@
+The code under review is in the file
+`2026-11-26-R3-browser-review-bundle.txt` (SHA-256 52be323423fb2f77666760e9fb2446bffc55c75fdab441de62381c9fa3b72aa1) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing a browser-based behavioral check of a TypeScript project: a
+sandbox provider method that drives a headless browser against a web product,
+the adapter that judges what the browser saw, and the conformance assertions
+over both. You have the source and nothing else — no design documents,
+no author reasoning, no prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The project runs code written by an AI agent inside a Docker container (the
+sandbox) and decides, in its own host process (the runtime), whether that code
+does what a locked acceptance scenario says. This change adds a browser
+scenario. The scenario's `serve` command starts the agent's web product inside
+the sandbox. A second container, started from a pinned browser image, joins the
+sandbox's network namespace and nothing else of it, carries out the scenario's
+steps against the sandbox's loopback, and prints what was on the page. The
+adapter, on the host, compares that report with the scenario's expectation and
+returns the verdict.
+
+It must hold against a capable, motivated party trying to have a browser
+scenario pass on a page that does not show what the scenario expects, or pass
+without the page having been exercised. Assume no deceptive intent — only
+that the easiest path gets taken.
+
+That party controls everything inside the sandbox container: the web product,
+every byte of HTML, CSS, and script it serves, every other process there, and
+anything those processes can do on the network namespace they share with the
+browser's container, including connecting to any port listening on its
+loopback. It does not control the scenario: its steps, its expectation, and its
+`mayBlock` list are locked before the product is written, and the party cannot
+edit them. It does not control the components the runtime is wired with — the
+Vault, the sandbox provider, and the drivers are runtime-selected and trusted,
+even where a function takes one as an argument — and it does not control code
+running inside the runtime's own process. It does not control the Docker
+daemon, the pinned browser image, or the program the provider writes to the
+browser container's standard input.
+
+The invariants at stake:
+
+- The runtime derives the verdict; the product never reports it. What the
+  browser prints is an observation, and the comparison that decides pass or
+  fail runs on the host.
+- An agent may not be judged by an artifact it can write. The browser that
+  observes the product must be out of the product's reach, and a scenario names
+  elements by what a person sees (a role and accessible name, a label, visible
+  text), never by markup the agent chooses.
+- Default deny. A capability not granted is unavailable. A browse request names
+  a port and never a host, and the browser reaches the sandbox's loopback and
+  nothing else.
+- Fail closed. A provider that cannot browse is named as lacking the control. A
+  host the page asked for and could not reach fails the scenario unless the
+  locked scenario lists it. A step that could not be done is never read as
+  done. A missing or malformed report is never read as a pass.
+- Every capability claim maps to an executable assertion that fails when the
+  capability is deleted.
+
+The mechanisms that matter most:
+
+- `browseRunArgs` and `LocalDockerProvider.browse`: how the browser's container
+  is started, what it shares with the sandbox, and how its lifetime is tied to
+  the sandbox's wall clock.
+- The program in `browse-source.ts`, which runs inside the browser's container:
+  two listeners that refuse every request not sent to the loopback, Chrome
+  driven over a pipe, elements found and read in a script world separate from
+  the page's, and the report it prints.
+- `readBrowseOutput`, which reads that report on the host, and
+  `readBrowserScenario` and `compareBrowser`, which read the scenario and
+  decide the verdict.
+- The seven registry assertions in
+  `packages/conformance/src/registry/browser.ts`, and the three existing ones
+  that were reworded.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+Absent work listed here is not a defect. Identifiers such as R76 and R30 name
+later units of work and mean nothing beyond that.
+
+- Running a browser scenario, or any behavioral scenario, from a `VerificationManifest` on the real line, and the fresh sandbox each one runs in (R76).
+- Mounting locked files into the sandbox for a scenario's `serve` to start (R76).
+- A browser outside the sandbox's network, or one that carries a person's signed-in sessions.
+- Egress for a browser scenario: a granted host, a preview URL, a proxy route (R30's later step, by amendment).
+- Seeded sessions, injected cookies, stored browser state.
+- Selectors over markup (CSS, XPath, test ids), scripts evaluated in the page, and a locked test script in place of steps.
+- Screenshots, visual comparison, video, and traces.
+- More than one browser engine, more than one page or tab, file upload and download, and dialogs.
+- A display in the sandbox's container, and computer use by a driver. `computerUse` stays `false` on every provider and driver, and its assertions stay as they are.
+- `MutationAdapter` (M3). A set on a provider that can browse still names `mutation`.
+- Stopping a scenario's server. It ends with the sandbox.
+
+THE QUESTION
+
+If you wrote the web product and everything else in the sandbox, how would you
+get a browser scenario to hold when the page does not show what the scenario
+expects: by reaching or replacing the browser, by shaping what it reports, by
+having a request leave the loopback or go unreported, by making a step or an
+observation count that was never made, or by having a missing piece read as a
+pass?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.

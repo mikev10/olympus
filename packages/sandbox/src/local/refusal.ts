@@ -33,6 +33,8 @@ export type RefusalLayer =
   | 'labels'
   /** A probe request this provider cannot send: a port, a wait, or an exchange it cannot read, or `detach` with `stdin`. */
   | 'probe'
+  /** A browse request this provider cannot carry out as written: a port, a wait, or a step it cannot read. */
+  | 'browse'
   /** A command printed more than the provider's output cap; the sandbox was ended and nothing it printed is returned (D-P8-15). */
   | 'output';
 

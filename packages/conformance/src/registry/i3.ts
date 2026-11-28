@@ -27,6 +27,7 @@ import { R19_ASSERTIONS } from './drafting.js';
 import { R16_ASSERTIONS } from './bug-fix.js';
 import { R8B_I3 } from './observe-plan.js';
 import { R24_I3 } from './repo-instructions.js';
+import { R3_ASSERTIONS } from './browser.js';
 
 /** The entry for `path`, or a failure naming what the manifest holds instead. */
 function entryFor(entries: readonly LockEntry[], path: string): LockEntry {
@@ -52,6 +53,8 @@ function soleTampered(verdict: LockVerdict, context: string): { path: string; ex
 export const I3: InvariantEntry = {
   title: INVARIANTS.I3,
   assertions: [
+    // R3: the browser that judges a page runs where the product cannot reach it.
+    ...R3_ASSERTIONS.I3,
     // R24: the target repository's instructions as granted context.
     ...R24_I3,
     // R20: the role compiler.

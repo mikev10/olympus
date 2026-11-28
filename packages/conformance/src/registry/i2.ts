@@ -6,6 +6,7 @@ import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { R17_I2 } from './security.js';
 import { UNMET_EXPECTATION_FAILS_THE_GATE } from './adapters.js';
 import { HTTP_VERDICT_JUDGED_OUTSIDE_THE_PRODUCT, HTTP_PROBE_SHARES_NETWORK_NOT_FILESYSTEM } from './http.js';
+import { R3_ASSERTIONS } from './browser.js';
 import { CALL_RECORDED_BEFORE_IT_IS_MADE, COST_IS_RUNTIME_METERED, RESUME_DERIVES_STATE_FROM_THE_VAULT } from './line-assertions.js';
 import { ESCALATION_DECIDED_FROM_FAILED_GATES, RELAY_BOUND_TO_TIER_MODEL } from './tier.js';
 import { SEAT_IDENTITY_IN_RUN_STATE } from './separation.js';
@@ -89,6 +90,8 @@ export const I2: InvariantEntry = {
     // P11: an HTTP verdict is drawn from a client the product cannot replace, and made on the host.
     HTTP_VERDICT_JUDGED_OUTSIDE_THE_PRODUCT,
     HTTP_PROBE_SHARES_NETWORK_NOT_FILESYSTEM,
+    // R3: a browser verdict is drawn from a browser the product cannot replace, and made on the host.
+    ...R3_ASSERTIONS.I2,
     STATUS_DERIVED_FROM_CHECK_RESULTS,
     TASK_RESULT_KEY_SET_ENFORCED,
     UNSTARTED_CHECK_IS_IN_THE_EVIDENCE,
