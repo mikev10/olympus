@@ -59,6 +59,7 @@ git grep -n "D-P3-06" -- docs/decisions
 | [R4.md](R4.md) | Amendment: parallel task execution (R4)<br>Unit: parallel task execution (R4)<br>Amendment: a park records its cause (issue #47) |
 | [R5.md](R5.md) | Amendment: R5 splits, and drafting at `plan` gains its spec |
 | [R5a.md](R5a.md) | R5a: Drafting at `plan` |
+| [R5b.md](R5b.md) | Amendment: goal decomposition (R5b) gains its spec, and "goal" joins the spine |
 | [R6.md](R6.md) | R6 — Driver: any OpenAI-compatible endpoint<br>R6 amendments to the contracts |
 | [R7.md](R7.md) | R7: False-done benchmark<br>R7 amendments to the contracts |
 | [R8.md](R8.md) | Amendment: post-merge observation (R8), split into R8a and R8b |

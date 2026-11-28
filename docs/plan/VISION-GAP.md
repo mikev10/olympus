@@ -100,7 +100,7 @@ rule the model is only asked to follow is a rule it skips (section 9).
 | # | Step | Today | Gap |
 |---|---|---|---|
 | 1 | Idea and brainstorm | Missing | No conversational intake. The user writes `spec.md` by hand. |
-| 2 | Plan / PRD in phases and tasks | Missing | `graph.json` is hand-written; R5a (drafting at `plan`) is M2 and specified, unstarted. R5b (goal decomposition) is M3. |
+| 2 | Plan / PRD in phases and tasks | Missing | `graph.json` is hand-written; R5a (drafting at `plan`) is M2 and specified, unstarted. R5b (goal decomposition) is M3 and specified (`R5b-goals.md`). |
 | 3 | Plan reviewed in a PR, cross-family | Missing | R-B. |
 | 4 | Spec and acceptance tests | Partial | R19 drafting shipped but halts in real use (#151). `verify.json` is hand-written. |
 | 5 | Spec and tests reviewed | Partial | R19 has a critic seat; no PR, no plain-English briefing. |

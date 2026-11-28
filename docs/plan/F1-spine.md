@@ -71,6 +71,7 @@ The term is stated here and is not yet wired: no unit reads it until R1 lands, t
 
 | Term | Meaning | Location |
 |---|---|---|
+| Goal | A person's outcome above the spec: the specs it decomposes into and the order between them, each carried by a run of its own. Locked at its gate before any child run starts. | Vault |
 | Spec | One shippable capability. Locked at `spec`. | Vault |
 | Role | Instructions for one seat. Versioned by hash; changed only by a person. | Vault |
 | Acceptance tests | Black-box oracle. Locked at `test-design`. | Vault |
@@ -82,6 +83,8 @@ The term is stated here and is not yet wired: no unit reads it until R1 lands, t
 | Integrity violation | A detected circumvention of a control. | Vault |
 | Run state | Station, tasks, attempts, evidence refs, lineage. | Vault |
 | Workspace | Ephemeral container + worktree. Agent-writable. | Sandbox |
+
+A goal is not a run and holds no station. It has no status of its own: what a goal reads as is derived from its child runs' endings, which the runtime already derives (I2). Its children share nothing writable, and nothing one learns reaches another except as runtime-written Vault data through `learn`. The term was added as an amendment before R5b, the unit that uses it, as readiness was before R1. `R5b-goals.md` owns the rest.
 
 ### Packages
 
@@ -149,6 +152,6 @@ A package that cannot be verified without the rest of the system is decomposed w
 
 **Out:** Codex driver (M2), compiler (M2), trigger framework (M2), readiness (M2), outcome measurement (M2), false-done benchmark (M2), post-merge observation (M2), separation of duties beyond the review seat (M2), trust ratchet (M2), telemetry export (M2), nightly review (M2), model tier per station and escalation (M2), acceptance checks run on the base before build (M2), bug-fix intake (M2), security at the gate (M2), drafting at spec and test-design (M2), drafting at plan (M2), goal decomposition (M3), learning (M3), review panel (M3), mutation testing (M3), behavioral browser QA (M3), L3 (M3 canary), distributed execution (M4b), control plane (M5).
 
-The units in `DECOMPOSITION.md`'s "Beyond M1" section are out of M1 and are specified only so far as keeping them out requires. Readiness is the one that reaches back into this document: it added the fourth term to the effective-level formula above and `readiness` to the package list, both taken deliberately as an amendment rather than by the unit that will use them.
+The units in `DECOMPOSITION.md`'s "Beyond M1" section are out of M1 and are specified only so far as keeping them out requires. Readiness and goal decomposition are the two that reach back into this document: readiness added the fourth term to the effective-level formula above and `readiness` to the package list, and goal decomposition added the goal to the artifacts, each taken deliberately as an amendment rather than by the unit that will use it.
 
 Test Design at M1 is single-family. The full green-on-green defense does not exist until M2 and M1 must not claim it.
