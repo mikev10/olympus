@@ -6,7 +6,7 @@
 
 The `DECOMPOSITION.md` entry is binding and is not repeated here. This spec
 is what the entry rests on, checked against the code on `v2` at cd1b536, and
-the choices the entry leaves open, each recorded in `docs/decisions.md`
+the choices the entry leaves open, each recorded in `docs/decisions/R19.md`
 (D-R19-01 onwards). The maintainer delegated every decision in this unit to
 the session's recommendation (2026-10-23).
 

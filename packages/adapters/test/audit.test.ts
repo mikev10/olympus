@@ -1,6 +1,6 @@
 /**
  * The dependency auditors (R13a, D-R13a-06). Outputs are as npm 10.9.8 and
- * pnpm 10.18.3 printed them in the pinned image (`docs/decisions.md`,
+ * pnpm 10.18.3 printed them in the pinned image (`docs/decisions/R13a.md`,
  * D-R13a-02). A report is read only when whole; anything else is never an
  * empty list (I5).
  */

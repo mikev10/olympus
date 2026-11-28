@@ -6,7 +6,7 @@
 
 The `DECOMPOSITION.md` entry is binding and is not repeated here. This spec is
 what the entry rests on, checked against the code on `v2` at 89d8200, and the
-choices the entry leaves open, each recorded in `docs/decisions.md`
+choices the entry leaves open, each recorded in `docs/decisions/R22.md`
 (D-A-TF-01 to D-A-TF-08), all confirmed by the maintainer on 2026-10-29. It replaces the recorded gap "the M2 trigger
 framework has no spec" and honours the recorded constraint on event
 subscriptions (D-A-DD-02): whatever transport carries an event, its payload is

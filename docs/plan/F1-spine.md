@@ -125,7 +125,7 @@ P10 is numbered after P9 and ordered before P5, which is what the bracketed depe
 
 P11 was added by P8 the same way. An HTTP behavioral check has to send its request from the sandbox's network, and a client inside the product's container is one the product can replace; the probe that puts the client out of reach changes the sandbox's network posture, so it is its own unit rather than part of P8.
 
-P14 was added by an amendment rather than by a unit, after the line was checked control by control against an external account of agent-run delivery (`docs/decisions.md`, D-A-LC-02). It records every refusal and denial, which today leave no trace an auditor or a rate could count beyond the relay's budget refusals P13 keeps. It blocks I1: the M1 proof runs a real model on a real repository, and a refusal history that was never written cannot be backfilled.
+P14 was added by an amendment rather than by a unit, after the line was checked control by control against an external account of agent-run delivery (`docs/decisions/amendment-agent-run-delivery.md`, D-A-LC-02). It records every refusal and denial, which today leave no trace an auditor or a rate could count beyond the relay's budget refusals P13 keeps. It blocks I1: the M1 proof runs a real model on a real repository, and a refusal history that was never written cannot be backfilled.
 
 ---
 

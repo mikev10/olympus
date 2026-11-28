@@ -6,7 +6,7 @@
 > amendments surfaced by S1 each changed a contract without changing this
 > file. The types under `packages/*/src` are authoritative; where this file
 > and the code differ, the code is right. The amendment history, with what
-> changed and why, is in `docs/decisions.md`.
+> changed and why, is in `docs/decisions/`.
 
 **Unit:** F2 (Phase 0, foundation, maintainer-only)
 **Depends on:** F1 Spine

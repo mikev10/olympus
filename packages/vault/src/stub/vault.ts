@@ -410,7 +410,7 @@ export class StubVault implements Vault {
 
   /**
    * `ifVersion` is authoritative and `s.version` is ignored; the contract
-   * leaves which of the two wins to P1 (docs/decisions.md, D-S1).
+   * leaves which of the two wins to P1 (docs/decisions/S1.md, D-S1).
    */
   commitRunState(s: RunState, ifVersion: string): Promise<RunState> {
     const current = this.states.get(s.runId)?.version ?? '0';

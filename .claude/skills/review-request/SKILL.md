@@ -94,7 +94,7 @@ whole class.
   echo "=== CHANGED ==="; git diff --stat <base>..HEAD; echo
   git diff -z --name-only --diff-filter=ACMR <base>..HEAD | while IFS= read -r -d '' f; do
     [ -f "$f" ] || continue
-    case "$f" in docs/decisions.md|docs/reviews/*|docs/plan/*|pnpm-lock.yaml) continue ;; esac
+    case "$f" in docs/decisions/*|docs/reviews/*|docs/plan/*|pnpm-lock.yaml) continue ;; esac
     printf '\n===== %s =====\n' "$f"
     if git cat-file -e "<base>:$f" 2>/dev/null; then
       git diff --no-color --no-ext-diff -W <base>..HEAD -- "$f"
@@ -134,7 +134,7 @@ provenance. Record the bundle's SHA-256 for the prompt:
 sha256sum docs/reviews/<date>-<UNIT>-<slug>-review-bundle.txt
 ```
 
-**Excluded by construction, and why.** `docs/decisions.md` carries author
+**Excluded by construction, and why.** `docs/decisions/` carries author
 reasoning and prior review outcomes — a reviewer reading it inherits
 conclusions already reached and stops questioning them. `docs/reviews/` holds
 what earlier reviewers found. `docs/plan/` is the spec the code is judged
@@ -169,7 +169,7 @@ absent raises nothing anywhere:
 ```bash
 sections=$(grep -cE '^===== .* =====$' docs/reviews/<date>-<UNIT>-<slug>-review-bundle.txt)
 expected=$(git diff -z --name-only --diff-filter=ACMR <base>..HEAD | while IFS= read -r -d '' f; do
-  case "$f" in docs/decisions.md|docs/reviews/*|docs/plan/*|pnpm-lock.yaml) continue ;; esac
+  case "$f" in docs/decisions/*|docs/reviews/*|docs/plan/*|pnpm-lock.yaml) continue ;; esac
   echo x
 done | wc -l)
 [ "$sections" -eq "$expected" ] || echo "FAIL: $sections sections for $expected changed files"
@@ -241,7 +241,7 @@ where a function takes one as a parameter, and the prompt has to say so.
 **Name mechanisms, never verdicts.** Say what a mechanism does and leave every
 judgment to the reviewer. No "this should be solid", no "the weak point is
 probably X", no target number of findings, no hint at what a previous review
-found, and no known limit from `docs/decisions.md`. Framing tells the reviewer
+found, and no known limit from `docs/decisions/`. Framing tells the reviewer
 what failure would mean; it never tells them where to look for it.
 
 **A limit worth knowing:** this half of the prompt is written by the same system

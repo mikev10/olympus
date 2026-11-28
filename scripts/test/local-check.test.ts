@@ -137,7 +137,7 @@ describe('naming registry entries', () => {
 describe('which packages a change touches', () => {
   const packages = [{ name: 'api', dir: 'packages/api' }, { name: 'codex', dir: 'packages/drivers/codex' }, { name: 'cli', dir: 'packages/cli' }];
   test('a path belongs to the package whose directory holds it, and to none otherwise', () => {
-    expect(changedPackages(['packages/api/src/x.ts', 'packages\\drivers\\codex\\test\\y.ts', 'docs/decisions.md', 'packages/apix/z.ts', 'scripts/a.ts'], packages).map((p) => p.name)).toEqual(['api', 'codex']);
+    expect(changedPackages(['packages/api/src/x.ts', 'packages\\drivers\\codex\\test\\y.ts', 'docs/decisions/R3.md', 'packages/apix/z.ts', 'scripts/a.ts'], packages).map((p) => p.name)).toEqual(['api', 'codex']);
     expect(changedPackages([], packages)).toEqual([]);
   });
 });

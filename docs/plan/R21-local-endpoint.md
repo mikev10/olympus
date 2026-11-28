@@ -6,7 +6,7 @@
 
 The `DECOMPOSITION.md` entry is binding and is not repeated here. This spec is
 what the entry rests on, checked against the code on `v2` at f99ea35, and the
-choices the entry leaves open, each recorded in `docs/decisions.md` (D-R21-01
+choices the entry leaves open, each recorded in `docs/decisions/R21.md` (D-R21-01
 onwards). On 2026-10-28 the maintainer confirmed three choices: a local endpoint
 is the Docker host and nothing else; a relay with no credential is allowed only
 for one; and the session writes this spec and takes every later decision.
