@@ -397,6 +397,61 @@ export const RUN_REPORT_READS_ONLY_RECORDS = runtime({
   },
 });
 
+/** What every sandbox in the spent scenario reads: a call that reached the cost bound of its budget. */
+const SPENT_METER: MeterReading = { ...REPORT_METER, exhausted: 'cost' };
+
+/**
+ * R59: whether the tokens were spent well, from the usage records alone.
+ * Each figure is checked against one computed here from the reading every
+ * sandbox was given, not by the code under test.
+ */
+export const REPORT_TOKEN_EFFICIENCY_FROM_USAGE_RECORDS = runtime({
+  id: 'I2.report-token-efficiency-from-usage-records',
+  title:
+    "the report's efficiency figures are the usage records': each task's tokens read and written are the sums of its calls' readings and their ratio is one over the other; cost per accepted change has no figure until a merge is recorded and is then the metered spend over the merges; and a task is named as ending on a spent budget exactly when its last call's reading says a bound was reached",
+  run: async () => {
+    await withIntegration('r59-efficiency-', async (it) => {
+      const { readUsage, runReport } = await api();
+      const { LocalVault } = await import('@olympus-ai/vault');
+      const vault = new LocalVault(it.rig.dirs);
+      await toApproval(it);
+      const waiting = await runReport(vault, it.rig.runId);
+      const unmerged = waiting.efficiency.costPerAcceptedChange;
+      if (unmerged.kind !== 'no-sample' || unmerged.spentUsd !== waiting.cost.run.metered.costUsd) throw new Error(`I5: a run with nothing merged reports a cost per accepted change: ${JSON.stringify(unmerged)}`);
+
+      if (!(await approveAndResume(it)).ok) throw new Error('I2 control: the run did not pass');
+      const report = await runReport(vault, it.rig.runId);
+      const usage = (await readUsage(vault, await vault.readRunState(it.rig.runId))).filter((r) => r.reading.kind !== 'pending');
+      const callsOf = new Map<string, number>();
+      for (const r of usage) callsOf.set(r.taskId, (callsOf.get(r.taskId) ?? 0) + 1);
+      if (callsOf.size === 0 || report.efficiency.tasks.length !== callsOf.size) throw new Error(`I2: the report rates ${String(report.efficiency.tasks.length)} tasks, and ${String(callsOf.size)} made calls`);
+      for (const task of report.efficiency.tasks) {
+        const calls = callsOf.get(task.taskId) ?? 0;
+        // Every call read REPORT_METER: 100 input, 300 cache read, 100 cache write, 10 output.
+        if (task.readTokens !== 500 * calls || task.writtenTokens !== 10 * calls || task.bound !== 'exact') throw new Error(`I2: task ${task.taskId} made ${String(calls)} calls and the report says ${JSON.stringify(task)}`);
+        if (task.readPerWritten.kind !== 'ratio' || task.readPerWritten.value !== 50) throw new Error(`I2: task ${task.taskId} read 500 tokens for every 10 written and the report says ${JSON.stringify(task.readPerWritten)}`);
+      }
+      const merged = report.efficiency.costPerAcceptedChange;
+      if (merged.kind !== 'cost' || merged.merges !== 1 || merged.bound !== 'exact' || Math.abs(merged.usd - 0.002 * usage.length) > 1e-12) throw new Error(`I2: one merge after ${String(usage.length)} calls at $0.002 reports ${JSON.stringify(merged)}`);
+      if (report.efficiency.spentBudgets.length !== 0) throw new Error(`I2: no call reached a bound and the report names ${JSON.stringify(report.efficiency.spentBudgets)}`);
+    }, REPORT_METER);
+
+    // Every call's reading says the cost bound was reached, so every task that made a call ended on one.
+    await withIntegration('r59-spent-', async (it) => {
+      const { readUsage, runReport } = await api();
+      const { LocalVault } = await import('@olympus-ai/vault');
+      const vault = new LocalVault(it.rig.dirs);
+      await toApproval(it);
+      const report = await runReport(vault, it.rig.runId);
+      const made = new Set((await readUsage(vault, await vault.readRunState(it.rig.runId))).filter((r) => r.reading.kind !== 'pending').map((r) => r.taskId));
+      const named = report.efficiency.spentBudgets;
+      if (made.size === 0 || named.length !== made.size || named.some((s) => !made.has(s.taskId) || s.bound !== 'cost' || !s.message.includes(s.taskId) || !s.message.includes('cost bound'))) {
+        throw new Error(`I2: ${String(made.size)} tasks ended on a call that reached its cost bound and the report names ${JSON.stringify(named)}`);
+      }
+    }, SPENT_METER);
+  },
+});
+
 /**
  * R2: the rates over a real run are the ones its records give. Each figure is
  * checked against a number computed here from the records directly, not by

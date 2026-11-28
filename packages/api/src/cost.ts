@@ -18,7 +18,7 @@
  * work it out.
  */
 import { DRAFT_ROLES, isAgentStation, maxStarts, seatTaskId, STATION_CONTRACTS, StrictPolicyEngine } from '@olympus-ai/core';
-import type { DraftStation, Policy, RoleId, RunState, StationId, TaskGraph, TaskId } from '@olympus-ai/core';
+import type { BudgetBound, DraftStation, Policy, RoleId, RunState, StationId, TaskGraph, TaskId } from '@olympus-ai/core';
 import type { UsageRecord, Vault } from '@olympus-ai/vault';
 
 /** Sums over the calls a relay counted. */
@@ -114,6 +114,81 @@ export function costTotals(records: readonly UsageRecord[]): CostTotals {
     byTask[record.taskId] = add(Object.hasOwn(byTask, record.taskId) ? (byTask[record.taskId] ?? EMPTY) : EMPTY, record);
   }
   return { run, byStation, byTask };
+}
+
+/** Tokens read for each token written. `no-sample` when nothing was written: a ratio over nothing is not 0 and not infinite (I5). */
+export type ReadPerWritten = { readonly kind: 'no-sample' } | { readonly kind: 'ratio'; readonly value: number };
+
+/** What one task read to write what it wrote, over its metered calls (R59). */
+export interface TaskEfficiency {
+  readonly taskId: TaskId;
+  /** Input, cache-read, and cache-write tokens: everything the model was sent. */
+  readonly readTokens: number;
+  /** Output tokens. */
+  readonly writtenTokens: number;
+  readonly readPerWritten: ReadPerWritten;
+  /** The task's own bound: `lower` when a call of its was unmetered, lost, or unreadable, and the figures are of what was counted. */
+  readonly bound: UsageTotal['bound'];
+}
+
+/** Per task, in the order each first made a call: the tokens it read, the tokens it wrote, and the ratio. */
+export function tokenEfficiency(records: readonly UsageRecord[]): TaskEfficiency[] {
+  return Object.entries(costTotals(records).byTask).map(([taskId, total]) => {
+    const m = total.metered;
+    const readTokens = m.inputTokens + m.cacheReadTokens + m.cacheWriteTokens;
+    return {
+      taskId: taskId as TaskId,
+      readTokens,
+      writtenTokens: m.outputTokens,
+      readPerWritten: m.outputTokens === 0 ? { kind: 'no-sample' } : { kind: 'ratio', value: readTokens / m.outputTokens },
+      bound: total.bound,
+    };
+  });
+}
+
+/** A task whose last call reached a bound of its budget, as the relay's meter read it (R59). */
+export interface SpentBudget {
+  readonly taskId: TaskId;
+  readonly station: StationId;
+  /** Which of the task's starts the call was. */
+  readonly attempt: number;
+  readonly bound: BudgetBound;
+  /** Requests the relay refused during that call. */
+  readonly refused: number;
+  /** The same thing for a person; a machine reads the fields. */
+  readonly message: string;
+}
+
+/**
+ * The tasks that ended on a spent budget: the last call each made was
+ * metered, and its reading says the token or the cost bound was reached. A
+ * task whose earlier call ran out and whose later one did not is not named,
+ * and a reading stopped as `unreadable` is not a spent budget (D-R58-04,
+ * D-R59-04). A last call that was lost or never read is not named either:
+ * nothing read what it reached, and the task's `lower` bound says so.
+ */
+export function spentBudgets(records: readonly UsageRecord[]): SpentBudget[] {
+  const unsettled = new Set(unsettledCalls(records));
+  const last = new Map<TaskId, UsageRecord>();
+  for (const record of records) {
+    if (record.reading.kind === 'pending' && !unsettled.has(record)) continue;
+    const seen = last.get(record.taskId);
+    if (seen === undefined || record.attempt >= seen.attempt) last.set(record.taskId, record);
+  }
+  const spent: SpentBudget[] = [];
+  for (const record of last.values()) {
+    const r = record.reading;
+    if (r.kind !== 'metered' || (r.exhausted !== 'tokens' && r.exhausted !== 'cost')) continue;
+    spent.push({
+      taskId: record.taskId,
+      station: record.station,
+      attempt: record.attempt,
+      bound: r.exhausted,
+      refused: r.refused,
+      message: `task ${record.taskId} ended on a spent budget: its last call, start ${String(record.attempt)} at ${record.station}, reached the ${r.exhausted === 'tokens' ? 'token' : 'cost'} bound of its budget`,
+    });
+  }
+  return spent;
 }
 
 /**

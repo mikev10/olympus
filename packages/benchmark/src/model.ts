@@ -14,11 +14,11 @@ import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { STATION_CONTRACTS, type CompiledRole, type Driver, type ModelTier, type TaskRequest } from '@olympus-ai/core';
 import type { SandboxSpec } from '@olympus-ai/sandbox';
-import { aloneCall, type AloneOutcome } from './alone.js';
+import { ALONE_TASK, aloneCall, type AloneOutcome } from './alone.js';
 import { render, type Corpus, type Item } from './corpus.js';
 import { installed, type Bench } from './line.js';
 import { throughTheCritic } from './critic.js';
-import { benchmarkResult, detectorFired, type BenchmarkResult, type ItemOutcome, type Verdict } from './result.js';
+import { benchmarkResult, detectorFired, type BenchmarkResult, type ItemOutcome, type ItemTokens, type TaskTokens, type Verdict } from './result.js';
 
 /** The spend so far against the cap, shared by every arm of one run. */
 export class Spend {
@@ -68,13 +68,15 @@ export async function askedOf(item: Item, tree: string): Promise<string> {
   return `What was asked:\n\n${item.asked}\n\nThe work is ${what}, in your working directory at ${Object.keys(item.change.write).sort().join(', ')}.`;
 }
 
-/** The driver-alone arm over every item, `repetitions` times each. */
-export async function aloneArm(arm: AloneArm): Promise<Map<string, Verdict[]>> {
+/** The driver-alone arm over every item, `repetitions` times each: what each call said, and what the relay counted for it. */
+export async function aloneArm(arm: AloneArm): Promise<{ verdicts: Map<string, Verdict[]>; tokens: ItemTokens[] }> {
   if (!Number.isSafeInteger(arm.repetitions) || arm.repetitions < 1) throw new Error('benchmark: repetitions must be a positive integer');
   const call = arm.call ?? aloneCall;
   const verdicts = new Map<string, Verdict[]>();
+  const tokens: ItemTokens[] = [];
   for (const item of arm.corpus.items) {
     const seen: Verdict[] = [];
+    const counted: Array<Record<string, TaskTokens>> = [];
     for (let r = 0; r < arm.repetitions; r += 1) {
       arm.spend.admit(arm.budget.maxCostUsd, `the driver-alone call for an item`);
       const tree = await workTree(arm.bench, arm.corpus, item);
@@ -92,12 +94,14 @@ export async function aloneArm(arm: AloneArm): Promise<Map<string, Verdict[]>> {
         budget: arm.budget,
       });
       arm.spend.charge(outcome.costUsd);
+      counted.push({ [ALONE_TASK]: outcome.tokens });
       // A driver that says not done has caught the item; one that says done has passed it (D-R7-05's verdicts, from a model's claim).
       seen.push(outcome.verdict.kind === 'unreadable' ? 'unreadable' : outcome.verdict.done ? 'passed' : 'caught');
     }
     verdicts.set(item.id, seen);
+    tokens.push({ id: item.id, repetitions: counted });
   }
-  return verdicts;
+  return { verdicts, tokens };
 }
 
 /** A fresh copy of the item's installed repository with its change applied, under a name that says nothing about the item (I3). */
@@ -145,21 +149,25 @@ export async function modelTier(options: ModelTierOptions): Promise<{ result: Be
   const { corpus } = options;
   const criticCall = options.calls?.critic ?? throughTheCritic;
   const criticOutcomes: ItemOutcome[] = [];
+  const criticTokens: ItemTokens[] = [];
   for (const item of corpus.items.filter((i) => i.tier === 'model')) {
     const prefixes = corpus.groups[item.group] ?? [];
     const verdicts: Verdict[] = [];
     const fired: Array<boolean | null> = [];
     const causes = new Set<string>();
+    const counted: Array<Readonly<Record<string, TaskTokens>>> = [];
     for (let r = 0; r < options.repetitions; r += 1) {
       spend.admit(DRAFT_ATTEMPTS * options.critic.budget.maxCostUsd, 'a drafted run with its critic seated');
       const outcome = await criticCall(options.bench, corpus, item, { driver: options.driver, image: options.image, ...options.critic });
       spend.charge(outcome.costUsd);
+      counted.push(outcome.tokens);
       verdicts.push(outcome.verdict);
       // An unreadable answer is no detector firing, whatever its cause's prefix (I5).
       fired.push(outcome.verdict === 'unreadable' ? null : detectorFired(prefixes, outcome.causes));
       for (const c of outcome.causes) causes.add(c);
     }
     criticOutcomes.push({ id: item.id, kind: item.kind, group: item.group, verdicts, detectorFired: fired, causes: [...causes].sort() });
+    criticTokens.push({ id: item.id, repetitions: counted });
   }
   const alone = await aloneArm({
     bench: options.bench,
@@ -173,7 +181,7 @@ export async function modelTier(options: ModelTierOptions): Promise<{ result: Be
     ...(options.calls?.alone === undefined ? {} : { call: options.calls.alone }),
   });
   const aloneOutcomes: ItemOutcome[] = corpus.items.map((item) => {
-    const verdicts = alone.get(item.id) ?? [];
+    const verdicts = alone.verdicts.get(item.id) ?? [];
     return { id: item.id, kind: item.kind, group: item.group, verdicts, detectorFired: verdicts.map(() => null), causes: [] };
   });
   const model = options.driver.resolveModel(options.alone.tier);
@@ -182,7 +190,7 @@ export async function modelTier(options: ModelTierOptions): Promise<{ result: Be
     repetitions: options.repetitions,
     capUsd: options.capUsd,
     spentUsd: spend.usd,
-  });
+  }, { alone: alone.tokens, critic: criticTokens });
   return { result, spentUsd: spend.usd };
 }
 

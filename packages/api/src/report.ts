@@ -7,8 +7,9 @@
 import { M1_STATIONS } from '@olympus-ai/core';
 import type { CandidateId, ModelIdentity, RunId, RunTemplateId, StationId, TaskAttempts, TaskId, TaskStatus, TemplateId, TriggerKind } from '@olympus-ai/core';
 import type { EnforcementDecision, EvidenceBundle, IntegrationRecord, Vault } from '@olympus-ai/vault';
-import { costTotals, readUsage, type CostTotals } from './cost.js';
+import { costTotals, readUsage, spentBudgets, tokenEfficiency, type CostTotals, type SpentBudget, type TaskEfficiency } from './cost.js';
 import { readIntegration } from './line.js';
+import type { CostPerMerge } from './outcomes.js';
 import { runStanding, type RunStanding, type StandingSource } from './run.js';
 
 /** Where a station's exit gate stands, derived from the run's position and standing. */
@@ -46,6 +47,17 @@ export interface RunReport {
    * write — of the metered calls; null when no call was metered.
    */
   readonly cacheHitRate: number | null;
+  /**
+   * Whether the tokens were spent well (R59), every figure from the usage
+   * records: per task, what it read for what it wrote; the run's dollars per
+   * change merged, `no-sample` while nothing has merged; and each task whose
+   * last call reached a bound of its budget.
+   */
+  readonly efficiency: {
+    readonly tasks: readonly TaskEfficiency[];
+    readonly costPerAcceptedChange: CostPerMerge;
+    readonly spentBudgets: readonly SpentBudget[];
+  };
   /** Each driver call's model, as the runtime resolved it before the call (A-I1a-01). */
   readonly calls: ReadonlyArray<{ readonly taskId: TaskId; readonly station: StationId; readonly attempt: number; readonly model: ModelIdentity }>;
   readonly tasks: ReadonlyArray<{ readonly taskId: TaskId; readonly station: StationId | null; readonly status: TaskStatus; readonly attempts: TaskAttempts }>;
@@ -141,6 +153,13 @@ export async function runReport(vault: Vault, runId: RunId): Promise<RunReport> 
   const candidate = entry?.candidate == null
     ? null
     : { id: entry.candidate.id, kind: entry.candidate.kind, template: entry.candidate.template, extracted: entry.candidate.extracted };
+  const integration = await readIntegration(vault, runId);
+  // An accepted change is a merge the runtime recorded; a resume that records the same merge again has not merged twice.
+  const merges = new Set(integration.flatMap((r) => (r.kind === 'merged' ? [r.mergeCommit] : []))).size;
+  const spentUsd = m.costUsd;
+  const costPerAcceptedChange: CostPerMerge = merges === 0
+    ? { kind: 'no-sample', spentUsd }
+    : { kind: 'cost', usd: spentUsd / merges, spentUsd, merges, bound: cost.run.bound };
   return {
     runId,
     requestedLevel,
@@ -150,6 +169,7 @@ export async function runReport(vault: Vault, runId: RunId): Promise<RunReport> 
     standingSource: source,
     cost,
     cacheHitRate: input === 0 ? null : m.cacheReadTokens / input,
+    efficiency: { tasks: tokenEfficiency(usage), costPerAcceptedChange, spentBudgets: spentBudgets(usage) },
     calls,
     tasks,
     stations,
@@ -157,6 +177,6 @@ export async function runReport(vault: Vault, runId: RunId): Promise<RunReport> 
     decisions: byCause,
     refusals,
     parks,
-    integration: await readIntegration(vault, runId),
+    integration,
   };
 }

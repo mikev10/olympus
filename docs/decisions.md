@@ -14430,3 +14430,31 @@ Started on `v2` at 473324b, in a worktree of its own on `unit/r59`. Issue
   would drop the check silently. Known limit, owned by the maintainer at
   the merge gate: until one paid run is committed and listed, nothing is
   held. Reverse by removing the list and the call in `model.tier.ts`.
+
+### D-R59-05: what proves it, each shown failing
+
+- **`I2.report-token-efficiency-from-usage-records`** runs a stub line to a
+  merge with a known reading at every sandbox, and holds each task's read
+  and written tokens, the ratio, and cost per accepted change to figures
+  computed in the entry. Before the merge the cost per accepted change is
+  `no-sample`. A second run, where every reading says the cost bound was
+  reached, names every task that made a call.
+- **`packages/api/test/efficiency.test.ts`** holds the edges on records
+  written by hand. With any exhausted reading read as a spent budget, the
+  `unreadable` case fails. With a task's first call deciding instead of its
+  last, the recovered task is named and three tests fail.
+- **`packages/benchmark/test/model.test.ts`** holds the record: with the
+  tokens left out of the result, it fails.
+- **`packages/benchmark/test/tokens.test.ts`** holds the rule. With growth
+  past the limit no longer failing, three tests fail. With a lower bound
+  under the limit read as within, one fails. With the baseline read from
+  the index and not from `HEAD`, the test that stages a regressed result
+  fails. The suite also holds every result listed in `TOKEN_BASELINES` to
+  its committed file and its corpus; the list is empty, so that loop holds
+  nothing until the first baseline is listed.
+- **The paid tier's own file is not run by any free suite.**
+  `test/tiers/model.tier.ts` calls `tokenHold` before the first call and
+  the check it returns after the result is written; the rule those two
+  calls apply is what the free suite holds.
+- **The CLI's `report` summary line is unchanged.** It prints the JSON, and
+  the new fields are in it.

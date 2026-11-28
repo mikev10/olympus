@@ -27,12 +27,15 @@ import { BASE_IMAGE } from '@olympus-ai/driver-claude-code';
 import { LocalVault, type CriticRecord, type DraftRecord } from '@olympus-ai/vault';
 import type { Corpus, Item } from './corpus.js';
 import { BENCH_READINESS, benchPolicyDocument, boundGraph, installed, type Bench } from './line.js';
+import type { TaskTokens } from './result.js';
 import { BenchStub, ScriptedSeat } from './seats.js';
 
 export interface CriticOutcome {
   readonly verdict: 'caught' | 'passed' | 'unreadable';
   readonly causes: readonly string[];
   readonly costUsd: number;
+  /** What the relay counted for each task that made a metered call, from the run's usage records (R59). */
+  readonly tokens: Readonly<Record<string, TaskTokens>>;
 }
 
 export interface CriticSeat {
@@ -158,10 +161,26 @@ export async function throughTheCritic(bench: Bench, corpus: Corpus, item: Item,
   const state = await vault.readRunState(runId);
   const usage = await readUsage(vault, state);
   // A call whose cost was lost or never read cannot be charged against the cap, so the run stops (I5); an unmetered one is the scripted seat's and cost nothing.
-  const totals = costTotals(usage).run;
+  const cost = costTotals(usage);
+  const totals = cost.run;
   const unsettled = unsettledCalls(usage).length;
   if (unsettled > 0 || totals.lost > 0) throw new Error(`benchmark: ${String(unsettled + totals.lost)} call(s) of the drafted run have no known cost, so the spend cannot be held to the cap`);
   const costUsd = totals.metered.costUsd;
+  // The scripted drafter's calls are unmetered and counted nowhere: a task is recorded for the calls a relay read.
+  const tokens: Record<string, TaskTokens> = {};
+  for (const [task, total] of Object.entries(cost.byTask)) {
+    const m = total.metered;
+    if (m.calls === 0) continue;
+    tokens[task] = {
+      calls: m.calls,
+      inputTokens: m.inputTokens,
+      outputTokens: m.outputTokens,
+      cacheReadTokens: m.cacheReadTokens,
+      cacheWriteTokens: m.cacheWriteTokens,
+      exhausted: m.exhausted,
+      bound: total.bound,
+    };
+  }
   const first = state.drafts[station]?.attempts[0];
   if (first?.draft === null || first === undefined) throw new Error(`benchmark: the drafted run for an item recorded no first draft at ${station}`);
   const record = JSON.parse(new TextDecoder().decode(await vault.read(first.draft))) as DraftRecord;
@@ -175,5 +194,5 @@ export async function throughTheCritic(bench: Bench, corpus: Corpus, item: Item,
     if (!verdict.binding) throw new Error('benchmark: the critic seated was not binding: its family is the drafter\'s, so its findings send nothing back');
     answer = { readable: verdict.readable, findings: verdict.findings.length };
   }
-  return { ...criticVerdict(problems, answer, first.sentBack?.by ?? null), costUsd };
+  return { ...criticVerdict(problems, answer, first.sentBack?.by ?? null), costUsd, tokens };
 }
