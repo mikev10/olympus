@@ -2301,6 +2301,7 @@ Found by R58's external review (codex-2, codex-3), which carried `scripts/local-
 - **Expected:** about 9-10 minutes without `run-driver` and about 18 with it, against 18-23 and 32. The PR's own CI run is the measurement.
 - **Rejected:** (a) `pnpm -r --no-sort` in one job: the sandbox and readiness suites both start containers, and running them on one runner at once puts wall-clock assertions under contention; separate runners do not. (b) Parallel paid suites: about 5 more minutes off a labelled run, but each needs its own cache and artifact wiring; a follow-up. (c) Sharding the registry: it is one file, so this needs a change under `packages/conformance/`; a follow-up.
 - **Reverse:** restore `.github/workflows/ci.yml` from the commit before this one.
+- **Series:** a change to the gates is an amendment (`docs/plan/WORKFLOW.md`), and this one belongs with D-A-CI-01 to 08. It was recorded as tooling in error and keeps its number, which `ci.yml` cites; the maintainer confirmed it before it was built.
 
 ### D-TOOLING-16: CI pulls the browser image beside the other pinned test images
 
@@ -2310,6 +2311,7 @@ Found by R58's external review (codex-2, codex-3), which carried `scripts/local-
 - **What does not change:** the provider still pulls by digest and runs by content ID, so a machine without this step behaves as before. No test, timeout, or assertion is touched.
 - **Limit:** the digest is now written in the workflow and in `browse.ts`. Nothing fails when the two differ; the pre-pull would then fetch an image no test uses, and the tests would pull their own as they did before this change.
 - **Reverse:** delete the three lines.
+- **Series:** a gate amendment recorded as tooling, as D-TOOLING-15 was; it keeps its number.
 
 ## P6: Verification + evidence
 
