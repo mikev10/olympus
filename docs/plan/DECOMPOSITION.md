@@ -3691,8 +3691,13 @@ again on every later turn.
 - The map is recorded with its hash, so what a seat was handed can be
   recomputed.
 
-**Depends on R59:** the saving is claimed only against R59's recorded
-baseline.
+**Depends on R59:** the saving is claimed only against figures R59
+reports: `report`'s tokens read and written per task, for the spec drafter,
+the test drafter and the builder, on a run of the same work at the same base
+commit before the map and after it. The benchmark's token baseline is not
+that measurement: its model tier seats a model only as a judge, the
+done-checker and the critic, so no drafter's or builder's tokens are in it
+(A-R61-01).
 
 ### R62 — The base install is reused while the lockfile is unchanged
 
