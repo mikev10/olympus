@@ -3927,6 +3927,67 @@ to I1, and I1 did not take it.
 `behavioral:browser` are unavailable on every real run, which is one of the
 things that keeps L3 refused.
 
+### The backlog after R3: every open issue has a home
+
+Placed on 2026-11-27, after R3 merged (#251). Seven open issues named no
+unit. Each is now named by a unit below or folded into an existing unit.
+As with the backlog after R57, each section restates its issues, and the
+spec is written when the unit starts and verified against the code then.
+
+**Folded into existing units:**
+- [#256](https://github.com/mikev10/olympus/issues/256) (the example policy and `init` grant no planning, so
+  `--draft-plan` needs a hand edit) joins R64, which is what a first-time
+  operator meets at `init`. A test holds the setup files to the examples
+  byte for byte, so both change together.
+- [#264](https://github.com/mikev10/olympus/issues/264) (the critic-plumbing tier is refused by `buildGraph`
+  since A-R53-01, and no workflow runs it) joins R70, which reworks the
+  critic arm. The tier names its image by content ID, and a workflow runs
+  it, so a rule that refuses it again goes red.
+- [#258](https://github.com/mikev10/olympus/issues/258) (the `openai-responses` dialect takes an answer that
+  names no tier as served at the default) joins R72, whose paid Codex runs
+  are where a live Responses answer's `service_tier` can be read. The relay
+  records the tier it read, and the dialect refuses a missing or null one
+  only if every live answer carries it.
+
+**Tooling, not a unit:** [#267](https://github.com/mikev10/olympus/issues/267) (the three paid suites in
+parallel jobs) is a gate-change pull request after #266 merges.
+
+**Suggested order:** R77 soon, because each intermittent failure costs a
+rerun, and a rerun of a labelled run pays the model again. R78 after #267
+merges, since both rework CI's critical path.
+
+### R77 — Test runs are deterministic and leave nothing behind
+
+Issues [#253](https://github.com/mikev10/olympus/issues/253), [#259](https://github.com/mikev10/olympus/issues/259), [#260](https://github.com/mikev10/olympus/issues/260). Two failures seen once each, and the
+containers a killed run leaves behind.
+
+- A waiter on a harness image's tag lock waits on a holder file that is
+  still empty, as it waits on one it cannot read, instead of failing on the
+  parse (#253). A test that holds the lock with an empty holder file fails
+  first.
+- The latest of several decisions recorded in the same millisecond is the
+  one written last, not whichever the Vault lists last (#259). If ordering
+  needs a field on a Vault record, the unit opens with a contract amendment.
+  The entry is run with one fixed `decidedAt` and fails first.
+- Every container and network the sandbox creates carries an ownership
+  label, and a sweep removes only labelled ones that are exited, dead, or
+  created and stale, and then labelled networks with nothing attached
+  (#260). It never matches by name prefix, never prunes unlabelled
+  resources, and never touches a running container, since parallel
+  sessions share one daemon.
+
+### R78 — The registry meta-test shards across runners
+
+Issue [#268](https://github.com/mikev10/olympus/issues/268). After #266, `test/registry.test.ts` is the longest step on
+CI's critical path: one file of 396 tests, about 6 minutes, and vitest
+shards by file.
+
+- The registry is evaluated once, and its entries run as several files or
+  a job matrix, with one summary report last in the log.
+- The baseline check and the external reconciliation each still run
+  exactly once, and a shard that does not run fails the gate.
+- The slowest entries bound what sharding wins; the spec records them.
+
 ## Working Rules
 
 1. **One unit per session.** Load `F1-spine.md`, `CLAUDE.md`, and this unit's section. Nothing else.
