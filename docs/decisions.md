@@ -14517,3 +14517,28 @@ From the external review, triaged in `docs/reviews/2026-11-26-R3-browser-triage.
 - **Verified:** this unit changes neither that file nor `image.ts`. The test passed in the two earlier full runs, three of three when rerun alone, and in a rerun of the whole package (257 passed, 2 skipped). The same job passed that test in CI.
 - **Chosen:** reported as it happened and not retried until green. Filed as issue #254. A second session was running Docker suites on the same machine, which is a possible cause and not a confirmed one.
 - **What this means for the merge gate:** the acceptance criteria are met by the reruns and by CI, and the one failure is on record here.
+
+## A-R61-01: R61's saving is measured in `report`, not in the benchmark
+
+Confirmed by the maintainer on 2026-11-27, in R59's session, taking the
+recommended answer. Found by R59 while reading the benchmark it was told to
+record a baseline in.
+
+- **What the entry said.** R61's saving is claimed only against R59's
+  recorded baseline.
+- **What the code holds.** The benchmark's model tier seats a real model in
+  two seats, the done-checker of the driver-alone arm and the critic behind
+  a scripted drafter (`packages/benchmark/src/model.ts`). It seats none as
+  the author of work, and says so (`notMeasured`,
+  `packages/benchmark/src/comparison.ts`). R61 changes what the spec
+  drafter, the test drafter and the builder start from. None of the three
+  is a model in the benchmark, so its token record cannot show their
+  saving.
+- **What the entry says now.** The saving is claimed against `report`'s
+  per-task tokens read and written (R59), for those three seats, on a run
+  of the same work at the same base commit before the map and after it.
+- **Not changed.** R61's deliverables, its dependency on R59, and its
+  place in the order. The benchmark's token baseline stays what R59 built:
+  a guard on the judging seats.
+- **Reverse** by restoring the sentence, which would leave R61 with a
+  baseline that cannot move when it succeeds.
