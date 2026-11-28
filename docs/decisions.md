@@ -14458,3 +14458,14 @@ Started on `v2` at 473324b, in a worktree of its own on `unit/r59`. Issue
   calls apply is what the free suite holds.
 - **The CLI's `report` summary line is unchanged.** It prints the JSON, and
   the new fields are in it.
+- **`node scripts/local-check.ts full` passed on fd1c35c.** The 27 entries
+  it names as not run are the ones that need CI's paid suites.
+- **The critic-plumbing tier could not confirm its changed line.** Run here
+  with `TIER=critic-plumbing`, it stops in `buildGraph` before any item:
+  it seats its critic with `BASE_IMAGE`, a digest reference, and a driver
+  call has run only in an image named by content since A-R53-01. The file
+  is otherwise as `v2` has it, and no workflow runs that tier. Its
+  expectation gained `tokens: {}`, which follows from the code (a stub
+  critic is unmetered, and a task with no metered call is not recorded)
+  and was not seen passing. Repairing the tier is not this unit's; it is
+  noted in the pull request and filed as an issue.
