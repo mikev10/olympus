@@ -46,12 +46,37 @@ export interface ArmResult {
   readonly items: readonly ItemOutcome[];
 }
 
+/**
+ * What the relay counted for one task of one repetition of an item (R59).
+ * Never a driver's account of its own usage (I2).
+ */
+export interface TaskTokens {
+  /** Driver calls the relay metered: how many times the task was started. */
+  readonly calls: number;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheReadTokens: number;
+  readonly cacheWriteTokens: number;
+  /** Calls that ended on their own budget, so the tokens are capped by it and not by the work. */
+  readonly exhausted: number;
+  /** `lower` when a call's usage could not be read, and the counts are of what was counted. */
+  readonly bound: 'exact' | 'lower';
+}
+
+/** One item's tokens: per repetition, in order, each task that made a metered call. */
+export interface ItemTokens {
+  readonly id: string;
+  readonly repetitions: ReadonlyArray<Readonly<Record<string, TaskTokens>>>;
+}
+
 export interface BenchmarkResult {
   readonly corpus: { readonly version: string; readonly digest: string };
   readonly tier: Item['tier'];
   readonly arms: Readonly<Record<string, ArmResult>>;
   /** The model tier only: what ran and what it cost, so the result says what model its rates are a claim about. */
   readonly run?: ModelRun;
+  /** The model tier only: tokens per task for each item, per arm, items in id order (R59). */
+  readonly tokens?: Readonly<Record<string, readonly ItemTokens[]>>;
 }
 
 export interface ModelRun {
@@ -87,10 +112,24 @@ export function armResult(items: readonly ItemOutcome[]): ArmResult {
   return { overall: rates(sorted), groups, items: sorted };
 }
 
-export function benchmarkResult(corpus: Corpus, tier: Item['tier'], arms: Readonly<Record<string, readonly ItemOutcome[]>>, run?: ModelRun): BenchmarkResult {
+export function benchmarkResult(
+  corpus: Corpus,
+  tier: Item['tier'],
+  arms: Readonly<Record<string, readonly ItemOutcome[]>>,
+  run?: ModelRun,
+  tokens?: Readonly<Record<string, readonly ItemTokens[]>>,
+): BenchmarkResult {
   const out: Record<string, ArmResult> = {};
   for (const name of Object.keys(arms).sort()) out[name] = armResult(arms[name] ?? []);
-  return { corpus: { version: corpus.version, digest: corpus.digest }, tier, arms: out, ...(run === undefined ? {} : { run: { ...run, spentUsd: Number(run.spentUsd.toFixed(DECIMALS)) } }) };
+  const counted: Record<string, ItemTokens[]> = {};
+  for (const name of Object.keys(tokens ?? {}).sort()) counted[name] = [...(tokens?.[name] ?? [])].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return {
+    corpus: { version: corpus.version, digest: corpus.digest },
+    tier,
+    arms: out,
+    ...(run === undefined ? {} : { run: { ...run, spentUsd: Number(run.spentUsd.toFixed(DECIMALS)) } }),
+    ...(tokens === undefined ? {} : { tokens: counted }),
+  };
 }
 
 /** The result as it is committed: two-space JSON and a final newline. */

@@ -1,0 +1,1723 @@
+BASE: reviewed/R66
+HEAD: 887dcf6
+
+=== COMMITS ===
+887dcf6 R59: record the acceptance run, and the tier that could not be run
+fd1c35c R59: token efficiency in the report, and tokens held to a baseline in the benchmark
+63615f2 R59: boundary and assumptions, recorded before any code
+
+=== CHANGED ===
+ .changeset/r59-token-efficiency.md                 |  27 +++
+ docs/decisions.md                                  | 180 +++++++++++++++
+ docs/plan/DECOMPOSITION.md                         |   9 +
+ packages/api/src/cost.ts                           |  77 ++++++-
+ packages/api/src/report.ts                         |  24 +-
+ packages/api/test/efficiency.test.ts               |  90 ++++++++
+ packages/benchmark/src/alone.ts                    |  22 +-
+ packages/benchmark/src/critic.ts                   |  23 +-
+ packages/benchmark/src/index.ts                    |   1 +
+ packages/benchmark/src/model.ts                    |  22 +-
+ packages/benchmark/src/result.ts                   |  43 +++-
+ packages/benchmark/src/tokens.ts                   | 245 +++++++++++++++++++++
+ packages/benchmark/test/model.test.ts              |  24 +-
+ .../benchmark/test/tiers/critic-plumbing.tier.ts   |   2 +-
+ packages/benchmark/test/tiers/model.tier.ts        |  16 +-
+ packages/benchmark/test/tokens.test.ts             | 177 +++++++++++++++
+ packages/conformance/src/registry/i2.ts            |   3 +-
+ packages/conformance/src/registry/integration.ts   |  55 +++++
+ 18 files changed, 1011 insertions(+), 29 deletions(-)
+
+
+===== .changeset/r59-token-efficiency.md =====
+---
+"@olympus-ai/api": minor
+"@olympus-ai/benchmark": minor
+"@olympus-ai/conformance": minor
+---
+
+R59: token efficiency is reported, and a token regression fails the
+benchmark's model tier.
+
+`RunReport` gains `efficiency`: per task, the tokens read (input, cache read,
+cache write), the tokens written, and their ratio, `no-sample` where nothing
+was written; `costPerAcceptedChange`, the run's metered spend over the merges
+it recorded, `no-sample` until one is; and `spentBudgets`, each task whose
+last call's reading says the token or the cost bound of its budget was
+reached. `tokenEfficiency` and `spentBudgets` are exported from `cost.ts`.
+Every figure is derived from the usage records.
+
+A model-tier `BenchmarkResult` gains `tokens`: per arm and item, per
+repetition, what the relay counted for each task. `TOKEN_BASELINES`
+(`tokens.ts`) lists the results a run is held to and each one's margin; a
+listed run fails when an item's tokens per driver call pass the margin over
+the result committed at `HEAD`, and is refused before any call when that
+result is missing or is other work. The list is empty: no committed result
+records tokens yet.
+
+The conformance registry adds
+`I2.report-token-efficiency-from-usage-records`.
+
+===== packages/api/src/cost.ts =====
+diff --git a/packages/api/src/cost.ts b/packages/api/src/cost.ts
+index a91a48e..3b55710 100644
+--- a/packages/api/src/cost.ts
++++ b/packages/api/src/cost.ts
+@@ -18,7 +18,7 @@
+  * work it out.
+  */
+ import { DRAFT_ROLES, isAgentStation, maxStarts, seatTaskId, STATION_CONTRACTS, StrictPolicyEngine } from '@olympus-ai/core';
+-import type { DraftStation, Policy, RoleId, RunState, StationId, TaskGraph, TaskId } from '@olympus-ai/core';
++import type { BudgetBound, DraftStation, Policy, RoleId, RunState, StationId, TaskGraph, TaskId } from '@olympus-ai/core';
+ import type { UsageRecord, Vault } from '@olympus-ai/vault';
+ 
+ /** Sums over the calls a relay counted. */
+@@ -104,22 +104,97 @@ export function unsettledCalls(records: readonly UsageRecord[]): UsageRecord[] {
+ /** Totals per run, per station, and per task, each the sum of its records in the order they were written. */
+ export function costTotals(records: readonly UsageRecord[]): CostTotals {
+   let run = EMPTY;
+   const byStation: Partial<Record<StationId, UsageTotal>> = {};
+   const byTask: Record<TaskId, UsageTotal> = {};
+   const unsettled = new Set(unsettledCalls(records));
+   for (const record of records) {
+     if (record.reading.kind === 'pending' && !unsettled.has(record)) continue;
+     run = add(run, record);
+     byStation[record.station] = add(byStation[record.station] ?? EMPTY, record);
+     byTask[record.taskId] = add(Object.hasOwn(byTask, record.taskId) ? (byTask[record.taskId] ?? EMPTY) : EMPTY, record);
+   }
+   return { run, byStation, byTask };
+ }
+ 
++/** Tokens read for each token written. `no-sample` when nothing was written: a ratio over nothing is not 0 and not infinite (I5). */
++export type ReadPerWritten = { readonly kind: 'no-sample' } | { readonly kind: 'ratio'; readonly value: number };
++
++/** What one task read to write what it wrote, over its metered calls (R59). */
++export interface TaskEfficiency {
++  readonly taskId: TaskId;
++  /** Input, cache-read, and cache-write tokens: everything the model was sent. */
++  readonly readTokens: number;
++  /** Output tokens. */
++  readonly writtenTokens: number;
++  readonly readPerWritten: ReadPerWritten;
++  /** The task's own bound: `lower` when a call of its was unmetered, lost, or unreadable, and the figures are of what was counted. */
++  readonly bound: UsageTotal['bound'];
++}
++
++/** Per task, in the order each first made a call: the tokens it read, the tokens it wrote, and the ratio. */
++export function tokenEfficiency(records: readonly UsageRecord[]): TaskEfficiency[] {
++  return Object.entries(costTotals(records).byTask).map(([taskId, total]) => {
++    const m = total.metered;
++    const readTokens = m.inputTokens + m.cacheReadTokens + m.cacheWriteTokens;
++    return {
++      taskId: taskId as TaskId,
++      readTokens,
++      writtenTokens: m.outputTokens,
++      readPerWritten: m.outputTokens === 0 ? { kind: 'no-sample' } : { kind: 'ratio', value: readTokens / m.outputTokens },
++      bound: total.bound,
++    };
++  });
++}
++
++/** A task whose last call reached a bound of its budget, as the relay's meter read it (R59). */
++export interface SpentBudget {
++  readonly taskId: TaskId;
++  readonly station: StationId;
++  /** Which of the task's starts the call was. */
++  readonly attempt: number;
++  readonly bound: BudgetBound;
++  /** Requests the relay refused during that call. */
++  readonly refused: number;
++  /** The same thing for a person; a machine reads the fields. */
++  readonly message: string;
++}
++
++/**
++ * The tasks that ended on a spent budget: the last call each made was
++ * metered, and its reading says the token or the cost bound was reached. A
++ * task whose earlier call ran out and whose later one did not is not named,
++ * and a reading stopped as `unreadable` is not a spent budget (D-R58-04,
++ * D-R59-04). A last call that was lost or never read is not named either:
++ * nothing read what it reached, and the task's `lower` bound says so.
++ */
++export function spentBudgets(records: readonly UsageRecord[]): SpentBudget[] {
++  const unsettled = new Set(unsettledCalls(records));
++  const last = new Map<TaskId, UsageRecord>();
++  for (const record of records) {
++    if (record.reading.kind === 'pending' && !unsettled.has(record)) continue;
++    const seen = last.get(record.taskId);
++    if (seen === undefined || record.attempt >= seen.attempt) last.set(record.taskId, record);
++  }
++  const spent: SpentBudget[] = [];
++  for (const record of last.values()) {
++    const r = record.reading;
++    if (r.kind !== 'metered' || (r.exhausted !== 'tokens' && r.exhausted !== 'cost')) continue;
++    spent.push({
++      taskId: record.taskId,
++      station: record.station,
++      attempt: record.attempt,
++      bound: r.exhausted,
++      refused: r.refused,
++      message: `task ${record.taskId} ended on a spent budget: its last call, start ${String(record.attempt)} at ${record.station}, reached the ${r.exhausted === 'tokens' ? 'token' : 'cost'} bound of its budget`,
++    });
++  }
++  return spent;
++}
++
+ /**
+  * The run's usage records, read back from the Vault: those run state
+  * references, in its order, then any the Vault holds that it does not — a
+  * record stored before a crash took the commit that referenced it (D-P13-20).
+  * A record that is not one the runtime wrote for this run is refused rather
+  * than summed.
+  */
+
+===== packages/api/src/report.ts =====
+diff --git a/packages/api/src/report.ts b/packages/api/src/report.ts
+index 12122bd..63ee693 100644
+--- a/packages/api/src/report.ts
++++ b/packages/api/src/report.ts
+@@ -7,8 +7,9 @@
+ import { M1_STATIONS } from '@olympus-ai/core';
+ import type { CandidateId, ModelIdentity, RunId, RunTemplateId, StationId, TaskAttempts, TaskId, TaskStatus, TemplateId, TriggerKind } from '@olympus-ai/core';
+ import type { EnforcementDecision, EvidenceBundle, IntegrationRecord, Vault } from '@olympus-ai/vault';
+-import { costTotals, readUsage, type CostTotals } from './cost.js';
++import { costTotals, readUsage, spentBudgets, tokenEfficiency, type CostTotals, type SpentBudget, type TaskEfficiency } from './cost.js';
+ import { readIntegration } from './line.js';
++import type { CostPerMerge } from './outcomes.js';
+ import { runStanding, type RunStanding, type StandingSource } from './run.js';
+ 
+ /** Where a station's exit gate stands, derived from the run's position and standing. */
+@@ -28,34 +29,45 @@ export interface StationReport {
+ export interface RunReport {
+   readonly runId: RunId;
+   readonly requestedLevel: number;
+   /** The run's template, from its admission record; null for none (A-R16-02). */
+   readonly template: RunTemplateId | null;
+   /**
+    * The candidate the run was admitted from, as its record names it: the
+    * kind, the template, and the schema's fields, such as an issue's
+    * repository and number (D-A-BG-07). For a person to read; no field of it
+    * reaches a request. Null for a person's own run.
+    */
+   readonly candidate: { readonly id: CandidateId; readonly kind: TriggerKind; readonly template: TemplateId; readonly extracted: Readonly<Record<string, string>> } | null;
+   readonly standing: RunStanding;
+   /** `records` when the standing was read from the Vault alone; `workspace` when it includes a live lock check of the working copy (D-I1b-15). */
+   readonly standingSource: StandingSource;
+   readonly cost: CostTotals;
+   /**
+    * Cache-read tokens over all input tokens — input, cache read, and cache
+    * write — of the metered calls; null when no call was metered.
+    */
+   readonly cacheHitRate: number | null;
++  /**
++   * Whether the tokens were spent well (R59), every figure from the usage
++   * records: per task, what it read for what it wrote; the run's dollars per
++   * change merged, `no-sample` while nothing has merged; and each task whose
++   * last call reached a bound of its budget.
++   */
++  readonly efficiency: {
++    readonly tasks: readonly TaskEfficiency[];
++    readonly costPerAcceptedChange: CostPerMerge;
++    readonly spentBudgets: readonly SpentBudget[];
++  };
+   /** Each driver call's model, as the runtime resolved it before the call (A-I1a-01). */
+   readonly calls: ReadonlyArray<{ readonly taskId: TaskId; readonly station: StationId; readonly attempt: number; readonly model: ModelIdentity }>;
+   readonly tasks: ReadonlyArray<{ readonly taskId: TaskId; readonly station: StationId | null; readonly status: TaskStatus; readonly attempts: TaskAttempts }>;
+   readonly stations: readonly StationReport[];
+   /** Where the agent's claim and the runtime's evidence differ, per evidence bundle. */
+   readonly mismatches: ReadonlyArray<{ readonly taskId: TaskId; readonly diffSha256: string; readonly differences: readonly string[] }>;
+   /** Every decision P14 recorded, by cause. */
+   readonly decisions: Readonly<Record<string, number>>;
+   /** Station refusals by reason, the parks among them by cause. */
+   readonly refusals: Readonly<Record<string, number>>;
+   readonly parks: Readonly<Record<string, number>>;
+   readonly integration: readonly IntegrationRecord[];
+ }
+@@ -76,87 +88,95 @@ function gateAt(index: number, current: number, standing: RunStanding): GateOutc
+ export async function runReport(vault: Vault, runId: RunId): Promise<RunReport> {
+   const { state, standing, source } = await runStanding(vault, runId);
+   const admission = decode(await vault.read(state.admission)) as { run?: { requestedLevel?: unknown }; template?: RunTemplateId | null; candidate?: { id: CandidateId } | null } | null;
+   const requestedLevel = admission?.run?.requestedLevel;
+   if (typeof requestedLevel !== 'number') throw new Error(`report: the admission record of run ${runId} names no level`);
+ 
+   const usage = await readUsage(vault, state);
+   const cost = costTotals(usage);
+   const m = cost.run.metered;
+   const input = m.inputTokens + m.cacheReadTokens + m.cacheWriteTokens;
+   const calls = usage.filter((r) => r.reading.kind !== 'pending').map((r) => ({ taskId: r.taskId, station: r.station, attempt: r.attempt, model: r.model }));
+ 
+   // A task's station is the one its calls were made at; a task that made none has none to report.
+   const stationOf = new Map<TaskId, StationId>(usage.map((r) => [r.taskId, r.station]));
+   const tasks = Object.entries(state.tasks).map(([id, status]) => {
+     const taskId = id as TaskId;
+     const attempts = state.attempts[taskId] ?? { iterations: 0, retries: 0, starts: 0, conflicts: [] };
+     return { taskId, station: stationOf.get(taskId) ?? null, status, attempts };
+   });
+ 
+   const decisions: EnforcementDecision[] = [];
+   for (const ref of await vault.readDecisions(runId)) decisions.push(decode(await vault.read(ref)) as EnforcementDecision);
+   const byCause: Record<string, number> = {};
+   const refusals: Record<string, number> = {};
+   const parks: Record<string, number> = {};
+   for (const d of decisions) {
+     bump(byCause, d.decision.cause);
+     if (d.decision.cause === 'station-refused') {
+       bump(refusals, d.decision.refusal.reason);
+       if (d.decision.refusal.reason === 'parked') bump(parks, d.decision.refusal.cause);
+     }
+   }
+ 
+   const current = M1_STATIONS.indexOf(state.station);
+   const stations = M1_STATIONS.map((station, index): StationReport => {
+     const attempts = tasks.filter((t) => t.station === station).reduce<TaskAttempts>(
+       (sum, t) => ({
+         iterations: sum.iterations + t.attempts.iterations,
+         retries: sum.retries + t.attempts.retries,
+         starts: sum.starts + t.attempts.starts,
+         conflicts: [...sum.conflicts, ...t.attempts.conflicts],
+       }),
+       { iterations: 0, retries: 0, starts: 0, conflicts: [] },
+     );
+     const at = decisions.filter((d) => d.station === station);
+     const stationRefusals: Record<string, number> = {};
+     for (const d of at) if (d.decision.cause === 'station-refused') bump(stationRefusals, d.decision.refusal.reason);
+     return {
+       station,
+       gate: gateAt(index, current, standing),
+       attempts,
+       approvals: at.filter((d) => d.decision.cause === 'approval-granted').length,
+       refusals: stationRefusals,
+     };
+   });
+ 
+   const mismatches: Array<{ taskId: TaskId; diffSha256: string; differences: readonly string[] }> = [];
+   for (const ref of state.evidenceRefs) {
+     const bundle = decode(await vault.read(ref)) as EvidenceBundle;
+     if (bundle.claimEvidenceDiff.length > 0) mismatches.push({ taskId: bundle.taskId, diffSha256: bundle.diffSha256, differences: bundle.claimEvidenceDiff });
+   }
+ 
+   // The issue a run came from, named from the candidate the admission record names (D-A-BG-07).
+   const from = admission?.candidate ?? null;
+   const entry = from === null ? null : await vault.readCandidate(from.id);
+   const candidate = entry?.candidate == null
+     ? null
+     : { id: entry.candidate.id, kind: entry.candidate.kind, template: entry.candidate.template, extracted: entry.candidate.extracted };
++  const integration = await readIntegration(vault, runId);
++  // An accepted change is a merge the runtime recorded; a resume that records the same merge again has not merged twice.
++  const merges = new Set(integration.flatMap((r) => (r.kind === 'merged' ? [r.mergeCommit] : []))).size;
++  const spentUsd = m.costUsd;
++  const costPerAcceptedChange: CostPerMerge = merges === 0
++    ? { kind: 'no-sample', spentUsd }
++    : { kind: 'cost', usd: spentUsd / merges, spentUsd, merges, bound: cost.run.bound };
+   return {
+     runId,
+     requestedLevel,
+     template: admission?.template ?? null,
+     candidate,
+     standing,
+     standingSource: source,
+     cost,
+     cacheHitRate: input === 0 ? null : m.cacheReadTokens / input,
++    efficiency: { tasks: tokenEfficiency(usage), costPerAcceptedChange, spentBudgets: spentBudgets(usage) },
+     calls,
+     tasks,
+     stations,
+     mismatches,
+     decisions: byCause,
+     refusals,
+     parks,
+-    integration: await readIntegration(vault, runId),
++    integration,
+   };
+ }
+
+===== packages/api/test/efficiency.test.ts =====
+/**
+ * Whether tokens were spent well, from usage records alone (R59): what a
+ * task read for what it wrote, and which tasks ended on a spent budget. The
+ * records here are written by hand, so each rule's edge is one record away
+ * from the case beside it.
+ */
+import { describe, expect, test } from 'vitest';
+import type { ModelFamily, RoleId, RunId, StationId, TaskId } from '@olympus-ai/core';
+import type { UsageReading, UsageRecord } from '@olympus-ai/vault';
+import { spentBudgets, tokenEfficiency } from '../src/index.js';
+
+type Metered = Extract<UsageReading, { kind: 'metered' }>;
+
+const metered = (over: Partial<Metered> = {}): Metered => ({
+  kind: 'metered', calls: 1, inputTokens: 100, outputTokens: 10, cacheReadTokens: 300, cacheWriteTokens: 100, costUsd: 0.002, exhausted: 'none', refused: 0, ...over,
+});
+
+function record(taskId: string, attempt: number, reading: UsageReading, station: StationId = 'build'): UsageRecord {
+  return {
+    runId: 'r59' as RunId,
+    taskId: taskId as TaskId,
+    station,
+    attempt,
+    model: { provider: 'test', family: 'claude' as ModelFamily, model: 'scripted', version: '1' },
+    role: { id: 'builder' as RoleId, sha256: '0'.repeat(64) },
+    driver: 'scripted',
+    reading,
+    timing: 'not-recorded',
+    harnessImage: 'not-recorded',
+    collectedBy: 'runtime',
+  };
+}
+
+describe('tokenEfficiency', () => {
+  test('a task read its input, cache-read, and cache-write tokens for the output it wrote, summed over its calls', () => {
+    const [a, b] = tokenEfficiency([record('a', 1, metered()), record('b', 1, metered({ inputTokens: 7, cacheReadTokens: 593_220, cacheWriteTokens: 0, outputTokens: 6_976 })), record('a', 2, metered())]);
+    expect(a).toStrictEqual({ taskId: 'a', readTokens: 1000, writtenTokens: 20, readPerWritten: { kind: 'ratio', value: 50 }, bound: 'exact' });
+    expect(b?.readTokens).toBe(593_227);
+    expect(b?.readPerWritten).toStrictEqual({ kind: 'ratio', value: 593_227 / 6_976 });
+  });
+
+  test('a task that wrote nothing has no ratio, never zero and never infinite', () => {
+    const [silent, unmetered] = tokenEfficiency([record('silent', 1, metered({ outputTokens: 0 })), record('unmetered', 1, { kind: 'unmetered' })]);
+    expect(silent?.readPerWritten).toStrictEqual({ kind: 'no-sample' });
+    expect(unmetered).toStrictEqual({ taskId: 'unmetered', readTokens: 0, writtenTokens: 0, readPerWritten: { kind: 'no-sample' }, bound: 'lower' });
+  });
+
+  test('a call the relay could not read, or one that was lost, makes the task a lower bound', () => {
+    const [unreadable, lost] = tokenEfficiency([
+      record('unreadable', 1, metered({ exhausted: 'unreadable' })),
+      record('lost', 1, metered()),
+      record('lost', 2, { kind: 'lost', detail: 'the sandbox could not be read' }),
+    ]);
+    expect(unreadable?.bound).toBe('lower');
+    expect(lost).toMatchObject({ readTokens: 500, bound: 'lower' });
+  });
+});
+
+describe('spentBudgets', () => {
+  test('names a task whose last call reached the token or the cost bound, with the bound and the start', () => {
+    const spent = spentBudgets([
+      record('tokens', 1, metered()),
+      record('tokens', 2, metered({ exhausted: 'tokens', refused: 3 })),
+      record('cost', 1, metered({ exhausted: 'cost' }), 'review'),
+    ]);
+    expect(spent.map((s) => [s.taskId, s.station, s.attempt, s.bound, s.refused])).toStrictEqual([['tokens', 'build', 2, 'tokens', 3], ['cost', 'review', 1, 'cost', 0]]);
+    expect(spent[0]?.message).toBe('task tokens ended on a spent budget: its last call, start 2 at build, reached the token bound of its budget');
+    expect(spent[1]?.message).toContain('cost bound');
+  });
+
+  test('does not name a task whose earlier call ran out and whose last did not', () => {
+    expect(spentBudgets([record('recovered', 1, metered({ exhausted: 'cost' })), record('recovered', 2, metered())])).toStrictEqual([]);
+  });
+
+  test('a pending reading its own terminal reading followed is not the last call', () => {
+    const spent = spentBudgets([record('a', 1, { kind: 'pending' }), record('a', 1, metered({ exhausted: 'cost' }))]);
+    expect(spent.map((s) => s.taskId)).toStrictEqual(['a']);
+  });
+
+  test('a reading stopped as unreadable, a lost last call, and a call nothing read are not spent budgets', () => {
+    expect(spentBudgets([
+      record('unreadable', 1, metered({ exhausted: 'unreadable' })),
+      record('lost', 1, metered({ exhausted: 'cost' })),
+      record('lost', 2, { kind: 'lost', detail: 'gone' }),
+      record('stopped', 1, metered({ exhausted: 'tokens' })),
+      record('stopped', 2, { kind: 'pending' }),
+      record('unmetered', 1, { kind: 'unmetered' }),
+    ])).toStrictEqual([]);
+  });
+});
+
+===== packages/benchmark/src/alone.ts =====
+diff --git a/packages/benchmark/src/alone.ts b/packages/benchmark/src/alone.ts
+index f28e7de..f0bacb2 100644
+--- a/packages/benchmark/src/alone.ts
++++ b/packages/benchmark/src/alone.ts
+@@ -15,6 +15,7 @@
+ import { boundTo, egressFor } from '@olympus-ai/api';
+ import type { CompiledRole, Driver, ModelTier, TaskId, TaskRequest } from '@olympus-ai/core';
+ import type { SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
++import type { TaskTokens } from './result.js';
+ 
+ export type AloneVerdict =
+   | { readonly kind: 'verdict'; readonly done: boolean; readonly reasons: readonly string[] }
+@@ -64,45 +65,60 @@ export interface AloneCall {
+ export interface AloneOutcome {
+   readonly verdict: AloneVerdict;
+   /** What the relay counted, in US dollars. */
+   readonly costUsd: number;
++  /** What the relay counted, in tokens (R59). */
++  readonly tokens: TaskTokens;
+ }
+ 
++/** The task a driver-alone call runs as, and is recorded under. */
++export const ALONE_TASK = 'done-check';
++
+ /** One driver-alone call. A call the relay did not meter is refused, never counted as free (I5). */
+ export async function aloneCall(call: AloneCall): Promise<AloneOutcome> {
+   const relay = call.driver.relayRequest(call.tools);
+   if (relay === null) throw new Error('benchmark: the driver-alone arm needs a metered driver; this one has no relay, so its cost could not be counted against the cap');
+   const model = call.driver.resolveModel(call.tier);
+   const spec: SandboxSpec = {
+     image: call.image,
+     mounts: { workspace: { source: call.tree, target: '/workspace', mode: 'rw' }, others: [] },
+     egress: egressFor({ egress: 'none' }),
+     limits: { ...call.limits, wallClockMs: call.budget.maxWallClockMs },
+     user: { uid: call.user.uid, gid: call.user.gid },
+     relay: { ...relay, meter: boundTo(relay.meter, model.model), budget: { maxTokens: call.budget.maxTokens, maxCostUsd: call.budget.maxCostUsd } },
+   };
+   const handle = await call.provider.provision(spec);
+   let narrative: string | null = null;
+   let failure: unknown = null;
+   try {
+     const result = await call.driver.runTask({
+-      taskId: 'done-check' as TaskId,
++      taskId: ALONE_TASK as TaskId,
+       role: call.role,
+       stablePrefix: call.asked,
+       variableSuffix: 'done-check',
+       tier: call.tier,
+       tools: [...call.tools],
+       sandbox: handle,
+       timeoutMs: call.budget.maxWallClockMs,
+       budget: { ...call.budget },
+     });
+     narrative = result.claim.narrative;
+   } catch (error) {
+     failure = error;
+   }
+   const teardown = await call.provider.destroy(handle);
+   if (teardown.meter.kind !== 'metered') throw new Error('benchmark: the relay did not meter the driver-alone call, so its cost is unknown');
+-  const costUsd = teardown.meter.costUsd;
++  const meter = teardown.meter;
++  const costUsd = meter.costUsd;
++  const tokens: TaskTokens = {
++    calls: 1,
++    inputTokens: meter.inputTokens,
++    outputTokens: meter.outputTokens,
++    cacheReadTokens: meter.cacheReadTokens,
++    cacheWriteTokens: meter.cacheWriteTokens,
++    exhausted: meter.exhausted === 'none' ? 0 : 1,
++    bound: meter.exhausted === 'unreadable' ? 'lower' : 'exact',
++  };
+   // A call that failed to return is not a verdict, and is not a harness failure the arm can count either: it stops the run with its cost known.
+   if (failure !== null) throw new Error(`benchmark: the driver-alone call failed after spending $${costUsd.toFixed(4)}: ${failure instanceof Error ? failure.message : JSON.stringify(failure)}`, { cause: failure });
+-  return { verdict: narrative === null ? { kind: 'unreadable' } : readVerdict(narrative), costUsd };
++  return { verdict: narrative === null ? { kind: 'unreadable' } : readVerdict(narrative), costUsd, tokens };
+ }
+
+===== packages/benchmark/src/critic.ts =====
+diff --git a/packages/benchmark/src/critic.ts b/packages/benchmark/src/critic.ts
+index c0c1a81..3e0d280 100644
+--- a/packages/benchmark/src/critic.ts
++++ b/packages/benchmark/src/critic.ts
+@@ -27,12 +27,15 @@ import { BASE_IMAGE } from '@olympus-ai/driver-claude-code';
+ import { LocalVault, type CriticRecord, type DraftRecord } from '@olympus-ai/vault';
+ import type { Corpus, Item } from './corpus.js';
+ import { BENCH_READINESS, benchPolicyDocument, boundGraph, installed, type Bench } from './line.js';
++import type { TaskTokens } from './result.js';
+ import { BenchStub, ScriptedSeat } from './seats.js';
+ 
+ export interface CriticOutcome {
+   readonly verdict: 'caught' | 'passed' | 'unreadable';
+   readonly causes: readonly string[];
+   readonly costUsd: number;
++  /** What the relay counted for each task that made a metered call, from the run's usage records (R59). */
++  readonly tokens: Readonly<Record<string, TaskTokens>>;
+ }
+ 
+ export interface CriticSeat {
+@@ -110,70 +113,86 @@ export function criticVerdict(
+ /** One drafted item through the drafting station, with `critic` seated. */
+ export async function throughTheCritic(bench: Bench, corpus: Corpus, item: Item, critic: CriticSeat): Promise<CriticOutcome> {
+   const station = stationOf(item);
+   const source = await installed(bench, corpus, item.repo);
+   const name = randomUUID();
+   const root = join(bench.base, 'runs', name);
+   const repository = join(root, 'repository');
+   await cp(source.dir, repository, { recursive: true });
+   await mkdir(join(root, 'store'), { recursive: true });
+   await mkdir(join(root, 'trees'), { recursive: true });
+   const vault = new LocalVault({ store: join(root, 'store'), artifacts: repository });
+   const runId = name as RunId;
+   const drafter = new ScriptedSeat(bench.provider, (station === 'spec' ? 'spec-drafter' : 'test-drafter') as RoleId, item.change, item.claim, name);
+   const idle = new BenchStub();
+   const components = buildGraph({
+     vault,
+     sandbox: bench.provider,
+     driver: idle,
+     reviewer: idle,
+     drafting: station === 'spec'
+       ? { specDrafter: drafter, specCritic: critic.driver, testDrafter: idle, testCritic: idle }
+       : { specDrafter: idle, specCritic: idle, testDrafter: drafter, testCritic: critic.driver },
+     workspaces: localWorkspaceStore({ root: join(root, 'trees'), user: bench.user }),
+     integrator: null,
+     profile: { buildImage: critic.image, checkImage: BASE_IMAGE, limits: DEFAULT_LIMITS },
+   });
+   const policy = draftingPolicy(corpus, item, critic);
+   const artifacts = draftedArtifacts(station);
+   // Bound as admission binds it, so the security seat it derives is in the figure (R9).
+   const graph = boundGraph(JSON.parse(await readFile(join(repository, artifacts.taskGraph), 'utf8')), { runId, baseCommit: source.commit, workspace: repository });
+   if (item.asked === null) throw new Error(`benchmark: drafted item '${item.id}' carries no request`);
+   const outcome = await startRun({
+     runId,
+     baseCommit: source.commit,
+     requestedLevel: 1,
+     workspace: repository,
+     artifacts,
+     policy,
+     roles: DEFAULT_ROLES_DIRECTORY,
+     components,
+     readiness: BENCH_READINESS,
+     intent: station === 'spec' ? { text: item.asked, from: 'principal' } : null,
+     rubrics: DEFAULT_RUBRICS_DIRECTORY,
+     approvedCostUsd: worstCaseCost(graph, policy, [station]).usd,
+   });
+   if (!outcome.ok && outcome.reason !== 'refused') {
+     throw new Error(`benchmark: the drafted run was refused before the line started (${outcome.reason}); the corpus or the bench is broken: ${JSON.stringify(outcome)}`);
+   }
+   const state = await vault.readRunState(runId);
+   const usage = await readUsage(vault, state);
+   // A call whose cost was lost or never read cannot be charged against the cap, so the run stops (I5); an unmetered one is the scripted seat's and cost nothing.
+-  const totals = costTotals(usage).run;
++  const cost = costTotals(usage);
++  const totals = cost.run;
+   const unsettled = unsettledCalls(usage).length;
+   if (unsettled > 0 || totals.lost > 0) throw new Error(`benchmark: ${String(unsettled + totals.lost)} call(s) of the drafted run have no known cost, so the spend cannot be held to the cap`);
+   const costUsd = totals.metered.costUsd;
++  // The scripted drafter's calls are unmetered and counted nowhere: a task is recorded for the calls a relay read.
++  const tokens: Record<string, TaskTokens> = {};
++  for (const [task, total] of Object.entries(cost.byTask)) {
++    const m = total.metered;
++    if (m.calls === 0) continue;
++    tokens[task] = {
++      calls: m.calls,
++      inputTokens: m.inputTokens,
++      outputTokens: m.outputTokens,
++      cacheReadTokens: m.cacheReadTokens,
++      cacheWriteTokens: m.cacheWriteTokens,
++      exhausted: m.exhausted,
++      bound: total.bound,
++    };
++  }
+   const first = state.drafts[station]?.attempts[0];
+   if (first?.draft === null || first === undefined) throw new Error(`benchmark: the drafted run for an item recorded no first draft at ${station}`);
+   const record = JSON.parse(new TextDecoder().decode(await vault.read(first.draft))) as DraftRecord;
+   const problems = record.problems.map((p) => p.code);
+   let answer: { readable: boolean; findings: number } | null = null;
+   if (first.critic === null || first.critic === 'not-seated') {
+     // The runtime sent the draft back before a critic read it; the catch is the runtime's.
+     if (problems.length === 0) throw new Error(`benchmark: the critic was ${String(first.critic)} on a draft the runtime did not send back; the arm measured nothing. The run stopped with: ${outcome.ok ? 'no refusal' : JSON.stringify({ at: outcome.at, transition: outcome.transition })}`);
+   } else {
+     const verdict = JSON.parse(new TextDecoder().decode(await vault.read(first.critic))) as CriticRecord;
+     if (!verdict.binding) throw new Error('benchmark: the critic seated was not binding: its family is the drafter\'s, so its findings send nothing back');
+     answer = { readable: verdict.readable, findings: verdict.findings.length };
+   }
+-  return { ...criticVerdict(problems, answer, first.sentBack?.by ?? null), costUsd };
++  return { ...criticVerdict(problems, answer, first.sentBack?.by ?? null), costUsd, tokens };
+ }
+
+===== packages/benchmark/src/index.ts =====
+diff --git a/packages/benchmark/src/index.ts b/packages/benchmark/src/index.ts
+index dcb0786..bd35336 100644
+--- a/packages/benchmark/src/index.ts
++++ b/packages/benchmark/src/index.ts
+@@ -15,3 +15,4 @@ export * from './seats.js';
+ export * from './model.js';
+ export * from './critic.js';
+ export * from './comparison.js';
++export * from './tokens.js';
+
+===== packages/benchmark/src/model.ts =====
+diff --git a/packages/benchmark/src/model.ts b/packages/benchmark/src/model.ts
+index d9c7273..ab9648c 100644
+--- a/packages/benchmark/src/model.ts
++++ b/packages/benchmark/src/model.ts
+@@ -14,11 +14,11 @@ import { dirname, join } from 'node:path';
+ import { randomUUID } from 'node:crypto';
+ import { STATION_CONTRACTS, type CompiledRole, type Driver, type ModelTier, type TaskRequest } from '@olympus-ai/core';
+ import type { SandboxSpec } from '@olympus-ai/sandbox';
+-import { aloneCall, type AloneOutcome } from './alone.js';
++import { ALONE_TASK, aloneCall, type AloneOutcome } from './alone.js';
+ import { render, type Corpus, type Item } from './corpus.js';
+ import { installed, type Bench } from './line.js';
+ import { throughTheCritic } from './critic.js';
+-import { benchmarkResult, detectorFired, type BenchmarkResult, type ItemOutcome, type Verdict } from './result.js';
++import { benchmarkResult, detectorFired, type BenchmarkResult, type ItemOutcome, type ItemTokens, type TaskTokens, type Verdict } from './result.js';
+ 
+ /** The spend so far against the cap, shared by every arm of one run. */
+ export class Spend {
+@@ -63,41 +63,45 @@ export interface AloneArm {
+ /** What was asked of an item's work, as the driver alone is told it: the repository's spec, or a drafted item's request. */
+ export async function askedOf(item: Item, tree: string): Promise<string> {
+   if (item.seat === 'build') return `What was asked:\n\n${await readFile(join(tree, 'spec.md'), 'utf8')}\nThe work is the repository in your working directory.`;
+   if (item.asked === null) throw new Error(`benchmark: drafted item '${item.id}' carries no request to judge its draft against`);
+   const what = item.seat === 'spec-drafter' ? 'a spec drafted from it' : 'acceptance tests drafted from the spec in spec.md';
+   return `What was asked:\n\n${item.asked}\n\nThe work is ${what}, in your working directory at ${Object.keys(item.change.write).sort().join(', ')}.`;
+ }
+ 
+-/** The driver-alone arm over every item, `repetitions` times each. */
+-export async function aloneArm(arm: AloneArm): Promise<Map<string, Verdict[]>> {
++/** The driver-alone arm over every item, `repetitions` times each: what each call said, and what the relay counted for it. */
++export async function aloneArm(arm: AloneArm): Promise<{ verdicts: Map<string, Verdict[]>; tokens: ItemTokens[] }> {
+   if (!Number.isSafeInteger(arm.repetitions) || arm.repetitions < 1) throw new Error('benchmark: repetitions must be a positive integer');
+   const call = arm.call ?? aloneCall;
+   const verdicts = new Map<string, Verdict[]>();
++  const tokens: ItemTokens[] = [];
+   for (const item of arm.corpus.items) {
+     const seen: Verdict[] = [];
++    const counted: Array<Record<string, TaskTokens>> = [];
+     for (let r = 0; r < arm.repetitions; r += 1) {
+       arm.spend.admit(arm.budget.maxCostUsd, `the driver-alone call for an item`);
+       const tree = await workTree(arm.bench, arm.corpus, item);
+       const outcome: AloneOutcome = await call({
+         provider: arm.bench.provider,
+         driver: arm.driver,
+         role: arm.role,
+         image: arm.image,
+         user: arm.bench.user,
+         limits: arm.limits,
+         tree,
+         asked: await askedOf(item, tree),
+         tier: arm.tier,
+         tools: arm.tools,
+         budget: arm.budget,
+       });
+       arm.spend.charge(outcome.costUsd);
++      counted.push({ [ALONE_TASK]: outcome.tokens });
+       // A driver that says not done has caught the item; one that says done has passed it (D-R7-05's verdicts, from a model's claim).
+       seen.push(outcome.verdict.kind === 'unreadable' ? 'unreadable' : outcome.verdict.done ? 'passed' : 'caught');
+     }
+     verdicts.set(item.id, seen);
++    tokens.push({ id: item.id, repetitions: counted });
+   }
+-  return verdicts;
++  return { verdicts, tokens };
+ }
+ 
+ /** A fresh copy of the item's installed repository with its change applied, under a name that says nothing about the item (I3). */
+@@ -133,57 +137,61 @@ export interface ModelTierOptions {
+ /**
+  * Both arms of the model tier under one cap. The critic arm runs first: a
+  * drafted station may seat its critic once per attempt, so its worst case is
+  * the station's attempt limit times the critic's budget, and it is admitted
+  * against the cap on that.
+  */
+ export async function modelTier(options: ModelTierOptions): Promise<{ result: BenchmarkResult; spentUsd: number }> {
+   // Every grant checked against the driver before any call: a tool it does not declare is refused at the task, after money may have gone on the ones before it (I4, I5).
+   const declared = new Set(options.driver.declaredTools());
+   const undeclared = [...options.alone.tools, ...options.critic.tools].filter((t) => !declared.has(t));
+   if (undeclared.length > 0) throw new Error(`benchmark: the model tier grants ${[...new Set(undeclared)].join(', ')}, which the driver does not declare; nothing was run`);
+   const spend = new Spend(options.capUsd);
+   const { corpus } = options;
+   const criticCall = options.calls?.critic ?? throughTheCritic;
+   const criticOutcomes: ItemOutcome[] = [];
++  const criticTokens: ItemTokens[] = [];
+   for (const item of corpus.items.filter((i) => i.tier === 'model')) {
+     const prefixes = corpus.groups[item.group] ?? [];
+     const verdicts: Verdict[] = [];
+     const fired: Array<boolean | null> = [];
+     const causes = new Set<string>();
++    const counted: Array<Readonly<Record<string, TaskTokens>>> = [];
+     for (let r = 0; r < options.repetitions; r += 1) {
+       spend.admit(DRAFT_ATTEMPTS * options.critic.budget.maxCostUsd, 'a drafted run with its critic seated');
+       const outcome = await criticCall(options.bench, corpus, item, { driver: options.driver, image: options.image, ...options.critic });
+       spend.charge(outcome.costUsd);
++      counted.push(outcome.tokens);
+       verdicts.push(outcome.verdict);
+       // An unreadable answer is no detector firing, whatever its cause's prefix (I5).
+       fired.push(outcome.verdict === 'unreadable' ? null : detectorFired(prefixes, outcome.causes));
+       for (const c of outcome.causes) causes.add(c);
+     }
+     criticOutcomes.push({ id: item.id, kind: item.kind, group: item.group, verdicts, detectorFired: fired, causes: [...causes].sort() });
++    criticTokens.push({ id: item.id, repetitions: counted });
+   }
+   const alone = await aloneArm({
+     bench: options.bench,
+     corpus,
+     driver: options.driver,
+     image: options.image,
+     limits: options.limits,
+     repetitions: options.repetitions,
+     spend,
+     ...options.alone,
+     ...(options.calls?.alone === undefined ? {} : { call: options.calls.alone }),
+   });
+   const aloneOutcomes: ItemOutcome[] = corpus.items.map((item) => {
+-    const verdicts = alone.get(item.id) ?? [];
++    const verdicts = alone.verdicts.get(item.id) ?? [];
+     return { id: item.id, kind: item.kind, group: item.group, verdicts, detectorFired: verdicts.map(() => null), causes: [] };
+   });
+   const model = options.driver.resolveModel(options.alone.tier);
+   const result = benchmarkResult(corpus, 'model', { alone: aloneOutcomes, critic: criticOutcomes }, {
+     model: { provider: model.provider, family: model.family, model: model.model },
+     repetitions: options.repetitions,
+     capUsd: options.capUsd,
+     spentUsd: spend.usd,
+-  });
++  }, { alone: alone.tokens, critic: criticTokens });
+   return { result, spentUsd: spend.usd };
+ }
+ 
+ /** The most attempts a drafting station allows, so the most times it may seat its critic. */
+
+===== packages/benchmark/src/result.ts =====
+diff --git a/packages/benchmark/src/result.ts b/packages/benchmark/src/result.ts
+index c2ed826..2c99cfd 100644
+--- a/packages/benchmark/src/result.ts
++++ b/packages/benchmark/src/result.ts
+@@ -46,12 +46,37 @@ export interface ArmResult {
+   readonly items: readonly ItemOutcome[];
+ }
+ 
++/**
++ * What the relay counted for one task of one repetition of an item (R59).
++ * Never a driver's account of its own usage (I2).
++ */
++export interface TaskTokens {
++  /** Driver calls the relay metered: how many times the task was started. */
++  readonly calls: number;
++  readonly inputTokens: number;
++  readonly outputTokens: number;
++  readonly cacheReadTokens: number;
++  readonly cacheWriteTokens: number;
++  /** Calls that ended on their own budget, so the tokens are capped by it and not by the work. */
++  readonly exhausted: number;
++  /** `lower` when a call's usage could not be read, and the counts are of what was counted. */
++  readonly bound: 'exact' | 'lower';
++}
++
++/** One item's tokens: per repetition, in order, each task that made a metered call. */
++export interface ItemTokens {
++  readonly id: string;
++  readonly repetitions: ReadonlyArray<Readonly<Record<string, TaskTokens>>>;
++}
++
+ export interface BenchmarkResult {
+   readonly corpus: { readonly version: string; readonly digest: string };
+   readonly tier: Item['tier'];
+   readonly arms: Readonly<Record<string, ArmResult>>;
+   /** The model tier only: what ran and what it cost, so the result says what model its rates are a claim about. */
+   readonly run?: ModelRun;
++  /** The model tier only: tokens per task for each item, per arm, items in id order (R59). */
++  readonly tokens?: Readonly<Record<string, readonly ItemTokens[]>>;
+ }
+ 
+ export interface ModelRun {
+@@ -87,10 +112,24 @@ export function armResult(items: readonly ItemOutcome[]): ArmResult {
+   return { overall: rates(sorted), groups, items: sorted };
+ }
+ 
+-export function benchmarkResult(corpus: Corpus, tier: Item['tier'], arms: Readonly<Record<string, readonly ItemOutcome[]>>, run?: ModelRun): BenchmarkResult {
++export function benchmarkResult(
++  corpus: Corpus,
++  tier: Item['tier'],
++  arms: Readonly<Record<string, readonly ItemOutcome[]>>,
++  run?: ModelRun,
++  tokens?: Readonly<Record<string, readonly ItemTokens[]>>,
++): BenchmarkResult {
+   const out: Record<string, ArmResult> = {};
+   for (const name of Object.keys(arms).sort()) out[name] = armResult(arms[name] ?? []);
+-  return { corpus: { version: corpus.version, digest: corpus.digest }, tier, arms: out, ...(run === undefined ? {} : { run: { ...run, spentUsd: Number(run.spentUsd.toFixed(DECIMALS)) } }) };
++  const counted: Record<string, ItemTokens[]> = {};
++  for (const name of Object.keys(tokens ?? {}).sort()) counted[name] = [...(tokens?.[name] ?? [])].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
++  return {
++    corpus: { version: corpus.version, digest: corpus.digest },
++    tier,
++    arms: out,
++    ...(run === undefined ? {} : { run: { ...run, spentUsd: Number(run.spentUsd.toFixed(DECIMALS)) } }),
++    ...(tokens === undefined ? {} : { tokens: counted }),
++  };
+ }
+ 
+ /** The result as it is committed: two-space JSON and a final newline. */
+
+===== packages/benchmark/src/tokens.ts =====
+/**
+ * Tokens held to a recorded baseline (R59): a model-tier run fails when an
+ * item's tokens per driver call grow past a set margin over what the
+ * committed result of the same name recorded.
+ *
+ * Which results are held, and by what margin, is `TOKEN_BASELINES` below: an
+ * edit to this file, reviewed in a diff, and never a setting of whoever
+ * runs the tier (D-R59-04). The baseline is read from `HEAD`, not from the
+ * working tree, where a failed run has just written its own result.
+ *
+ * The figure compared is tokens per driver call. A drafted item's critic is
+ * seated once per attempt, and how many attempts there are follows the
+ * verdict, so a total would move with what the critic said and not with
+ * what it read.
+ */
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import type { BenchmarkResult, ItemTokens } from './result.js';
+
+export interface TokenBaseline {
+  /** A model-tier result under `docs/benchmark/`, committed with its tokens. */
+  readonly result: string;
+  /** How far past the baseline an item's tokens per call may grow: 0.25 is a quarter more. */
+  readonly margin: number;
+}
+
+/**
+ * The results a model-tier run is held to. Empty until a paid run's result
+ * is committed with its tokens: a baseline nobody recorded is not one. Add a
+ * result here in the pull request that commits it, with a margin chosen from
+ * the spread its own repetitions show.
+ */
+export const TOKEN_BASELINES: readonly TokenBaseline[] = [];
+
+/** The baseline a run that writes `result` is held to, or null when the result is not listed. A margin that is not a positive number is refused. */
+export function baselineFor(result: string, baselines: readonly TokenBaseline[] = TOKEN_BASELINES): TokenBaseline | null {
+  const listed = baselines.filter((b) => b.result === result);
+  if (listed.length > 1) throw new Error(`benchmark: ${result} is listed as a token baseline ${String(listed.length)} times; one margin holds a result`);
+  const [entry] = listed;
+  if (entry === undefined) return null;
+  if (!Number.isFinite(entry.margin) || entry.margin <= 0) throw new Error(`benchmark: the token baseline ${result} is listed with the margin ${String(entry.margin)}, which is not a positive number`);
+  return entry;
+}
+
+interface Named {
+  readonly file: string;
+  readonly result: BenchmarkResult;
+}
+
+/** What a result must be for another run to be held to it, or to be held: named so a refusal can say which side it is. */
+export interface RunShape {
+  readonly corpus: BenchmarkResult['corpus'];
+  readonly repetitions: number;
+  readonly model: string;
+}
+
+type Counted = Readonly<Record<string, readonly ItemTokens[]>>;
+
+const COUNTS = ['calls', 'inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'exhausted'] as const;
+
+/**
+ * A result's tokens as a file gave them: nothing in it is what its type says
+ * until it is checked here. Refused unless it is a model-tier result of
+ * `shape`'s corpus, repetitions, and model, with a count for every
+ * repetition of every item it names.
+ */
+function counted(named: Named, shape: RunShape): Counted {
+  const { file } = named;
+  const refuse = (what: string): never => {
+    throw new Error(`benchmark: ${file} ${what}, so no run can be held to it`);
+  };
+  const result = named.result as unknown as {
+    tier?: unknown;
+    corpus?: { version?: unknown; digest?: unknown } | null;
+    run?: { repetitions?: unknown; model?: { model?: unknown } | null } | null;
+    tokens?: Record<string, unknown> | null;
+  } | null;
+  if (typeof result !== 'object' || result === null) return refuse('is not a result');
+  if (result.tier !== 'model') return refuse('is not a model-tier result');
+  if (result.corpus?.version !== shape.corpus.version || result.corpus.digest !== shape.corpus.digest) return refuse(`ran another corpus than ${shape.corpus.version} (${shape.corpus.digest})`);
+  if (result.run?.repetitions !== shape.repetitions) return refuse(`did not run each item ${String(shape.repetitions)} time(s)`);
+  if (result.run.model?.model !== shape.model) return refuse(`is not ${shape.model}'s result`);
+  const tokens = result.tokens;
+  if (typeof tokens !== 'object' || tokens === null || Object.keys(tokens).length === 0) return refuse('records no tokens');
+  for (const [arm, items] of Object.entries(tokens)) {
+    if (!Array.isArray(items)) return refuse(`holds no items in the tokens of its '${arm}' arm`);
+    const seen = new Set<string>();
+    for (const entry of items as unknown[]) {
+      const item = entry as { id?: unknown; repetitions?: unknown } | null;
+      if (typeof item !== 'object' || item === null || typeof item.id !== 'string' || seen.has(item.id)) return refuse(`holds a malformed or repeated item in the tokens of its '${arm}' arm`);
+      seen.add(item.id);
+      if (!Array.isArray(item.repetitions) || item.repetitions.length !== shape.repetitions) return refuse(`does not count item '${item.id}' once per repetition in its '${arm}' arm`);
+      for (const repetition of item.repetitions as unknown[]) {
+        if (typeof repetition !== 'object' || repetition === null) return refuse(`holds a malformed repetition of item '${item.id}'`);
+        for (const task of Object.values(repetition) as unknown[]) {
+          const t = task as Record<string, unknown> | null;
+          if (typeof t !== 'object' || t === null || (t.bound !== 'exact' && t.bound !== 'lower') || COUNTS.some((k) => !Number.isSafeInteger(t[k]) || (t[k] as number) < 0)) {
+            return refuse(`holds a count that is not one for item '${item.id}'`);
+          }
+        }
+      }
+    }
+  }
+  return tokens as Counted;
+}
+
+/** Refuses a baseline a run of `shape` could not be held to. Called before any call is paid for (I5). */
+export function checkBaseline(baseline: Named, shape: RunShape): void {
+  counted(baseline, shape);
+}
+
+/** One item's tokens over all its repetitions and tasks: every token the model was sent or wrote, and the driver calls they were spent in. */
+export interface ItemFigure {
+  readonly tokens: number;
+  readonly calls: number;
+  /** Null when no call was metered: the runtime sent the draft back before any model read it. */
+  readonly perCall: number | null;
+  readonly bound: 'exact' | 'lower';
+}
+
+export function figure(item: ItemTokens): ItemFigure {
+  let tokens = 0;
+  let calls = 0;
+  let bound: ItemFigure['bound'] = 'exact';
+  for (const repetition of item.repetitions) {
+    for (const t of Object.values(repetition)) {
+      tokens += t.inputTokens + t.outputTokens + t.cacheReadTokens + t.cacheWriteTokens;
+      calls += t.calls;
+      if (t.bound === 'lower') bound = 'lower';
+    }
+  }
+  return { tokens, calls, perCall: calls === 0 ? null : tokens / calls, bound };
+}
+
+/**
+ * `within`: no more than the limit. `grew`: past it. `unmeasured`: under
+ * the limit, but only a lower bound, so nothing says it did not grow.
+ * `no-baseline`: the baseline metered no call for the item and the run did.
+ * Only `within` passes (I5).
+ */
+export type Held = 'within' | 'grew' | 'unmeasured' | 'no-baseline';
+
+export interface ItemHeld {
+  readonly arm: string;
+  readonly id: string;
+  readonly baseline: ItemFigure;
+  readonly fresh: ItemFigure;
+  /** The most tokens per call the item may use: the baseline's, times one plus the margin. Null when the baseline has none. */
+  readonly limit: number | null;
+  readonly held: Held;
+}
+
+function verdict(baseline: ItemFigure, fresh: ItemFigure, margin: number): { limit: number | null; held: Held } {
+  // No call metered: no token was spent, whatever the baseline holds.
+  if (fresh.perCall === null) return { limit: baseline.perCall === null ? null : baseline.perCall * (1 + margin), held: 'within' };
+  if (baseline.perCall === null) return { limit: null, held: 'no-baseline' };
+  const limit = baseline.perCall * (1 + margin);
+  if (fresh.perCall > limit) return { limit, held: 'grew' };
+  return { limit, held: fresh.bound === 'lower' ? 'unmeasured' : 'within' };
+}
+
+/**
+ * `fresh` held to `baseline`, item by item, in every arm. Refused unless
+ * both are model-tier results of the same corpus by digest, the same
+ * repetitions, and the same model, over the same arms and items: anything
+ * else is not the same work, and a comparison that cannot be made is never
+ * reported as held (I5).
+ */
+export function holdTokens(baseline: Named, fresh: Named, margin: number): ItemHeld[] {
+  if (!Number.isFinite(margin) || margin <= 0) throw new Error(`benchmark: the margin ${String(margin)} is not a positive number`);
+  const run = fresh.result.run;
+  if (run === undefined) throw new Error(`benchmark: ${fresh.file} is not a model-tier result, so it has no tokens to hold`);
+  const shape: RunShape = { corpus: fresh.result.corpus, repetitions: run.repetitions, model: run.model.model };
+  const now = counted(fresh, shape);
+  const then = counted(baseline, shape);
+  const arms = Object.keys(now).sort();
+  if (arms.join() !== Object.keys(then).sort().join()) throw new Error(`benchmark: ${baseline.file} and ${fresh.file} do not count tokens for the same arms`);
+  const held: ItemHeld[] = [];
+  for (const arm of arms) {
+    const before = new Map((then[arm] ?? []).map((i) => [i.id, i]));
+    const after = now[arm] ?? [];
+    if (before.size !== after.length || after.some((i) => !before.has(i.id))) throw new Error(`benchmark: the '${arm}' arms of ${baseline.file} and ${fresh.file} count tokens for different items`);
+    for (const item of [...after].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
+      const was = before.get(item.id);
+      // The two id sets were just held equal.
+      if (was === undefined) throw new Error(`benchmark: item '${item.id}' is missing from ${baseline.file}`);
+      const b = figure(was);
+      const f = figure(item);
+      held.push({ arm, id: item.id, baseline: b, fresh: f, ...verdict(b, f, margin) });
+    }
+  }
+  return held;
+}
+
+/** The items a run failed on: every one that is not `within`. */
+export function tokenFailures(held: readonly ItemHeld[]): ItemHeld[] {
+  return held.filter((h) => h.held !== 'within');
+}
+
+/** The failures as a person reads them, one line each. */
+export function describeFailures(failures: readonly ItemHeld[]): string {
+  const n = (x: number | null): string => (x === null ? 'none' : String(Math.round(x)));
+  return failures
+    .map((f) => `${f.arm}/${f.id}: ${f.held}, ${n(f.fresh.perCall)} tokens per call against a baseline of ${n(f.baseline.perCall)} and a limit of ${n(f.limit)}`)
+    .join('\n');
+}
+
+/**
+ * A result as `HEAD` holds it under `docs/benchmark/`. A result that is not
+ * committed is refused: a listed baseline that is missing is a missing
+ * check, never a run with nothing to be held to (I5).
+ */
+export async function committedResult(file: string, repository: string): Promise<Named> {
+  if (!/^[a-z0-9][a-z0-9.-]*\.json$/.test(file)) throw new Error(`benchmark: '${file}' is not the name of a result under docs/benchmark/`);
+  let text: string;
+  try {
+    ({ stdout: text } = await promisify(execFile)('git', ['show', `HEAD:docs/benchmark/${file}`], { cwd: repository, maxBuffer: 64 * 1024 * 1024 }));
+  } catch (error) {
+    throw new Error(`benchmark: the token baseline ${file} is not committed at HEAD, so nothing can be held to it`, { cause: error });
+  }
+  return { file, result: JSON.parse(text) as BenchmarkResult };
+}
+
+/**
+ * What a model-tier run that writes `file` owes its baseline, settled before
+ * any call is paid for: null when the result is not listed, and otherwise
+ * the check to run on the fresh result, which throws naming every item that
+ * is not within its limit. A listed baseline that is not committed, or that
+ * a run of `shape` cannot be held to, is refused here (I5).
+ */
+export async function tokenHold(
+  file: string,
+  repository: string,
+  shape: RunShape,
+  baselines: readonly TokenBaseline[] = TOKEN_BASELINES,
+): Promise<((fresh: BenchmarkResult) => void) | null> {
+  const listed = baselineFor(file, baselines);
+  if (listed === null) return null;
+  const baseline = await committedResult(file, repository);
+  checkBaseline(baseline, shape);
+  return (fresh) => {
+    const failures = tokenFailures(holdTokens(baseline, { file, result: fresh }, listed.margin));
+    if (failures.length > 0) throw new Error(`benchmark: ${file} is held to its committed tokens with a margin of ${String(listed.margin)}, and ${String(failures.length)} item(s) are not within it:\n${describeFailures(failures)}`);
+  };
+}
+
+===== packages/benchmark/test/model.test.ts =====
+diff --git a/packages/benchmark/test/model.test.ts b/packages/benchmark/test/model.test.ts
+index 6b6713f..e01b52c 100644
+--- a/packages/benchmark/test/model.test.ts
++++ b/packages/benchmark/test/model.test.ts
+@@ -15,6 +15,7 @@ import type { CriticOutcome } from '../src/critic.js';
+ import { loadCorpus, type Corpus } from '../src/corpus.js';
+ import type { Bench } from '../src/line.js';
+ import { DRAFT_ATTEMPTS, modelTier, Spend, type ModelTierOptions } from '../src/model.js';
++import type { TaskTokens } from '../src/result.js';
+ 
+ let base: string;
+ let corpus: Corpus;
+@@ -37,6 +38,8 @@ function bench(): Bench {
+ 
+ const ROLE: CompiledRole = { role: 'done-checker' as RoleId, instructions: '', sha256: '0'.repeat(64) };
+ const BUDGET = { maxTokens: 1000, maxCostUsd: 0.1, maxWallClockMs: 1000 };
++/** What every scripted call is counted as: 500 tokens read, 10 written. */
++const COUNTED: TaskTokens = { calls: 1, inputTokens: 100, outputTokens: 10, cacheReadTokens: 300, cacheWriteTokens: 100, exhausted: 0, bound: 'exact' };
+ 
+ function options(over: Partial<ModelTierOptions>): ModelTierOptions {
+   return {
+@@ -53,7 +56,7 @@ function options(over: Partial<ModelTierOptions>): ModelTierOptions {
+   };
+ }
+ 
+-const critic = (verdict: CriticOutcome['verdict'], costUsd = 0.01) => (): Promise<CriticOutcome> => Promise.resolve({ verdict, causes: verdict === 'caught' ? ['critic:findings'] : [], costUsd });
++const critic = (verdict: CriticOutcome['verdict'], costUsd = 0.01) => (): Promise<CriticOutcome> => Promise.resolve({ verdict, causes: verdict === 'caught' ? ['critic:findings'] : [], costUsd, tokens: { 'spec.critic': COUNTED } });
+ 
+ describe('Spend', () => {
+   test('refuses a call whose worst case would pass the cap, and admits one that reaches it exactly', () => {
+@@ -72,60 +75,65 @@ describe('Spend', () => {
+ describe('modelTier', () => {
+   test('runs every item alone and every drafted item past its critic, and counts what each said', async () => {
+     const seen: string[] = [];
+     const alone = (call: AloneCall): Promise<AloneOutcome> => {
+       seen.push(call.asked);
+-      return Promise.resolve({ verdict: { kind: 'verdict', done: true, reasons: [] }, costUsd: 0.01 });
++      return Promise.resolve({ verdict: { kind: 'verdict', done: true, reasons: [] }, costUsd: 0.01, tokens: COUNTED });
+     };
+     const { result, spentUsd } = await modelTier(options({ repetitions: 2, calls: { alone, critic: critic('caught') } }));
+     const drafted = corpus.items.filter((i) => i.tier === 'model');
+     expect(seen).toHaveLength(corpus.items.length * 2);
+     expect(result.arms.alone?.items).toHaveLength(corpus.items.length);
+     expect(result.arms.critic?.items.map((i) => i.id)).toEqual(drafted.map((i) => i.id).sort());
+     expect(result.arms.alone?.overall.detection).toMatchObject({ kind: 'rate', count: 0 });
+     expect(spentUsd).toBeCloseTo((corpus.items.length + drafted.length) * 2 * 0.01);
+     expect(result.run).toMatchObject({ repetitions: 2, capUsd: 100 });
++    // Tokens per task for each item, per arm and per repetition, as each call's relay counted them (R59).
++    expect(result.tokens?.alone?.map((i) => i.id)).toEqual(corpus.items.map((i) => i.id).sort());
++    expect(result.tokens?.critic?.map((i) => i.id)).toEqual(drafted.map((i) => i.id).sort());
++    for (const item of result.tokens?.alone ?? []) expect(item.repetitions).toStrictEqual([{ 'done-check': COUNTED }, { 'done-check': COUNTED }]);
++    for (const item of result.tokens?.critic ?? []) expect(item.repetitions).toStrictEqual([{ 'spec.critic': COUNTED }, { 'spec.critic': COUNTED }]);
+   });
+ 
+   test('a verdict nobody can read is counted apart from the rate', async () => {
+-    const alone = (): Promise<AloneOutcome> => Promise.resolve({ verdict: { kind: 'unreadable' }, costUsd: 0 });
++    const alone = (): Promise<AloneOutcome> => Promise.resolve({ verdict: { kind: 'unreadable' }, costUsd: 0, tokens: COUNTED });
+     const { result } = await modelTier(options({ calls: { alone, critic: critic('passed') } }));
+     const overall = result.arms.alone?.overall;
+     if (overall === undefined) throw new Error('the alone arm is missing');
+     expect(overall.detection).toEqual({ kind: 'no-sample' });
+     expect(overall.unreadable.seeded + overall.unreadable.control).toBe(corpus.items.length);
+   });
+ 
+   test("a critic answer nobody can read is unreadable in the critic arm, and its detector did not fire", async () => {
+-    const unreadable = (): Promise<CriticOutcome> => Promise.resolve({ verdict: 'unreadable', causes: ['critic:unreadable', 'sent-back:critic'], costUsd: 0 });
+-    const alone = (): Promise<AloneOutcome> => Promise.resolve({ verdict: { kind: 'verdict', done: true, reasons: [] }, costUsd: 0 });
++    const unreadable = (): Promise<CriticOutcome> => Promise.resolve({ verdict: 'unreadable', causes: ['critic:unreadable', 'sent-back:critic'], costUsd: 0, tokens: { 'spec.critic': COUNTED } });
++    const alone = (): Promise<AloneOutcome> => Promise.resolve({ verdict: { kind: 'verdict', done: true, reasons: [] }, costUsd: 0, tokens: COUNTED });
+     const { result } = await modelTier(options({ calls: { alone, critic: unreadable } }));
+     const arm = result.arms.critic;
+     if (arm === undefined) throw new Error('the critic arm is missing');
+     expect(arm.overall.detection).toEqual({ kind: 'no-sample' });
+     expect(arm.overall.unreadable.seeded + arm.overall.unreadable.control).toBe(arm.items.length);
+     expect(arm.items.flatMap((i) => i.detectorFired)).toEqual(arm.items.map(() => null));
+   });
+ 
+   test('a drafted run is admitted against every attempt its station may seat the critic for', async () => {
+     let critics = 0;
+     const counting = (): Promise<CriticOutcome> => {
+       critics += 1;
+-      return Promise.resolve({ verdict: 'passed', causes: [], costUsd: 0 });
++      return Promise.resolve({ verdict: 'passed', causes: [], costUsd: 0, tokens: { 'spec.critic': COUNTED } });
+     };
+     // Room for one attempt's worth and not the station's limit: refused before the first critic runs.
+     await expect(modelTier(options({ capUsd: BUDGET.maxCostUsd * (DRAFT_ATTEMPTS - 1), calls: { critic: counting } }))).rejects.toThrow(/drafted run/);
+     expect(critics).toBe(0);
+   });
+ 
+   test('the alone arm stops at the cap instead of reporting part of the corpus', async () => {
+     let calls = 0;
+     const alone = (): Promise<AloneOutcome> => {
+       calls += 1;
+-      return Promise.resolve({ verdict: { kind: 'verdict', done: false, reasons: ['x'] }, costUsd: BUDGET.maxCostUsd });
++      return Promise.resolve({ verdict: { kind: 'verdict', done: false, reasons: ['x'] }, costUsd: BUDGET.maxCostUsd, tokens: COUNTED });
+     };
+     const drafted = corpus.items.filter((i) => i.tier === 'model').length;
+     const cap = drafted * DRAFT_ATTEMPTS * BUDGET.maxCostUsd + 2.5 * BUDGET.maxCostUsd;
+     await expect(modelTier(options({ capUsd: cap, calls: { alone, critic: critic('passed', DRAFT_ATTEMPTS * BUDGET.maxCostUsd) } }))).rejects.toThrow(/cap/);
+     expect(calls).toBe(2);
+   });
+ });
+@@ -133,12 +141,12 @@ describe('modelTier', () => {
+ describe('the grants', () => {
+   test('a tool the driver does not declare is refused before any call is made', async () => {
+     let calls = 0;
+     const counting = (): Promise<CriticOutcome> => {
+       calls += 1;
+-      return Promise.resolve({ verdict: 'passed', causes: [], costUsd: 0 });
++      return Promise.resolve({ verdict: 'passed', causes: [], costUsd: 0, tokens: { 'spec.critic': COUNTED } });
+     };
+     // The stub declares no tools at all.
+     await expect(modelTier(options({ critic: { tier: 'fast', tools: ['Grep'], budget: BUDGET }, calls: { critic: counting } }))).rejects.toThrow(/grants Grep, which the driver does not declare; nothing was run/);
+     expect(calls).toBe(0);
+   });
+ });
+
+===== packages/benchmark/test/tiers/critic-plumbing.tier.ts =====
+diff --git a/packages/benchmark/test/tiers/critic-plumbing.tier.ts b/packages/benchmark/test/tiers/critic-plumbing.tier.ts
+index 1885b7e..8f90bf1 100644
+--- a/packages/benchmark/test/tiers/critic-plumbing.tier.ts
++++ b/packages/benchmark/test/tiers/critic-plumbing.tier.ts
+@@ -62,9 +62,9 @@ const seat = (findings: readonly string[]) => ({
+ test('every drafted item reaches its critic, and the arm reads its findings, or their absence, from the record', async () => {
+   for (const item of corpus.items.filter((i) => i.tier === 'model')) {
+     const clean = await throughTheCritic(bench, corpus, item, seat([]));
+-    expect(clean, item.id).toEqual({ verdict: 'passed', causes: [], costUsd: 0 });
++    expect(clean, item.id).toEqual({ verdict: 'passed', causes: [], costUsd: 0, tokens: {} });
+     const found = await throughTheCritic(bench, corpus, item, seat(['a fixed finding']));
+     expect(found.verdict, item.id).toBe('caught');
+     expect(found.causes, item.id).toEqual(['critic:findings', 'sent-back:critic']);
+   }
+ });
+
+===== packages/benchmark/test/tiers/model.tier.ts =====
+diff --git a/packages/benchmark/test/tiers/model.tier.ts b/packages/benchmark/test/tiers/model.tier.ts
+index 0211398..247d81b 100644
+--- a/packages/benchmark/test/tiers/model.tier.ts
++++ b/packages/benchmark/test/tiers/model.tier.ts
+@@ -1,20 +1,24 @@
+ /**
+  * The model tier (D-R7-02): the driver-alone arm over every item, and the
+  * critic arm over the drafted items, with the Claude Code driver in the real
+  * seats, under a cap.
+  *
+  * **This calls the model and spends money.** It needs a Docker daemon,
+  * `ANTHROPIC_API_KEY`, and `BENCHMARK_CAP_USD`, the most the run may spend,
+  * which the maintainer sets. It fails without them and is never skipped. It
+  * writes its result under `docs/benchmark/`, which is committed as the run's
+  * result: a model's answers vary, so there is nothing to compare a rerun to.
+  * `BENCHMARK_REPETITIONS` sets how many times each item runs (default 3).
+  *
+  * `BENCHMARK_CORPUS` names the corpus (default `v1`), `BENCHMARK_TIER` the
+  * tier both seats run at (default `fast`), `BENCHMARK_MODEL` a model to seat
+  * at that tier in place of the driver's own, and `BENCHMARK_CALL_USD` the
+  * most one call may spend (default 0.15). With a tier or a model named, the
+  * result's file name carries both (R54, `src/comparison.ts`).
++ *
++ * The result records tokens per task for each item. Where its file is listed
++ * in `TOKEN_BASELINES`, the run fails when an item's tokens per call grow
++ * past the listed margin over the committed result (R59, `src/tokens.ts`).
+  */
+ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+ import { tmpdir } from 'node:os';
+@@ -28,8 +32,10 @@ import { loadCorpus, type Corpus } from '../../src/corpus.js';
+ import { openBench, type Bench } from '../../src/line.js';
+ import { modelTier } from '../../src/model.js';
+ import { serialize } from '../../src/result.js';
++import { tokenHold } from '../../src/tokens.js';
+ 
+-const DOCS = join(import.meta.dirname, '..', '..', '..', '..', 'docs', 'benchmark');
++const ROOT = join(import.meta.dirname, '..', '..', '..', '..');
++const DOCS = join(ROOT, 'docs', 'benchmark');
+ 
+ let base: string;
+ let bench: Bench;
+@@ -58,25 +64,31 @@ afterAll(async () => {
+ test('the model tier of the corpus, under the cap', async () => {
+   const roles = await compileRoles(join(corpus.root, 'roles'));
+   if (!roles.ok) throw new Error(`the corpus's roles did not compile: ${JSON.stringify(roles.refused)}`);
+   const role = roles.roles.find((r) => r.role === 'done-checker');
+   if (role === undefined) throw new Error("the corpus has no 'done-checker' role");
+   const own = new ClaudeCodeDriver({ provider: bench.provider });
+   // The driver's own tier map with one tier reseated: every other tier keeps the model the driver ships.
+   const shipped = { fast: own.resolveModel('fast').model, standard: own.resolveModel('standard').model, deep: own.resolveModel('deep').model };
+   const driver = plan.model === null ? own : new ClaudeCodeDriver({ provider: bench.provider, models: { ...shipped, [plan.tier]: plan.model } });
+   const image = await ensureImage();
+   const budget = { maxTokens: 400_000, maxCostUsd: plan.callUsd, maxWallClockMs: 600_000 };
++  const model = driver.resolveModel(plan.tier).model;
++  const name = plan.resultName(model);
++  // A result listed as a token baseline is held to its committed self; one that cannot be is refused here, before any call (R59, I5).
++  const hold = await tokenHold(name, ROOT, { corpus: { version: corpus.version, digest: corpus.digest }, repetitions: plan.repetitions, model });
+   const result = await modelTier({
+     bench,
+     corpus,
+     driver,
+     image,
+     limits: DEFAULT_LIMITS,
+     capUsd: plan.capUsd,
+     repetitions: plan.repetitions,
+     alone: { role, tier: plan.tier, tools: ['Read', 'Bash'], budget },
+     critic: { tier: plan.tier, tools: ['Read'], budget },
+   });
+-  await writeFile(join(DOCS, plan.resultName(driver.resolveModel(plan.tier).model)), serialize(result.result));
++  // Written first: the run is paid for, and its result is the evidence of a regression as much as of a pass.
++  await writeFile(join(DOCS, name), serialize(result.result));
+   expect(result.spentUsd).toBeLessThanOrEqual(plan.capUsd);
++  hold?.(result.result);
+ });
+
+===== packages/benchmark/test/tokens.test.ts =====
+/**
+ * Tokens held to a recorded baseline (R59), with no model behind it: every
+ * result here is written by hand, so nothing spends anything. A run is held
+ * only where its result is listed; a held run fails on growth past the
+ * margin, on a figure nobody could read in full, and on an item with no
+ * baseline; and a baseline that is missing or is other work is refused
+ * before the run starts.
+ */
+import { execFileSync } from 'node:child_process';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import { loadCorpus } from '../src/corpus.js';
+import { coverage } from '../src/comparison.js';
+import type { BenchmarkResult, ItemTokens, TaskTokens } from '../src/result.js';
+import { baselineFor, committedResult, figure, holdTokens, TOKEN_BASELINES, tokenFailures, tokenHold, type RunShape } from '../src/tokens.js';
+
+const CORPUS = { version: 'v9', digest: 'a'.repeat(64) };
+const SHAPE: RunShape = { corpus: CORPUS, repetitions: 2, model: 'scripted-1' };
+
+const RUN = { model: { provider: 'test', family: 'claude', model: 'scripted-1' }, repetitions: 2, capUsd: 1, spentUsd: 0 };
+
+const task = (over: Partial<TaskTokens> = {}): TaskTokens => ({ calls: 1, inputTokens: 100, outputTokens: 10, cacheReadTokens: 300, cacheWriteTokens: 90, exhausted: 0, bound: 'exact', ...over });
+
+/** An item that ran twice, one task each time. */
+const item = (id: string, name: string, over: Partial<TaskTokens> = {}): ItemTokens => ({ id, repetitions: [{ [name]: task(over) }, { [name]: task(over) }] });
+
+function result(tokens: BenchmarkResult['tokens'], over: Partial<BenchmarkResult> = {}): BenchmarkResult {
+  return {
+    corpus: CORPUS,
+    tier: 'model',
+    arms: {},
+    run: RUN,
+    ...(tokens === undefined ? {} : { tokens }),
+    ...over,
+  };
+}
+
+const BASELINE = { file: 'then.json', result: result({ alone: [item('a', 'done-check'), item('b', 'done-check')], critic: [item('c', 'spec.critic')] }) };
+const fresh = (tokens: BenchmarkResult['tokens'], over: Partial<BenchmarkResult> = {}) => ({ file: 'now.json', result: result(tokens, over) });
+
+describe('figure', () => {
+  test('is every token the model was sent or wrote, over the driver calls they were spent in', () => {
+    expect(figure(item('a', 'done-check'))).toStrictEqual({ tokens: 1000, calls: 2, perCall: 500, bound: 'exact' });
+    // A critic seated three times in one repetition read three times as much, and per call the same.
+    expect(figure({ id: 'c', repetitions: [{ 'spec.critic': task({ calls: 3, inputTokens: 300, outputTokens: 30, cacheReadTokens: 900, cacheWriteTokens: 270 }) }, { 'spec.critic': task() }] }).perCall).toBe(500);
+  });
+
+  test('an item no model read has no figure, and one unreadable call makes the item a lower bound', () => {
+    expect(figure({ id: 'd', repetitions: [{}, {}] })).toStrictEqual({ tokens: 0, calls: 0, perCall: null, bound: 'exact' });
+    expect(figure({ id: 'e', repetitions: [{ t: task() }, { t: task({ bound: 'lower' }) }] }).bound).toBe('lower');
+  });
+});
+
+describe('holdTokens', () => {
+  test('an item at its limit is within it, and one token per call past it grew', () => {
+    // The baseline is 500 tokens per call; a quarter more is 625.
+    const at = holdTokens(BASELINE, fresh({ alone: [item('a', 'done-check', { cacheReadTokens: 425 }), item('b', 'done-check')], critic: [item('c', 'spec.critic')] }), 0.25);
+    expect(at.map((h) => [h.arm, h.id, h.fresh.perCall, h.limit, h.held])).toStrictEqual([['alone', 'a', 625, 625, 'within'], ['alone', 'b', 500, 625, 'within'], ['critic', 'c', 500, 625, 'within']]);
+    expect(tokenFailures(at)).toStrictEqual([]);
+
+    const past = holdTokens(BASELINE, fresh({ alone: [item('a', 'done-check', { cacheReadTokens: 426 }), item('b', 'done-check')], critic: [item('c', 'spec.critic')] }), 0.25);
+    expect(tokenFailures(past).map((h) => [h.arm, h.id, h.held])).toStrictEqual([['alone', 'a', 'grew']]);
+  });
+
+  test('more driver calls at the same tokens per call is not growth', () => {
+    const again = { id: 'c', repetitions: [{ 'spec.critic': task({ calls: 3, inputTokens: 300, outputTokens: 30, cacheReadTokens: 900, cacheWriteTokens: 270 }) }, { 'spec.critic': task() }] };
+    expect(tokenFailures(holdTokens(BASELINE, fresh({ alone: [item('a', 'done-check'), item('b', 'done-check')], critic: [again] }), 0.25))).toStrictEqual([]);
+  });
+
+  test('a figure under the limit that is only a lower bound is unmeasured, never within; past the limit it grew', () => {
+    const under = holdTokens(BASELINE, fresh({ alone: [item('a', 'done-check', { bound: 'lower' }), item('b', 'done-check', { bound: 'lower', inputTokens: 900 })], critic: [item('c', 'spec.critic')] }), 0.25);
+    expect(tokenFailures(under).map((h) => [h.id, h.held])).toStrictEqual([['a', 'unmeasured'], ['b', 'grew']]);
+  });
+
+  test('an item the baseline metered no call for has no baseline, and one the run metered no call for spent nothing', () => {
+    const then = { file: 'then.json', result: result({ alone: [{ id: 'a', repetitions: [{}, {}] }, item('b', 'done-check')] }) };
+    const held = holdTokens(then, fresh({ alone: [item('a', 'done-check'), { id: 'b', repetitions: [{}, {}] }] }), 0.25);
+    expect(held.map((h) => [h.id, h.held])).toStrictEqual([['a', 'no-baseline'], ['b', 'within']]);
+  });
+
+  test('refuses a baseline that is not the same work, and a margin that is not a positive number', () => {
+    const now = fresh(BASELINE.result.tokens);
+    const then = (over: Partial<BenchmarkResult>, tokens: BenchmarkResult['tokens'] | 'recorded' = 'recorded') => ({ file: 'then.json', result: result(tokens === 'recorded' ? BASELINE.result.tokens : tokens, over) });
+    expect(() => holdTokens({ file: 'then.json', result: result(undefined) }, now, 0.25)).toThrow('then.json records no tokens');
+    expect(() => holdTokens(then({ tier: 'deterministic' }), now, 0.25)).toThrow('then.json is not a model-tier result');
+    expect(() => holdTokens(then({ corpus: { ...CORPUS, digest: 'b'.repeat(64) } }), now, 0.25)).toThrow('then.json ran another corpus');
+    expect(() => holdTokens(then({ run: { ...RUN, repetitions: 3 } }), now, 0.25)).toThrow('then.json did not run each item 2 time(s)');
+    expect(() => holdTokens(then({ run: { ...RUN, model: { ...RUN.model, model: 'other' } } }), now, 0.25)).toThrow("then.json is not scripted-1's result");
+    expect(() => holdTokens(then({}, { alone: BASELINE.result.tokens?.alone ?? [] }), now, 0.25)).toThrow('do not count tokens for the same arms');
+    expect(() => holdTokens(then({}, { alone: [item('a', 'done-check')], critic: [item('c', 'spec.critic')] }), now, 0.25)).toThrow("the 'alone' arms of then.json and now.json count tokens for different items");
+    expect(() => holdTokens(then({}, { alone: [item('a', 'done-check'), { id: 'b', repetitions: [{}] }], critic: [item('c', 'spec.critic')] }), now, 0.25)).toThrow("does not count item 'b' once per repetition");
+    expect(() => holdTokens(then({}, { alone: [item('a', 'done-check', { inputTokens: -1 }), item('b', 'done-check')], critic: [item('c', 'spec.critic')] }), now, 0.25)).toThrow("holds a count that is not one for item 'a'");
+    expect(() => holdTokens(BASELINE, fresh(undefined), 0.25)).toThrow('now.json records no tokens');
+    for (const margin of [0, -0.1, Number.NaN, Number.POSITIVE_INFINITY]) expect(() => holdTokens(BASELINE, now, margin)).toThrow('is not a positive number');
+  });
+});
+
+describe('baselineFor', () => {
+  test('a result is held only when it is listed, once, with a positive margin', () => {
+    const listed = [{ result: 'a.json', margin: 0.25 }, { result: 'twice.json', margin: 0.1 }, { result: 'twice.json', margin: 0.2 }, { result: 'zero.json', margin: 0 }];
+    expect(baselineFor('a.json', listed)).toStrictEqual({ result: 'a.json', margin: 0.25 });
+    expect(baselineFor('b.json', listed)).toBeNull();
+    expect(() => baselineFor('twice.json', listed)).toThrow('listed as a token baseline 2 times');
+    expect(() => baselineFor('zero.json', listed)).toThrow('not a positive number');
+  });
+
+  test('every result listed in the source is committed, covers its corpus, and can hold a run of its own shape', async () => {
+    // Empty until a paid run is committed with its tokens (D-R59-04); each entry added is held here from then on.
+    const repository = join(import.meta.dirname, '..', '..', '..');
+    for (const entry of TOKEN_BASELINES) {
+      expect(baselineFor(entry.result)).toStrictEqual(entry);
+      const named = await committedResult(entry.result, repository);
+      coverage(await loadCorpus(named.result.corpus.version), named);
+      // Held to itself, every item is within its limit, and every item of the corpus is held.
+      const held = holdTokens(named, named, entry.margin);
+      expect(tokenFailures(held)).toStrictEqual([]);
+      expect(held.length).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('tokenHold', () => {
+  let repository: string;
+  const git = (...args: string[]): void => {
+    execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: repository, stdio: 'ignore' });
+  };
+  const commit = async (file: string, content: BenchmarkResult): Promise<void> => {
+    await mkdir(join(repository, 'docs', 'benchmark'), { recursive: true });
+    await writeFile(join(repository, 'docs', 'benchmark', file), JSON.stringify(content));
+    git('add', '.');
+    git('commit', '-m', 'a result');
+  };
+
+  beforeEach(async () => {
+    repository = await mkdtemp(join(tmpdir(), 'token-hold-'));
+    git('init', '-q');
+  });
+
+  afterEach(async () => {
+    await rm(repository, { recursive: true, force: true });
+  });
+
+  const LISTED = [{ result: 'held.json', margin: 0.25 }];
+
+  test('a result that is not listed is held to nothing, and says so as null', async () => {
+    await commit('held.json', BASELINE.result);
+    expect(await tokenHold('other.json', repository, SHAPE, LISTED)).toBeNull();
+  });
+
+  test('a listed result is held to what HEAD holds, not to the file a run has just overwritten', async () => {
+    await commit('held.json', BASELINE.result);
+    const grown = result({ alone: [item('a', 'done-check', { cacheReadTokens: 3000 }), item('b', 'done-check')], critic: [item('c', 'spec.critic')] });
+    const hold = await tokenHold('held.json', repository, SHAPE, LISTED);
+    if (hold === null) throw new Error('a listed result was held to nothing');
+    // The regressed run's own result is on disk and staged, not committed; a second run is still held to the committed one.
+    await writeFile(join(repository, 'docs', 'benchmark', 'held.json'), JSON.stringify(grown));
+    git('add', '.');
+    const again = await tokenHold('held.json', repository, SHAPE, LISTED);
+    for (const check of [hold, again]) {
+      expect(() => check?.(grown)).toThrow(/1 item\(s\) are not within it:\nalone\/a: grew, 3200 tokens per call against a baseline of 500 and a limit of 625/);
+      expect(() => check?.(BASELINE.result)).not.toThrow();
+    }
+  });
+
+  test('a listed baseline that is not committed, records no tokens, or is other work is refused before the run', async () => {
+    await commit('unrelated.json', BASELINE.result);
+    await expect(tokenHold('held.json', repository, SHAPE, LISTED)).rejects.toThrow('held.json is not committed at HEAD');
+    await commit('held.json', result(undefined));
+    await expect(tokenHold('held.json', repository, SHAPE, LISTED)).rejects.toThrow('held.json records no tokens, so no run can be held to it');
+    await commit('held.json', BASELINE.result);
+    await expect(tokenHold('held.json', repository, { ...SHAPE, repetitions: 3 }, LISTED)).rejects.toThrow('did not run each item 3 time(s)');
+    await expect(tokenHold('held.json', repository, { ...SHAPE, model: 'other' }, LISTED)).rejects.toThrow("is not other's result");
+    await expect(tokenHold('../held.json', repository, SHAPE, [{ result: '../held.json', margin: 0.25 }])).rejects.toThrow('is not the name of a result');
+  });
+});
+
+===== packages/conformance/src/registry/i2.ts =====
+diff --git a/packages/conformance/src/registry/i2.ts b/packages/conformance/src/registry/i2.ts
+index ef1128e..241eac2 100644
+--- a/packages/conformance/src/registry/i2.ts
++++ b/packages/conformance/src/registry/i2.ts
+@@ -1,6 +1,6 @@
+ import { compileError, external } from '../kit/assert.js';
+ import { ENFORCEMENT_DECISIONS_RECORDED } from './decisions.js';
+-import { OUTCOMES_DERIVED_FROM_RUN_RECORDS, RUN_REPORT_READS_ONLY_RECORDS } from './integration.js';
++import { OUTCOMES_DERIVED_FROM_RUN_RECORDS, REPORT_TOKEN_EFFICIENCY_FROM_USAGE_RECORDS, RUN_REPORT_READS_ONLY_RECORDS } from './integration.js';
+ import { R4_I2 } from './parallel.js';
+ import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
+ import { R17_I2 } from './security.js';
+@@ -30,109 +30,110 @@ import { R58_I2 } from './refusals.js';
+ /** I2: The runtime derives status; the model never reports it. */
+ export const I2: InvariantEntry = {
+   title: INVARIANTS.I2,
+   assertions: [
+     // R53: the image every driver call ran in, by content (A-R53-01).
+     ...R53_I2,
+     // R20: the role compiler.
+     ...R20_I2,
+     // R13a: the nightly checks that call no model.
+     ...R13A_I2,
+     ...R8A_I2,
+     ...R8B_I2,
+     ...R8A_REVIEW_I2,
+     // R13b: the nightly reviewers.
+     ...R13B_I2,
+     ...R25_ASSERTIONS.I2,
+     // R28: a review seat's findings are located and never move its status; outcomes are the runtime's or a person's.
+     ...R28_ASSERTIONS.I2,
+     // R17: security at the gate.
+     ...R17_I2,
+     // R4: parallel task execution.
+     ...R4_I2,
+     READINESS_OUTCOME_IS_RUNTIME_DERIVED,
+     RUN_REPORT_READS_ONLY_RECORDS,
++    REPORT_TOKEN_EFFICIENCY_FROM_USAGE_RECORDS,
+     compileError({
+       id: 'I2.task-result-has-no-status',
+       title: 'TaskResult and AgentClaim have no status, passed, success, verdict, ok, or exitCode field',
+       fixture: 'i2/task-result-has-no-status.ts',
+     }),
+     compileError({
+       id: 'I2.task-status-lives-in-run-state',
+       title: 'Task carries no status; RunState.tasks is the only place it can be read from',
+       fixture: 'i2/task-status-lives-in-run-state.ts',
+     }),
+     compileError({
+       id: 'I2.evidence-collected-by-runtime',
+       title: 'EvidenceBundle.collectedBy admits only "runtime" and the bundle has no pass/fail field',
+       fixture: 'i2/evidence-collected-by-runtime.ts',
+     }),
+     compileError({
+       id: 'I2.gate-verdict-single-source',
+       title: 'GateResult has one verdict and no second boolean to disagree with it',
+       fixture: 'i2/gate-verdict-single-source.ts',
+     }),
+     compileError({
+       id: 'I2.records-are-readonly',
+       title:
+         'RunState, TaskResult, and AgentClaim cannot be mutated after construction: status, station, references, events, and the claim are read-only, and a new state is a new record',
+       fixture: 'i2/records-are-readonly.ts',
+     }),
+     compileError({
+       id: 'I2.check-result-declares-expectation',
+       title:
+         'CheckResult.expectation is required, null for a check with none; a held expectation carries no mismatch and a failed one at least one',
+       fixture: 'i2/check-result-declares-expectation.ts',
+     }),
+     RESUME_DERIVES_STATE_FROM_THE_VAULT,
+     UNMET_EXPECTATION_FAILS_THE_GATE,
+     // P11: an HTTP verdict is drawn from a client the product cannot replace, and made on the host.
+     HTTP_VERDICT_JUDGED_OUTSIDE_THE_PRODUCT,
+     HTTP_PROBE_SHARES_NETWORK_NOT_FILESYSTEM,
+     STATUS_DERIVED_FROM_CHECK_RESULTS,
+     TASK_RESULT_KEY_SET_ENFORCED,
+     UNSTARTED_CHECK_IS_IN_THE_EVIDENCE,
+     // P13: what a call cost is collected by the runtime from the relay, never taken from the driver's report.
+     COST_IS_RUNTIME_METERED,
+     // I1a: a call is on record before it is made, so a process stop during it is a lost reading, not a silence (D-I1a-12).
+     CALL_RECORDED_BEFORE_IT_IS_MADE,
+     // P14: every enforcement decision, by cause, recorded by the runtime for the component that made it.
+     ENFORCEMENT_DECISIONS_RECORDED,
+     // R58: a run a station refused reads refused, from the decision record.
+     ...R58_I2,
+     // R14: the tier rises only from the failed gates run state counts, and the relay serves only the tier's model.
+     ESCALATION_DECIDED_FROM_FAILED_GATES,
+     // R9: every seat's identity, role, driver, and model, is the runtime's record.
+     SEAT_IDENTITY_IN_RUN_STATE,
+     RELAY_BOUND_TO_TIER_MODEL,
+     // R2: a rate over every run reads the set the store names, never one a caller chose.
+     VAULT_LISTS_EVERY_RUN,
+     OUTCOMES_DERIVED_FROM_RUN_RECORDS,
+     // R18: a rate is kept per stack, the stack being what admission's adapter detection found.
+     ADMISSION_RECORDS_THE_DETECTED_STACK,
+     // R12: every span is drawn from a record the runtime wrote and timed by its clock.
+     TELEMETRY_IS_DRAWN_FROM_RUNTIME_RECORDS,
+     // R26: the Responses meter agrees with the Codex session it counted (A-R26-01).
+     CODEX_RELAY_METER_AGREES_WITH_SESSION,
+     // P13's paid control: the meter counts what the session used, so a reading of zero is not a meter that looked nowhere (I8).
+     external({
+       id: 'I2.relay-meter-agrees-with-session',
+       title: "the relay's reading of a session equals the CLI's own account of it, class by class, so the meter is not blind to what the session used",
+       level: 'runtime',
+       package: '@olympus-ai/driver-claude-code',
+       file: 'test/invariants.test.ts',
+     }),
+     // I1a's paid run: on the composed host, every real call is metered by the relay the line provisioned, and its record names the runtime's model.
+     external({
+       id: 'I2.line-usage-is-metered-and-names-its-model',
+       title:
+         "every usage record of a real driver call on the composed host is metered by the relay the line provisioned, and names the model the runtime resolved the scope's tier to, never the driver's own account",
+       level: 'runtime',
+       package: '@olympus-ai/api',
+       file: 'test/paid/line.paid.test.ts',
+     }),
+     // R15: the base run's results are the runtime's, and a resume reads them rather than running them again.
+     BASE_RESULTS_ARE_THE_RUNTIMES,
+     RESUME_READS_THE_BASE_RECORD,
+   ],
+   pending: [],
+ };
+
+===== packages/conformance/src/registry/integration.ts =====
+diff --git a/packages/conformance/src/registry/integration.ts b/packages/conformance/src/registry/integration.ts
+index bbf5153..c4df6ac 100644
+--- a/packages/conformance/src/registry/integration.ts
++++ b/packages/conformance/src/registry/integration.ts
+@@ -336,70 +336,125 @@ export const GIT_REMOTE_UNREACHABLE_FROM_EVERY_SANDBOX = runtime({
+ export const RUN_REPORT_READS_ONLY_RECORDS = runtime({
+   id: 'I2.run-report-reads-only-records',
+   title:
+     "the per-run report is derived from the Vault alone: its cost is the totals of the usage records, each call names the model the runtime resolved, a claim the evidence contradicts appears as the bundle's mismatch, every gate and approval is the one P14 recorded, and the merge is the integration record; the API serves it and the CLI prints it",
+   run: async () => {
+     await withIntegration('i1b-report-', async (it) => {
+       const { costTotals, readUsage, runReport } = await api();
+       const { LocalVault } = await import('@olympus-ai/vault');
+       // The stub driver claims no file changed while its task writes one: the runtime's diff of claim and evidence says so.
+       await toApproval(it);
+       const outcome = await approveAndResume(it);
+       if (!outcome.ok) throw new Error('I2 control: the run did not pass');
+       const vault = new LocalVault(it.rig.dirs);
+       const report = await runReport(vault, it.rig.runId);
+       const state = await vault.readRunState(it.rig.runId);
+       const usage = await readUsage(vault, state);
+       if (JSON.stringify(report.cost) !== JSON.stringify(costTotals(usage))) throw new Error('I2: the report cost is not the totals of the usage records');
+       // The arithmetic, against figures computed here and not by the helper production calls: every call read REPORT_METER.
+       const read = usage.filter((r) => r.reading.kind !== 'pending').length;
+       const m = report.cost.run.metered;
+       if (read === 0 || report.calls.length !== read) throw new Error(`I2 control: the report lists ${String(report.calls.length)} calls for ${String(read)} readings`);
+       if (m.calls !== read || m.inputTokens !== 100 * read || m.outputTokens !== 10 * read || m.cacheReadTokens !== 300 * read || m.cacheWriteTokens !== 100 * read || Math.abs(m.costUsd - 0.002 * read) > 1e-12) {
+         throw new Error(`I2: the report's metered totals are not ${String(read)} calls of the reading each made: ${JSON.stringify(m)}`);
+       }
+       if (report.cacheHitRate !== 0.6) throw new Error(`I2: the report's cache-hit rate is ${String(report.cacheHitRate)}, not 300 cached of 500 input tokens`);
+       if (report.calls.length === 0 || report.calls.some((c) => typeof c.model.family !== 'string' || c.model.family === '')) throw new Error('I2: a call in the report names no model');
+       if (report.standing.standing !== 'passed') throw new Error(`I2: the report says ${report.standing.standing} for a merged run`);
+       const integrate = report.stations.find((s) => s.station === 'integrate');
+       if (integrate?.gate !== 'passed' || integrate.approvals !== 1) throw new Error(`I2: the report's integrate gate is ${JSON.stringify(integrate)}, not passed on one approval`);
+       if (report.decisions['approval-granted'] !== 1) throw new Error('I2: the report does not count the approval P14 recorded');
+       const merge = report.integration.find((r) => r.kind === 'merged');
+       if (merge?.kind !== 'merged' || merge.mergeCommit !== it.github.head(it.github.baseBranch)) throw new Error('I2: the report does not carry the merge the Vault records');
+       const differences: string[] = [];
+       for (const ref of state.evidenceRefs) differences.push(...(JSON.parse(new TextDecoder().decode(await vault.read(ref))) as { claimEvidenceDiff: string[] }).claimEvidenceDiff);
+       if (differences.length === 0) throw new Error('I2 control: no bundle records a mismatch between claim and evidence');
+       if (JSON.stringify(report.mismatches.flatMap((m) => m.differences)) !== JSON.stringify(differences)) throw new Error("I2: the report's mismatches are not the evidence bundles' own");
+ 
+       // Served and printed: the API's report is the same object, and the CLI asks for it.
+       const { createApiServer } = await api();
+       const server = createApiServer({ readiness: RIG_SCANNER, components: await it.components(), token: REPORT_TOKEN, principal: 'conformance', policyFile: join(it.rig.dirs.artifacts, 'missing-policy.yaml'), rolesDirectory: it.rig.roles });
+       const address = await server.listen(0, '127.0.0.1');
+       try {
+         const res = await fetch(`${address}/runs/${it.rig.runId}/report`, { headers: { authorization: `Bearer ${REPORT_TOKEN}` } });
+         if (res.status !== 200) throw new Error(`I2: GET /runs/:id/report answered ${String(res.status)}`);
+         const served = (await res.json()) as typeof report;
+         if (JSON.stringify(served.cost) !== JSON.stringify(report.cost) || served.integration.length !== report.integration.length) throw new Error('I2: the served report is not the one derived from the Vault');
+       } finally {
+         await server.close();
+       }
+     }, REPORT_METER);
+ 
+     // With no meter there is no input to rate: the cache-hit rate is null, not 0.
+     await withIntegration('i1b-report-unmetered-', async (it) => {
+       const { runReport } = await api();
+       const { LocalVault } = await import('@olympus-ai/vault');
+       await toApproval(it);
+       if (!(await approveAndResume(it)).ok) throw new Error('I2 control: the unmetered run did not pass');
+       const report = await runReport(new LocalVault(it.rig.dirs), it.rig.runId);
+       if (report.cost.run.unmetered === 0) throw new Error('I2 control: the unmetered run recorded a metered call');
+       if (report.cacheHitRate !== null) throw new Error(`I2: an unmetered run's cache-hit rate is ${String(report.cacheHitRate)}, not null`);
+     });
+   },
+ });
+ 
++/** What every sandbox in the spent scenario reads: a call that reached the cost bound of its budget. */
++const SPENT_METER: MeterReading = { ...REPORT_METER, exhausted: 'cost' };
++
++/**
++ * R59: whether the tokens were spent well, from the usage records alone.
++ * Each figure is checked against one computed here from the reading every
++ * sandbox was given, not by the code under test.
++ */
++export const REPORT_TOKEN_EFFICIENCY_FROM_USAGE_RECORDS = runtime({
++  id: 'I2.report-token-efficiency-from-usage-records',
++  title:
++    "the report's efficiency figures are the usage records': each task's tokens read and written are the sums of its calls' readings and their ratio is one over the other; cost per accepted change has no figure until a merge is recorded and is then the metered spend over the merges; and a task is named as ending on a spent budget exactly when its last call's reading says a bound was reached",
++  run: async () => {
++    await withIntegration('r59-efficiency-', async (it) => {
++      const { readUsage, runReport } = await api();
++      const { LocalVault } = await import('@olympus-ai/vault');
++      const vault = new LocalVault(it.rig.dirs);
++      await toApproval(it);
++      const waiting = await runReport(vault, it.rig.runId);
++      const unmerged = waiting.efficiency.costPerAcceptedChange;
++      if (unmerged.kind !== 'no-sample' || unmerged.spentUsd !== waiting.cost.run.metered.costUsd) throw new Error(`I5: a run with nothing merged reports a cost per accepted change: ${JSON.stringify(unmerged)}`);
++
++      if (!(await approveAndResume(it)).ok) throw new Error('I2 control: the run did not pass');
++      const report = await runReport(vault, it.rig.runId);
++      const usage = (await readUsage(vault, await vault.readRunState(it.rig.runId))).filter((r) => r.reading.kind !== 'pending');
++      const callsOf = new Map<string, number>();
++      for (const r of usage) callsOf.set(r.taskId, (callsOf.get(r.taskId) ?? 0) + 1);
++      if (callsOf.size === 0 || report.efficiency.tasks.length !== callsOf.size) throw new Error(`I2: the report rates ${String(report.efficiency.tasks.length)} tasks, and ${String(callsOf.size)} made calls`);
++      for (const task of report.efficiency.tasks) {
++        const calls = callsOf.get(task.taskId) ?? 0;
++        // Every call read REPORT_METER: 100 input, 300 cache read, 100 cache write, 10 output.
++        if (task.readTokens !== 500 * calls || task.writtenTokens !== 10 * calls || task.bound !== 'exact') throw new Error(`I2: task ${task.taskId} made ${String(calls)} calls and the report says ${JSON.stringify(task)}`);
++        if (task.readPerWritten.kind !== 'ratio' || task.readPerWritten.value !== 50) throw new Error(`I2: task ${task.taskId} read 500 tokens for every 10 written and the report says ${JSON.stringify(task.readPerWritten)}`);
++      }
++      const merged = report.efficiency.costPerAcceptedChange;
++      if (merged.kind !== 'cost' || merged.merges !== 1 || merged.bound !== 'exact' || Math.abs(merged.usd - 0.002 * usage.length) > 1e-12) throw new Error(`I2: one merge after ${String(usage.length)} calls at $0.002 reports ${JSON.stringify(merged)}`);
++      if (report.efficiency.spentBudgets.length !== 0) throw new Error(`I2: no call reached a bound and the report names ${JSON.stringify(report.efficiency.spentBudgets)}`);
++    }, REPORT_METER);
++
++    // Every call's reading says the cost bound was reached, so every task that made a call ended on one.
++    await withIntegration('r59-spent-', async (it) => {
++      const { readUsage, runReport } = await api();
++      const { LocalVault } = await import('@olympus-ai/vault');
++      const vault = new LocalVault(it.rig.dirs);
++      await toApproval(it);
++      const report = await runReport(vault, it.rig.runId);
++      const made = new Set((await readUsage(vault, await vault.readRunState(it.rig.runId))).filter((r) => r.reading.kind !== 'pending').map((r) => r.taskId));
++      const named = report.efficiency.spentBudgets;
++      if (made.size === 0 || named.length !== made.size || named.some((s) => !made.has(s.taskId) || s.bound !== 'cost' || !s.message.includes(s.taskId) || !s.message.includes('cost bound'))) {
++        throw new Error(`I2: ${String(made.size)} tasks ended on a call that reached its cost bound and the report names ${JSON.stringify(named)}`);
++      }
++    }, SPENT_METER);
++  },
++});
++
+ /**
+  * R2: the rates over a real run are the ones its records give. Each figure is
+  * checked against a number computed here from the records directly, not by
+  * the code under test, and the merge time is the fake GitHub's, which no clock
+  * produces.
+  */
+
+=== BUNDLE END === f63039fe111cc5f142ae0bef5b4e6598

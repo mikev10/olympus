@@ -62,7 +62,7 @@ const seat = (findings: readonly string[]) => ({
 test('every drafted item reaches its critic, and the arm reads its findings, or their absence, from the record', async () => {
   for (const item of corpus.items.filter((i) => i.tier === 'model')) {
     const clean = await throughTheCritic(bench, corpus, item, seat([]));
-    expect(clean, item.id).toEqual({ verdict: 'passed', causes: [], costUsd: 0 });
+    expect(clean, item.id).toEqual({ verdict: 'passed', causes: [], costUsd: 0, tokens: {} });
     const found = await throughTheCritic(bench, corpus, item, seat(['a fixed finding']));
     expect(found.verdict, item.id).toBe('caught');
     expect(found.causes, item.id).toEqual(['critic:findings', 'sent-back:critic']);

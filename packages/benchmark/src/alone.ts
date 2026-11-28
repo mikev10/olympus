@@ -15,6 +15,7 @@
 import { boundTo, egressFor } from '@olympus-ai/api';
 import type { CompiledRole, Driver, ModelTier, TaskId, TaskRequest } from '@olympus-ai/core';
 import type { SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
+import type { TaskTokens } from './result.js';
 
 export type AloneVerdict =
   | { readonly kind: 'verdict'; readonly done: boolean; readonly reasons: readonly string[] }
@@ -65,7 +66,12 @@ export interface AloneOutcome {
   readonly verdict: AloneVerdict;
   /** What the relay counted, in US dollars. */
   readonly costUsd: number;
+  /** What the relay counted, in tokens (R59). */
+  readonly tokens: TaskTokens;
 }
+
+/** The task a driver-alone call runs as, and is recorded under. */
+export const ALONE_TASK = 'done-check';
 
 /** One driver-alone call. A call the relay did not meter is refused, never counted as free (I5). */
 export async function aloneCall(call: AloneCall): Promise<AloneOutcome> {
@@ -85,7 +91,7 @@ export async function aloneCall(call: AloneCall): Promise<AloneOutcome> {
   let failure: unknown = null;
   try {
     const result = await call.driver.runTask({
-      taskId: 'done-check' as TaskId,
+      taskId: ALONE_TASK as TaskId,
       role: call.role,
       stablePrefix: call.asked,
       variableSuffix: 'done-check',
@@ -101,8 +107,18 @@ export async function aloneCall(call: AloneCall): Promise<AloneOutcome> {
   }
   const teardown = await call.provider.destroy(handle);
   if (teardown.meter.kind !== 'metered') throw new Error('benchmark: the relay did not meter the driver-alone call, so its cost is unknown');
-  const costUsd = teardown.meter.costUsd;
+  const meter = teardown.meter;
+  const costUsd = meter.costUsd;
+  const tokens: TaskTokens = {
+    calls: 1,
+    inputTokens: meter.inputTokens,
+    outputTokens: meter.outputTokens,
+    cacheReadTokens: meter.cacheReadTokens,
+    cacheWriteTokens: meter.cacheWriteTokens,
+    exhausted: meter.exhausted === 'none' ? 0 : 1,
+    bound: meter.exhausted === 'unreadable' ? 'lower' : 'exact',
+  };
   // A call that failed to return is not a verdict, and is not a harness failure the arm can count either: it stops the run with its cost known.
   if (failure !== null) throw new Error(`benchmark: the driver-alone call failed after spending $${costUsd.toFixed(4)}: ${failure instanceof Error ? failure.message : JSON.stringify(failure)}`, { cause: failure });
-  return { verdict: narrative === null ? { kind: 'unreadable' } : readVerdict(narrative), costUsd };
+  return { verdict: narrative === null ? { kind: 'unreadable' } : readVerdict(narrative), costUsd, tokens };
 }
