@@ -12,7 +12,7 @@
  * `testPathIgnorePatterns` (@jest/core `SearchSource`).
  *
  * Two deliberate departures, each safer than the framework and recorded in
- * docs/decisions/P8.md: symbolic links are never followed, and every directory
+ * docs/decisions.md: symbolic links are never followed, and every directory
  * a config names must sit inside the repository, because the host is
  * enumerating a tree an agent wrote.
  */
