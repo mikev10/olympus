@@ -1,0 +1,134 @@
+The code under review is in the file
+`2026-11-27-R59-token-efficiency-review-bundle.txt` (SHA-256 23bc61eca697eadff1300b1f11fcb7d62e9341144556eba6ee8767021d4402ee) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing the token-efficiency reporting of a software factory runtime,
+and the token-regression check of its benchmark, in a TypeScript project. You
+have the source and nothing else — no design documents, no author reasoning, no
+prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The runtime carries a piece of work through stations, and at each one it calls
+a model through a driver inside a sandbox. A relay beside the sandbox counts
+the tokens and dollars of every call, and the runtime stores that count as a
+usage record. This change adds three figures to the per-run report, each
+derived from those records: per task, the tokens read against the tokens
+written; the run's cost per merged change; and the tasks whose last call
+reached a bound of its budget. It also makes the benchmark's paid tier record
+tokens per task for each benchmark item, and fail a run whose tokens per driver
+call grow past a margin over a result committed earlier. Which results are held
+this way, and by what margin, is a list in the source, and that list is empty
+in this change.
+
+It must hold against a capable, motivated party trying to make a run look
+efficient, or a token regression look like no regression, without the tokens
+having been saved. Assume no deceptive intent — only that the easiest path
+gets taken.
+
+That party controls what a model returns, including any account it gives of
+its own usage, the files in a workspace, and the contents of a benchmark result
+file in its own working tree. It does not control the components the runtime
+is wired with — the Vault, the sandbox provider, the relay's meter, and the
+drivers are runtime-selected and trusted, even where a function takes one as
+an argument — and it does not control code running inside the runtime's own
+process, the source of this repository at the committed HEAD, or the
+environment of the person who runs the benchmark.
+
+The invariants at stake:
+
+- The runtime derives status; the model never reports it. A figure in the
+  report or in a benchmark result must come from what the relay counted and
+  the runtime read, never from anything a driver or model said about itself.
+- Fail closed. A missing check, a missing baseline, a figure that cannot be
+  computed, or a comparison that cannot be made is a refusal or an explicit
+  no-sample state. It is never a pass, a zero, or a warning the run continues
+  past.
+- Every capability claim maps to an executable assertion that fails when the
+  capability is deleted. A test that would pass with the rule removed is not
+  such an assertion.
+
+The mechanisms that matter most:
+
+- `tokenEfficiency` and `spentBudgets` in `packages/api/src/cost.ts`, and the
+  `efficiency` field `runReport` builds from them and from the run's
+  integration records in `packages/api/src/report.ts`.
+- The token record each benchmark arm returns (`alone.ts`, `critic.ts`) and
+  `modelTier` assembles into the result (`model.ts`, `result.ts`).
+- `holdTokens`, `tokenHold`, `committedResult`, and `TOKEN_BASELINES` in
+  `packages/benchmark/src/tokens.ts`, and the two calls to `tokenHold` in
+  `packages/benchmark/test/tiers/model.tier.ts`.
+- The registry entry `I2.report-token-efficiency-from-usage-records` in
+  `packages/conformance/src/registry/integration.ts`, and the two new test
+  files.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+- Any gate on the line. No park, refusal, budget, or admission rule reads
+  these figures.
+- Reducing tokens. R60 and R61 own the savings.
+- Rates across runs. R2's `outcomes` owns those; this is one run's report.
+- The paid run that records the first baseline, and the workflow that runs
+  it. The unit ships the mechanism and lists no baseline.
+
+Absent work listed here is not a defect. The ids above (R60, R61, R2) name
+other units of the project's plan, and ids of the form D-… or A-… in comments
+name entries in a decisions log; you have neither, and need neither.
+
+THE QUESTION
+
+How would a run be reported as having spent its tokens well, or a benchmark
+run be recorded as within its token baseline, when it was not: by a figure
+that is computed from the wrong records, a comparison that passes when it
+could not be made, or a baseline that can be moved without anyone seeing it
+move?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.
