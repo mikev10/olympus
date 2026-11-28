@@ -14289,3 +14289,144 @@ takes a missing or `null` tier as the default, in both OpenAI dialects.
 The review's other finding (codex-2, the ceiling charged for a missing
 output count) is rejected in the triage: the rule is A-R26-01's and this
 unit does not change it.
+
+## R59: Token efficiency is reported, and a regression fails the benchmark
+
+Started on `v2` at 473324b, in a worktree of its own on `unit/r59`. Issue
+#196.
+
+### D-R59-01: boundary, verified
+
+- **Deliverables:**
+  - `report` gains, per task, the tokens read (input, cache read, cache
+    write), the tokens written (output), and the ratio of the two; the run's
+    cost per accepted change; and each task whose last call reached a bound
+    of its budget, named with the bound in plain words.
+  - A model-tier result records tokens per task for each item of the corpus,
+    per arm and per repetition.
+  - A model-tier run whose result is listed as a token baseline is held to
+    the committed result of the same name: it fails when an item's tokens
+    per driver call grow past the listed margin.
+  - Assertions for each, shown failing with the thing they guard removed. A
+    changeset for every published package changed.
+- **Out of scope** (the entry names none; proposed here and written into
+  the entry in this unit's first commit):
+  - Any gate on the line. The entry says it changes none: no park, refusal,
+    budget, or admission rule reads these figures.
+  - Reducing tokens. R60 and R61 own the savings.
+  - Rates across runs. R2's `outcomes` owns those; this is one run's report.
+  - The paid run that records the first baseline, and the workflow that
+    runs it. The unit ships the mechanism and lists no baseline.
+- **Acceptance** (the entry names none; proposed the same way):
+  `node scripts/local-check.ts preflight <ids>` after each change, then
+  `node scripts/local-check.ts full` once: typecheck, lint, every package's
+  tests, and the conformance registry.
+- **Invariants:**
+  - The runtime derives status and the model never reports it (I2). Every
+    figure is summed from readings the relay counted and the runtime read at
+    teardown. Nothing a driver said about its own usage is an input.
+  - Fail closed (I5). A ratio over no output is `no-sample`, never 0 or
+    infinity. A listed baseline that is missing, carries no tokens, or ran
+    other items is refused before any call is paid for. A fresh figure that
+    is only a lower bound and sits under the limit is a failure, not a pass.
+  - Every claim has an assertion that fails when the capability is deleted
+    (I8): one registry entry for the report, and the benchmark's own suite
+    for the record and the hold.
+  - No Greek names in code (I10).
+- **Pending registry entries owed:** none name R59
+  (`rg R59 packages/conformance` finds nothing).
+
+### D-R59-02: assumptions, each verified
+
+- **The dependencies have shipped.** `reviewed/P13`, `reviewed/R2`,
+  `reviewed/R7` exist (`git tag -l`).
+- **`report` is JSON the CLI prints unchanged.** `report`
+  (`packages/cli/src/cli.ts:237`) writes the response body, so a field added
+  to `RunReport` (`packages/api/src/report.ts:28`) is a field a person sees.
+  No renderer needs a change.
+- **Per-task totals already exist.** `costTotals`
+  (`packages/api/src/cost.ts:105`) returns `byTask`, each a `UsageTotal`
+  with the four token counts and a `bound`.
+- **A reading says which bound was reached.** A metered reading carries
+  `exhausted: 'none' | 'tokens' | 'cost' | 'unreadable'` and `refused`
+  (`packages/sandbox/src/types.ts:182`). R58 reads `tokens` and `cost` as a
+  spent budget and `unreadable` as not one (D-R58-04).
+- **An accepted change is a merge the runtime recorded.**
+  `IntegrationMerged` (`packages/vault/src/types.ts`) is written when the
+  pull request merged, and `runReport` already reads the run's integration
+  records. R2's `CostPerMerge` (`packages/api/src/outcomes.ts:269`) is the
+  shape for dollars over merges, with `no-sample` for none.
+- **Both benchmark arms hold a relay reading per call.** The driver-alone
+  arm has `teardown.meter` and refuses a call that was not metered
+  (`packages/benchmark/src/alone.ts:103`). The critic arm reads the run's
+  usage records and refuses lost or unsettled calls
+  (`packages/benchmark/src/critic.ts:159`).
+- **A critic's task id holds no run id.** `seatTaskId`
+  (`packages/core/src/station/contracts.ts:87`) is `<station>.<seat>`, so a
+  result that records it still names no run.
+- **The deterministic result does not pass through the new field.**
+  `benchmarkResult` (`packages/benchmark/src/result.ts:90`) adds `run` only
+  when given one; tokens are added the same way, so
+  `docs/benchmark/*-deterministic.json` keep their bytes.
+- **No committed result carries tokens.** The three model-tier results hold
+  `spentUsd` and nothing per call (`rg inputTokens docs/benchmark` finds
+  nothing), so no baseline exists today.
+- **The model tier's workflow is a gate path, and types files are.**
+  `.github/protected-paths.txt` lists `^\.github/workflows/`, every
+  `src/**/types.ts`, and `^packages/conformance/`. The unit edits none of
+  the first two. It adds assertions to the third, as every unit that adds a
+  registry entry does.
+
+### D-R59-03: where the code differs from the entry
+
+- **The entry says every figure is read from P13's usage records.** The
+  driver-alone arm writes none: it has no Vault. Its figure is the relay's
+  reading from teardown, which is what a usage record's `reading` holds.
+- **The entry calls the benchmark's unit a fixture.** The code calls it an
+  item (`corpus.ts`). The result records tokens per item.
+- **The model tier seats a model only as a judge** (`comparison.ts`,
+  `notMeasured`): the done-checker and the critic. No drafter or builder is
+  a real model there. R61 says its saving is claimed against R59's
+  baseline, and the seats R60 and R61 change are not in it. Their saving
+  shows in `report`'s per-task figures on a real run. R61's entry needs to
+  say which measurement it means; raised at the merge gate, not built here.
+- **The issue flags a task with `exhausted > 0`.** That counts any call. A
+  task whose first call ran out and whose retry passed did not end on a
+  spent budget. See D-R59-04.
+
+### D-R59-04: choices
+
+- **A task ended on a spent budget when its last settled call's reading
+  says `tokens` or `cost`.** Rejected: any exhausted call (names tasks that
+  recovered); the `budget-spent` park decision (a decision, where the entry
+  asks for usage records, and it misses a call that returned a result under
+  a spent budget, A-R58-02). `unreadable` follows R58: not a spent budget,
+  and already shown as a `lower` bound. Reverse in `spentBudgets`
+  (`cost.ts`).
+- **The ratio is read over written, with the bound beside it.** Read is
+  input, cache read, and cache write, as the issue defines it. No output
+  gives `no-sample`. An unreadable call is charged output it may not have
+  written, so the task's `bound` is carried and a `lower` ratio is of what
+  was counted.
+- **The benchmark compares tokens per driver call, not a raw total.** A
+  seeded draft the critic faults goes back and the critic is seated again,
+  up to the station's attempt limit (`critic.ts`, header). A raw total
+  would move with the verdict. Rejected: raw totals. Known limit: an item
+  whose calls end on the call's own budget is capped by it, and growth past
+  the cap does not show; the record counts such calls.
+- **The baseline is the committed result of the same name, read from
+  `HEAD`.** Rejected: the file on disk, which a failed run has just
+  overwritten, so a rerun would pass against the regression; a second
+  baseline file, which is a second figure that can disagree with the result
+  it came from.
+- **Which results are held, and by what margin, is a list in the source**
+  (`TOKEN_BASELINES`, `packages/benchmark/src/tokens.ts`), empty today.
+  Adding a result to it is an edit a reviewer sees, made with the recorded
+  spread between repetitions in view. Rejected: an environment variable,
+  which lets whoever runs the tier choose whether it is held and needs a
+  change to the paid workflow, a gate path the unit does not declare; a
+  fixed margin chosen now, with no token data to choose it from; holding
+  whenever a committed result has tokens, where deleting them from the file
+  would drop the check silently. Known limit, owned by the maintainer at
+  the merge gate: until one paid run is committed and listed, nothing is
+  held. Reverse by removing the list and the call in `model.tier.ts`.
