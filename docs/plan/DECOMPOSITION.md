@@ -3668,15 +3668,45 @@ shape alone (#195). And a drafted test whose imports cannot resolve fails
 on the base and passes the fails-on-base check for the wrong reason, so the
 build can never satisfy it (#210).
 
-- The test drafter writes only test files. The runtime builds the manifest
-  from them, and writes the stack facts `init` already detected.
-- A drafted test is accepted only when its failure on the base is the
-  failure of an assertion. One that cannot load is refused with a code the
-  drafter's retry is told.
+- The test drafter writes its test files and, for each, only what takes
+  judgment: what the test does on the base, the authorization rule it
+  denies, whether it reproduces the defect, whether it is a property test,
+  and a behavioral test's command. The runtime builds the manifest from
+  that: each check's id, kind, `required`, timeout, tests, seed and case
+  count are code's, and a manifest the drafter writes is not read.
+- The runtime derives the framework, the test command and the test
+  directory from the base when a spec is drafted, and writes them into the
+  run-requirements part. The spec drafter writes the public interface, and
+  the test directory only where the base gives the runtime none to derive.
+- A declared acceptance check is accepted on the base only when each test
+  it names loaded and failed an assertion there. One that did not load is a
+  mismatch with a cause of its own, in the record and in `status`. The
+  test drafter's retry is told what it is told today, that its draft did
+  not hold over the repository, and nothing more.
 
 Neither change lets an agent write what it is judged by: the manifest moves
-from a model's draft to the runtime's code, and the lock before Build is
-unchanged.
+from a model's draft to the runtime's code, the built manifest is part of
+the draft the critic reads and the lock covers, and the lock before Build
+is unchanged.
+
+**Opens with a contract amendment** (A-R60-01, `docs/decisions/R60.md`):
+`CheckResult` (`packages/integrity/src/types.ts`) gains each named test's
+outcome as the runner reported it; `BaseMismatch` and `BaseRefusalPart`
+(`packages/core/src/station/types.ts`) gain the cause `did-not-load`; and
+policy (`packages/core/src/policy/types.ts`) gains the timeout and case
+count the runtime writes into a drafted check. `RetryPart` is not changed.
+
+**Out of scope:** the shape of a manifest a run is admitted with, which
+stays the person's; drafting at `plan`; the spec drafter's other parts
+(the spec, the security part, the questions, the reproduction); R61's
+repository map; what `verify` does with a check after the build; and any
+paid run that records a baseline.
+
+**Done when:** `node scripts/local-check.ts full` passes, with a registry
+entry for each of the three deliverables, each shown failing with what it
+guards removed, and with
+`I3.base-refusal-tells-the-drafter-nothing-of-the-repository` unchanged and
+passing.
 
 ### R61 — One repository map per base commit
 
