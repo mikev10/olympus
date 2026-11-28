@@ -2313,6 +2313,15 @@ Found by R58's external review (codex-2, codex-3), which carried `scripts/local-
 - **Reverse:** delete the three lines.
 - **Series:** a gate amendment recorded as tooling, as D-TOOLING-15 was; it keeps its number.
 
+### D-TOOLING-18: the weekly cap on paid runs is $5
+
+- **Problem:** the cap was $2 per rolling 7 days, 5 runs at 40 cents (D-TOOLING-12). One unit can need more than one paid run through no fault of its own: R59 needed two, because another unit merged into `v2` while its first was running. With units merging in parallel the cap was passed in ordinary weeks, and each time the merge stopped to ask.
+- **Chosen:** $5 per rolling 7 days, set by the maintainer on 2026-11-28. At 40 cents a run that is 12 runs.
+- **What does not change:** the count of 40 cents per run, the ledger and where it lives, the rule that the line is written before the run starts, and the stop when one more run would pass the cap. A `run-benchmark` labelling is not covered by this authorization and is asked for each time.
+- **Rejected:** removing the cap. It is what stops a loop of reruns from spending without anyone seeing it.
+- **Reverse:** restore `$2` in `merge-unit` and in `docs/plan/WORKFLOW.md`, step 7.
+- **Series:** numbered 18 because 17 is held for #267.
+
 ## P6: Verification + evidence
 
 ### D-P6-01: The unit spec was completed before the code, after a contradiction in the ledger was resolved

@@ -75,7 +75,7 @@ maintainer's.
 7. The maintainer reads the triage report and types `/merge-unit <id>`.
    That command is the approval (D-TOOLING-11): it re-checks the four
    conditions below, runs the paid suites under a standing `run-driver`
-   authorization capped at $2 a week, reruns a listed intermittent paid
+   authorization capped at $5 a week, reruns a listed intermittent paid
    failure once, merges, tags, closes the issues the unit delivered, and names
    the next unit. What it does is what follows. The PR is merged, then tagged: `git tag reviewed/<id> <the v2
    commit> && git push origin reviewed/<id>`. The tag is the diff base for the
