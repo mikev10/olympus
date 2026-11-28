@@ -13,7 +13,7 @@ Only the `v2` branch is maintained. `main` holds v1, which is frozen and receive
 
 Do not open a public issue for a vulnerability.
 
-Report it privately through GitHub: on the repository's **Security** tab, choose **Report a vulnerability**. Only the maintainer can see the report.
+Report it privately through GitHub: on the repository's **Security** tab, choose **Report a vulnerability**. Only the repository's maintainers and admins can see the report.
 
 Please include:
 
