@@ -3970,12 +3970,13 @@ spec is written when the unit starts and verified against the code then.
   records the tier it read, and the dialect refuses a missing or null one
   only if every live answer carries it.
 
-**Tooling, not a unit:** [#267](https://github.com/mikev10/olympus/issues/267) (the three paid suites in
-parallel jobs) is a gate-change pull request after #266 merges.
+**Folded into R78:** [#267](https://github.com/mikev10/olympus/issues/267) (the three paid suites in
+parallel jobs). It is a gate change, and R78 reworks the same `conformance`
+job, so one change takes both.
 
 **Suggested order:** R77 soon, because each intermittent failure costs a
-rerun, and a rerun of a labelled run pays the model again. R78 after #267
-merges, since both rework CI's critical path.
+rerun, and a rerun of a labelled run pays the model again. Then R78,
+which shortens CI's critical path.
 
 ### R77 — Test runs are deterministic and leave nothing behind
 
@@ -3997,17 +3998,27 @@ containers a killed run leaves behind.
   resources, and never touches a running container, since parallel
   sessions share one daemon.
 
-### R78 — The registry meta-test shards across runners
+### R78 — The registry shards across runners, and the paid suites run side by side
 
-Issue [#268](https://github.com/mikev10/olympus/issues/268). After #266, `test/registry.test.ts` is the longest step on
-CI's critical path: one file of 396 tests, about 6 minutes, and vitest
-shards by file.
+Issues [#268](https://github.com/mikev10/olympus/issues/268), [#267](https://github.com/mikev10/olympus/issues/267). After #266, the `conformance` job is CI's
+critical path. `test/registry.test.ts` is one file of 396 tests, about 6
+minutes, and vitest shards by file (#268). With `run-driver`, the Claude
+Code driver, Codex driver, and line suites run one after another, about 9
+minutes, before the registry starts (#267).
+
+**Gate path in scope:** `.github/workflows/ci.yml`. The unit declares it,
+and its pull request carries the `gate-change` label.
 
 - The registry is evaluated once, and its entries run as several files or
   a job matrix, with one summary report last in the log.
 - The baseline check and the external reconciliation each still run
   exactly once, and a shard that does not run fails the gate.
 - The slowest entries bound what sharding wins; the spec records them.
+- Each paid suite runs in its own job and hands its report to the registry
+  as an artifact. Each still runs once per tree: the cache keys, a merge
+  reusing its pull request's report (D-A-CI-06), and saving a report only
+  after its suite passed are kept. A key reaches only the step that calls
+  the model, and without the label the tests that call no model still run.
 
 ## Working Rules
 
