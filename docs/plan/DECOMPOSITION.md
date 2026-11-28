@@ -3952,6 +3952,13 @@ spec is written when the unit starts and verified against the code then.
   since A-R53-01, and no workflow runs it) joins R70, which reworks the
   critic arm. The tier names its image by content ID, and a workflow runs
   it, so a rule that refuses it again goes red.
+- [#273](https://github.com/mikev10/olympus/issues/273) (the model tier fails at the critic arm: the critic's
+  driver call fails at the invocation layer three times, and the error
+  does not say why) joins R70 with #264, placed on 2026-11-28. The arm's
+  error carries the failed attempt's detail, and the tier #264 repairs
+  seats the critic without a model, so the fault is found before a paid
+  run. R59's token baseline is recorded by the first model-tier run after
+  that, and until then its list of held results stays empty.
 - [#258](https://github.com/mikev10/olympus/issues/258) (the `openai-responses` dialect takes an answer that
   names no tier as served at the default) joins R72, whose paid Codex runs
   are where a live Responses answer's `service_tier` can be read. The relay
