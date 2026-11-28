@@ -1,0 +1,11 @@
+name: Question
+description: Something to find out before it can become work.
+labels: [question]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: What is unknown, and what depends on the answer.
+    validations:
+      required: true

@@ -1,0 +1,28 @@
+name: Bug
+description: Something does not work as specified, or a check lets through what it should refuse.
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw, with the run, CI link, or command that showed it.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should happen
+    validations:
+      required: true
+  - type: textarea
+    id: where
+    attributes:
+      label: Where
+      description: The file and line on v2 that holds the behaviour, if known.
+  - type: checkboxes
+    id: flaky
+    attributes:
+      label: Intermittent
+      options:
+        - label: This is a test that fails only sometimes (add the flaky-test label).
