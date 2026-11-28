@@ -39,9 +39,11 @@ has been wrong before.
 Write the following as the unit's first entry in `docs/decisions/<id>.md` (create the file, and add its row to
 `docs/decisions/README.md` in id order), print it,
 and continue to step 5 without waiting (`CLAUDE.md`, working rule 6). The
-entry ships in the review bundle, so both reviewing families challenge it; that
-replaces a confirmation typed by the maintainer, and it is only as good as the
-verification behind each line.
+entry is left out of the review bundle, so both reviewing families judge the
+code it led to without the author's reasoning. What replaces a confirmation
+typed by the maintainer is the triage report at the merge gate, which lists
+every decision the unit made, and it is only as good as the verification
+behind each line.
 
 - Unit id and title
 - Deliverables, one line each

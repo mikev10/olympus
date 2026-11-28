@@ -21,8 +21,10 @@ rule 6. Nothing is built on an assumption that has not been verified against
 the code or by running it. A plan document is a claim about the code, not
 evidence of it: the code is read before the plan is relied on. For units and
 review fixes, the plan and every assumption are recorded in
-`docs/decisions/<id>.md` before any code and the work proceeds; the record ships in
-the review bundle, where both families challenge it. Amendments wait for the
+`docs/decisions/<id>.md` before any code and the work proceeds; the record is left
+out of the review bundle, so both families judge the code without the author's
+reasoning, and the maintainer reads every decision in the triage report at the
+merge gate. Amendments wait for the
 maintainer's confirmation. Rule 6 lists the conditions that stop a unit; what
 cannot be verified from here is one of them.
 
