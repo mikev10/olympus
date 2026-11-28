@@ -59,10 +59,11 @@ representative at an online or offline event.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the project maintainer, [mikev10](https://github.com/mikev10), or
-through GitHub's **Report content** option on the comment, issue, or pull
-request concerned. All complaints will be reviewed and investigated promptly
-and fairly.
+reported privately to the project maintainer at
+[conduct@olympusai.dev](mailto:conduct@olympusai.dev). All complaints will be
+reviewed and investigated promptly and fairly. A complaint about the maintainer
+can go to [GitHub Support](https://support.github.com/contact/report-abuse)
+instead.
 
 All community leaders are obligated to respect the privacy and security of the
 reporter of any incident.
