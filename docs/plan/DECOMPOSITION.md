@@ -599,7 +599,7 @@ order between them is settled before any of them is picked up.
 | R3 | Behavioral breadth (browser) (opens with a contract amendment) | M3 | P8, P11 | `docs/plan/R3-browser.md` |
 | R4 | Parallel task execution | M2 | P4, P6, I1 | `docs/plan/R4-parallel.md` |
 | R5a | Drafting at `plan` | M2 | R4, R19, R20 | `docs/plan/R5-planning.md` |
-| R5b | Goal decomposition | M3 | R5a, R4, R20 | — |
+| R5b | Goal decomposition | M3 | R5a, R4, R20 | `docs/plan/R5b-goals.md` |
 | R6 | Driver: any OpenAI-compatible endpoint | M2 | P5, P10, P12 | `docs/plan/R6-openai-compatible.md` |
 | R7 | False-done benchmark | M2 | P6, P7, I1, R17, R19 | `docs/plan/R7-benchmark.md` |
 | R8a | Post-merge attribution and the baseline | M2 | I1, R2, R22 | `docs/plan/R8-observe.md` |
@@ -859,8 +859,12 @@ through R5a. Binding:
 - "goal" is a new artifact. Adding it to the spine's vocabulary is a
   deliberate amendment the unit takes first, as R1 did with `readiness`
 
-It has no spec yet. The amendment that writes one settles its deliverables,
-out-of-scope list, conformance and acceptance criteria before the unit starts.
+**Spec:** `docs/plan/R5b-goals.md`, written by the amendment that added
+"goal" to the spine (D-A-GL-01 to D-A-GL-09). Where this entry and the spec
+differ, the spec is the one verified against the code. It adds what the
+entry left open: the decomposition holds the child specs themselves, children
+run one at a time because integration refuses a moved base, and a child that
+does not merge leaves its dependents unstarted.
 
 ### R6 — Driver: any OpenAI-compatible endpoint
 
