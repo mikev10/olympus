@@ -320,6 +320,82 @@ export interface ProbeResult {
 }
 
 /**
+ * The element a browser step names, by what a person sees and never by
+ * markup (A-R3-02): a role and its accessible name, the label of a form
+ * field, or visible text. A locked scenario is written before `build`, so it
+ * cannot know the markup the agent will choose (I3).
+ */
+export type BrowseTarget =
+  | { readonly role: string; readonly name: string }
+  | { readonly label: string }
+  | { readonly text: string };
+
+/** One thing the browser is asked to do. `path` begins with `/`; the host is always the sandbox's own loopback. */
+export type BrowseStep =
+  | { readonly do: 'goto'; readonly path: string }
+  | { readonly do: 'click'; readonly target: BrowseTarget }
+  | { readonly do: 'fill'; readonly target: BrowseTarget; readonly value: string }
+  | { readonly do: 'press'; readonly key: string }
+  | { readonly do: 'observe'; readonly target: BrowseTarget };
+
+/**
+ * What a browser is asked to do (A-R3-02). A port and never a URL, as
+ * `ProbeRequest` is: the browser reaches the sandbox's loopback and no other
+ * host, and no field here could name one.
+ */
+export interface BrowseRequest {
+  readonly port: number;
+  /** How long the port has to accept a connection before the browser gives up and does nothing. */
+  readonly readyWithinMs: number;
+  /** Done in order, on one page. */
+  readonly steps: readonly [BrowseStep, ...BrowseStep[]];
+}
+
+/**
+ * What was on the page for one `observe` step, and nothing the browser
+ * decided. `matched` is how many elements the target named; `visible`, `text`,
+ * and `value` describe the element only when that is exactly one, and are
+ * `false`, empty, and `null` otherwise, so none is ever one element picked
+ * from several. `not-reached` is an observation an earlier step that could
+ * not be done kept from being made.
+ */
+export type BrowseObservation =
+  | {
+      readonly kind: 'observed';
+      readonly matched: number;
+      readonly visible: boolean;
+      readonly text: string;
+      readonly value: string | null;
+      readonly path: string;
+      readonly title: string;
+    }
+  | { readonly kind: 'not-reached'; readonly reason: string };
+
+/** A host the page asked for and was refused. `navigation` is true when the document itself tried to go there. */
+export interface BrowseBlockedHost {
+  readonly host: string;
+  readonly requests: number;
+  readonly navigation: boolean;
+}
+
+/**
+ * `ready: false` means the port never accepted a connection within
+ * `readyWithinMs`; nothing was done and `observations` is empty. Otherwise
+ * there is one observation for each `observe` step, in order. `failedStep` is
+ * the first step that could not be done, by its index in the request, or
+ * `null`. `browser.image` is the content ID of the image the browser ran
+ * from, and `name` and `version` are read from the running browser.
+ */
+export interface BrowseResult {
+  readonly ready: boolean;
+  readonly observations: readonly BrowseObservation[];
+  readonly failedStep: { readonly index: number; readonly reason: string } | null;
+  readonly blocked: readonly BrowseBlockedHost[];
+  readonly browser: { readonly name: string; readonly version: string; readonly image: string };
+  readonly durationMs: number;
+}
+
+/**
  * I8: every capability claimed here needs an executable conformance assertion
  * (packages/conformance) that fails when the capability is removed.
  *
@@ -370,6 +446,19 @@ export interface SandboxProvider {
    * on an ended sandbox.
    */
   probe?(h: SandboxHandle, request: ProbeRequest): Promise<ProbeResult>;
+  /**
+   * Drives a browser through `request.steps` against the sandbox's own
+   * loopback, from a browser the sandbox's processes cannot reach: one that
+   * shares the sandbox's network and not its filesystem or process tree, so
+   * what it saw is not the product's report of itself (A-R3-01). It observes
+   * and decides nothing. Optional, for the reason `probe` is: a provider that
+   * cannot put the browser out of the product's reach omits it, and a set
+   * built on that provider names `behavioral:browser` unavailable. An
+   * implementation MUST drive the sandbox's own loopback and refuse every
+   * request to another host, MUST charge the call to the sandbox's wall-clock
+   * budget as `exec` does, and MUST refuse a call on an ended sandbox.
+   */
+  browse?(h: SandboxHandle, request: BrowseRequest): Promise<BrowseResult>;
   /**
    * Posts one request to the sandbox's model relay from a client the
    * sandbox's processes cannot replace: one in the relay's own container, whose

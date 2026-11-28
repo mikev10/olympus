@@ -31,7 +31,7 @@ const manifest = (devDependencies: Readonly<Record<string, string>>): string => 
 export const UNSUPPORTED_STACK_IS_LOUD: LocalAssertion = runtime({
   id: 'I5.unsupported-stack-is-loud',
   title:
-    'an adapter set names every control it lacks — each null slot and each behavioral kind it does not carry — and is ' +
+    'an adapter set built with no sandbox provider names every control it lacks — each null slot and each behavioral kind, browser among them — and is ' +
     'refused at L3 naming each, derived from its slots even when its own unavailableControls() under-reports; L0-L2 are not refused',
   run: async () => {
     const { adapterAdmission, buildAdapterSet } = await import('@olympus-ai/adapters');
@@ -53,7 +53,8 @@ export const UNSUPPORTED_STACK_IS_LOUD: LocalAssertion = runtime({
       }
     });
 
-    // A supported stack still lacks mutation (M3) and the HTTP and browser kinds, so L3 stays refused at M1.
+    // Built with no sandbox provider, as here, a supported stack lacks mutation (M3) and every behavioral kind, the HTTP and
+    // browser kinds among them, so L3 stays refused. A provider that can probe and browse carries both kinds (http.ts, browser.ts).
     await withRepository({ 'package.json': manifest({ vitest: '^4.1.0' }) }, async (root) => {
       const set = await buildAdapterSet(root, options);
       if (set.test === null) throw new Error(`I5: a vitest repository got no test adapter: ${set.reasons.get('test') ?? ''}`);
