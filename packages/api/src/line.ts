@@ -129,6 +129,7 @@ import type { EgressPolicy, ExecResult, RelayMeter, SandboxHandle, SandboxSpec, 
 import { splitFrontMatter } from '@olympus-ai/compiler';
 import type { AdmissionRecord, AdmittedArtifact, AttemptFailure, BaseRunRecord, RepoInstructionFile, CallTiming, DiffEntry, EnforcementDecision, EvidenceBundle, HarnessImage, IntegrationOpened, IntegrationRecord, UnstartedCheck, UsageReading, UsageRecord, Vault } from '@olympus-ai/vault';
 import { draftFloorOf, draftStation, isDrafted, lockApproved, testDraftOf, type DraftingContext } from './drafting.js';
+import { seatedRolesOf } from './planning.js';
 import type { RunRequirements } from './spec-parts.js';
 import { imageFor, type BuiltGraph } from './graph.js';
 import { installInto } from './install.js';
@@ -170,7 +171,8 @@ export interface LineArtifacts {
   /** The observation plan, locked at `test-design` with the tests: supplied, or drafted once its draft is locked; null where none (R8b). */
   readonly observationPlan: AdmittedArtifact | null;
   readonly verificationManifest: AdmittedArtifact;
-  readonly taskGraph: AdmittedArtifact;
+  /** The task graph: supplied, or drafted once its draft is locked; null for a drafted graph before that (R5a). */
+  readonly taskGraph: AdmittedArtifact | null;
   readonly specParts: {
     readonly security: AdmittedArtifact | null;
     readonly runRequirements: AdmittedArtifact | null;
@@ -194,7 +196,13 @@ export interface LineContext {
   readonly repoInstructions: readonly RepoInstructionFile[];
   /** Replaced when a drafted artifact is locked (R19). */
   artifacts: LineArtifacts;
-  readonly graph: TaskGraph;
+  /**
+   * The run's task graph, or null for a drafted graph before `plan` locks it
+   * (R5a). Null is the absence, never an empty graph: a station past `plan`
+   * that finds none throws rather than finishing with nothing built (I5).
+   * Replaced once, when a drafted graph is locked.
+   */
+  graph: TaskGraph | null;
   /** The verification manifest's checks and the acceptance manifest's; replaced when drafted tests are locked (R19). */
   checks: readonly CheckSpec[];
   /** The spec's security part as admitted or locked, or null where none was and `spec` refuses (R17). */
@@ -255,7 +263,7 @@ export async function runLine(ctx: LineContext, changed: readonly TamperedPath[]
   for (;;) {
     const cancel = ctx.state.cancelled === null ? (ctx.cancelRequested?.() ?? null) : null;
     if (cancel !== null) await commit(ctx, { cancelled: cancel });
-    const step = nextStep(ctx.state, ctx.graph, stepLimits(ctx));
+    const step = nextStep(ctx.state, stepGraph(ctx.state, ctx.graph), stepLimits(ctx));
     let refusal: StationRefusal | undefined;
     // The task a refusal was made over, for its record; null for one made over the station.
     let task: TaskId | null = null;
@@ -329,6 +337,8 @@ export async function runLine(ctx: LineContext, changed: readonly TamperedPath[]
             break;
           }
         }
+        // A drafted graph's tasks exist only once it is locked: created in the commit that leaves `plan`, never before (R5a, I3).
+        const planned = step.from === 'plan' && floor !== undefined ? newTasks(graphOf(ctx)) : {};
         // One human approval crosses one exit: the grant is spent in the same
         // commit as the move, so a stop between the two leaves it unspent and
         // the gate is evaluated again (A-P4-04).
@@ -345,12 +355,47 @@ export async function runLine(ctx: LineContext, changed: readonly TamperedPath[]
           else if (next.spends !== null) await commit(ctx, { approvals });
           return { ok: true, state: ctx.state };
         }
-        await commit(ctx, { station: next.next, phase: 'working', approvals });
+        await commit(ctx, { station: next.next, phase: 'working', approvals, ...planned });
         break;
       }
     }
     if (refusal !== undefined) return refused(ctx, ctx.state.station, refusal, task);
   }
+}
+
+const NO_TASKS: TaskGraph = Object.freeze({ tasks: [], edges: [] });
+
+/** The stations a run that drafts its graph passes before any graph is locked. */
+const BEFORE_BUILD: readonly StationId[] = ['intake', 'spec', 'test-design', 'plan'];
+
+/**
+ * The graph the station machine reads its next step from. A drafted graph
+ * does not exist before `plan` locks it, and up to there the machine reads
+ * tasks only to find a park, so it is given none. Past `plan` a run with no
+ * graph is not stepped: the machine finishes `build` on an empty list, which
+ * would carry a run to `integrate` with nothing built (R5a, I5).
+ */
+export function stepGraph(state: Pick<RunState, 'station' | 'runId'>, graph: TaskGraph | null): TaskGraph {
+  if (graph !== null) return graph;
+  if (BEFORE_BUILD.includes(state.station)) return NO_TASKS;
+  throw new Error(`run ${state.runId}: the run is at ${state.station} and holds no locked task graph; refusing to step it`);
+}
+
+/** The run's locked graph, for a reader that runs only once one exists. */
+export function graphOf(ctx: Pick<LineContext, 'graph' | 'run'>): TaskGraph {
+  if (ctx.graph === null) throw new Error(`run ${ctx.run.id}: no task graph is locked yet`);
+  return ctx.graph;
+}
+
+/** Every task of a graph as it starts: pending, with nothing spent. */
+function newTasks(graph: TaskGraph): Pick<StateChange, 'tasks' | 'attempts'> {
+  const tasks: Record<TaskId, TaskStatus> = {};
+  const attempts: Record<TaskId, TaskAttempts> = {};
+  for (const task of graph.tasks) {
+    tasks[task.id] = 'pending';
+    attempts[task.id] = { iterations: 0, retries: 0, starts: 0, conflicts: [] };
+  }
+  return { tasks, attempts };
 }
 
 /**
@@ -487,15 +532,13 @@ async function work(ctx: LineContext, station: StationId): Promise<StationRefusa
       break;
     }
     case 'plan': {
-      const refusal = await lockAdmitted(ctx, 'plan', [ctx.artifacts.taskGraph]);
+      // A drafted graph is drafted here; its draft is locked at the exit, once approved, and only then are its tasks created (R5a).
+      if (isDrafted(ctx, 'plan')) return draftStation(ctx, 'plan');
+      const admitted = ctx.artifacts.taskGraph;
+      if (admitted === null) throw new Error(`run ${ctx.run.id}: the run was admitted with a task graph and the line holds none to lock`);
+      const refusal = await lockAdmitted(ctx, 'plan', [admitted]);
       if (refusal !== undefined) return refusal;
-      const tasks: Record<TaskId, TaskStatus> = {};
-      const attempts: Record<TaskId, TaskAttempts> = {};
-      for (const task of ctx.graph.tasks) {
-        tasks[task.id] = 'pending';
-        attempts[task.id] = { iterations: 0, retries: 0, starts: 0, conflicts: [] };
-      }
-      await commit(ctx, { phase: 'exiting', tasks, attempts });
+      await commit(ctx, { phase: 'exiting', ...newTasks(graphOf(ctx)) });
       return undefined;
     }
     case 'intake':
@@ -650,7 +693,7 @@ export async function tamperedPaths(ctx: LineContext): Promise<TamperedPath[]> {
 /** The role a violation is attributed to: the suspect, else the last task that ran, else none. */
 function suspectRole(ctx: LineContext, suspect: Task | null): RoleId {
   if (suspect !== null) return suspect.role;
-  const ran = ctx.graph.tasks.filter((t) => Object.hasOwn(ctx.state.results, t.id));
+  const ran = (ctx.graph?.tasks ?? []).filter((t) => Object.hasOwn(ctx.state.results, t.id));
   return ran.at(-1)?.role ?? UNATTRIBUTED;
 }
 
@@ -952,7 +995,7 @@ function judged(prepared: PreparedProperty | null, exec: ExecResult): Pick<Check
 }
 
 /** The scope a role holds as admitted, before any narrowing; for what narrowing never touches, such as tiers (R14). */
-export function roleScope(policy: Policy, task: Task): CapabilityScope {
+export function roleScope(policy: Policy, task: Pick<Task, 'role' | 'station'>): CapabilityScope {
   const resolved = engine.resolveCapabilities(task.role, task.station, policy);
   // Admission resolved every role the graph schedules, against the same admitted policy.
   if (!resolved.ok) throw new Error(`line: role ${task.role} lost its scope at ${task.station}: ${resolved.detail}`);
@@ -1024,9 +1067,16 @@ export interface WithheldInput {
 
 const RELEASED = new WeakSet<WithheldInput>();
 
-/** Every role the run seats: each role the graph names, and the drafting seats of each station it drafts. */
+/**
+ * Every role the run seats: each role the graph names, and the drafting
+ * seats of each station it drafts. A run that drafts its graph seats every
+ * role its bound allows and the derived review's, before and after the lock,
+ * so a narrowing covers every builder the planner could name (R5a).
+ */
 function seatedRoles(ctx: LineContext): RoleId[] {
-  const roles = new Set<RoleId>(ctx.graph.tasks.map((t) => t.role));
+  const bound = ctx.drafting.graphBound;
+  const named = seatedRolesOf(bound === null ? graphOf(ctx) : null, bound);
+  const roles = new Set<RoleId>([...named.build, ...named.review]);
   for (const station of DRAFT_STATIONS) {
     if (!ctx.drafting.drafted[station]) continue;
     roles.add(DRAFT_ROLES[station].drafter);
@@ -1317,7 +1367,7 @@ function admittedArtifacts(ctx: LineContext): AdmittedArtifact[] {
   const { acceptanceTests, acceptanceManifest, observationPlan, verificationManifest, taskGraph } = ctx.artifacts;
   return [
     ...specArtifacts(ctx), ...acceptanceTests, ...(acceptanceManifest === null ? [] : [acceptanceManifest]),
-    ...(observationPlan === null ? [] : [observationPlan]), verificationManifest, taskGraph,
+    ...(observationPlan === null ? [] : [observationPlan]), verificationManifest, ...(taskGraph === null ? [] : [taskGraph]),
   ];
 }
 
@@ -1542,6 +1592,22 @@ async function recordConflict(ctx: LineContext, task: Task, conflict: TaskConfli
   return undefined;
 }
 
+/**
+ * What a builder is given of the graph under its `task-graph` grant: every
+ * task's id, station, role and dependencies, and the objective of its own
+ * task and of each task it depends on, where one is stated (A-R5a-04). No
+ * other task's objective: with several build tasks the objective is what
+ * tells a builder which part of the spec is its own, and the rest is the
+ * plan. A review seat's contract grants no `task-graph`, so none of this
+ * reaches one.
+ */
+export function taskGraphGrant(graph: TaskGraph, task: Pick<Task, 'id' | 'dependsOn'>): string {
+  return JSON.stringify(graph.tasks.map(({ id, station, role, dependsOn, objective }) => ({
+    id, station, role, dependsOn,
+    ...(objective !== null && (id === task.id || task.dependsOn.includes(id)) ? { objective } : {}),
+  })));
+}
+
 /** `build`: one attempt at one task. The result is recorded in the Vault before the task is handed to `verify`. */
 async function build(ctx: LineContext, task: Task): Promise<StationRefusal | undefined> {
   const { driver, vault, workspaces } = ctx.components;
@@ -1571,6 +1637,11 @@ async function build(ctx: LineContext, task: Task): Promise<StationRefusal | und
   if (!prepared.ok) return prepared.outcome;
   // What the role is not given is left out of both copies, so the model never has it and its diff never shows it (D-A-TR-04).
   await omitWithheld(ctx, task.role, start);
+  // A drafted graph's locked file holds every task's objective. It is left out of both copies, as a withheld path is, so
+  // what a builder has of the graph is its `task-graph` grant and the file is no way around it (A-R5a-04; review: codex-1).
+  // The base keeps it, so every tree `verify` builds holds it, and a builder that writes the path adds a locked artifact to its diff.
+  const drafted = isDrafted(ctx, 'plan') ? ctx.artifacts.taskGraph : null;
+  if (drafted !== null) await omitPaths(start, (path) => path === drafted.path);
   await copyTree(start, work);
   // Input a declared source brought for this task narrows the run before it is placed, and is placed only after (D-A-TR-03).
   const brought = ctx.inputFor?.(task) ?? null;
@@ -1581,7 +1652,7 @@ async function build(ctx: LineContext, task: Task): Promise<StationRefusal | und
   const offered: Partial<Record<ContextGrant, string>> = {
     'locked-spec': spec.text,
     'acceptance-tests': tests.text,
-    'task-graph': JSON.stringify(ctx.graph.tasks.map(({ id, station, role, dependsOn }) => ({ id, station, role, dependsOn }))),
+    'task-graph': taskGraphGrant(graphOf(ctx), task),
   };
   // The checks a failed gate named, by id and cause, in the suffix and never the prefix or the role; never their output (I7, R37).
   const suffix = gatedBefore ? await gateRetry(ctx, task) : undefined;
@@ -1995,7 +2066,7 @@ async function review(ctx: LineContext, task: Task): Promise<StationRefusal | un
   // The reviewer has not run; the mismatch is not the review seat's doing.
   if (tampered.length > 0) return recordTamper(ctx, 'review', task, tampered, { phase: 'before-review' }, null);
 
-  const reviewed = ctx.graph.tasks.filter((t) => task.dependsOn.includes(t.id));
+  const reviewed = graphOf(ctx).tasks.filter((t) => task.dependsOn.includes(t.id));
   const authored = await Promise.all(reviewed.map((t) => readResult(ctx, t)));
   const authors = await authorsOf(ctx, reviewed, authored);
   const level = levelOf(ctx.run.requestedLevel, ctx.state.narrowed);
@@ -2020,7 +2091,7 @@ async function review(ctx: LineContext, task: Task): Promise<StationRefusal | un
     diff: JSON.stringify(current.diff.map(({ path, change }) => ({ path, change }))),
     'evidence-bundle': await evidenceFacts(ctx, task.dependsOn),
     'author-narrative': authored.map((r) => r.claim.narrative).join('\n'),
-    plan: JSON.stringify(ctx.graph.tasks),
+    plan: JSON.stringify(graphOf(ctx).tasks),
   };
   // The seat's instructions are its seat's role's; its grants stay its task's scope (D-A-RC-06, R9), the
   // target's instructions among them, filtered as its tree is (D-A-RI-03, D-R24-06).

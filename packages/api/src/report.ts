@@ -5,10 +5,12 @@
  * claim appears only as the runtime's diff of it against the evidence.
  */
 import { M1_STATIONS } from '@olympus-ai/core';
-import type { CandidateId, ModelIdentity, RunId, RunTemplateId, StationId, TaskAttempts, TaskId, TaskStatus, TemplateId, TriggerKind } from '@olympus-ai/core';
-import type { EnforcementDecision, EvidenceBundle, IntegrationRecord, Vault } from '@olympus-ai/vault';
-import { costTotals, readUsage, type CostTotals } from './cost.js';
+import type { CandidateId, ModelIdentity, RunId, RunState, RunTemplateId, StationId, TaskAttempts, TaskId, TaskStatus, TemplateId, TriggerKind } from '@olympus-ai/core';
+import type { DraftLockRecord, DraftRecord, EnforcementDecision, EvidenceBundle, IntegrationRecord, Vault } from '@olympus-ai/vault';
+import { graphDraftPath } from './planning.js';
+import { costTotals, readUsage, spentBudgets, tokenEfficiency, type CostTotals, type SpentBudget, type TaskEfficiency } from './cost.js';
 import { readIntegration } from './line.js';
+import type { CostPerMerge } from './outcomes.js';
 import { runStanding, type RunStanding, type StandingSource } from './run.js';
 
 /** Where a station's exit gate stands, derived from the run's position and standing. */
@@ -46,9 +48,25 @@ export interface RunReport {
    * write — of the metered calls; null when no call was metered.
    */
   readonly cacheHitRate: number | null;
+  /**
+   * Whether the tokens were spent well (R59), every figure from the usage
+   * records: per task, what it read for what it wrote; the run's dollars per
+   * change merged, `no-sample` while nothing has merged; and each task whose
+   * last call reached a bound of its budget.
+   */
+  readonly efficiency: {
+    readonly tasks: readonly TaskEfficiency[];
+    readonly costPerAcceptedChange: CostPerMerge;
+    readonly spentBudgets: readonly SpentBudget[];
+  };
   /** Each driver call's model, as the runtime resolved it before the call (A-I1a-01). */
   readonly calls: ReadonlyArray<{ readonly taskId: TaskId; readonly station: StationId; readonly attempt: number; readonly model: ModelIdentity }>;
-  readonly tasks: ReadonlyArray<{ readonly taskId: TaskId; readonly station: StationId | null; readonly status: TaskStatus; readonly attempts: TaskAttempts }>;
+  /**
+   * `objective` is what a drafted graph's task was to deliver, read from the
+   * locked draft the Vault holds; null for a drafting seat and for a
+   * supplied graph's task, whose graph file the Vault does not hold (R5a).
+   */
+  readonly tasks: ReadonlyArray<{ readonly taskId: TaskId; readonly station: StationId | null; readonly status: TaskStatus; readonly attempts: TaskAttempts; readonly objective: string | null }>;
   readonly stations: readonly StationReport[];
   /** Where the agent's claim and the runtime's evidence differ, per evidence bundle. */
   readonly mismatches: ReadonlyArray<{ readonly taskId: TaskId; readonly diffSha256: string; readonly differences: readonly string[] }>;
@@ -73,6 +91,31 @@ function gateAt(index: number, current: number, standing: RunStanding): GateOutc
   return standing.standing;
 }
 
+/**
+ * Each task's objective as the locked graph draft states it, from the bytes
+ * the runtime read and recorded (R5a). Empty where the run locked no drafted
+ * graph. Read as data from the record, never parsed for anything else.
+ */
+async function objectivesOf(vault: Vault, state: RunState): Promise<Map<TaskId, string>> {
+  const out = new Map<TaskId, string>();
+  const plan = state.drafts.plan;
+  const lockRef = plan?.locked ?? null;
+  if (plan === undefined || lockRef === null) return out;
+  const lock = decode(await vault.read(lockRef)) as DraftLockRecord;
+  const attempt = plan.attempts.find((a) => a.attempt === lock.draft.attempt);
+  if (attempt?.draft == null) return out;
+  const record = decode(await vault.read(attempt.draft)) as DraftRecord;
+  const file = record.files.find((f) => f.path === graphDraftPath(state.runId));
+  if (file === undefined) return out;
+  const graph = decode(Buffer.from(file.base64, 'base64')) as { tasks?: unknown } | null;
+  const tasks: readonly unknown[] = Array.isArray(graph?.tasks) ? graph.tasks : [];
+  for (const task of tasks) {
+    const t = (typeof task === 'object' && task !== null ? task : {}) as { id?: unknown; objective?: unknown };
+    if (typeof t.id === 'string' && typeof t.objective === 'string') out.set(t.id as TaskId, t.objective);
+  }
+  return out;
+}
+
 export async function runReport(vault: Vault, runId: RunId): Promise<RunReport> {
   const { state, standing, source } = await runStanding(vault, runId);
   const admission = decode(await vault.read(state.admission)) as { run?: { requestedLevel?: unknown }; template?: RunTemplateId | null; candidate?: { id: CandidateId } | null } | null;
@@ -87,10 +130,11 @@ export async function runReport(vault: Vault, runId: RunId): Promise<RunReport> 
 
   // A task's station is the one its calls were made at; a task that made none has none to report.
   const stationOf = new Map<TaskId, StationId>(usage.map((r) => [r.taskId, r.station]));
+  const objectives = await objectivesOf(vault, state);
   const tasks = Object.entries(state.tasks).map(([id, status]) => {
     const taskId = id as TaskId;
     const attempts = state.attempts[taskId] ?? { iterations: 0, retries: 0, starts: 0, conflicts: [] };
-    return { taskId, station: stationOf.get(taskId) ?? null, status, attempts };
+    return { taskId, station: stationOf.get(taskId) ?? null, status, attempts, objective: objectives.get(taskId) ?? null };
   });
 
   const decisions: EnforcementDecision[] = [];
@@ -141,6 +185,13 @@ export async function runReport(vault: Vault, runId: RunId): Promise<RunReport> 
   const candidate = entry?.candidate == null
     ? null
     : { id: entry.candidate.id, kind: entry.candidate.kind, template: entry.candidate.template, extracted: entry.candidate.extracted };
+  const integration = await readIntegration(vault, runId);
+  // An accepted change is a merge the runtime recorded; a resume that records the same merge again has not merged twice.
+  const merges = new Set(integration.flatMap((r) => (r.kind === 'merged' ? [r.mergeCommit] : []))).size;
+  const spentUsd = m.costUsd;
+  const costPerAcceptedChange: CostPerMerge = merges === 0
+    ? { kind: 'no-sample', spentUsd }
+    : { kind: 'cost', usd: spentUsd / merges, spentUsd, merges, bound: cost.run.bound };
   return {
     runId,
     requestedLevel,
@@ -150,6 +201,7 @@ export async function runReport(vault: Vault, runId: RunId): Promise<RunReport> 
     standingSource: source,
     cost,
     cacheHitRate: input === 0 ? null : m.cacheReadTokens / input,
+    efficiency: { tasks: tokenEfficiency(usage), costPerAcceptedChange, spentBudgets: spentBudgets(usage) },
     calls,
     tasks,
     stations,
@@ -157,6 +209,6 @@ export async function runReport(vault: Vault, runId: RunId): Promise<RunReport> 
     decisions: byCause,
     refusals,
     parks,
-    integration: await readIntegration(vault, runId),
+    integration,
   };
 }

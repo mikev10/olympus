@@ -1,6 +1,6 @@
 import { compileError, external } from '../kit/assert.js';
 import { ENFORCEMENT_DECISIONS_RECORDED } from './decisions.js';
-import { OUTCOMES_DERIVED_FROM_RUN_RECORDS, RUN_REPORT_READS_ONLY_RECORDS } from './integration.js';
+import { OUTCOMES_DERIVED_FROM_RUN_RECORDS, REPORT_TOKEN_EFFICIENCY_FROM_USAGE_RECORDS, RUN_REPORT_READS_ONLY_RECORDS } from './integration.js';
 import { R4_I2 } from './parallel.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { R17_I2 } from './security.js';
@@ -52,6 +52,7 @@ export const I2: InvariantEntry = {
     ...R4_I2,
     READINESS_OUTCOME_IS_RUNTIME_DERIVED,
     RUN_REPORT_READS_ONLY_RECORDS,
+    REPORT_TOKEN_EFFICIENCY_FROM_USAGE_RECORDS,
     compileError({
       id: 'I2.task-result-has-no-status',
       title: 'TaskResult and AgentClaim have no status, passed, success, verdict, ok, or exitCode field',

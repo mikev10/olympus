@@ -58,7 +58,7 @@ export const COMMANDS: readonly Command[] = [
       spec: { type: 'string', multiple: true, value: '<path>', help: 'a spec file, relative to the workspace; repeatable; or --draft-spec' },
       tests: { type: 'string', multiple: true, value: '<path>', help: 'an acceptance-test file, relative to the workspace; repeatable; or --draft-tests' },
       manifest: { type: 'string', value: '<path>', help: 'required: the verification manifest, the checks the runtime runs' },
-      graph: { type: 'string', value: '<path>', help: 'required: the task graph' },
+      graph: { type: 'string', value: '<path>', help: 'the task graph; required unless --draft-plan' },
       'security-part': { type: 'string', value: '<path>', help: 'the spec\'s security part; without it the run is refused at the spec exit' },
       'run-requirements': { type: 'string', value: '<path>', help: 'the spec\'s run-requirements part' },
       questions: { type: 'string', value: '<path>', help: 'the spec\'s questions part' },
@@ -66,11 +66,12 @@ export const COMMANDS: readonly Command[] = [
       'approve-cost': { type: 'string', value: '<usd>', help: 'approves the worst-case cost in US dollars, the figure a refused create prints' },
       'draft-spec': { type: 'boolean', help: 'draft the spec on the line from --intent instead of naming it; needs FACTORY_RUBRICS_DIR' },
       'draft-tests': { type: 'boolean', help: 'draft the acceptance tests on the line instead of naming them' },
+      'draft-plan': { type: 'boolean', help: 'draft the task graph at plan instead of naming it; the policy must grant planning, and FACTORY_RUBRICS_DIR hold plan.md' },
       intent: { type: 'string', value: '<text>', help: 'what the run is for, the text a drafted spec is written from' },
     },
   },
   { name: 'status', args: '<run id>', summary: 'the run\'s station, tasks, and gates', flags: {} },
-  { name: 'draft', args: '<run id> <station>', summary: 'print a draft\'s files and questions, to read before deciding it; <station> is spec or test-design', flags: {} },
+  { name: 'draft', args: '<run id> <station>', summary: 'print a draft\'s files and questions, to read before deciding it; <station> is spec, test-design, or plan', flags: {} },
   {
     name: 'approve', args: '<run id> <station:level>', summary: 'pass a gate the policy holds for a person',
     flags: { draft: { type: 'string', value: '<hash>', help: 'the draft approved, as status and draft name it, at a drafting station' } },
@@ -296,6 +297,7 @@ async function create(io: CliIo, t: Target, args: string[]): Promise<ExitCode> {
   // A drafted artifact is drafted on the line instead of named here (R19); naming both is a contradiction.
   if (bool(values, 'draft-spec') && spec !== undefined) throw new UsageError('--draft-spec and --spec name the spec twice');
   if (bool(values, 'draft-tests') && tests !== undefined) throw new UsageError('--draft-tests and --tests name the acceptance tests twice');
+  if (bool(values, 'draft-plan') && str(values, 'graph') !== undefined) throw new UsageError('--draft-plan and --graph name the task graph twice');
   const security = str(values, 'security-part');
   const runRequirements = str(values, 'run-requirements');
   const questions = str(values, 'questions');
@@ -314,7 +316,8 @@ async function create(io: CliIo, t: Target, args: string[]): Promise<ExitCode> {
       spec: bool(values, 'draft-spec') ? 'draft' : (spec ?? []),
       acceptanceTests: bool(values, 'draft-tests') ? 'draft' : (tests ?? []),
       verificationManifest: required(str(values, 'manifest'), '--manifest'),
-      taskGraph: required(str(values, 'graph'), '--graph'),
+      // A drafted graph is drafted at `plan`, within the policy's planning grant (R5a).
+      taskGraph: bool(values, 'draft-plan') ? 'draft' : required(str(values, 'graph'), '--graph'),
       ...(acceptanceManifest === undefined ? {} : { acceptanceManifest }),
       // Optional on the wire: a spec created without its security part is refused at the spec exit, naming the part (R17).
       ...(Object.keys(parts).length === 0 ? {} : { specParts: parts }),

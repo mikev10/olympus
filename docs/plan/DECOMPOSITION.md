@@ -3651,6 +3651,15 @@ cached tokens to write 6,976, visible only by hand.
 Every figure is read from P13's usage records. It changes no gate on the
 line.
 
+**Out of scope:** any gate on the line; reducing tokens, which R60 and R61
+own; rates across runs, which R2's `outcomes` owns; and the paid run that
+records the first baseline, with the workflow that runs it (D-R59-01).
+
+**Done when:** `node scripts/local-check.ts full` passes, with a registry
+entry for the report's figures and the benchmark's own suite holding the
+record and the regression rule, each shown failing with what it guards
+removed.
+
 ### R60 — What code can derive from a draft, code writes and checks
 
 Issues [#195](https://github.com/mikev10/olympus/issues/195), [#210](https://github.com/mikev10/olympus/issues/210). A model writes fields that are facts about the

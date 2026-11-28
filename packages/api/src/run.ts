@@ -77,13 +77,13 @@ import { adapterAdmission, buildAdapterSet, missingControls, type AdapterSet, ty
 import { compileRoles, readRepoInstructions, type RepoInstructionRefusal, type RoleFileRefusal } from '@olympus-ai/compiler';
 import type { CheckSpec } from '@olympus-ai/integrity';
 import type { SandboxProvider } from '@olympus-ai/sandbox';
-import type { AdmissionRecord, AdmissionRefusal, AdmittedArtifact, RecordedHeldBy, RecordedReadiness, RecordedScanLevel, AdmittedManifest, AdmittedPlan, AdmittedSet, AttemptFailure, CriticRecord, EnforcementDecision, DraftLockRecord, DraftRecord, EvidenceBundle, IntakeEntry, IntentRecord, ResumeRefusal, RubricRecord, RubricVersion, Vault } from '@olympus-ai/vault';
+import type { AdmissionRecord, AdmissionRefusal, AdmittedArtifact, RecordedHeldBy, RecordedReadiness, RecordedScanLevel, AdmittedGraph, AdmittedManifest, AdmittedPlan, AdmittedSet, AttemptFailure, CriticRecord, EnforcementDecision, DraftLockRecord, DraftRecord, EvidenceBundle, IntakeEntry, IntentRecord, ResumeRefusal, RubricRecord, RubricVersion, Vault } from '@olympus-ai/vault';
 import { criticFindingsOf, repoInstructionsProblem } from '@olympus-ai/vault';
 import { resolveCommit, type ReadinessCeiling } from '@olympus-ai/readiness';
 import { readUsage, unsettledCalls, worstCaseCost, type WorstCaseCost } from './cost.js';
 import { estimateCost, type CostEstimate, type EstimateCell } from './outcomes.js';
 import { problemCodes, recordDecision } from './decisions.js';
-import { gateFailure, integrateEscalations, readIntegration, runLine, type GateFailure, type LineArtifacts, type LineContext } from './line.js';
+import { gateFailure, integrateEscalations, readIntegration, runLine, stepGraph, type GateFailure, type LineArtifacts, type LineContext } from './line.js';
 import { criticNote, draftFloorOf, lockedArtifacts, NOT_DRAFTING, seatDriver, settleArtifactRoot, settleBase, type DraftingContext, type DraftingDrivers } from './drafting.js';
 import { readRubrics, rubricsProblems, type ReadRubric } from './rubrics.js';
 import { parsePlan } from './observation-plan.js';
@@ -93,6 +93,7 @@ import { reachesRemote, type Integrator } from './integrate.js';
 import { unsafeComponents, type UnsafeDeclaration } from './safety.js';
 import { parseSecurityPart, type SecurityPart, type SecurityScanners } from './security.js';
 import { mergedCheckProblems, parseGraph, parseManifest, reproductionProblems, requestProblems, securityProblems, type RequestProblem } from './validate.js';
+import { boundGraph, parseDraftedGraph, seatedRolesOf, type GraphBound, type SeatedRoles } from './planning.js';
 import { suiteBindingProblems } from './verification.js';
 import { propertyAdmissionProblems } from './property.js';
 import { planInstall } from './install.js';
@@ -157,7 +158,11 @@ export interface RequestedArtifacts {
   readonly observationPlan?: string;
   /** JSON: `{ "checks": CheckSpec[] }`. */
   readonly verificationManifest: string;
-  /** JSON: `{ "tasks": [{ id, station, role, dependsOn, dependencySet }] }`. */
+  /**
+   * JSON: `{ "tasks": [{ id, station, role, dependsOn, dependencySet, objective? }] }`,
+   * or the literal `'draft'`: the run drafts its graph at `plan`, within the
+   * policy's `planning` grant, and locks what is approved (A-R5a-01).
+   */
   readonly taskGraph: string;
   /**
    * The parts of a supplied spec, each a JSON file locked with it at `spec`.
@@ -476,7 +481,10 @@ function parseJson(bytes: Uint8Array): unknown {
 
 interface Admitted {
   readonly artifacts: AdmissionRecord['artifacts'];
-  readonly graph: TaskGraph;
+  /** The supplied graph, or null for a graph the run drafts at `plan` (R5a). */
+  readonly graph: TaskGraph | null;
+  /** What a drafted graph is held to; null for a supplied one. */
+  readonly bound: GraphBound | null;
   /** The verification manifest's checks and a supplied acceptance manifest's. */
   readonly checks: CheckSpec[];
   readonly securityPart: SecurityPart | null;
@@ -507,7 +515,10 @@ function parsedPart<T>(
  * reads, from the same bytes. A drafted artifact is recorded as drafted and
  * read nothing (R19).
  */
-async function admitArtifacts(req: RunRequest): Promise<{ ok: true; admitted: Admitted } | { ok: false; problems: RequestProblem[] }> {
+async function admitArtifacts(req: RunRequest, planning: Policy['planning']): Promise<{ ok: true; admitted: Admitted } | { ok: false; problems: RequestProblem[] }> {
+  // A drafted graph is read nothing here: it does not exist yet, and what admission checks instead is its bound (A-R5a-01).
+  const graphDrafted = req.artifacts.taskGraph === 'draft';
+  const graphBound = graphDrafted && planning !== null ? { maxBuildTasks: planning.maxBuildTasks, roles: [...planning.roles] } : null;
   const problems: RequestProblem[] = [];
   const read = async (at: string, path: string): Promise<ReadArtifact | undefined> => {
     const artifact = await readArtifact(req.workspace, path);
@@ -523,7 +534,7 @@ async function admitArtifacts(req: RunRequest): Promise<{ ok: true; admitted: Ad
   const spec = await readSet('spec');
   const tests = await readSet('acceptanceTests');
   const manifestFile = await read('artifacts.verificationManifest', req.artifacts.verificationManifest);
-  const graphFile = await read('artifacts.taskGraph', req.artifacts.taskGraph);
+  const graphFile = graphDrafted ? undefined : await read('artifacts.taskGraph', req.artifacts.taskGraph);
   const acceptancePath = req.artifacts.acceptanceManifest;
   const acceptanceFile = acceptancePath === undefined ? undefined : await read('artifacts.acceptanceManifest', acceptancePath);
   const planPath = req.artifacts.observationPlan;
@@ -532,22 +543,22 @@ async function admitArtifacts(req: RunRequest): Promise<{ ok: true; admitted: Ad
   const securityFile = parts.security === undefined ? undefined : await read('artifacts.specParts.security', parts.security);
   const requirementsFile = parts.runRequirements === undefined ? undefined : await read('artifacts.specParts.runRequirements', parts.runRequirements);
   const questionsFile = parts.questions === undefined ? undefined : await read('artifacts.specParts.questions', parts.questions);
-  if (problems.length > 0 || manifestFile === undefined || graphFile === undefined) return { ok: false, problems };
+  if (problems.length > 0 || manifestFile === undefined || (graphFile === undefined && !graphDrafted)) return { ok: false, problems };
 
   const securityPart = parsedPart(securityFile, 'artifacts.specParts.security', 'security part', parseSecurityPart, problems);
   const requirements = parsedPart(requirementsFile, 'artifacts.specParts.runRequirements', 'run-requirements part', (v) => parseRunRequirements(v, 'artifacts.specParts.runRequirements'), problems);
   parsedPart(questionsFile, 'artifacts.specParts.questions', 'questions part', (v) => parseQuestions(v, 'artifacts.specParts.questions'), problems);
 
   const manifestJson = parseJson(manifestFile.bytes);
-  const graphJson = parseJson(graphFile.bytes);
+  const graphJson = graphFile === undefined ? undefined : parseJson(graphFile.bytes);
   if (manifestJson === undefined) problems.push({ path: 'artifacts.verificationManifest', code: 'not-json', message: 'the verification manifest is not JSON' });
-  if (graphJson === undefined) problems.push({ path: 'artifacts.taskGraph', code: 'not-json', message: 'the task graph is not JSON' });
+  if (graphFile !== undefined && graphJson === undefined) problems.push({ path: 'artifacts.taskGraph', code: 'not-json', message: 'the task graph is not JSON' });
   // Beside an acceptance manifest, supplied or drafted, the two are held to a reproduction together (R19).
   const alone = acceptanceFile === undefined && tests !== 'drafted';
   const manifest = parseManifest(manifestJson, { alone });
-  const graph = parseGraph(graphJson, { runId: req.runId, baseCommit: req.baseCommit, workspace: req.workspace });
+  const graph = graphFile === undefined ? null : parseGraph(graphJson, { runId: req.runId, baseCommit: req.baseCommit, workspace: req.workspace });
   if (manifestJson !== undefined && !manifest.ok) problems.push(...manifest.problems);
-  if (graphJson !== undefined && !graph.ok) problems.push(...graph.problems);
+  if (graphJson !== undefined && graph !== null && !graph.ok) problems.push(...graph.problems);
   let acceptanceChecks: CheckSpec[] = [];
   if (acceptanceFile !== undefined) {
     const json = parseJson(acceptanceFile.bytes);
@@ -565,7 +576,10 @@ async function admitArtifacts(req: RunRequest): Promise<{ ok: true; admitted: Ad
     else if (!parsed.ok) problems.push(...parsed.problems);
     else observationPlan = { source: 'supplied', file: planFile.admitted, plan: parsed.plan };
   }
-  if (problems.length > 0 || !manifest.ok || !graph.ok) return { ok: false, problems };
+  if (problems.length > 0 || !manifest.ok || (graph !== null && !graph.ok)) return { ok: false, problems };
+  // Neither a file nor a bound: `admission` refuses a drafted graph under a policy that grants no planning before this is called.
+  const taskGraph: AdmittedGraph | null = graphFile !== undefined ? { source: 'supplied', file: graphFile.admitted } : graphBound === null ? null : { source: 'drafted', bound: graphBound };
+  if (taskGraph === null) return { ok: false, problems: [{ path: 'artifacts.taskGraph', code: 'not-applicable', message: 'the policy grants no planning, so no run drafts its task graph' }] };
   if (acceptanceFile !== undefined) {
     const merged = mergedCheckProblems(manifest.checks, acceptanceChecks);
     if (merged.length > 0) return { ok: false, problems: merged };
@@ -581,15 +595,16 @@ async function admitArtifacts(req: RunRequest): Promise<{ ok: true; admitted: Ad
         acceptanceTests: set(tests),
         acceptanceManifest,
         verificationManifest: manifestFile.admitted,
-        taskGraph: graphFile.admitted,
+        taskGraph,
         observationPlan,
         specParts: { security: securityFile?.admitted ?? null, runRequirements: requirementsFile?.admitted ?? null, questions: questionsFile?.admitted ?? null },
       },
-      graph: graph.graph,
+      graph: graph === null ? null : graph.graph,
+      bound: graphBound,
       checks: [...manifest.checks, ...acceptanceChecks],
       securityPart,
       requirements,
-      drafted: { spec: spec === 'drafted', 'test-design': tests === 'drafted' },
+      drafted: { spec: spec === 'drafted', 'test-design': tests === 'drafted', plan: graphDrafted },
     },
   };
 }
@@ -636,6 +651,17 @@ function draftingProblems(req: RunRequest, drafted: Readonly<Record<DraftStation
       const egress = scope?.network.egress;
       if (egress !== undefined && egress !== 'none' && egress.length > 0) {
         problems.push({ path: `policy.roles.${role}.network.egress`, code: 'not-black-box', message: `the ${role} is black-box in fact: it reaches the model through its relay and nothing else, so its egress is none` });
+      }
+    }
+  }
+  // The planner reads the locked spec and the base, and reaches nothing beyond its model relay: what it could fetch would be input no grant names (R5a, I7).
+  if (drafted.plan) {
+    for (const seat of ['drafter', 'critic'] as const) {
+      const role = DRAFT_ROLES.plan[seat];
+      const scope = Object.hasOwn(policy.roles, role) ? policy.roles[role] : undefined;
+      const egress = scope?.network.egress;
+      if (egress !== undefined && egress !== 'none' && egress.length > 0) {
+        problems.push({ path: `policy.roles.${role}.network.egress`, code: 'not-applicable', message: `the ${role} reaches the model through its relay and nothing else, so its egress is none` });
       }
     }
   }
@@ -804,9 +830,10 @@ async function rolesProblems(req: RunRequest): Promise<RequestProblem[]> {
  * The roles directory compiled, and every seat the graph schedules given a
  * role, before any driver is invoked (D-A-RC-06). Every role the graph names
  * is checked, and `reviewer` as well, since every review seat runs under it.
+ * For a drafted graph the roles are every role its bound allows (R5a).
  */
 async function admitRoles(
-  directory: string, graph: TaskGraph, drafted: readonly DraftStation[],
+  directory: string, named: readonly RoleId[], drafted: readonly DraftStation[],
 ): Promise<{ ok: true; roles: readonly CompiledRole[] } | Extract<AdmissionOutcome, { reason: 'roles-refused' | 'role-undefined' }>> {
   const compiled = await compileRoles(directory);
   if (!compiled.ok) return { ok: false, reason: 'roles-refused', refused: compiled.refused };
@@ -814,7 +841,7 @@ async function admitRoles(
   // Each seat a drafting station holds runs under its fixed role, or the run is refused (D-A-RC-06, R19).
   const seats = drafted.flatMap((station) => [DRAFT_ROLES[station].drafter, DRAFT_ROLES[station].critic]);
   // `security-reviewer` too: every review task has a security seat beside it, which runs under it (R9).
-  const needed = [...new Set([...graph.tasks.map((t) => t.role), REVIEWER_ROLE, SECURITY_REVIEWER_ROLE, ...seats])].sort();
+  const needed = [...new Set([...named, REVIEWER_ROLE, SECURITY_REVIEWER_ROLE, ...seats])].sort();
   const missing = needed.filter((role) => !defined.has(role));
   if (missing.length > 0) return { ok: false, reason: 'role-undefined', roles: missing };
   return { ok: true, roles: compiled.roles };
@@ -860,8 +887,12 @@ async function likelyCost(components: ComponentGraph, worstCase: WorstCaseCost, 
  * does not declare only when the task is driven, after the spend; here the
  * run is refused before the estimate, naming the tool and the driver.
  */
-function toolGrantRefusal(worstCase: WorstCaseCost, policy: Policy, components: ComponentGraph): Extract<RunOutcome, { reason: 'policy-refused' }> | undefined {
-  for (const task of worstCase.tasks) {
+function toolGrantRefusal(
+  worstCase: WorstCaseCost, policy: Policy, components: ComponentGraph, allowed: readonly RoleId[] = [],
+): Extract<RunOutcome, { reason: 'policy-refused' }> | undefined {
+  // A drafted graph's worst case names its costliest role alone, and a planner may seat any role the bound allows (R5a).
+  const seats: Array<{ station: StationId; role: RoleId }> = [...worstCase.tasks, ...allowed.map((role) => ({ station: 'build' as const, role }))];
+  for (const task of seats) {
     if (!isAgentStation(task.station)) continue;
     const driver = driverOfTask(task, components);
     if (driver === undefined) continue;
@@ -914,9 +945,10 @@ function capabilityRefusalFor(components: ComponentGraph, drafted: readonly Draf
  * admission, before anything is written. A station a role acts at is resolved
  * for every role the graph schedules there, which also refuses a role the
  * policy does not define or does not grant that station; a station no role
- * acts at is bounded by the global and station caps.
+ * acts at is bounded by the global and station caps. `named` is the roles
+ * the graph schedules, or every role a drafted graph's bound allows (R5a).
  */
-function policyRefusal(level: AutonomyLevel, graph: TaskGraph, policy: Policy, drafted: readonly DraftStation[] = []): Extract<RunOutcome, { reason: 'policy-refused' }> | undefined {
+function policyRefusal(level: AutonomyLevel, named: SeatedRoles, policy: Policy, drafted: readonly DraftStation[] = []): Extract<RunOutcome, { reason: 'policy-refused' }> | undefined {
   for (const station of M1_STATIONS) {
     // A drafting station a run does not draft at seats no role, and is bounded by its caps alone (R19).
     const seated = isDraftStation(station) ? drafted.includes(station) : isAgentStation(station);
@@ -927,7 +959,7 @@ function policyRefusal(level: AutonomyLevel, graph: TaskGraph, policy: Policy, d
     }
     const roles = isDraftStation(station)
       ? [DRAFT_ROLES[station].drafter, DRAFT_ROLES[station].critic]
-      : [...new Set(graph.tasks.filter((task) => task.station === station).map((task) => task.role))];
+      : station === 'build' ? named.build : named.review;
     for (const role of roles) {
       const autonomy = engine.resolveAutonomy(level, station, role, policy);
       if (!autonomy.ok) return { ok: false, reason: 'policy-refused', station, role, refusal: autonomy };
@@ -1133,7 +1165,7 @@ function admissionRefusalOf(outcome: Exclude<AdmissionOutcome, { ok: true }>): A
  * `policyRefusal` resolves them: a role the policy does not define is that
  * check's refusal and is left out here.
  */
-function seatedScopes(graph: TaskGraph, policy: Policy, drafted: readonly DraftStation[]): Array<readonly [RoleId, CapabilityScope]> {
+function seatedScopes(named: SeatedRoles, policy: Policy, drafted: readonly DraftStation[]): Array<readonly [RoleId, CapabilityScope]> {
   const roles = new Set<RoleId>();
   for (const station of M1_STATIONS) {
     if (isDraftStation(station)) {
@@ -1143,7 +1175,7 @@ function seatedScopes(graph: TaskGraph, policy: Policy, drafted: readonly DraftS
       continue;
     }
     if (!isAgentStation(station)) continue;
-    for (const task of graph.tasks) if (task.station === station) roles.add(task.role);
+    for (const role of station === 'build' ? named.build : named.review) roles.add(role);
   }
   return [...roles].flatMap((role) => {
     const scope = Object.hasOwn(policy.roles, role) ? policy.roles[role] : undefined;
@@ -1214,8 +1246,17 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
   }
   const policy = checkedPolicy(req.policy);
   if (!policy.ok) return { ok: false, reason: 'invalid-request', problems: [{ path: 'policy', code: 'invalid-policy', message: policy.message }] };
-  const admitted = await admitArtifacts(req);
+  // Policy grants planning or the run is refused: the roles a planner may seat and how many tasks are a person's edit (R5a, I4, I5).
+  if (req.artifacts.taskGraph === 'draft' && policy.policy.planning === null) {
+    return {
+      ok: false, reason: 'policy-refused', station: 'plan', role: null,
+      refusal: { ok: false, reason: 'capability-missing', detail: 'the run drafts its task graph and the policy grants no planning: it names neither how many build tasks a drafted graph may hold nor the roles it may seat them under' },
+    };
+  }
+  const admitted = await admitArtifacts(req, policy.policy.planning);
   if (!admitted.ok) return { ok: false, reason: 'invalid-request', problems: admitted.problems };
+  // What every read of the graph is made over: the graph, or the bound of one not drafted yet (D-A-GD-02).
+  const named = seatedRolesOf(admitted.admitted.graph, admitted.admitted.bound);
   const unplanned = planProblems(req, policy.policy);
   if (unplanned.length > 0) return { ok: false, reason: 'invalid-request', problems: unplanned };
   // A locked artifact reaches every seat as text, whatever its tree omits, so none may be sensitive (codex-1, D-R10-09).
@@ -1239,7 +1280,7 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
   if (capability !== undefined) return { ok: false, reason: 'refused', at: capability.at, transition: capability.refusal, state: null };
   const remote = remoteEgress(policy.policy, req.components.integrator ?? null);
   if (remote.length > 0) return { ok: false, reason: 'invalid-request', problems: remote };
-  const refused = policyRefusal(req.requestedLevel, admitted.admitted.graph, policy.policy, drafted);
+  const refused = policyRefusal(req.requestedLevel, named, policy.policy, drafted);
   if (refused !== undefined) return refused;
   // The trigger policy binds every run, a person's own included (D-A-TF-02): a person's run is `human`, by
   // the owner, at depth 0; a candidate's is its kind, its author's trust, and its lineage.
@@ -1253,18 +1294,18 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
   const trigger: AdmittedTrigger = candidate === null
     ? { kind: 'human', authorTrust: 'owner', depth: 0 }
     : { kind: candidate.candidate.kind, authorTrust: candidate.candidate.authorTrust, depth: candidate.candidate.lineage.depth };
-  const triggerVerdict = admitTrigger(trigger, req.requestedLevel, seatedScopes(admitted.admitted.graph, policy.policy, drafted), policy.policy.triggers);
+  const triggerVerdict = admitTrigger(trigger, req.requestedLevel, seatedScopes(named, policy.policy, drafted), policy.policy.triggers);
   if (!triggerVerdict.ok) {
     if (triggerVerdict.reason === 'trigger-refused') return { ok: false, reason: 'trigger-refused', cause: triggerVerdict.cause, detail: triggerVerdict.detail };
     return { ok: false, reason: 'policy-refused', station: 'intake', role: triggerVerdict.role, refusal: triggerVerdict.refusal };
   }
   // An admitted author below the kind's `narrowBelow`, or a seated role granted a sensitive class, narrows the
   // run before anything runs; a role with no narrowed scope, or a level above a narrowed ceiling, is refused (A-R10-01, D-R10-02).
-  const narrowing = narrowAtAdmission(trigger, req.requestedLevel, seatedScopes(admitted.admitted.graph, policy.policy, drafted), policy.policy.triggers);
+  const narrowing = narrowAtAdmission(trigger, req.requestedLevel, seatedScopes(named, policy.policy, drafted), policy.policy.triggers);
   if (!narrowing.ok) return { ok: false, reason: 'policy-refused', station: 'intake', role: narrowing.role, refusal: narrowing.refusal };
   const rolesAt = await rolesProblems(req);
   if (rolesAt.length > 0) return { ok: false, reason: 'invalid-request', problems: rolesAt };
-  const roles = await admitRoles(req.roles, admitted.admitted.graph, drafted);
+  const roles = await admitRoles(req.roles, [...named.build, ...named.review], drafted);
   if (!roles.ok) return roles;
   let rubrics: Partial<Record<DraftStation, ReadRubric>> = {};
   if (drafted.length > 0) {
@@ -1275,10 +1316,14 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
     if (!read.ok) return { ok: false, reason: 'invalid-request', problems: read.problems };
     rubrics = read.rubrics;
   }
-  const worstCase = worstCaseCost(admitted.admitted.graph, policy.policy, drafted);
+  // A drafted graph's figure is its bound's: the most build tasks under the costliest allowed role, one review, and
+  // its security seat. It is what the person approves, and no graph the bound admits costs more (R5a, D-A-GD-02).
+  const costed = admitted.admitted.graph
+    ?? boundGraph(admitted.admitted.bound ?? noBound(), policy.policy, { runId: req.runId, baseCommit: req.baseCommit, workspace: req.workspace });
+  const worstCase = worstCaseCost(costed, policy.policy, drafted);
   // A tool a seat is granted and its driver does not declare would refuse that seat's every call, after the
   // spend was approved; it is refused here, before the estimate (I4, I5, #150).
-  const ungranted = toolGrantRefusal(worstCase, policy.policy, req.components);
+  const ungranted = toolGrantRefusal(worstCase, policy.policy, req.components, admitted.admitted.bound?.roles ?? []);
   if (ungranted !== undefined) return ungranted;
 
   const { vault } = req.components;
@@ -1483,7 +1528,7 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
         checks: admitted.admitted.checks,
         securityPart: admitted.admitted.securityPart,
         requirements: admitted.admitted.requirements,
-        drafting: { drafted: admitted.admitted.drafted, ...draftingIntent, template, rubrics },
+        drafting: { drafted: admitted.admitted.drafted, ...draftingIntent, template, rubrics, graphBound: admitted.admitted.bound },
         components: req.components,
         baseTreeSha256,
         state,
@@ -1543,13 +1588,23 @@ function recordArtifacts(artifacts: unknown): AdmissionRecord['artifacts'] | und
   const security = nullableArtifact(parts.security);
   const runRequirements = nullableArtifact(parts.runRequirements);
   const questions = nullableArtifact(parts.questions);
-  if (!isAdmittedArtifact(artifacts.verificationManifest) || !isAdmittedArtifact(artifacts.taskGraph) || security === undefined || runRequirements === undefined || questions === undefined) return undefined;
+  // A record written before R5a holds the bare file, read as supplied; a drafted graph holds its bound (A-R5a-01).
+  const taskGraph = ((value: unknown): AdmittedGraph | undefined => {
+    if (isAdmittedArtifact(value)) return { source: 'supplied', file: value };
+    if (isRecordLike(value) && value.source === 'supplied' && isAdmittedArtifact(value.file)) return { source: 'supplied', file: value.file };
+    if (!isRecordLike(value) || value.source !== 'drafted' || !isRecordLike(value.bound)) return undefined;
+    const { maxBuildTasks, roles } = value.bound;
+    if (typeof maxBuildTasks !== 'number' || !Number.isSafeInteger(maxBuildTasks) || maxBuildTasks < 1) return undefined;
+    if (!Array.isArray(roles) || roles.length === 0 || !roles.every((role) => typeof role === 'string' && role !== '')) return undefined;
+    return { source: 'drafted', bound: { maxBuildTasks, roles: roles as RoleId[] } };
+  })(artifacts.taskGraph);
+  if (!isAdmittedArtifact(artifacts.verificationManifest) || taskGraph === undefined || security === undefined || runRequirements === undefined || questions === undefined) return undefined;
   return {
     spec,
     acceptanceTests: tests,
     acceptanceManifest: manifest,
     verificationManifest: artifacts.verificationManifest,
-    taskGraph: artifacts.taskGraph,
+    taskGraph,
     observationPlan,
     specParts: { security, runRequirements, questions },
   };
@@ -1563,7 +1618,7 @@ export function lineArtifactsOf(artifacts: AdmissionRecord['artifacts']): LineAr
     acceptanceManifest: artifacts.acceptanceManifest.source === 'supplied' ? artifacts.acceptanceManifest.file : null,
     observationPlan: artifacts.observationPlan?.source === 'supplied' ? artifacts.observationPlan.file : null,
     verificationManifest: artifacts.verificationManifest,
-    taskGraph: artifacts.taskGraph,
+    taskGraph: artifacts.taskGraph.source === 'supplied' ? artifacts.taskGraph.file : null,
     specParts: artifacts.specParts,
   };
 }
@@ -1623,8 +1678,8 @@ async function readVaultJson<T>(vault: Vault, ref: VaultRef): Promise<T> {
 
 /** What a run drafts, its intent, and its rubrics, read from the records admission wrote (R19). */
 async function draftingOf(vault: Vault, record: AdmissionRecord): Promise<DraftingContext> {
-  const drafted = { spec: record.artifacts.spec.source === 'drafted', 'test-design': record.artifacts.acceptanceTests.source === 'drafted' };
-  if (!drafted.spec && !drafted['test-design']) return NOT_DRAFTING;
+  const drafted = draftedOf(record.artifacts);
+  if (!drafted.spec && !drafted['test-design'] && !drafted.plan) return NOT_DRAFTING;
   const intent = intentOf(record.intent === null ? null : await readVaultJson<IntentRecord>(vault, record.intent));
   const rubrics: Partial<Record<DraftStation, ReadRubric>> = {};
   for (const version of record.rubrics) {
@@ -1632,7 +1687,17 @@ async function draftingOf(vault: Vault, record: AdmissionRecord): Promise<Drafti
     if (rubric.sha256 !== version.sha256) throw new Error(`run ${record.run.id}: the ${version.station} rubric recorded does not hash to the version admission pinned`);
     rubrics[version.station] = { text: rubric.text, sha256: rubric.sha256 };
   }
-  return { drafted, ...intent, template: record.template ?? null, rubrics };
+  const graph = record.artifacts.taskGraph;
+  return { drafted, ...intent, template: record.template ?? null, rubrics, graphBound: graph.source === 'drafted' ? graph.bound : null };
+}
+
+/** Which artifacts a run drafts, read from its admission record (R19, R5a). */
+function draftedOf(artifacts: AdmissionRecord['artifacts']): Readonly<Record<DraftStation, boolean>> {
+  return { spec: artifacts.spec.source === 'drafted', 'test-design': artifacts.acceptanceTests.source === 'drafted', plan: artifacts.taskGraph.source === 'drafted' };
+}
+
+function noBound(): never {
+  throw new Error('admission: a run holds a task graph or the bound of a drafted one');
 }
 
 /**
@@ -1651,7 +1716,8 @@ function intentOf(record: IntentRecord | null): { intent: string | null; defect:
 
 export interface Loaded {
   readonly artifacts: LineArtifacts;
-  readonly graph: TaskGraph;
+  /** Null for a drafted graph no lock has written yet, and where an artifact changed (R5a). */
+  readonly graph: TaskGraph | null;
   readonly checks: CheckSpec[];
   readonly securityPart: SecurityPart | null;
   readonly requirements: RunRequirements | null;
@@ -1690,21 +1756,24 @@ export async function loadLine(vault: Vault, record: AdmissionRecord, state: Run
   await load(artifacts.observationPlan);
   const securityJson = await load(artifacts.specParts.security);
   const requirementsJson = await load(artifacts.specParts.runRequirements);
-  const empty = { artifacts, graph: { tasks: [], edges: [] }, checks: [], securityPart: null, requirements: null, drafting, changed };
+  const empty = { artifacts, graph: null, checks: [], securityPart: null, requirements: null, drafting, changed };
   if (changed.length > 0) return empty;
   const alone = artifacts.acceptanceManifest === null && !drafting.drafted['test-design'];
   const manifest = parseManifest(manifestJson, { alone });
-  const graph = parseGraph(graphJson, { runId: record.run.id, baseCommit: record.run.baseCommit, workspace: record.run.repo });
+  // A locked drafted graph is its planner's bytes; the review task is the runtime's, added on every read (R5a, D-A-GD-03).
+  const bind = { runId: record.run.id, baseCommit: record.run.baseCommit, workspace: record.run.repo };
+  const bound = drafting.graphBound;
+  const graph = artifacts.taskGraph === null ? null : bound === null ? parseGraph(graphJson, bind) : parseDraftedGraph(graphJson, bind, bound);
   const acceptance = artifacts.acceptanceManifest === null ? null : parseManifest(acceptanceJson, { alone: false });
   // The bytes hash to what admission validated or a lock approved, so these cannot fail unless the validator itself changed.
-  if (!manifest.ok || !graph.ok || acceptance?.ok === false) throw new Error(`run ${record.run.id}: the admitted manifests or graph no longer validate; refusing to resume`);
+  if (!manifest.ok || (graph !== null && !graph.ok) || acceptance?.ok === false) throw new Error(`run ${record.run.id}: the admitted manifests or graph no longer validate; refusing to resume`);
   const security = securityJson === undefined ? null : parseSecurityPart(securityJson);
   if (security !== null && !security.ok) throw new Error(`run ${record.run.id}: the security part no longer validates; refusing to resume`);
   const requirements = requirementsJson === undefined ? null : parseRunRequirements(requirementsJson, 'runRequirements');
   if (requirements !== null && !requirements.ok) throw new Error(`run ${record.run.id}: the run-requirements part no longer validates; refusing to resume`);
   return {
     artifacts,
-    graph: graph.graph,
+    graph: graph === null ? null : graph.graph,
     checks: [...manifest.checks, ...(acceptance?.ok === true ? acceptance.checks : [])],
     securityPart: security === null ? null : security.part,
     requirements: requirements === null ? null : requirements.part,
@@ -1737,7 +1806,8 @@ export async function resumeRun(req: ResumeRequest, hooks: DriveHooks = {}): Pro
   const state = await vault.readRunState(req.runId);
   const { record, policy } = await readAdmission(vault, state);
   const level = record.run.requestedLevel;
-  const drafted = DRAFT_STATIONS.filter((station) => (station === 'spec' ? record.artifacts.spec : record.artifacts.acceptanceTests).source === 'drafted');
+  const draftedAt = draftedOf(record.artifacts);
+  const drafted = DRAFT_STATIONS.filter((station) => draftedAt[station]);
 
   // Admission's own checks, repeated: a refusal here is recorded as a resume refusal, by admission (D-P14-11).
   const resumeRefused = async (refusal: ResumeRefusal): Promise<void> => {
@@ -1841,7 +1911,7 @@ export async function approveStation(req: ApprovalRequest): Promise<ApprovalOutc
   if (changed.length > 0) return refuse('not-awaiting', `run ${req.runId} has an admitted artifact that changed; it is not awaiting approval`, state.station);
 
   // The policy's own limits: this reads only whether the step is an exit, which the batch size does not change (D-R4-02).
-  const step = nextStep(state, graph, policy.concurrency);
+  const step = nextStep(state, stepGraph(state, graph), policy.concurrency);
   const expected = approvalKey(state.station, level);
   const floor = step.kind === 'exit' ? floorAt(state, drafting) : undefined;
   const draft: DraftRef | null = floor?.draft ?? null;
@@ -1881,8 +1951,8 @@ const REJECTION_REASONS: readonly RejectionReason[] = ['not-black-box', 'does-no
 
 /**
  * Records a person's rejection of the draft waiting at a drafting station's
- * exit (R19). The draft goes back to the drafter with the notes at `spec` or
- * the reason at `test-design`; a rejection of the last allowed attempt parks
+ * exit (R19). The draft goes back to the drafter with the notes at `spec` and
+ * `plan` or the reason at `test-design`; a rejection of the last allowed attempt parks
  * the run, terminally. Recorded before it takes effect, as an approval is
  * (D-P14-07).
  */
@@ -1900,15 +1970,15 @@ export async function rejectDraft(req: RejectionRequest): Promise<RejectionOutco
   const { graph, changed, drafting } = await loadLine(req.vault, record, state);
   const station = state.station;
   if (changed.length > 0 || !isDraftStation(station)) return { ok: false, reason: 'not-awaiting', message: `run ${req.runId} is not waiting at a drafted exit` };
-  const step = nextStep(state, graph, policy.concurrency);
+  const step = nextStep(state, stepGraph(state, graph), policy.concurrency);
   const floor = step.kind === 'exit' ? floorAt(state, drafting) : undefined;
   if (floor === undefined || key !== approvalKey(station, level) || effectiveApproval(STATION_CONTRACTS[station], policy, level, [], floor) !== 'human-required') {
     return { ok: false, reason: 'not-awaiting', message: `run ${req.runId} is not waiting for a person to decide a draft at ${key}` };
   }
   if (floor.draft.sha256 !== req.draft) return { ok: false, reason: 'draft-mismatch', message: `the draft waiting at ${station} is ${floor.draft.sha256}, not ${req.draft}` };
-  // At `spec`, notes and no reason; at `test-design`, a reason from the fixed set and no text (D-A-DS-02).
-  if (station === 'spec') {
-    if (reason !== null) return invalid('a rejection at spec carries notes, not a reason');
+  // At `spec` and `plan`, notes and no reason; at `test-design`, a reason from the fixed set and no text (D-A-DS-02, R5a).
+  if (station !== 'test-design') {
+    if (reason !== null) return invalid(`a rejection at ${station} carries notes, not a reason`);
     if (notes !== null && (typeof notes !== 'string' || notes.trim() === '' || Buffer.byteLength(notes, 'utf8') > INTENT_MAX_BYTES)) return invalid(`notes are the approver's text, at most ${String(INTENT_MAX_BYTES)} bytes`);
   } else {
     if (notes !== null) return invalid('a rejection at test-design carries no free text; an approver who has read the repository would otherwise be a channel around the black box');
@@ -2106,7 +2176,7 @@ async function standingOf(vault: Vault, runId: RunId): Promise<{ state: RunState
     return { state, standing: { standing: 'stopped', refusal: { ok: false, reason: 'lock-tamper', tampered: changed, message: `an admitted artifact changed: ${paths}` } }, source: 'workspace' };
   }
   // The policy's own limits: the standing reads only a refusal or an exit, which the batch size does not change (D-R4-02).
-  const step = nextStep(state, graph, policy.concurrency);
+  const step = nextStep(state, stepGraph(state, graph), policy.concurrency);
   if (step.kind === 'refuse') return { state, standing: { standing: 'stopped', refusal: step.refusal }, source: 'workspace' };
   if (step.kind !== 'exit') return { state, standing: { standing: 'open' }, source: 'workspace' };
   const floor = floorAt(state, drafting);

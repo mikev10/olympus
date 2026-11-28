@@ -84,6 +84,14 @@ export interface Task {
   dependencySet: string[];
   worktreePath: string;
   attempt: number;
+  /**
+   * What the task delivers, in bounded text, or null where the graph states
+   * none (A-R5a-04). Required of every build task of a drafted graph, where
+   * the locked spec no longer says which part is whose. Given to the task's
+   * builder and to the builders that depend on it, inside the `task-graph`
+   * grant; never to a review seat.
+   */
+  objective: string | null;
 }
 
 export type TaskStatus =

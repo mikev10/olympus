@@ -55,7 +55,7 @@ export async function exampleGraph(dirs: { store: string; artifacts: string }, b
   const root = join(base, 'trees');
   return buildGraph({
     vault: new LocalVault(dirs), sandbox, driver, reviewer: driver,
-    drafting: { specDrafter: driver, specCritic: driver, testDrafter: driver, testCritic: driver },
+    drafting: { specDrafter: driver, specCritic: driver, testDrafter: driver, testCritic: driver, planner: driver, planCritic: driver },
     workspaces: localWorkspaceStore(user === undefined ? { root } : { root, user }),
     scanners: SCANNERS,
   });

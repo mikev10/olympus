@@ -15,6 +15,10 @@
  * at that tier in place of the driver's own, and `BENCHMARK_CALL_USD` the
  * most one call may spend (default 0.15). With a tier or a model named, the
  * result's file name carries both (R54, `src/comparison.ts`).
+ *
+ * The result records tokens per task for each item. Where its file is listed
+ * in `TOKEN_BASELINES`, the run fails when an item's tokens per call grow
+ * past the listed margin over the committed result (R59, `src/tokens.ts`).
  */
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -28,8 +32,10 @@ import { loadCorpus, type Corpus } from '../../src/corpus.js';
 import { openBench, type Bench } from '../../src/line.js';
 import { modelTier } from '../../src/model.js';
 import { serialize } from '../../src/result.js';
+import { tokenHold } from '../../src/tokens.js';
 
-const DOCS = join(import.meta.dirname, '..', '..', '..', '..', 'docs', 'benchmark');
+const ROOT = join(import.meta.dirname, '..', '..', '..', '..');
+const DOCS = join(ROOT, 'docs', 'benchmark');
 
 let base: string;
 let bench: Bench;
@@ -66,6 +72,10 @@ test('the model tier of the corpus, under the cap', async () => {
   const driver = plan.model === null ? own : new ClaudeCodeDriver({ provider: bench.provider, models: { ...shipped, [plan.tier]: plan.model } });
   const image = await ensureImage();
   const budget = { maxTokens: 400_000, maxCostUsd: plan.callUsd, maxWallClockMs: 600_000 };
+  const model = driver.resolveModel(plan.tier).model;
+  const name = plan.resultName(model);
+  // A result listed as a token baseline is held to its committed self; one that cannot be is refused here, before any call (R59, I5).
+  const hold = await tokenHold(name, ROOT, { corpus: { version: corpus.version, digest: corpus.digest }, repetitions: plan.repetitions, model });
   const result = await modelTier({
     bench,
     corpus,
@@ -77,6 +87,8 @@ test('the model tier of the corpus, under the cap', async () => {
     alone: { role, tier: plan.tier, tools: ['Read', 'Bash'], budget },
     critic: { tier: plan.tier, tools: ['Read'], budget },
   });
-  await writeFile(join(DOCS, plan.resultName(driver.resolveModel(plan.tier).model)), serialize(result.result));
+  // Written first: the run is paid for, and its result is the evidence of a regression as much as of a pass.
+  await writeFile(join(DOCS, name), serialize(result.result));
   expect(result.spentUsd).toBeLessThanOrEqual(plan.capUsd);
+  hold?.(result.result);
 });

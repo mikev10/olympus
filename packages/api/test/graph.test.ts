@@ -63,7 +63,7 @@ describe('buildGraph', () => {
     const relaying = Object.assign(new StubSandboxProvider(), { relayCall: () => Promise.reject(new Error('the graph test makes no model call')) });
     const other = new OpenAICompatibleDriver({ provider: relaying, endpoint });
     expect(names({ ...parts, reviewer: other })).toEqual(['StubSandboxProvider']);
-    expect(names({ ...parts, driver: other, reviewer: other, drafting: { specDrafter: other, specCritic: parts.driver, testDrafter: other, testCritic: parts.driver } }))
+    expect(names({ ...parts, driver: other, reviewer: other, drafting: { specDrafter: other, specCritic: parts.driver, testDrafter: other, testCritic: parts.driver, planner: other, planCritic: parts.driver } }))
       .toEqual(['StubSandboxProvider']);
     expect(names({ ...parts, reviewer: new DelegatingDriver(other) })).toContain('unattested reviewer');
   });

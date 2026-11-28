@@ -15,6 +15,7 @@ import type { CriticOutcome } from '../src/critic.js';
 import { loadCorpus, type Corpus } from '../src/corpus.js';
 import type { Bench } from '../src/line.js';
 import { DRAFT_ATTEMPTS, modelTier, Spend, type ModelTierOptions } from '../src/model.js';
+import type { TaskTokens } from '../src/result.js';
 
 let base: string;
 let corpus: Corpus;
@@ -37,6 +38,8 @@ function bench(): Bench {
 
 const ROLE: CompiledRole = { role: 'done-checker' as RoleId, instructions: '', sha256: '0'.repeat(64) };
 const BUDGET = { maxTokens: 1000, maxCostUsd: 0.1, maxWallClockMs: 1000 };
+/** What every scripted call is counted as: 500 tokens read, 10 written. */
+const COUNTED: TaskTokens = { calls: 1, inputTokens: 100, outputTokens: 10, cacheReadTokens: 300, cacheWriteTokens: 100, exhausted: 0, bound: 'exact' };
 
 function options(over: Partial<ModelTierOptions>): ModelTierOptions {
   return {
@@ -53,7 +56,7 @@ function options(over: Partial<ModelTierOptions>): ModelTierOptions {
   };
 }
 
-const critic = (verdict: CriticOutcome['verdict'], costUsd = 0.01) => (): Promise<CriticOutcome> => Promise.resolve({ verdict, causes: verdict === 'caught' ? ['critic:findings'] : [], costUsd });
+const critic = (verdict: CriticOutcome['verdict'], costUsd = 0.01) => (): Promise<CriticOutcome> => Promise.resolve({ verdict, causes: verdict === 'caught' ? ['critic:findings'] : [], costUsd, tokens: { 'spec.critic': COUNTED } });
 
 describe('Spend', () => {
   test('refuses a call whose worst case would pass the cap, and admits one that reaches it exactly', () => {
@@ -74,7 +77,7 @@ describe('modelTier', () => {
     const seen: string[] = [];
     const alone = (call: AloneCall): Promise<AloneOutcome> => {
       seen.push(call.asked);
-      return Promise.resolve({ verdict: { kind: 'verdict', done: true, reasons: [] }, costUsd: 0.01 });
+      return Promise.resolve({ verdict: { kind: 'verdict', done: true, reasons: [] }, costUsd: 0.01, tokens: COUNTED });
     };
     const { result, spentUsd } = await modelTier(options({ repetitions: 2, calls: { alone, critic: critic('caught') } }));
     const drafted = corpus.items.filter((i) => i.tier === 'model');
@@ -84,10 +87,15 @@ describe('modelTier', () => {
     expect(result.arms.alone?.overall.detection).toMatchObject({ kind: 'rate', count: 0 });
     expect(spentUsd).toBeCloseTo((corpus.items.length + drafted.length) * 2 * 0.01);
     expect(result.run).toMatchObject({ repetitions: 2, capUsd: 100 });
+    // Tokens per task for each item, per arm and per repetition, as each call's relay counted them (R59).
+    expect(result.tokens?.alone?.map((i) => i.id)).toEqual(corpus.items.map((i) => i.id).sort());
+    expect(result.tokens?.critic?.map((i) => i.id)).toEqual(drafted.map((i) => i.id).sort());
+    for (const item of result.tokens?.alone ?? []) expect(item.repetitions).toStrictEqual([{ 'done-check': COUNTED }, { 'done-check': COUNTED }]);
+    for (const item of result.tokens?.critic ?? []) expect(item.repetitions).toStrictEqual([{ 'spec.critic': COUNTED }, { 'spec.critic': COUNTED }]);
   });
 
   test('a verdict nobody can read is counted apart from the rate', async () => {
-    const alone = (): Promise<AloneOutcome> => Promise.resolve({ verdict: { kind: 'unreadable' }, costUsd: 0 });
+    const alone = (): Promise<AloneOutcome> => Promise.resolve({ verdict: { kind: 'unreadable' }, costUsd: 0, tokens: COUNTED });
     const { result } = await modelTier(options({ calls: { alone, critic: critic('passed') } }));
     const overall = result.arms.alone?.overall;
     if (overall === undefined) throw new Error('the alone arm is missing');
@@ -96,8 +104,8 @@ describe('modelTier', () => {
   });
 
   test("a critic answer nobody can read is unreadable in the critic arm, and its detector did not fire", async () => {
-    const unreadable = (): Promise<CriticOutcome> => Promise.resolve({ verdict: 'unreadable', causes: ['critic:unreadable', 'sent-back:critic'], costUsd: 0 });
-    const alone = (): Promise<AloneOutcome> => Promise.resolve({ verdict: { kind: 'verdict', done: true, reasons: [] }, costUsd: 0 });
+    const unreadable = (): Promise<CriticOutcome> => Promise.resolve({ verdict: 'unreadable', causes: ['critic:unreadable', 'sent-back:critic'], costUsd: 0, tokens: { 'spec.critic': COUNTED } });
+    const alone = (): Promise<AloneOutcome> => Promise.resolve({ verdict: { kind: 'verdict', done: true, reasons: [] }, costUsd: 0, tokens: COUNTED });
     const { result } = await modelTier(options({ calls: { alone, critic: unreadable } }));
     const arm = result.arms.critic;
     if (arm === undefined) throw new Error('the critic arm is missing');
@@ -110,7 +118,7 @@ describe('modelTier', () => {
     let critics = 0;
     const counting = (): Promise<CriticOutcome> => {
       critics += 1;
-      return Promise.resolve({ verdict: 'passed', causes: [], costUsd: 0 });
+      return Promise.resolve({ verdict: 'passed', causes: [], costUsd: 0, tokens: { 'spec.critic': COUNTED } });
     };
     // Room for one attempt's worth and not the station's limit: refused before the first critic runs.
     await expect(modelTier(options({ capUsd: BUDGET.maxCostUsd * (DRAFT_ATTEMPTS - 1), calls: { critic: counting } }))).rejects.toThrow(/drafted run/);
@@ -121,7 +129,7 @@ describe('modelTier', () => {
     let calls = 0;
     const alone = (): Promise<AloneOutcome> => {
       calls += 1;
-      return Promise.resolve({ verdict: { kind: 'verdict', done: false, reasons: ['x'] }, costUsd: BUDGET.maxCostUsd });
+      return Promise.resolve({ verdict: { kind: 'verdict', done: false, reasons: ['x'] }, costUsd: BUDGET.maxCostUsd, tokens: COUNTED });
     };
     const drafted = corpus.items.filter((i) => i.tier === 'model').length;
     const cap = drafted * DRAFT_ATTEMPTS * BUDGET.maxCostUsd + 2.5 * BUDGET.maxCostUsd;
@@ -135,7 +143,7 @@ describe('the grants', () => {
     let calls = 0;
     const counting = (): Promise<CriticOutcome> => {
       calls += 1;
-      return Promise.resolve({ verdict: 'passed', causes: [], costUsd: 0 });
+      return Promise.resolve({ verdict: 'passed', causes: [], costUsd: 0, tokens: { 'spec.critic': COUNTED } });
     };
     // The stub declares no tools at all.
     await expect(modelTier(options({ critic: { tier: 'fast', tools: ['Grep'], budget: BUDGET }, calls: { critic: counting } }))).rejects.toThrow(/grants Grep, which the driver does not declare; nothing was run/);
