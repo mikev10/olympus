@@ -4,7 +4,7 @@
  * including anything it cannot read, stays a failure.
  */
 import { describe, expect, test } from 'vitest';
-import { changedPackages, classify, idPattern, isPaid, isRegistryId, outcomesOf, problemLines, RECONCILIATION_ID, unproven, type TestOutcome } from '../local-check.ts';
+import { changedPackages, classify, idPattern, isPaid, isRegistryId, outcomesOf, problemLines, RECONCILIATION_ID, runnerProblems, unexecuted, unproven, type TestOutcome } from '../local-check.ts';
 
 const REGISTRY = 'test/registry.test.ts';
 const AGGREGATE = 'no entry is missing, no record is malformed, and no pending count exceeds its baseline';
@@ -139,5 +139,46 @@ describe('which packages a change touches', () => {
   test('a path belongs to the package whose directory holds it, and to none otherwise', () => {
     expect(changedPackages(['packages/api/src/x.ts', 'packages\\drivers\\codex\\test\\y.ts', 'docs/decisions.md', 'packages/apix/z.ts', 'scripts/a.ts'], packages).map((p) => p.name)).toEqual(['api', 'codex']);
     expect(changedPackages([], packages)).toEqual([]);
+  });
+});
+
+describe('what the runner says beyond its tests (#249)', () => {
+  const passed = local('I9.x', 'passed');
+
+  test('a clean exit over passed tests is no problem, and neither is a failing exit over a failed test', () => {
+    expect(runnerProblems(0, ' \u2713 a test\n', [passed])).toEqual([]);
+    expect(runnerProblems(1, ' \u00d7 a test\n', [passed, PAID])).toEqual([]);
+  });
+
+  test('a non-zero exit with no failed test is a failure', () => {
+    expect(runnerProblems(1, '', [passed])).toEqual(['runner: vitest exited 1 with no failed test in its report']);
+  });
+
+  test('an unhandled error is a failure even beside a failed paid entry, which excuses only itself', () => {
+    const output = ['\u001b[31m\u23AF\u23AF\u23AF\u23AF Unhandled Errors \u23AF\u23AF\u23AF\u23AF\u001b[39m', '', '\u23AF\u23AF Unhandled Rejection \u23AF\u23AF'].join('\n');
+    expect(runnerProblems(1, output, [passed, PAID])).toEqual(['runner: vitest reported an error outside any test']);
+  });
+
+  test('a test whose title mentions an unhandled error is not one', () => {
+    expect(runnerProblems(0, ' \u2713 [I5.x] an Unhandled Rejection is recorded\n', [passed])).toEqual([]);
+  });
+
+  test('an exit of zero beside a failed test is not trusted', () => {
+    expect(runnerProblems(0, '', [PAID])).toEqual(['runner: vitest exited 0 with a failed test in its report']);
+  });
+});
+
+describe('a whole-suite run that did not run (#249)', () => {
+  test('every test passed or failed: nothing is unexecuted', () => {
+    expect(unexecuted([local('I9.x', 'passed'), PAID])).toEqual([]);
+  });
+
+  test('an empty report, or one with no passed test, did not run', () => {
+    expect(unexecuted([])).toEqual(['runner: no test passed, so the suite did not run']);
+    expect(unexecuted([local('I9.x', 'skipped')])).toEqual(['runner: no test passed, so the suite did not run']);
+  });
+
+  test('a skipped test beside passed ones is named', () => {
+    expect(unexecuted([local('I9.x', 'passed'), local('I9.y', 'skipped')])).toEqual([`not executed (skipped): ${REGISTRY}: [I9.y] a title`]);
   });
 });

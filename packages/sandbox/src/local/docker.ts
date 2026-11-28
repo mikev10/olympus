@@ -165,6 +165,96 @@ export function dockerCli(executable: string, args: string[], options: CliOption
 }
 
 /** What the daemon this provider will talk to actually is. */
+/** A container being started with its program on standard input, and the `docker start` client that is delivering it. */
+export interface InputStart {
+  /** Why the start failed, as far as the client has said; `undefined` while it has not. */
+  failure(): string | undefined;
+  /** Whether the client has exited. A container whose client is gone and that never ran was not started. */
+  ended(): boolean;
+  /** Kills the client. The container is not signalled by it: SIGKILL is not a signal a client can pass on. */
+  release(): void;
+}
+
+/** The most of a start client's error output that is kept: enough for the daemon's message, bounded whatever it prints. */
+const START_STDERR_LIMIT = 64 * 1024;
+
+/**
+ * Starts a container created with `--interactive`, writing `input` to its
+ * standard input and closing it, which is how a program too long for a
+ * command line reaches `node -` with nothing mounted and no image built.
+ *
+ * `docker start --interactive` stays attached for as long as the container
+ * runs, so this returns at once and the caller decides when the container is
+ * up and releases the client. Everything the container prints is discarded
+ * here; `docker logs` keeps its own copy.
+ */
+export function dockerStartWithInput(executable: string, containerId: string, input: string): InputStart {
+  const child = spawn(executable, ['start', '--interactive', containerId], { shell: false, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+  let failed: string | undefined;
+  let over = false;
+  let stderr = '';
+  const fail = (why: string): void => {
+    failed ??= why;
+  };
+  writeStdin(child.stdin, input, (error) => {
+    fail(`the program could not be written to the container's standard input: ${error.message}`);
+    child.kill('SIGKILL');
+  });
+  child.stdout.resume();
+  child.stderr.on('data', (chunk: Buffer) => {
+    if (stderr.length < START_STDERR_LIMIT) stderr += chunk.toString('utf8').slice(0, START_STDERR_LIMIT - stderr.length);
+  });
+  child.on('error', (error: Error) => {
+    over = true;
+    fail(`${executable} could not be run: ${error.message}`);
+  });
+  child.on('close', (code) => {
+    over = true;
+    // A client this module killed reports a null code and is not a failure of the start.
+    if (code !== null && code !== 0) fail(`docker start exited ${String(code)}: ${stderr.trim()}`);
+  });
+  return {
+    failure: () => failed,
+    ended: () => over,
+    release: () => {
+      child.kill('SIGKILL');
+    },
+  };
+}
+
+/** The longest command line Windows starts a process with, its terminator included (`CreateProcessW`). */
+export const WINDOWS_COMMAND_LINE_LIMIT = 32767;
+
+/** One argument as Node writes it into a Windows command line (libuv's `quote_cmd_arg`). */
+function windowsQuoted(arg: string): string {
+  if (arg === '') return '""';
+  if (!/[ \t"]/u.test(arg)) return arg;
+  if (!/["\\]/u.test(arg)) return `"${arg}"`;
+  // Backslashes are literal unless a quote follows them, where each is doubled and the quote escaped; the closing quote counts as one.
+  let out = '"';
+  let slashes = 0;
+  for (const ch of arg) {
+    if (ch === '\\') {
+      slashes += 1;
+      continue;
+    }
+    out += '\\'.repeat(ch === '"' ? slashes * 2 + 1 : slashes) + ch;
+    slashes = 0;
+  }
+  return `${out}${'\\'.repeat(slashes * 2)}"`;
+}
+
+/**
+ * How many characters the command line for `executable` and `args` takes on
+ * Windows, where every argument shares one string and a JSON value costs a
+ * character more for each of its quotes. A process whose line reaches
+ * `WINDOWS_COMMAND_LINE_LIMIT` does not start there, and no other host says
+ * so (#207).
+ */
+export function windowsCommandLineLength(executable: string, args: readonly string[]): number {
+  return [executable, ...args].map(windowsQuoted).join(' ').length;
+}
+
 export interface DaemonFacts {
   readonly osType: 'linux';
   readonly serverVersion: string;

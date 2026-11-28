@@ -442,7 +442,7 @@ export class LocalDockerProvider implements SandboxProvider {
     this.#labels = labels;
   }
 
-  /** The relay runs on the proxy's image: both are Node source handed to `node --eval`. */
+  /** The relay runs on the proxy's image: both are Node source run by `node`. */
   get #relayOptions(): RelayOptions {
     return { executable: this.#executable, image: this.#proxyImage, timeoutMs: LIFECYCLE_TIMEOUT_MS, labels: this.#labels };
   }
