@@ -1,0 +1,90 @@
+The code under review is in the file
+`2026-11-26-R66-relay-meters-and-starts-on-windows-review-bundle.txt` (SHA-256 e4dd6740fb661c8a7658908383216207472bba068d716951db8e169f465175dc) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing a relay that meters what a model is sent and how that relay's container is started, in a
+TypeScript project. You have the source and nothing else — no design documents,
+no author reasoning, no prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+A model runs a task inside a container that has no route to the internet. Every model request it makes goes through a relay the runtime owns: a Node program (`RELAY_SOURCE` in packages/sandbox/src/local/relay.ts) running in its own container, which holds the model credential, forwards requests upstream, reads the usage each answer reports, prices it from a table the runtime gives it, and refuses further requests once the task's budget is spent or once it meets an answer whose cost it cannot count. It speaks three dialects: `anthropic-messages`, `openai-chat`, and `openai-responses`. This change does three things. First, a price table naming a model whose id marks it as one that performs a web search on every call, billed per search outside the token counts, is refused before any container starts (`PER_CALL_MODEL` and `checkMeter`), and again by the relay's own start checks. Second, the `openai-responses` dialect now reads the service tier an answer reports, from a whole body and from a stream's `response.completed` event, and stops forwarding after an answer served at any tier but `default`, because the price table holds the default rate alone. Third, the relay's source no longer travels as a command-line argument: the container is created with `docker create --interactive … node -` (`relayCreateArgs`) and started with the source written to its standard input (`dockerStartWithInput` in packages/sandbox/src/local/docker.ts, `startRelay` and `requireListening` in relay.ts), because as one argument it came within reach of the 32,767-character Windows command-line limit. `windowsCommandLineLength` measures the line Windows would be handed, and tests hold each shipped relay's argument list under the limit.
+
+It must hold against a capable, motivated party trying to spend money the budget does not see, or to change what the relay container runs or can reach. Assume no deceptive intent — only
+that the easiest path gets taken.
+
+That party is the model doing a task, inside the task's container. It controls the requests it sends to the relay (path, headers, body, including which model and options a request names), how many it sends and when, the files in its working copy, and when its process stops. It also influences, through what it asks for, what the upstream answers. It does not control the components the runtime is wired with — the Vault, the sandbox provider, and the drivers are runtime-selected and trusted, even where a function takes one as an argument — and it does not control code running inside
+the runtime's own process. It does not control the relay's price table, budget, or environment, the arguments the relay's container is created with, the host's Docker daemon, or the upstream service itself. The operator who writes a price table is trusted but can be mistaken, and the provisioning checks exist to catch that mistake.
+
+The invariants at stake:
+
+- Fail closed. Spend the relay cannot count is refused, never estimated and never forwarded with a warning. A missing or unreadable usage field, a tier it has no rate for, or a model billed outside what it reads must stop the spending, not be priced as if it were ordinary.
+- Default deny. The relay's container has only what it was granted: a read-only root, every capability dropped, nothing mounted, no image built for it, and no network route it did not already have. The task's container gains nothing from this change.
+- The model credential never enters the task's container.
+- Every capability claim maps to an executable assertion that fails when the capability is deleted. A test or conformance entry that would pass with the mechanism removed is a defect.
+
+The mechanisms that matter most:
+
+- `PER_CALL_MODEL`, where it is applied (`checkMeter` at provisioning and the relay's start check), and what a request can name that it does not see.
+- The tier read in the `openai-responses` path: which events and bodies it reads, what it does when the field is absent or has an unexpected value, and what is counted before the relay stops.
+- `relayCreateArgs`, `dockerStartWithInput`, `startRelay`, and `requireListening`: what the container runs, what happens when the source is not delivered or the client dies, and what is left behind on failure.
+- `windowsCommandLineLength` and the tests over it: whether the measure matches what Windows is handed, and whether the tests would fail if the source went back into an argument or a table grew past the limit.
+- The conformance entries in packages/conformance/src/registry/local-relay.ts, including the new `I5.model-relay-source-is-in-no-argument`.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+Charging a per-call price, which needs a field on `ModelPrice` and is a contract change (D-R66-04); the proxy's and the probe's sources, which also travel as one argument and are a fraction of the limit; what the `anthropic-messages` dialect reads; any price or budget; a refusal for an operator's price table too large for the Windows command line, beyond the error `spawn` already gives. Identifiers such as unit and decision ids here and in the code's comments refer to the project's records, which you do not have; they are not something to resolve.
+
+THE QUESTION
+
+As the model doing a task, how would you cause spending the relay does not count or prices too low, keep the relay forwarding after an answer it should have stopped on, or get the relay's container to run something other than the runtime's source or to hold something it was not granted? And where would a table, a tier, or an argument list that should be refused pass every check here?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.

@@ -19,7 +19,7 @@
  *   stdout as JSON, and the comparison against what the scenario expected runs
  *   in the runtime's own process.
  *
- * Built the way the proxy and relay are: source passed to `node --eval` in the
+ * Built the way the proxy is: source passed to `node --eval` in the
  * same pinned image, read-only, every capability dropped, nothing mounted.
  */
 import type { ProbeExchange, ProbeObservation, ProbeRequest, ProbeResult } from '../types.js';
