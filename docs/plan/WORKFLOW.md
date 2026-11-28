@@ -38,8 +38,11 @@ maintainer's.
 1. `/start-unit <id>` — fresh session. It reads the code the unit touches,
    verifies every assumption, records the boundary and the assumptions in
    `docs/decisions/<id>.md`, and proceeds.
-2. Work. Conformance suite first. Decisions logged as they are made.
-3. `/ship-unit` — same session. Verifies acceptance criteria, opens the PR.
+2. Work. Conformance suite first. Decisions logged as they are made. The
+   documents are corrected as the work makes them false (see Keeping the
+   documents current).
+3. `/ship-unit` — same session. Verifies acceptance criteria, marks the unit
+   done in `STATUS.md`, checks the documents, opens the PR.
 4. `/review-request <id>` — writes two files to `docs/reviews/`, a
    `-review-prompt.txt` and a `-review-bundle.txt`, commits and pushes them.
    It sends nothing itself, then chains into step 5.
@@ -103,22 +106,56 @@ maintainer's.
 
 Between step 7 and the next unit: land any amendments the unit surfaced.
 
+## Keeping the documents current
+
+A document that describes the code is a claim about it, and a claim nobody
+maintains goes false (D-TOOLING-21). So every change that lands on `v2`, of
+any work type, leaves the documents true in the same pull request:
+
+- **`docs/plan/STATUS.md`** lists every unit and whether it is done. It is
+  generated: `node scripts/unit-status.ts write` derives it from the tables
+  in `DECOMPOSITION.md` and its own done rows, and a tooling test fails in CI
+  when the committed file is not what that derives. A unit's pull request
+  runs `write --done <id>`, which changes that unit's row and no other line,
+  so the merge is what makes the row true and two open units do not meet in
+  the file. An amendment that adds, splits, or renames a unit changes its
+  row in a table in `DECOMPOSITION.md` and runs `write`. The counts and the
+  units ready to start are printed by `node scripts/unit-status.ts` and are
+  not committed.
+- **`README.md` and `CONTRIBUTING.md`** state what the runtime does and how
+  to work on it. A change that makes one of their sentences false corrects
+  it: a host variable, a command or a flag, what `init` writes, what the
+  example policy grants, a supported stack or host, a package added or
+  removed, a station entered, a check the gate runs.
+- **This file, `WORKFLOW-DIAGRAM.md`, and the skills** describe the loop. A
+  change to the loop changes all of them together.
+
+`/ship-unit` holds a unit to this before it opens the pull request, and the
+pull request names each document it changed, or says why none needed it.
+`/merge-unit` checks `STATUS.md` against the `reviewed/*` tags before it
+merges. A document found stale later is corrected by an amendment, not left
+for the next unit that passes by.
+
 ## Where state lives
 
-- What is built: git history and merged PRs
-- What is next: the DECOMPOSITION.md dependency graph, first unit whose
-  dependencies have shipped
+- What is built: `docs/plan/STATUS.md`, one row per unit, and behind it git
+  history and merged PRs
+- What is next: an open unit whose dependencies are all done, by the
+  DECOMPOSITION.md dependency graph; `node scripts/unit-status.ts` prints
+  them
 - What is owed: pending registry entries, each with an owning unit
 - Why something was done: docs/decisions/, one file per unit
 - What a review found and what was done about it: docs/reviews/
 
-There is no separate status document. If "what is next" cannot be answered from
-the four above, that is a gap in them.
+`STATUS.md` records only which units are done. Its other columns are copied
+from the decomposition, so the two cannot disagree. If "what is next" cannot
+be answered from the five above, that is a gap in them.
 
 ## Answering "what is next"
 
 Check in order: unfinished step in the current unit's loop; unlanded amendment
-from the last unit; the next unit whose dependencies have all shipped.
+from the last unit; the next open unit whose dependencies are all done
+(`node scripts/unit-status.ts` lists them under "Ready to start").
 
 Every turn ends by naming what is next per this document, whatever the turn
 did. That holds when the answer is a decision only the maintainer can make:

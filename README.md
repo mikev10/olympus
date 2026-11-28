@@ -43,13 +43,14 @@ it.
 **M1 is complete.** The line runs end to end, from `intake` through
 `integrate`: real sandboxes, a locked Vault, the Claude Code driver, verified
 evidence, tamper detection, cost bounds, an enforcement record, and a merge
-that is gated by all of them. `observe` and `learn` are not entered yet.
+that is gated by all of them.
 
-**M2 is in progress.** Readiness (R1), outcome measurement (R2), model tier per
-station (R14), acceptance checks on the base before build (R15), and security
-at the gate (R17) have shipped. The current unit and everything after it are
-listed in [docs/plan/DECOMPOSITION.md](docs/plan/DECOMPOSITION.md), which is
-the source of truth for what is done and what is next.
+**M2 is in progress.** A merged run now enters `observe`, where it is watched
+until its observation window closes. `learn` is not entered yet.
+[docs/plan/STATUS.md](docs/plan/STATUS.md) lists every unit and whether it is
+done; it is generated, and a test fails when it falls behind.
+`node scripts/unit-status.ts` prints the counts and the units ready to start.
+[docs/plan/DECOMPOSITION.md](docs/plan/DECOMPOSITION.md) defines each unit.
 
 ## How the line works
 
@@ -69,7 +70,7 @@ Work moves through ten stations, in order:
 | 6 | `verify` | The runtime runs the pinned checks in a fresh sandbox and collects evidence. |
 | 7 | `review` | Reviewers that never share the author's model family. |
 | 8 | `integrate` | Merge, gated by evidence and integrity. |
-| 9 | `observe` | Post-merge signals. Not entered yet (R8). |
+| 9 | `observe` | Post-merge signals. A merged run is watched until its observation window closes. |
 | 10 | `learn` | What the next run should do differently. Not entered yet (R11). |
 
 Four autonomy levels bound how far a run may advance without a person:
@@ -121,16 +122,21 @@ packages/
   adapters/     per-stack test, coverage, mutation, behavioral hooks
   readiness/    the autonomy ceiling a repository supports, from probes that ran
   compiler/     the roles a person wrote, compiled and versioned by hash
+  benchmark/    the false-done benchmark: seeded false-dones and clean controls, carried through the line
   api/          the runtime as a service: the line, the HTTP API, factory-host
   cli/          the command line, a client of the HTTP API and nothing more
   conformance/  the kit that proves invariants, and the registry
   drivers/
     claude-code/  the Claude Code CLI, run inside a provisioned sandbox
+    codex/        the Codex CLI, run inside a provisioned sandbox
     openai-compatible/  any OpenAI-compatible chat endpoint; the loop on the host, every tool in the sandbox
 docs/
-  plan/         the spine, the decomposition into units, and unit specs
+  plan/         the spine, the decomposition into units, unit specs, and the status of every unit
   decisions/    every judgment call made while building each unit, one file per unit
   reviews/      external review findings and how each was resolved
+  benchmark/    committed benchmark results
+  proof/        recorded proof runs
+  brand/        the banner, the diagrams, and the logo
 ```
 
 Packages import each other only through their published entry, never through
@@ -152,7 +158,9 @@ pnpm conformance   # the invariant registry and its report
 ```
 
 CI runs these four on every push and pull request to `v2`, along with the
-maintainer tooling's own typecheck and tests. On a pull request, the tests
+maintainer tooling's own typecheck and tests. `node scripts/local-check.ts
+preflight` runs the quick subset for the packages a branch changed, and
+`node scripts/local-check.ts full` runs everything in the order CI does. On a pull request, the tests
 that call a paid model run only once a maintainer applies the `run-driver`
 label, and the registry fails until they have run for that tree. A push
 reuses the report of an earlier run of the same tree.
@@ -233,7 +241,9 @@ every problem in one list.
 
 The command line needs only the API's address and token: `--url` and
 `--token`, `FACTORY_API_URL` and `FACTORY_API_TOKEN`, or `--env-file`
-naming the host's file, from which it reads both.
+naming the host's file, from which it reads both. One command reads two
+more: `telemetry` takes its collector from `--endpoint` and `--header`, or
+from `OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_EXPORTER_OTLP_HEADERS`.
 
 ### Configure policy
 
@@ -266,12 +276,13 @@ so it stays current:
   base commit), the spec's security part, and the task graph.
 
 A role's `tools` are the driver's own names, case and all. The Claude Code
-driver, the one the host runs, declares `Read`, `Write`, `Edit`, `Bash`, and
+driver, which fills every seat not given to another driver, declares `Read`, `Write`, `Edit`, `Bash`, and
 the rest of its CLI's built-in tools; `create` refuses a run that grants a
 seat a tool its driver does not declare, naming the role and the tool. Each
 role's `budget` is per task, and `maxTokens` counts the tokens a model reads
 from its cache: a model reading the repository spends most of its tokens
-there. The example gives each drafter 400000 and every other seat 200000.
+there. The example gives the builder, the reviewer, and each drafter
+1000000, and each critic 200000.
 
 A run can draft its task graph too: `create --draft-plan` in place of
 `--graph`. A planner then reads the locked spec and the repository at `plan`
@@ -395,6 +406,17 @@ it back instead, `olympus-ai reject` takes the same hash.
 and what was decided. Every command prints its flags with
 `olympus-ai <command> --help`.
 
+The other commands:
+
+| Command | What it does |
+|---|---|
+| `cancel <run id>` | Stops a run. |
+| `outcomes [--from <time>] [--to <time>]` | Safety and throughput rates over every run, each with its sample and bound. |
+| `findings` | Every located review, critic, and nightly finding, and whether it is open, addressed, or dismissed. |
+| `dismiss-finding <finding id> --cause <cause>` | Records that a finding will not be worked, with a cause and no text. |
+| `telemetry <run id>...` | A finished run as OTLP/JSON traces and metrics, printed or sent to a collector. |
+| `readiness [--revision <rev>]` | The autonomy ceiling the repository supports at a commit (see Readiness). |
+
 A run is built over the tree of `--base-commit` as git stores it, never over
 the working copy: nothing uncommitted, untracked, or ignored there (a `.env`,
 `node_modules/`, a build output) reaches a model, and uncommitted changes do
@@ -428,8 +450,12 @@ API credit: every probe's outcome is computed from what the runtime observes.
 The sandboxes have no network access except during the install step, which
 can only reach the package registries for the repo's stack (the public npm
 registry or PyPI for Python lockfiles, by default) and no other hosts. It
-writes nothing, and admission does
-not read it yet: a run is still admitted at the level policy allows.
+writes nothing.
+
+Admission runs the same scan on a run's base commit. A run that asks for a
+level above that commit's ceiling is refused, never lowered, and the refusal
+names the probe or the scan limit that holds the ceiling. Policy still caps
+the level as before; the lower of the two binds.
 
 ## Contributing
 
@@ -438,7 +464,8 @@ running the whole factory. [CONTRIBUTING.md](CONTRIBUTING.md) has the rule
 every unit follows, how to send a small fix, and how to write a conformance
 suite with the kit. The units themselves are defined in
 [docs/plan](docs/plan): the spine, the decomposition, and a spec for each unit
-that needs one. Decisions made while building each unit are recorded in
+that needs one, and [STATUS.md](docs/plan/STATUS.md), which says which units
+are done. Decisions made while building each unit are recorded in
 [docs/decisions](docs/decisions/README.md), one file per unit.
 
 Questions, ideas, and things you built with Olympus go in

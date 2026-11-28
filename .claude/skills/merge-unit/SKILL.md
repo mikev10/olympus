@@ -113,6 +113,17 @@ does not start another paid run.
 
 ## 3. Merge
 
+First, the unit's row (`docs/plan/WORKFLOW.md`, "Keeping the documents
+current"). The pull request's head must mark the unit done:
+
+```
+git fetch origin
+git show origin/unit/<id lowercase>:docs/plan/STATUS.md | grep -F "| <ID> |"     # the row ends `done`
+```
+
+A row that ends `**open**`, or no row: stop and name it. `ship-unit` step 2a
+writes it; the merge is what makes it true, so it is never added after.
+
 ```
 gh pr merge <n> --squash --body "Gate-Change: acknowledged"   # the PR carries gate-change
 gh pr merge <n> --squash                                        # it does not
@@ -142,8 +153,21 @@ stays open with a comment saying what remains.
 
 ## 6. Report and stop
 
+Check the status document against the tags, on `v2` as it now stands, and
+print the counts:
+
+```
+git checkout --detach origin/v2
+node scripts/unit-status.ts check --tags
+node scripts/unit-status.ts
+```
+
+A failure here names a tagged unit `STATUS.md` does not mark done. Report it
+as an amendment owed before the next unit; do not push a fix to `v2`.
+
 Print the squash commit, the tag, the closed issues, the paid runs used this
-week and the total against the cap, and the post-merge `v2` CI status.
+week and the total against the cap, the post-merge `v2` CI status, and the
+first line of the counts (`<n> of <m> units done, <k> remaining`).
 Then name the next unit per `docs/plan/WORKFLOW.md`, "Answering what is
 next", as the exact command for a fresh session: `/start-unit <next id>`.
 

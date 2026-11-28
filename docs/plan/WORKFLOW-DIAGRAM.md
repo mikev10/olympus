@@ -25,8 +25,9 @@ who runs each step, and where one Claude session ends and the next begins.
                 ▼
  ┌──────────────────────────────┐
  │ /ship-unit                   │  Claude, same session
- │  runs all gates, commits,    │  (any gate fails → stops)
- │  opens the PR                │
+ │  runs all gates, checks the  │  (any gate fails → stops)
+ │  documents are current,      │
+ │  commits, opens the PR       │
  └──────────────┬───────────────┘
                 │ runs automatically
                 ▼
@@ -91,7 +92,7 @@ who runs each step, and where one Claude session ends and the next begins.
   `review-request`, `run-review`, and `triage-review`. Each hands off to the
   next without asking.
 - **A chain stopped early** resumes in a new session with the skill that
-  stopped, or with `/handoff resume` after a disconnect.
+  stopped.
 - **The next unit starts fresh.**
 
 ## The files a review leaves in `docs/reviews/`
