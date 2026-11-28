@@ -2310,6 +2310,7 @@ Found by R58's external review (codex-2, codex-3), which carried `scripts/local-
 - **What does not change:** the provider still pulls by digest and runs by content ID, so a machine without this step behaves as before. No test, timeout, or assertion is touched.
 - **Limit:** the digest is now written in the workflow and in `browse.ts`. Nothing fails when the two differ; the pre-pull would then fetch an image no test uses, and the tests would pull their own as they did before this change.
 - **Reverse:** delete the three lines.
+
 ## P6: Verification + evidence
 
 ### D-P6-01: The unit spec was completed before the code, after a contradiction in the ledger was resolved
