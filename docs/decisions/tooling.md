@@ -151,9 +151,18 @@ Found by R58's external review (codex-2, codex-3), which carried `scripts/local-
 - **Reverse:** delete the three lines.
 - **Series:** a gate amendment recorded as tooling, as D-TOOLING-15 was; it keeps its number.
 
+### D-TOOLING-18: the weekly cap on paid runs is $5
+
+- **Problem:** the cap was $2 per rolling 7 days, 5 runs at 40 cents (D-TOOLING-12). One unit can need more than one paid run through no fault of its own: R59 needed two, because another unit merged into `v2` while its first was running. With units merging in parallel the cap was passed in ordinary weeks, and each time the merge stopped to ask.
+- **Chosen:** $5 per rolling 7 days, set by the maintainer on 2026-11-28. At 40 cents a run that is 12 runs.
+- **What does not change:** the count of 40 cents per run, the ledger and where it lives, the rule that the line is written before the run starts, and the stop when one more run would pass the cap. A `run-benchmark` labelling is not covered by this authorization and is asked for each time.
+- **Rejected:** removing the cap. It is what stops a loop of reruns from spending without anyone seeing it.
+- **Reverse:** restore `$2` in `merge-unit` and in `docs/plan/WORKFLOW.md`, step 7.
+- **Series:** numbered 18 because 17 is held for #267.
+
 ### D-TOOLING-19: the decision record is one file per unit under `docs/decisions/` (#53)
 
-- **Problem:** `docs/decisions.md` had grown to 15,161 lines in 131 sections, and every unit and amendment branch appended to its tail, so two open branches conflicted on it. #53 recorded the split as a watch item to act on at the first such conflict; the merge of `v2` into `amend/r3-spec` (ffdf6ef) was one.
+- **Problem:** `docs/decisions.md` had grown to 15,170 lines in 131 sections, and every unit and amendment branch appended to its tail, so two open branches conflicted on it. #53 recorded the split as a watch item to act on at the first such conflict; the merge of `v2` into `amend/r3-spec` (ffdf6ef) was one.
 - **Verified before building:** (1) no unit pull request was open, and the one open pull request that edits the file is #276, a tooling change; (2) nothing under `scripts/` or `.github/` reads the file, and the one path in a test (`scripts/test/local-check.test.ts`) is a sample of a path outside every package; (3) the review bundle leaves the file out by a `case` pattern written twice in `review-request`; (4) no level-two heading sits inside a code fence, so a split on `## ` cuts only between sections.
 - **Chosen:** each section moved, text unchanged, to the file of the unit its heading names: `<ID>.md` for a unit and for an amendment to that one unit, `tooling.md` for the `D-TOOLING` series, and `amendment-<slug>.md` for the nine amendments that belong to no single unit, with `amendment-ci.md` holding the `D-A-CI` series. `docs/decisions/README.md` is the index and states where a new entry goes. A unit adds its row in id order, not at the end, so two units do not append to the same line of the index either. Ids do not change.
 - **How the move was checked:** a script read every section back from its new file and compared it with the original, section by section and then whole with blank lines removed. The one difference is that three headings which had no blank line above them now have one.
