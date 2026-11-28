@@ -180,6 +180,7 @@ Found by R58's external review (codex-2, codex-3), which carried `scripts/local-
 - **Rejected:** putting the unit's record into the bundle so the old sentence becomes true. It would undo the exclusion's purpose, and a reviewer shown "verified at file:line" is more likely to accept the line than to check it.
 - **Limit:** the record's assumptions are challenged only through the code they produced and by the maintainer at the gate. A wrong assumption that produced plausible code can pass both reviews. Whether that needs a check of its own is the maintainer's call and is not decided here.
 - **Reverse:** restore the three sentences.
+
 ### D-TOOLING-21: the documents are kept current by rule, and the status of every unit is a generated file
 
 - **Problem:** on 2026-11-28 the README said M2 had shipped five units when 46 had, that `observe` was not entered (R8a enters it, `packages/api/src/line.ts`), that admission did not read readiness (R40 does, `packages/api/src/run.ts`), and that the example policy's budgets were 400000 and 200000 (they are 1000000 and 200000). CONTRIBUTING.md said the registry refuses every external assertion, which stopped being true when reconciliation landed. R77 and R78 had sections in the decomposition and no table row, so no milestone and no dependencies. The decomposition was named the source of truth for what is done and marks no unit done; the `reviewed/*` tags were the only record. Nothing in the loop asked a unit to correct a document it made false.
