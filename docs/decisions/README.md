@@ -100,6 +100,7 @@ git grep -n "D-P3-06" -- docs/decisions
 | [R57.md](R57.md) | R57: A build runs the locked acceptance tests in its own sandbox |
 | [R58.md](R58.md) | A-R58-01: a spent budget is a park cause, and a station refusal names the state it was made at<br>R58: A refused run says so, and a spent budget parks at once |
 | [R59.md](R59.md) | R59: Token efficiency is reported, and a regression fails the benchmark |
+| [R60.md](R60.md) | A-R60-01: what R60 builds, and the contract changes it opens with |
 | [R61.md](R61.md) | A-R61-01: R61's saving is measured in `report`, not in the benchmark |
 | [R66.md](R66.md) | R66 — The relay meters what it forwards, and starts on Windows |
 | [tooling.md](tooling.md) | Tooling: external review automation |
