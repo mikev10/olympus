@@ -9,6 +9,7 @@ import { claimKeys } from './claims.js';
 import { assertReconciliationRefuses } from './reconciliation.js';
 import { CEILING_BEARING_PROBE_CHECK_IS_EXERCISED, CEILING_BEARING_PROBE_HAS_AN_ASSERTION } from './readiness.js';
 import { R28_ASSERTIONS } from './findings.js';
+import { R3_ASSERTIONS } from './browser.js';
 
 const CONFORMANCE = '@olympus-ai/conformance';
 
@@ -18,6 +19,8 @@ export const I8: InvariantEntry = {
   assertions: [
     // R28: each stack names the changed lines a finding's resolution reads.
     ...R28_ASSERTIONS.I8,
+    // R3: the browser that ran is named in the evidence.
+    ...R3_ASSERTIONS.I8,
     CEILING_BEARING_PROBE_HAS_AN_ASSERTION,
     CEILING_BEARING_PROBE_CHECK_IS_EXERCISED,
     runtime({

@@ -7,6 +7,7 @@
  */
 import type { SandboxProvider } from '@olympus-ai/sandbox';
 import { CliBehavioralAdapter } from './behavioral.js';
+import { BrowserBehavioralAdapter, canBrowse } from './browser.js';
 import { canProbe, HttpBehavioralAdapter } from './http.js';
 import { IstanbulCoverageAdapter } from './coverage.js';
 import { jestDiscovery, vitestDiscovery } from './discovery.js';
@@ -31,7 +32,7 @@ export const BEHAVIORAL_KINDS: ReadonlyArray<BehavioralAdapter['kind']> = ['cli'
 export type Control = 'test' | 'coverage' | 'mutation' | 'manifest' | 'static-analysis' | 'property' | `behavioral:${BehavioralAdapter['kind']}`;
 
 export interface AdapterSetOptions {
-  /** The provider behavioral scenarios run through, or null to build a set with no behavioral adapter. HTTP needs one with a probe. */
+  /** The provider behavioral scenarios run through, or null to build a set with no behavioral adapter. HTTP needs one with a probe, and browser one with a browse. */
   readonly provider: SandboxProvider | null;
   /** Where the coverage check's report is, or null when no coverage check has run. */
   readonly coverage: { readonly report: string; readonly sourceRoot: string } | null;
@@ -223,7 +224,10 @@ export async function buildAdapterSet(root: string, options: AdapterSetOptions):
   else if (!canProbe(options.provider)) {
     reasons.set('behavioral:http', `sandbox provider ${options.provider.id} has no probe, so an HTTP client would run where the product can replace it`);
   } else behavioral.push(new HttpBehavioralAdapter(options.provider));
-  reasons.set('behavioral:browser', 'browser scenarios are R3');
+  if (options.provider === null) reasons.set('behavioral:browser', 'no sandbox provider was given to run browser scenarios through');
+  else if (!canBrowse(options.provider)) {
+    reasons.set('behavioral:browser', `sandbox provider ${options.provider.id} has no browse, so a browser would run where the product can replace it`);
+  } else behavioral.push(new BrowserBehavioralAdapter(options.provider));
   // The scanner reads TypeScript, JavaScript, and Python, and a repository is one of those only with its manifest.
   if (!hasManifest) {
     reasons.set('static-analysis', 'the repository has neither a package.json nor a pyproject.toml or requirements file, and the static-analysis scanner this package carries reads TypeScript, JavaScript, and Python');

@@ -17,8 +17,9 @@ import {
 const FAKE_KEY = 'AIzaSyDummyDummyDummyDummyDummyDummy12';
 
 // Supplied only to the transport, never to the builder: any appearance of it
-// in a built URL or body is a leak.
-const SENTINEL = 'AIzaSySentinelSentinelSentinelSentinel7';
+// in a built URL or body is a leak. One character short of a real key's
+// length, like FAKE_KEY, so secret scanning does not flag it.
+const SENTINEL = 'AIzaSySentinelSentinelSentinelSentinel';
 
 describe('GEMINI_MODEL', () => {
   it('is pinned to the measured model id, with no fallback list anywhere', () => {

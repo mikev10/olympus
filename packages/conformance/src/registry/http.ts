@@ -117,7 +117,8 @@ export const HTTP_PROBE_ABSENT_IS_NAMED: LocalAssertion = runtime({
   id: 'I5.http-probe-absent-is-named',
   title:
     'a provider with no probe builds a set that names behavioral:http unavailable and cannot construct the HTTP adapter; ' +
-    'a provider with one builds a set that carries it, and mutation and browser still keep that set from L3',
+    'a provider with one builds a set that carries it, and mutation still keeps that set from L3; the stub provider, which cannot browse either, names behavioral:browser, ' +
+    'and the local provider, which can, does not',
   run: async () => {
     const [{ adapterAdmission, buildAdapterSet, HttpBehavioralAdapter }, { LocalDockerProvider, StubSandboxProvider }] = await Promise.all([
       import('@olympus-ai/adapters'),
@@ -131,6 +132,7 @@ export const HTTP_PROBE_ABSENT_IS_NAMED: LocalAssertion = runtime({
       const without = await buildAdapterSet(dirs.workspace, { provider: stub, coverage: null });
       if (!without.unavailableControls().includes('behavioral:http')) throw new Error('I5: a set on a provider with no probe did not name behavioral:http');
       if (without.behavioral.some((adapter) => adapter.kind === 'http')) throw new Error('I5: a set on a provider with no probe carries an HTTP adapter');
+      if (!without.unavailableControls().includes('behavioral:browser')) throw new Error('I5: a set on the stub provider, which cannot browse, did not name behavioral:browser');
       let refused = false;
       try {
         new HttpBehavioralAdapter(stub);
@@ -143,8 +145,10 @@ export const HTTP_PROBE_ABSENT_IS_NAMED: LocalAssertion = runtime({
       const withProbe = await buildAdapterSet(dirs.workspace, { provider: local, coverage: null });
       if (withProbe.unavailableControls().includes('behavioral:http')) throw new Error('I5: a set on a provider with a probe still names behavioral:http');
       const l3 = adapterAdmission(withProbe, 3);
-      if (l3.ok || !l3.unavailable.includes('mutation') || !l3.unavailable.includes('behavioral:browser')) {
-        throw new Error(`I5: the L3 refusal did not still name mutation and behavioral:browser: ${l3.ok ? 'admitted' : l3.message}`);
+      if (l3.ok || !l3.unavailable.includes('mutation')) throw new Error(`I5: the L3 refusal did not still name mutation: ${l3.ok ? 'admitted' : l3.message}`);
+      // The local provider can browse (R3), so its set no longer names the browser kind; the stub's, above, still does.
+      if (l3.unavailable.includes('behavioral:http') || l3.unavailable.includes('behavioral:browser')) {
+        throw new Error(`I5: the L3 refusal names a behavioral kind the local provider carries: ${l3.message}`);
       }
     });
   },
