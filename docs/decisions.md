@@ -14469,3 +14469,22 @@ Started on `v2` at 473324b, in a worktree of its own on `unit/r59`. Issue
   critic is unmetered, and a task with no metered call is not recorded)
   and was not seen passing. Repairing the tier is not this unit's; it is
   noted in the pull request and filed as an issue.
+
+### D-R59-06: external review, what changed and what stays a limit
+
+Both families counted on the first run. Codex raised three findings and
+all three were fixed; Gemini raised two and both were rejected. The triage
+has the evidence for each.
+
+- **A comparison that was not made is never `within`** (codex-1). Neither
+  side metering a call is `no-calls` and passes; one side alone fails.
+  Reverse in `verdict` (`tokens.ts`).
+- **A result's tokens must cover its own arms and items** (codex-2).
+- **The extraction is tested against a driver that reports other figures**
+  (codex-3).
+- **Known limit: the figures describe consumption, not value.** A task
+  improves its ratio by writing more, and more calls at the same tokens
+  per call pass the benchmark's rule. The result records calls per task,
+  so a rise shows in a committed result's diff. No unit owns a measure of
+  useful work per token; it is named at the merge gate.
+- **`throughTheCritic` is still run by no suite.** #264 owns the tier.

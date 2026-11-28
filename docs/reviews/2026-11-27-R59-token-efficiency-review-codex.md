@@ -1,3 +1,40 @@
+# External review of R59, codex, 2026-11-27
+
+An external review of R59 (token efficiency in the report, and tokens held to
+a baseline in the benchmark), as the runner wrote it. What was done about each
+finding is in `2026-11-27-R59-token-efficiency-triage.md`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex.
+  A headless `codex exec` run under a read-only sandbox, with recorded approval
+  policy `never`, in an empty scratch working directory and a scratch config
+  home holding only `auth.json`, with an environment of `CODEX_HOME` alone. The
+  pre-run listing of both is the manifest's `cleanRoom`.
+- **Cross-family agreement:** none. This review raised three findings
+  (codex-1, codex-2, codex-3) and Gemini raised none of them; Gemini's two
+  findings are about other constructs.
+- **Date:** 2026-11-27
+- **Bundle:** `2026-11-27-R59-token-efficiency-review-bundle.txt`, SHA-256
+  `23bc61eca697eadff1300b1f11fcb7d62e9341144556eba6ee8767021d4402ee`, base
+  `473324b` (`reviewed/R66`), head `887dcf6` (the unit's tip before the review
+  files were committed). It held the 16 changed files: new files in full,
+  modified files as function-context diffs. `docs/decisions.md`,
+  `docs/reviews/`, `docs/plan/`, and `pnpm-lock.yaml` were excluded. Prompt:
+  `2026-11-27-R59-token-efficiency-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer said it had no prior project
+  context and performed no external lookups. That is its own report and
+  cannot be checked independently.
+- **Coverage, and any gap:** items 1, 2 and 3 were answered with findings.
+  Item 4 was answered as no demonstrated bypass. Item 5 was not addressed by
+  name. Item 6 lists five mechanisms it judged sound. Item 7 was answered:
+  the framing fits provenance and fail-closed comparison, and "spent its
+  tokens well" overstates what the figures show.
+- **Citations:** line numbers refer to positions in the bundle, not the
+  repository. Each finding was located by the function it names.
+
+---
+
 BASE: reviewed/R66  
 HEAD: 887dcf6  
 packages/conformance/src/registry/integration.ts  

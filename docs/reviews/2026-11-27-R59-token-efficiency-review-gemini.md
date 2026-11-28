@@ -1,3 +1,41 @@
+# External review of R59, gemini, 2026-11-27
+
+An external review of R59 (token efficiency in the report, and tokens held to
+a baseline in the benchmark), as the runner wrote it. What was done about each
+finding is in `2026-11-27-R59-token-efficiency-triage.md`.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini.
+  A direct `generateContent` API call to `gemini-3.1-pro-preview`, offering no
+  tools. `cleanRoom` is `null` because an API call loads no local
+  configuration.
+- **Cross-family agreement:** none. This review raised two findings
+  (gemini-1, gemini-2) and Codex raised neither. Codex's three findings are
+  in `tokens.ts` and the benchmark's tests; this review judged `tokens.ts`
+  sound apart from its cast.
+- **Date:** 2026-11-27
+- **Bundle:** `2026-11-27-R59-token-efficiency-review-bundle.txt`, SHA-256
+  `23bc61eca697eadff1300b1f11fcb7d62e9341144556eba6ee8767021d4402ee`, base
+  `473324b` (`reviewed/R66`), head `887dcf6` (the unit's tip before the review
+  files were committed). It held the 16 changed files: new files in full,
+  modified files as function-context diffs. `docs/decisions.md`,
+  `docs/reviews/`, `docs/plan/`, and `pnpm-lock.yaml` were excluded. Prompt:
+  `2026-11-27-R59-token-efficiency-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer said it had no prior context
+  and performed no lookups. That is its own report and cannot be checked
+  independently.
+- **Coverage, and any gap:** item 4 was answered with one finding (the
+  cast). Item 6 lists five mechanisms it judged sound. Item 7 was answered:
+  it called the framing the right question. Items 1, 2, 3 and 5 came back
+  with no finding and no statement that none was found; that silence is not
+  a clearance, and Codex found constructions under items 1 to 3 in the same
+  file.
+- **Citations:** line numbers refer to positions in the bundle, not the
+  repository. Each finding was located by the function it names.
+
+---
+
 BASE: reviewed/R66
 HEAD: 887dcf6
 packages/conformance/src/registry/integration.ts
