@@ -15124,3 +15124,11 @@ has the evidence for each.
 - **`node scripts/local-check.ts full` passed again after the fixes**, on
   a5eb10e, which is the unit with `v2` at 832e0e7 merged in. The same 27
   entries are named as not run: they need CI's paid suites.
+- **After `v2` at a3005c8 was merged in (25d5e38), the full run failed once
+  in a package this unit does not touch.** `packages/sandbox`'s
+  `image-lock.test.ts` threw `Unexpected end of JSON input` in
+  `withTagLock`, which is #254's failure, recurring after that issue was
+  closed. Everything else passed, with the same 27 entries not run. The
+  sandbox package's tests, rerun once on their own, passed (264 of 264
+  run). Reported as it happened and noted on #254; the pull request's own
+  checks run that package again.
