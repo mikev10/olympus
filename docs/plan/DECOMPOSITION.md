@@ -3929,7 +3929,10 @@ things that keeps L3 refused.
 
 ### The backlog after R3: every open issue has a home
 
-Placed on 2026-11-27, after R3 merged (#251). Seven open issues named nounit. Each is now named by a unit below or folded into an existing unit.As with the backlog after R57, each section restates its issues, and thespec is written when the unit starts and verified against the code then.
+Placed on 2026-11-27, after R3 merged (#251). Seven open issues named no
+unit. Each is now named by a unit below or folded into an existing unit.
+As with the backlog after R57, each section restates its issues, and the
+spec is written when the unit starts and verified against the code then.
 
 **Folded into existing units:**
 - [#256](https://github.com/mikev10/olympus/issues/256) (the example policy and `init` grant no planning, so
