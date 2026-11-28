@@ -15225,4 +15225,4 @@ The maintainer asked on 2026-11-28 for R5b's spec and the spine change for "goal
 - **Verified:** `learn` (R11, M3) has no spec and no implementation.
 - **Choice:** a child receives its locked spec from the goal and nothing else. What one child merged reaches the next only as the base it starts from.
 - **Rejected: hand a child a summary of the children before it.** It is model-written text from one run steering another's work, which is the shared scratchpad the entry forbids.
-- **Order and milestone:** not changed. R5b stays M3. Its dependencies, R4, R5a and R20, have shipped, so pulling it forward is the maintainer's call at confirmation.
+- **Order and milestone:** not changed. R5b stays M3. Its dependencies, R4, R5a and R20, have shipped, and the maintainer kept it at M3 on 2026-11-28.
